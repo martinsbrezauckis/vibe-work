@@ -55,26 +55,39 @@ pub use sharp_mac::snapshot_png_sharp;
 #[allow(unsafe_code)]
 pub mod agent_world_mac;
 /// Input-transparent click feedback drawn outside the page on GTK.
-#[cfg(all(target_os = "linux", feature = "click-marker"))]
+#[cfg(target_os = "linux")]
 pub mod click_marker_linux;
 /// The agent's click marker: a short ring in the person's view, never in the page.
-#[cfg(all(target_os = "macos", feature = "click-marker"))]
+#[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod click_marker_mac;
 /// Input-transparent click feedback in a native owned popup window.
-#[cfg(all(windows, feature = "click-marker"))]
+#[cfg(windows)]
 #[allow(unsafe_code)]
 pub mod click_marker_win;
-#[cfg(all(feature = "click-marker", any(windows, test)))]
+#[cfg(any(windows, test))]
 mod click_marker_win_math;
 /// Element full screen off while an agent act runs.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod full_screen_mac;
-/// The private, watch-only request log (Settings > Developer only).
+/// Portable request observations used by native adapters.
+pub mod request_event;
+/// The private, watch-only request delegate for a single webview.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod request_watch_mac;
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod color_scheme_mac;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod reload_mac;
+#[cfg(target_os = "macos")]
+pub use color_scheme_mac::set_color_scheme;
+#[cfg(target_os = "macos")]
+pub use reload_mac::reload_from_origin;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]

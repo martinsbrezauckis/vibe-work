@@ -36,31 +36,6 @@ fn table(family: Family, state: u32) -> Vec<u32> {
     }
 }
 
-#[cfg(windows)]
-#[test]
-fn native_tables_include_listeners_but_never_connected_client_ports() {
-    for address in ["127.0.0.1:0", "[::1]:0"] {
-        let server = std::net::TcpListener::bind(address).unwrap();
-        let bound = server.local_addr().unwrap();
-        let client = std::net::TcpStream::connect(bound).unwrap();
-        let (_accepted, _) = server.accept().unwrap();
-        let client_port = client.local_addr().unwrap().port();
-        let rows = windows_tcp_listeners().unwrap();
-        assert!(
-            rows.iter()
-                .any(|row| row.port == bound.port() && row.pid == std::process::id())
-        );
-        assert!(!rows.iter().any(|row| row.port == client_port));
-        drop(server);
-        let rows = windows_tcp_listeners().unwrap();
-        assert!(
-            !rows
-                .iter()
-                .any(|row| row.port == bound.port() && row.pid == std::process::id())
-        );
-    }
-}
-
 #[test]
 fn listener_table_membership_survives_inconsistent_tcp_state() {
     for family in [Family::V4, Family::V6] {

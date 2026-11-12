@@ -16,10 +16,7 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 async fn page(format: Value) -> (Rig, String) {
-    let rig = Rig::new().await;
-    rig.engine
-        .isolate_scripts
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval(&format!(r#"
         document.body.innerHTML='<label>Date<input id="date" placeholder="mm/dd/yyyy" value="original"></label>';
         window.widgetFormat={format};
@@ -187,7 +184,7 @@ async fn unrelated_datepicker_data_does_not_reinterpret_plain_text() {
     );
     assert_eq!(
         rig.engine.eval("window.events").await,
-        json!([["input", "2026-03-14"], ["change", "2026-03-14"]])
+        json!([["input", "2026-03-14"]])
     );
 }
 

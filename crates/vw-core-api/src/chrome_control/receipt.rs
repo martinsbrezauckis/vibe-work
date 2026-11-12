@@ -14,13 +14,14 @@ pub(super) fn profile(shared: &Shared, tool: &str, args: &Value) -> Option<Strin
 }
 
 fn bound_profile(shared: &Shared, id: &str) -> Option<String> {
-    shared
+    let profile = shared
         .chrome_control
         .work
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .profile_of(id)
-        .map(str::to_owned)
+        .map(str::to_owned);
+    profile.or_else(|| super::profile_bindings::session_profile(&shared.chrome_control, id))
 }
 
 pub(super) fn stamp(shared: &Shared, tool: &str, args: &Value, result: &mut Value) {
@@ -40,8 +41,13 @@ pub(super) fn stamp(shared: &Shared, tool: &str, args: &Value, result: &mut Valu
     let Some(body) = result["structuredContent"].as_object_mut() else {
         return;
     };
-    if body.get("profileId").and_then(Value::as_str) != Some(profile.as_str()) {
-        body.insert("profileId".into(), Value::String(profile));
-        super::output::sync_text(result);
-    }
+    let name = shared
+        .chrome_control
+        .profiles
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .name(&profile);
+    body.insert("profileId".into(), Value::String(profile));
+    body.insert("profileName".into(), Value::String(name));
+    super::output::sync_text(result);
 }

@@ -50,6 +50,7 @@ mod readiness;
 mod server;
 mod service;
 mod settings;
+mod snapshot;
 mod template;
 mod theme;
 mod viewer;

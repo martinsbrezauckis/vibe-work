@@ -118,9 +118,12 @@ pub fn dismiss_offer(changes_dir: &Path, folder: &Path) -> Result<(), ChangesErr
     let bytes = serde_json::to_vec_pretty(&offers)
         .map_err(|e| ChangesError::Parse(format!("offers.json: {e}")))?;
     let path = offers_path(changes_dir);
-    let tmp = changes_dir.join("offers.json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| ChangesError::io("write", &tmp, e))?;
-    std::fs::rename(&tmp, &path).map_err(|e| ChangesError::io("replace", &path, e))
+    vw_platform::atomic_file::replace_file(
+        &path,
+        &bytes,
+        vw_platform::atomic_file::MetadataPolicy::NewFile,
+    )
+    .map_err(|e| ChangesError::io("replace", &path, e))
 }
 
 /// What `git init` + first commit would do in a folder (shown in the confirmation).

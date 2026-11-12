@@ -30,19 +30,22 @@ pub mod choice_context;
 mod choices;
 pub mod consent;
 mod consent_driver;
+pub mod control;
 pub mod delegation;
 mod delegation_driver;
+pub mod diagnostics;
 pub mod dialogs;
 pub mod downloads;
 mod driver;
+pub mod element_inspection;
+pub mod extraction;
+mod form;
 mod frame_wait;
 pub mod frames;
 pub mod guard;
 mod host_action;
 mod image_read;
 mod inline_output;
-#[cfg(test)]
-mod inline_output_tests;
 mod input_marker;
 mod keys;
 mod labels;
@@ -53,24 +56,33 @@ mod navigation_receipt;
 pub mod observe;
 pub mod output;
 mod page;
+pub mod playback;
 mod point;
 mod point_receipt;
+mod point_resolve;
 mod pointer;
 mod postconditions;
 mod read;
 pub mod receipt;
+pub mod recording;
+mod recording_gif;
 mod refs;
 pub mod screenshot_area;
 pub mod scripts;
+pub mod scroll_motion;
 mod scroll_shown;
 mod secret_capture;
+mod selector;
 mod sending;
 mod sessions;
 pub mod site_storage;
+mod subtree;
+pub use form::parse_form;
 pub mod text;
 mod text_paging;
 mod upload;
 mod visual;
+pub mod wait_condition;
 
 pub use act::{
     Action, Covering, DEFAULT_WAIT_MS, KEYS, MAX_TEXT, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES,
@@ -83,6 +95,7 @@ pub use login_fill::{FillRefusal, FillTarget, LoginRole};
 pub use output::filter_agent_output;
 pub use read::ReadOptions;
 pub use secret_capture::CapturedSecret;
+pub use selector::{Selector, SelectorKind};
 pub use sending::SEND_REQUIRED;
 pub use sessions::{
     ACTIVE_FOR_MS, Actor, BrowserState, LOG_CAP, LogEntry, Outcome, Sessions, now_ms,
@@ -93,3 +106,10 @@ mod agent_secret;
 #[cfg(feature = "agent-vault")]
 pub use agent_secret::AgentSecret;
 pub use text_paging::TextCursor;
+
+mod color_scheme;
+mod viewport;
+
+mod page_scripts;
+
+mod network;

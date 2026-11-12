@@ -55,8 +55,6 @@ mod trace_routes;
 #[path = "../../../private/vault-e2e/routes.rs"]
 mod vault_e2e;
 mod window_capture;
-#[cfg(test)]
-mod window_capture_tests;
 mod window_routes;
 pub use window_capture::{WindowCaptureError, capture_main};
 

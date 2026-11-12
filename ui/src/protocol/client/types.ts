@@ -321,6 +321,8 @@ export interface CliSharingView {
 
 /** Native lifecycle wiring (mirrors vw_host::tray::TrayView). */
 export interface DesktopClient {
+  /** Desktop-window activation, independent of focus moving between its native child webviews. */
+  subscribeFocus?: (onFocus: (focused: boolean) => void) => Promise<() => void>;
   /** Waiting chats not yet opened; native hosts paint the Dock/taskbar and tray together. */
   attention?(count: number): Promise<void>;
   settings(enabled?: boolean): Promise<{ enabled: boolean; available: boolean }>;

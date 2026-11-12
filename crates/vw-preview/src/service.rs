@@ -16,20 +16,21 @@ use std::time::Duration;
 
 use url::Url;
 
-use crate::engine::{EngineError, EngineFuture, HistoryStep, MountId, PreviewEngine, Storage};
+use crate::engine::{EngineError, EngineFuture, HistoryStep, PreviewEngine, Storage};
 use crate::engine_pool::PoolState;
 use crate::hooks::{Hooks, Inner};
-use crate::layout::{self, DeviceWidth, Rect};
+use crate::layout::{self, DeviceWidth};
 use crate::policy::UrlPolicy;
 pub use crate::preview_error::PreviewError;
-use crate::shot::Shot;
-use crate::state::{BrowserMountState, PreviewView, Shown, State};
+use crate::state::{BrowserMountState, PreviewView, State};
 use crate::visibility::VisibilityReport;
 
 #[path = "service_accounts.rs"]
 mod service_accounts;
 #[path = "service_adopt.rs"]
 mod service_adopt;
+#[path = "service_capture.rs"]
+mod service_capture;
 #[path = "service_console.rs"]
 mod service_console;
 #[path = "service_favicon.rs"]
@@ -145,7 +146,6 @@ pub struct OpenRequest {
 /// The previews of all sessions.
 #[derive(Clone)]
 pub struct PreviewService {
-    #[cfg(feature = "click-marker")]
     pub(crate) actions: Arc<crate::action_tracking::ActionTracker>,
     pub(crate) inner: Arc<Inner>,
     pub(crate) engine: Arc<dyn PreviewEngine>,
@@ -208,7 +208,6 @@ impl PreviewService {
         let pool = PoolState::load(&config.storage_root, config.memory_probe.clone());
         let adoptions = service_adopt::Adoptions::load(&config.storage_root);
         Self {
-            #[cfg(feature = "click-marker")]
             actions: Arc::default(),
             adoptions: Arc::new(std::sync::Mutex::new(adoptions)),
             inner,
@@ -391,7 +390,7 @@ impl PreviewService {
             let before = *loads.borrow();
             let placement = area
                 .filter(|s| s.session_id == session)
-                .and_then(|s| layout::place(s.area, entry.width).ok());
+                .and_then(|s| layout::place_viewport(s.area, entry.width, entry.viewport).ok());
             (entry.mount.clone(), before, loads, placement)
         };
         // Local mounts' URL rules follow the ports (any session's open may change them), before the page
@@ -459,6 +458,7 @@ impl PreviewService {
             let last_area = state.last_area;
             let entry = state.entry(session_id);
             entry.width = width;
+            entry.viewport = None;
             match (shown, entry.ready_mount()) {
                 (Some(s), Some(m)) if s.session_id == session_id => layout::place(s.area, width)
                     .ok()
@@ -479,259 +479,6 @@ impl PreviewService {
             }
         }
         Ok(())
-    }
-
-    /// What the window shows: `Some((session, area))` places that session's preview there (mounting it again
-    /// when suspended) and hides every other one; `None` hides all.
-    ///
-    /// # Errors
-    /// [`PreviewError::Layout`] for an invalid area; engine failures of the shown preview.
-    pub async fn layout(&self, shown: Option<(String, Rect)>) -> Result<(), PreviewError> {
-        self.layout_selected(shown, service_layout::PanelSelection::Unchanged)
-            .await
-    }
-
-    /// Applies a passive UI layout report only while its page is still the selected tab.
-    /// A queued report from a tab switched away from cannot restore its native view.
-    ///
-    /// # Errors
-    /// A rectangle without a page, invalid placement, or native engine failure.
-    pub async fn report_tab_layout(
-        &self,
-        page: Option<String>,
-        rect: Option<Rect>,
-    ) -> Result<(), PreviewError> {
-        let _layout = self.layout_op.lock().await;
-        if self.stale_window_layout() {
-            return Ok(());
-        }
-        tracing::debug!(
-            page = page.as_deref().unwrap_or("-"),
-            ?rect,
-            "preview layout reported"
-        );
-        let Some(page_key) = page else {
-            if rect.is_some() {
-                return Err(PreviewError::InvalidTab(
-                    "a Browser rectangle needs its page".to_owned(),
-                ));
-            }
-            return self
-                .layout_selected_locked(None, service_layout::PanelSelection::Set(None))
-                .await;
-        };
-        let current = {
-            let state = self.inner.lock();
-            let owner = state.owner_of(&page_key);
-            state
-                .tabs
-                .get(&owner)
-                .and_then(|tabs| tabs.selected.as_deref())
-                .unwrap_or(&owner)
-                == page_key.as_str()
-        };
-        if !current {
-            tracing::debug!(page = %page_key, "layout ignored: the page is not its session's selected tab");
-            return Ok(());
-        }
-        // A Browser panel reopening can reclaim an engine released while the page was away.
-        // Native-only layout changes intentionally keep Released parked.
-        if rect.is_some()
-            && let Some(entry) = self.inner.lock().entries.get_mut(&page_key)
-            && entry.browser_mount == BrowserMountState::Released
-            && entry.server_status.is_none()
-        {
-            entry.browser_mount = BrowserMountState::Ready;
-        }
-        self.layout_selected_locked(
-            rect.map(|area| (page_key.clone(), area)),
-            service_layout::PanelSelection::Set(Some(page_key)),
-        )
-        .await
-    }
-
-    async fn layout_selected(
-        &self,
-        shown: Option<(String, Rect)>,
-        selected: service_layout::PanelSelection,
-    ) -> Result<(), PreviewError> {
-        let _layout = self.layout_op.lock().await;
-        if self.stale_window_layout() {
-            return Ok(());
-        }
-        self.layout_selected_locked(shown, selected).await
-    }
-
-    /// Caller holds `layout_op`; places a selected page at the still-current Browser area.
-    pub(crate) async fn layout_page_locked(
-        &self,
-        page_key: String,
-        area: Rect,
-    ) -> Result<(), PreviewError> {
-        self.layout_selected_locked(
-            Some((page_key.clone(), area)),
-            service_layout::PanelSelection::Set(Some(page_key)),
-        )
-        .await
-    }
-
-    /// Caller holds `layout_op`, so visibility checks and native placement share one ordering.
-    async fn layout_selected_locked(
-        &self,
-        shown: Option<(String, Rect)>,
-        selected: service_layout::PanelSelection,
-    ) -> Result<(), PreviewError> {
-        if let Some((_, area)) = &shown {
-            area.checked().map_err(PreviewError::Layout)?;
-        }
-        if let service_layout::PanelSelection::Set(session) = selected {
-            self.select_browser_panel(session).await;
-        }
-        // Hiding (including a modal or session switch) parks the view, never its document.
-        let previously_shown = self
-            .inner
-            .lock()
-            .shown
-            .as_ref()
-            .map(|s| s.session_id.clone());
-        tracing::debug!(
-            shown = shown.as_ref().map_or("-", |(page, _)| page.as_str()),
-            previously = previously_shown.as_deref().unwrap_or("-"),
-            "preview layout applied"
-        );
-        if let Some(session) = previously_shown
-            && shown.as_ref().is_none_or(|(next, _)| next != &session)
-        {
-            self.capture_tab_snapshot(&session).await;
-            self.touch_pool(&session);
-        }
-        let (others, target) = {
-            let mut state = self.inner.lock();
-            state.shown = shown
-                .clone()
-                .map(|(session_id, area)| Shown { session_id, area });
-            if let Some((_, area)) = &shown {
-                state.last_area = Some(*area);
-            }
-            let now = state.tick();
-            if shown.is_none() {
-                for entry in state.entries.values_mut() {
-                    if entry.browser_mount == BrowserMountState::Released {
-                        entry.browser_mount = BrowserMountState::Ready;
-                    }
-                }
-            }
-            let target = shown.as_ref().and_then(|(session, _)| {
-                state.entries.get_mut(session)?.last_used = now;
-                Some(session.clone())
-            });
-            let others: Vec<MountId> = state
-                .entries
-                .values()
-                .filter(|e| shown.as_ref().is_none_or(|(s, _)| *s != e.session_id))
-                .filter_map(|e| {
-                    e.ready_mount().map(|m| MountId {
-                        session_id: e.session_id.clone(),
-                        label: m.label.clone(),
-                    })
-                })
-                .collect();
-            (others, target)
-        };
-        for id in others {
-            let _activity = self.session_lock(&id.session_id).await;
-            let current = self
-                .inner
-                .lock()
-                .entries
-                .get(&id.session_id)
-                .and_then(|entry| entry.mount.as_ref())
-                .is_some_and(|mount| mount.label == id.label);
-            if current {
-                let _ = self.bounded("hide", self.engine.place(&id, None)).await;
-            }
-        }
-        if let Some(session) = target {
-            self.apply_layout_target(&session).await?;
-        }
-        Ok(())
-    }
-
-    /// A shaped screenshot of the session's visible preview.
-    ///
-    /// # Errors
-    /// [`PreviewError::NothingOpen`], engine failures and timeouts, or [`PreviewError::Image`].
-    pub async fn screenshot(&self, session_id: &str) -> Result<Shot, PreviewError> {
-        self.screenshot_of_mount(session_id)
-            .await
-            .map(|(shot, _)| shot)
-    }
-
-    /// The engine's own PNG of what the session's preview shows, at full size for stitching and comparing.
-    ///
-    /// # Errors
-    /// [`PreviewError::NothingOpen`], engine failures and timeouts.
-    pub async fn screenshot_png(&self, session_id: &str) -> Result<Vec<u8>, PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        if self.shots_blocked(session_id) {
-            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
-        }
-        self.require_visible_screenshot(session_id)?;
-        let id = self.ensure_mounted(session_id).await?;
-        Ok(bounded(
-            self.config.shot_timeout,
-            "screenshot",
-            self.engine.screenshot(&id),
-        )
-        .await?)
-    }
-
-    /// A full-page capture's viewport slice, at the page's real resolution where supported.
-    ///
-    /// # Errors
-    /// Nothing open, a hidden/protected page, engine failures and timeouts.
-    pub async fn screenshot_slice_png(&self, session_id: &str) -> Result<Vec<u8>, PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        if self.shots_blocked(session_id) {
-            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
-        }
-        self.require_visible_screenshot(session_id)?;
-        let id = self.ensure_mounted(session_id).await?;
-        Ok(bounded(
-            self.config.shot_timeout,
-            "viewport slice",
-            self.engine.screenshot_slice(&id),
-        )
-        .await?)
-    }
-
-    /// The engine's PNG of the whole document of CSS size `size` in one render, `None` when the engine has no such
-    /// capture (macOS; the caller stitches).
-    ///
-    /// # Errors
-    /// [`PreviewError::NothingOpen`], engine failures and timeouts.
-    pub async fn screenshot_full_png(
-        &self,
-        session_id: &str,
-        size: (u32, u32),
-    ) -> Result<Option<Vec<u8>>, PreviewError> {
-        let _activity = self.session_lock(session_id).await;
-        if self.shots_blocked(session_id) {
-            return Err(PreviewError::Image(crate::browse::SHOTS_BLOCKED.to_owned()));
-        }
-        self.require_visible_screenshot(session_id)?;
-        let id = self.ensure_mounted(session_id).await?;
-        match bounded(
-            self.config.shot_timeout * 3,
-            "full-page screenshot",
-            self.engine.screenshot_full(&id, size),
-        )
-        .await
-        {
-            Ok(png) => Ok(Some(png)),
-            Err(EngineError::Unsupported(_)) => Ok(None),
-            Err(other) => Err(other.into()),
-        }
     }
 
     /// Evaluates `script` natively in the session's preview (mounted again first when suspended) and answers the

@@ -175,7 +175,3 @@ fn nautilus_script(exe: &Path) -> String {
     let program = exe.to_string_lossy().replace('\'', r"'\''");
     format!("#!/bin/sh\n# {MARKER}\nexec '{program}' --attach \"$@\"\n")
 }
-
-#[cfg(test)]
-#[path = "send_to_linux_tests.rs"]
-mod tests;

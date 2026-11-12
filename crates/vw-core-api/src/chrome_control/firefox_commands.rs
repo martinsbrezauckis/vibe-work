@@ -1,4 +1,4 @@
-//! Optional app-owned Firefox window commands. Uses the checked helper and existing owner key; no add-on setup.
+//! Owned Firefox window commands. Uses the checked helper and existing owner key; sharing setup is separate.
 use super::{
     PairingState,
     commands::{invalid, view},
@@ -30,10 +30,10 @@ pub(super) fn setup_view(shared: &crate::core::Shared) -> Option<Box<setup::Chro
             | PairingState::Connecting
             | PairingState::BrowserOutdated
             | PairingState::Blocked => pairing.0,
-            _ if installed() => PairingState::WindowClosed,
+            _ if executable().is_some() => PairingState::WindowClosed,
             _ => PairingState::NotInstalled,
         };
-        let facts = state_view(setup.pairing_state, chrome.enabled(), setup.package);
+        let facts = state_view(setup.pairing_state, chrome.firefox_enabled(), setup.package);
         setup.pairing.clone_from(&facts.label);
         setup.addon = Some(facts);
         setup.state = if setup.pairing_state == PairingState::WindowOpen {
@@ -48,7 +48,7 @@ pub(super) fn setup_view(shared: &crate::core::Shared) -> Option<Box<setup::Chro
         Box::new(setup)
     })
 }
-fn installed() -> bool {
+pub(super) fn executable() -> Option<std::path::PathBuf> {
     let mut paths = Vec::new();
     if cfg!(target_os = "macos") {
         paths.push(std::path::PathBuf::from(
@@ -81,7 +81,7 @@ fn installed() -> bool {
                 }),
         );
     }
-    paths.iter().any(|p| p.is_file())
+    paths.into_iter().find(|p| p.is_file())
 }
 impl Core {
     pub(super) async fn firefox_window(&self, open: bool) -> Result<CommandResult, CoreError> {
@@ -90,6 +90,11 @@ impl Core {
         }
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
+        if open && !chrome.firefox_enabled() {
+            return Err(invalid(&super::agent_browser::Browser::Firefox.words(
+                "{yourBrowser} is off. Turn it on in Settings > Browser > {yourBrowser}.",
+            )));
+        }
         if open {
             setup::packaged_helper(&chrome.config).map_err(|e| invalid(&e))?;
             let state = chrome
@@ -160,7 +165,7 @@ impl Core {
                 view: view(&self.shared),
             });
             let fallback = format!(
-                "{} Ask the person to open its window in Vibe Work Settings, then check chrome_status.",
+                "{} Ask the user to open its window in Vibe Work Settings, then check chrome_status.",
                 vw_vocabulary::texts::FIREFOX_NOT_CONNECTED
             );
             return Err(invalid(
@@ -188,20 +193,16 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
         (
             A::Unavailable,
             "Unavailable",
-            "{yourBrowser} is unavailable in this build. Use a build that includes the Firefox module.",
+            super::browser_text::UNAVAILABLE,
         )
     } else if state == PairingState::NotInstalled {
         (
             A::ChromeMissing,
             "Not installed",
-            "Firefox is missing. Ask the person to install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
+            "Firefox is missing. Ask the user to install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
         )
     } else if !enabled {
-        (
-            A::SwitchedOff,
-            "Off",
-            "The browser connection is off. Ask the person to choose Turn on under Settings > Browser > {yourBrowser}.",
-        )
+        (A::SwitchedOff, "Off", super::browser_text::SWITCHED_OFF)
     } else {
         match state {
             PairingState::WindowOpen => (
@@ -217,17 +218,17 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             PairingState::BrowserOutdated => (
                 A::UpdateNeeded,
                 "Update Firefox",
-                "Firefox is older than the supported version. Ask the person to update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
+                "Firefox is older than the supported version. Ask the user to update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
             ),
             PairingState::Blocked => (
                 A::Unavailable,
                 "Blocked by your organization",
-                "Your organization blocks this Firefox connection. Ask the person to contact their administrator.",
+                "The user's organization blocks this Firefox connection. Ask the user to contact their administrator.",
             ),
             _ => (
                 A::ChromeClosed,
                 "Window closed",
-                "The owned Firefox window is closed. Ask the person to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session cannot resume after a restart.",
+                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session cannot resume after a restart.",
             ),
         }
     };
@@ -263,7 +264,7 @@ mod tests {
             (
                 PairingState::NotInstalled,
                 "Not installed",
-                "Ask the person to install Firefox",
+                "Ask the user to install Firefox",
             ),
         ] {
             *core
@@ -298,7 +299,7 @@ mod tests {
                 assert_eq!(
                     firefox["instruction"],
                     format!(
-                        "Firefox is missing. Ask the person to install Firefox, then choose Open window in Settings > Browser > {}.",
+                        "Firefox is missing. Ask the user to install Firefox, then choose Open window in Settings > Browser > {}.",
                         vw_vocabulary::texts::FIREFOX_NAME
                     )
                 );

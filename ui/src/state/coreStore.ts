@@ -83,6 +83,8 @@ export interface CoreController {
   run(command: Command, options?: ExecuteOptions): Promise<CommandResult>;
   /** Keeps a UI-control action's request open through preparation and lazy-loading awaits. */
   trackAction<T>(action: Promise<T>): Promise<T>;
+  /** Keeps browser setup discovery current while at least one consumer is mounted. */
+  watchBrowserSetup(): () => void;
   /** Stops listening. */
   stop(): void;
   /**
@@ -144,6 +146,8 @@ export function createCore(
   const listeners = new Set<(event: CoreEvent) => void>();
   let unsubscribe: (() => void) | null = null;
   let reading: Promise<void> | null = null;
+  const browserReaders = new Set<symbol>();
+  let browserTimer: ReturnType<typeof setInterval> | null = null;
 
   const fold = (result: CommandResult): void => {
     store.set((state) => applyResult(state, result));
@@ -339,7 +343,24 @@ export function createCore(
       }
       return result;
     },
+    watchBrowserSetup() {
+      const reader = Symbol();
+      browserReaders.add(reader);
+      browserTimer ??= setInterval(() => {
+        void this.run({ type: "chromeControl", request: { op: "read" } }).catch(() => undefined);
+      }, 3000);
+      return () => {
+        browserReaders.delete(reader);
+        if (browserReaders.size === 0 && browserTimer !== null) {
+          clearInterval(browserTimer);
+          browserTimer = null;
+        }
+      };
+    },
     stop() {
+      if (browserTimer !== null) clearInterval(browserTimer);
+      browserTimer = null;
+      browserReaders.clear();
       if (localTimer !== null) clearTimeout(localTimer);
       localTimer = null;
       unsubscribe?.();

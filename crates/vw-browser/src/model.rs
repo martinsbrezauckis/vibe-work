@@ -93,6 +93,9 @@ pub struct RefItem {
     /// Checked state (checkbox, radio, `aria-checked`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
+    /// Selected state of a custom option (`aria-selected`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
     /// `aria-expanded`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded: Option<bool>,
@@ -114,6 +117,12 @@ pub struct RefItem {
     /// Required field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
+    /// Current native validity without triggering validation UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid: Option<bool>,
+    /// Current validation message, omitted for protected fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_message: Option<String>,
     /// A link's address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub href: Option<String>,
@@ -234,6 +243,21 @@ pub struct PageModel {
     /// How many interactive elements the page has.
     #[serde(default)]
     pub ref_count: u32,
+    /// Number of selector matches before output caps, over the scanned documents.
+    #[serde(default)]
+    pub selector_matches: Option<u32>,
+    /// Fixed selector syntax failure marker; never page exception text.
+    #[serde(default, skip_serializing)]
+    pub selector_error: Option<String>,
+    /// Number of retained subtree roots found across the observed documents.
+    #[serde(default, skip_serializing)]
+    pub scope_matches: u32,
+    /// Rendered extraction batches, consumed before inline budgets.
+    #[serde(default, skip_serializing)]
+    pub datasets: Vec<crate::extraction::Dataset>,
+    /// Fixed extraction syntax error, never page exception text.
+    #[serde(default, skip_serializing)]
+    pub extraction_error: Option<String>,
     /// Iframes.
     #[serde(default)]
     pub frames: Vec<FrameItem>,
@@ -342,6 +366,7 @@ impl PageModel {
             cap_opt(&mut r.redacted, 20);
             cap_opt(&mut r.kind, 20);
             cap_opt(&mut r.href, 300);
+            cap_opt(&mut r.validation_message, 300);
             cap_opt(&mut r.login, 20);
             if let Some(targets) = &mut r.submits_to {
                 targets.truncate(16);
@@ -351,6 +376,7 @@ impl PageModel {
             }
             if r.redacted.is_some() {
                 r.value = None;
+                r.validation_message = None;
             }
             if let Some(options) = &mut r.options {
                 options.truncate(20);

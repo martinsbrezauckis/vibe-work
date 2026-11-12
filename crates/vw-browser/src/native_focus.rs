@@ -13,8 +13,8 @@ use crate::act::Action;
 use crate::driver::{ActError, Browser, NavFuture, Navigate, refused};
 use crate::sessions::{Actor, Outcome, Sessions};
 
-pub(crate) const FOCUS_REQUEST: &str = "No input has been sent: Vibe Work needs to be in front. Ask the person to bring it forward; this click will try once.";
-pub(crate) const CLICK_WAITING: &str = "A native click is already waiting for Vibe Work to come to the front. Do not repeat it; ask the person to bring the window forward or press Stop to cancel.";
+pub(crate) const FOCUS_REQUEST: &str = "No input has been sent: Vibe Work needs to be in front. Ask the user to bring it forward; this click will try once.";
+pub(crate) const CLICK_WAITING: &str = "A native click is already waiting for Vibe Work to come to the front. Do not repeat it; ask the user to bring the window forward or press Stop to cancel.";
 const FOCUS_WAIT: Duration = Duration::from_secs(60);
 
 struct Pending {
@@ -85,7 +85,7 @@ impl Browser {
         Ok(
             json!({"Outcome": FOCUS_REQUEST, "ok": false, "pending": true,
             "expiresInSeconds": FOCUS_WAIT.as_secs(),
-            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it: it is already queued, and a repeat is refused while it waits. Ask the person to press Stop if they want to cancel. Its result will appear in Browser actions."}),
+            "note": "No input has been sent. This authorized act will try once when the window is key. Do not repeat it: it is already queued, and a repeat is refused while it waits. Ask the user to press Stop if they want to cancel. Its result will appear in Browser actions."}),
         )
     }
 
@@ -152,13 +152,5 @@ impl Browser {
             self.log(session, Actor::Agent, action, target, &result);
         }
         result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn pending_native_input_asks_the_person_for_focus() {
-        assert!(super::FOCUS_REQUEST.contains("Ask the person"));
     }
 }

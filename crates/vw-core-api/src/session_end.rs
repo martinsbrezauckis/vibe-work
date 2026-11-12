@@ -297,6 +297,7 @@ fn ready(shared: &Shared, id: &str) -> bool {
 
 /// The resources of an archived session end (it may be restored later, so its preview's website data stays).
 async fn teardown_archived(shared: &Shared, id: &str) {
+    crate::chrome_control::end_chat(shared, id, false);
     // An archived chat is closed: its "Allow for this session" answers end (a restored chat asks again).
     crate::ask::grants::session_ended(shared, id);
     // The session's own processes stop, the agent's are listed, the lease returns.

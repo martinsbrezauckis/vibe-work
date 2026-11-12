@@ -14,7 +14,6 @@ import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { accessibilityCatalog } from "./accessibilityCatalog";
 import { chromeCatalog } from "./chrome/chromeRows";
-import { PLAN_USAGE_ENABLED } from "../../state/planUsageEnabled";
 
 /** A category of the Settings page. */
 export interface SettingsCategory {
@@ -61,17 +60,13 @@ export interface SettingEntry {
 
 /** Every setting, in page order. */
 export const SETTINGS_INDEX: readonly SettingEntry[] = [
-  ...(PLAN_USAGE_ENABLED
-    ? [
-        {
-          id: "plan-usage",
-          category: "usage",
-          label: "This month",
-          description: "",
-          keywords: "monthly plan usage allowance budget left pay as you go reset",
-        },
-      ]
-    : []),
+  {
+    id: "plan-usage",
+    category: "usage",
+    label: "This month",
+    description: "",
+    keywords: "monthly plan usage allowance budget left pay as you go reset",
+  },
   ...accessibilityCatalog,
   {
     id: "close-to-tray",
@@ -91,9 +86,8 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "allowed-sessions",
     category: "allowed",
-    label: "Answers in open sessions",
-    description:
-      "“Allow for this session” answers, per open session; revoke one to be asked again.",
+    label: "Answers in open chats",
+    description: "“Allow for this chat” answers, per open chat; revoke one to be asked again.",
     keywords: "always allow earlier rules vault grant command site mcp key revoke session answers",
   },
   {
@@ -122,16 +116,15 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "cli-sharing",
     category: "general",
-    label: "Keep sessions separate from the Vibe command line",
-    description:
-      "Whether sessions started here also show in the CLI's list, and the other way round.",
+    label: "Keep chats separate from the Vibe command line",
+    description: "Whether chats started here also show in the CLI's list, and the other way round.",
     keywords: "cli terminal command line share sharing vibe home",
   },
   {
     id: "session-copies",
     category: "general",
-    label: "Session copies",
-    description: "Review or remove session copies (git worktrees) no chat uses anymore.",
+    label: "Chat copies",
+    description: "Review or remove chat copies (git worktrees) no chat uses anymore.",
     keywords: "git worktree worktrees leftover kept copies review remove cleanup",
   },
   {
@@ -206,14 +199,14 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     id: "status-usage",
     category: "appearance",
     label: "Show usage in the status bar",
-    description: 'How full the open session\'s context is, as "Context 42%".',
+    description: 'How full the open chat\'s context is, as "Context 42%".',
     keywords: "usage context tokens footer status bar compaction",
   },
   {
     id: "show-thinking-expanded",
     category: "appearance",
     label: "Show thinking expanded",
-    description: "Open thinking blocks in the session by default.",
+    description: "Open thinking blocks in the chat by default.",
     keywords: "transcript composer thinking reasoning expand collapse disclosure",
   },
   {
@@ -249,7 +242,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "secret-scan",
     category: "secrets",
-    label: "Scan session logs for my secrets",
+    label: "Scan chat logs for my secrets",
     description: "Find Vault secrets that ended up in chat logs, and redact them",
     keywords: "scan leak leaked log logs session redact remove secret token key find",
   },
@@ -362,13 +355,35 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     description: "Off, Balanced, Strict",
     keywords: "browser ads trackers shields easylist easyprivacy",
   },
+  {
+    id: "builtin-control-enabled",
+    category: "browser",
+    label: "Vibe Work browser · Use Vibe Work browser",
+    description: "",
+    keywords: "browser builtin built-in availability enable disable",
+  },
+  ...(
+    [
+      ["builtin", "Vibe Work browser"],
+      ["chrome", TEXT.chromeName],
+      ["edge", TEXT.edgeName],
+      ["firefox", TEXT.firefoxName],
+      ["safari", TEXT.safariName],
+    ] as const
+  ).map(([browser, label]) => ({
+    id: `${browser}-composer`,
+    category: "browser" as const,
+    label: `${label} · Show in composer`,
+    description: "",
+    keywords: "browser composer show hide visibility",
+  })),
   ...chromeCatalog(),
   {
     id: "safari-control",
     category: "browser",
     label: TEXT.safariName,
     description: "",
-    keywords: "safari extension browser setup connection",
+    keywords: "safari extension browser setup connection other app copies installations",
   },
   {
     id: "firefox-control",
@@ -416,7 +431,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     id: "session-usage",
     category: "usage",
     label: TEXT.thisSession,
-    description: "Tokens used and how full the context is, until Vibe compacts the session.",
+    description: "Tokens used and how full the context is, until Vibe compacts the chat.",
     keywords: "tokens context usage compaction session",
   },
   {
@@ -638,10 +653,14 @@ export function searchSettings(
   const words = queryWords(query);
   if (words.length === 0) return [];
   const hits = SEARCH_INDEX.filter((e) => {
-    if (!chromeAvailable && e.id.startsWith("chrome-control")) return false;
-    if (!firefoxAvailable && e.id.startsWith("firefox-control")) return false;
-    if (!edgeAvailable && e.id.startsWith("edge-control")) return false;
-    if (!safariAvailable && e.id.startsWith("safari-control")) return false;
+    if (!chromeAvailable && (e.id.startsWith("chrome-control") || e.id === "chrome-composer"))
+      return false;
+    if (!firefoxAvailable && (e.id.startsWith("firefox-control") || e.id === "firefox-composer"))
+      return false;
+    if (!edgeAvailable && (e.id.startsWith("edge-control") || e.id === "edge-composer"))
+      return false;
+    if (!safariAvailable && (e.id.startsWith("safari-control") || e.id === "safari-composer"))
+      return false;
     const hay =
       `${e.label} ${e.description} ${e.keywords} ${categoryOf(e.category).label}`.toLowerCase();
     return words.every((w) => hay.includes(w));

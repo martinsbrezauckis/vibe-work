@@ -1,9 +1,9 @@
-/** Shared passive and actionable chips, retaining the established presentations. Features supply content and state; shared CSS owns the visuals. */
+/** Shared passive and actionable chips, with one visual treatment and semantic tones. Features supply content and state; shared CSS owns the visuals. */
 import { createElement, type ComponentProps, type HTMLAttributes, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 
 const PRESENTATIONS = {
-  metadata: "ui-badge",
+  metadata: "",
   "page-check": "pages-visual-badge",
   session: "tag",
   "cli-session": "tag cli-tag",
@@ -25,10 +25,10 @@ const PRESENTATIONS = {
   "voice-label": "u-tag u-voice",
   "context-label": "ctx-chip",
   "image-label": "img-chip",
-  sources: "copy-btn sources-chip",
+  sources: "sources-chip",
   "voice-strip": "vchat-tag",
-  "pull-request": "chip pr-chip",
-  worktree: "chip wt-chip",
+  "pull-request": "pr-chip",
+  worktree: "wt-chip",
 } as const;
 type Content = {
   presentation?: keyof typeof PRESENTATIONS;
@@ -66,10 +66,10 @@ export function Badge({
             : ` ${state}`;
   const shared = {
     className:
+      "ui-badge " +
       PRESENTATIONS[presentation] +
       suffix +
       (presentation === "pull-request" && tone === "bad" ? " bad" : ""),
-    "data-size": presentation === "metadata" ? "small" : undefined,
     "data-tone": props["data-tone"] ?? tone,
   };
   const content = (

@@ -28,7 +28,7 @@ const FILTERS = [
   { value: "approval", label: "Approvals", empty: "No approvals." },
   { value: "finished", label: "Finished", empty: "No finished chats." },
   { value: "failure", label: "Failures", empty: "No failures." },
-  { value: "worktrees", label: "Session copies", empty: "No session copies." },
+  { value: "worktrees", label: "Chat copies", empty: "No chat copies." },
 ] as const;
 const RESERVATION = "notifications-panel";
 
@@ -277,7 +277,7 @@ export function NotificationsPanel() {
                       toasts.close();
                     }}
                   >
-                    Sessions
+                    Chats
                   </Button>
                 )}
                 {toast.sessionId !== undefined && toast.security === undefined && (

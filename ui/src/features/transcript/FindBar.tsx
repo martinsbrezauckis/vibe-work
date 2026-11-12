@@ -224,7 +224,7 @@ export function FindBar({
       </button>
       {bar.older && (
         <p className="find-note">
-          That message is further back than this session shows (the newest {DEEPEST_READ} entries).
+          That message is further back than this chat shows (the newest {DEEPEST_READ} entries).
         </p>
       )}
     </div>

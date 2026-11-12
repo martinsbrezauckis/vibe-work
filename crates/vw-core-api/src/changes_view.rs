@@ -12,6 +12,38 @@ use vw_changes::{FileChange, InitPlan, Target};
 
 use crate::error::{CoreError, ErrorCode};
 
+/// Display Git's root with the host's separators; filesystem identity stays in the tracker.
+pub(crate) fn display_root(path: &std::path::Path) -> String {
+    root_text(&path.to_string_lossy(), cfg!(windows))
+}
+
+fn root_text(path: &str, windows: bool) -> String {
+    if windows {
+        path.replace('/', "\\")
+    } else {
+        path.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    #[test]
+    fn git_roots_use_native_separators_without_changing_case_or_unicode() {
+        assert_eq!(
+            super::root_text("C:/Work/Ā/nested", true),
+            r"C:\Work\Ā\nested"
+        );
+        assert_eq!(
+            super::root_text("//server/share/Project", true),
+            r"\\server\share\Project"
+        );
+        assert_eq!(
+            super::root_text(r"/work/back\slash/nested", false),
+            r"/work/back\slash/nested"
+        );
+    }
+}
+
 /// One Changes request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]

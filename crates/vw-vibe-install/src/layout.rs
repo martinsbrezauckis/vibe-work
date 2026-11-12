@@ -198,10 +198,12 @@ pub fn active_version(root: &Path) -> Option<String> {
 /// The OS error.
 pub fn save_active(root: &Path, version: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
-    let temp = root.join("active.json.tmp");
     let text = serde_json::json!({ "version": version }).to_string();
-    std::fs::write(&temp, text)?;
-    std::fs::rename(&temp, root.join("active.json"))
+    vw_platform::atomic_file::replace_file(
+        &root.join("active.json"),
+        text.as_bytes(),
+        vw_platform::atomic_file::MetadataPolicy::NewFile,
+    )
 }
 
 /// Removes every other install folder under `root` (folders named like a plain version, except `keep`): the

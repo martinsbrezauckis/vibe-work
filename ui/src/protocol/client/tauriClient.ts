@@ -52,6 +52,14 @@ export function createTauriClient(): CoreClient {
   return {
     kind: "tauri",
     desktop: {
+      async subscribeFocus(onFocus) {
+        const channel = new Channel<boolean>();
+        channel.onmessage = onFocus;
+        await call<null>("desktop_focus_subscribe", { focused: channel });
+        return () => {
+          channel.onmessage = () => undefined;
+        };
+      },
       attention: (count) => call("desktop_attention", { count }),
       settings: (enabled) => call("desktop_settings", { enabled: enabled ?? null }),
       async quit() {

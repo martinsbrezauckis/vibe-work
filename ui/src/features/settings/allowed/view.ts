@@ -86,15 +86,15 @@ export interface PageView {
 }
 
 const GROUP_TITLE: Record<GroupId, string> = {
-  sessions: "Answers in open sessions",
+  sessions: "Answers in open chats",
   earlier: "Earlier “Always allow” rules",
   vault: TEXT.vault,
 };
 
 const GROUP_HELP: Record<GroupId, string> = {
-  sessions: "“Allow for this session” answers.",
+  sessions: "“Allow for this chat” answers.",
   earlier:
-    "Saved by the “Always allow” button of Vibe Work 0.1.0 and 0.1.1. They apply in every project and every new session.",
+    "Saved by the “Always allow” button of Vibe Work 0.1.0 and 0.1.1. They apply in every project and every new chat.",
   vault: "“Always …” answers from the vault's own questions.",
 };
 
@@ -185,7 +185,7 @@ export function moreLabel(notShown: number): string {
 function countParts(src: AllowedSources, all: readonly AllowedEntry[]): string[] {
   const n = (group: GroupId) => all.filter((e) => e.group === group).length;
   return [
-    `${plural(n("sessions"), "answer")} in open sessions`,
+    `${plural(n("sessions"), "answer")} in open chats`,
     src.rules.state === "error"
       ? "earlier rules could not be read"
       : plural(n("earlier"), "earlier rule"),

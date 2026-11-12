@@ -92,7 +92,7 @@ export function ProjectGroupView({
   const items: MenuItem[] = [
     {
       id: "new",
-      label: id === null ? "New session here" : `${TEXT.newChat} in this project`,
+      label: id === null ? `${TEXT.newChat} here` : `${TEXT.newChat} in this project`,
       run: newHere,
       disabled: id === null && path === null,
     },
@@ -177,7 +177,7 @@ export function ProjectGroupView({
             aria-expanded={open}
             title={
               id === null
-                ? (path ?? "Sessions without a folder")
+                ? (path ?? "Chats without a folder")
                 : `${group.name}${path === null ? " (no main folder)" : ` · ${path}`}`
             }
             onClick={() => {
@@ -207,7 +207,7 @@ export function ProjectGroupView({
             <span className="pname">{group.name}</span>
             <span className="cnt">
               {shown?.running && (
-                <span className="sb run" role="img" aria-label="A session is running">
+                <span className="sb run" role="img" aria-label="A chat is running">
                   <Walker size="badge" />
                 </span>
               )}
@@ -264,7 +264,7 @@ export function ProjectGroupView({
         {shown?.rows.length === 0 && id !== null && (
           <div className="proj-empty">
             <span>
-              No sessions here. Drag sessions here, or{" "}
+              No chats here. Drag chats here, or{" "}
               <Button
                 data-testid="sessions.project-group-view-link-btn"
                 type="button"

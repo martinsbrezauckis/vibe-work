@@ -1,21 +1,22 @@
 //! Maps container video caps to installed system elements, with precise missing-support errors.
 use super::{Metadata, geometry, gst};
-pub(super) fn metadata(s: &gst::StructureRef) -> Result<Metadata, String> {
+use vw_video_types::{Code, Error};
+pub(super) fn metadata(s: &gst::StructureRef) -> Result<Metadata, Error> {
     let width = u32::try_from(
         s.get::<i32>("width")
-            .map_err(|_| "decode_failed: unknown source width")?,
+            .map_err(|error| Error::at(Code::DecodeFailed, "unknown source width", error))?,
     )
-    .map_err(|_| "limit_exceeded: width")?;
+    .map_err(|error| Error::at(Code::Dimensions, "width", error))?;
     let height = u32::try_from(
         s.get::<i32>("height")
-            .map_err(|_| "decode_failed: unknown source height")?,
+            .map_err(|error| Error::at(Code::DecodeFailed, "unknown source height", error))?,
     )
-    .map_err(|_| "limit_exceeded: height")?;
+    .map_err(|error| Error::at(Code::Dimensions, "height", error))?;
     geometry::geometry(width, height)?;
     if s.get::<String>("colorimetry").is_ok_and(|c| {
         c.contains("2100") || c.contains("2020") || c.contains("pq") || c.contains("hlg")
     }) {
-        return Err("unsupported_codec: HDR color conversion is unavailable".into());
+        return Err(Error::new(Code::Hdr, "HDR color conversion is unavailable"));
     }
     let par = s
         .get::<gst::Fraction>("pixel-aspect-ratio")
@@ -26,8 +27,10 @@ pub(super) fn metadata(s: &gst::StructureRef) -> Result<Metadata, String> {
         height,
         rotation: 0,
         par: (
-            u32::try_from(par.numer()).map_err(|_| "decode_failed: PAR")?,
-            u32::try_from(par.denom()).map_err(|_| "decode_failed: PAR")?,
+            u32::try_from(par.numer())
+                .map_err(|error| Error::at(Code::PixelAspect, "PAR", error))?,
+            u32::try_from(par.denom())
+                .map_err(|error| Error::at(Code::PixelAspect, "PAR", error))?,
         ),
         codec: format!(
             "{} {}",
@@ -38,41 +41,44 @@ pub(super) fn metadata(s: &gst::StructureRef) -> Result<Metadata, String> {
         .to_owned(),
     })
 }
-pub(super) fn elements(codec: &str) -> Result<(Option<&'static str>, &'static str), String> {
+pub(super) fn elements(codec: &str) -> Result<(Option<&'static str>, &'static str), Error> {
     choose(codec, |name| gst::ElementFactory::find(name).is_some())
 }
 fn choose(
     codec: &str,
     available: impl Fn(&str) -> bool,
-) -> Result<(Option<&'static str>, &'static str), String> {
+) -> Result<(Option<&'static str>, &'static str), Error> {
     let (parser, decoders): (Option<&str>, &[&str]) = match codec {
         "video/x-h264" => (Some("h264parse"), &["avdec_h264", "openh264dec"]),
         "video/x-h265" => (Some("h265parse"), &["avdec_h265", "libde265dec"]),
         "video/x-vp8" => (None, &["vp8dec", "avdec_vp8"]),
         "video/x-vp9" => (None, &["vp9dec", "avdec_vp9"]),
         "video/x-av1" => (Some("av1parse"), &["dav1ddec", "av1dec", "avdec_av1"]),
-        _ => return Err(format!("unsupported_codec: {codec}")),
+        _ => return Err(Error::new(Code::UnsupportedCodec { codec: None }, codec)),
     };
+    let known = match codec {
+        "video/x-h264" => vw_video_types::Codec::H264,
+        "video/x-h265" => vw_video_types::Codec::Hevc,
+        "video/x-vp8" => vw_video_types::Codec::Vp8,
+        "video/x-vp9" => vw_video_types::Codec::Vp9,
+        "video/x-av1" => vw_video_types::Codec::Av1,
+        _ => unreachable!("only supported caps reach element selection"),
+    };
+    let missing =
+        |detail: String| Error::new(Code::UnsupportedCodec { codec: Some(known) }, detail);
     if let Some(parser) = parser
         && !available(parser)
     {
-        return Err(format!(
-            "backend_unavailable: missing GStreamer element {parser} for {codec}"
-        ));
+        return Err(missing(format!(
+            "missing GStreamer element {parser} for {codec}"
+        )));
     }
-    let label = match codec {
-        "video/x-h264" => "H.264",
-        "video/x-h265" => "HEVC",
-        "video/x-vp8" => "VP8",
-        "video/x-vp9" => "VP9",
-        "video/x-av1" => "AV1",
-        _ => codec,
-    };
     let decoder = decoders.iter().find(|d| available(d)).ok_or_else(|| {
-        format!(
-            "unsupported_codec: system has no decoder for {label} ({codec}; {})",
+        missing(format!(
+            "system has no decoder for {} ({codec}; {})",
+            known.label(),
             decoders.join(" or ")
-        )
+        ))
     })?;
     Ok((parser, *decoder))
 }
@@ -81,18 +87,30 @@ mod tests {
     use super::*;
     #[test]
     fn absent_system_support_names_the_codec_and_elements() {
+        let parser = choose("video/x-h264", |_| false).unwrap_err();
         assert_eq!(
-            choose("video/x-h264", |_| false).unwrap_err(),
-            "backend_unavailable: missing GStreamer element h264parse for video/x-h264"
+            parser.code,
+            Code::UnsupportedCodec {
+                codec: Some(vw_video_types::Codec::H264)
+            }
         );
+        assert!(parser.detail.contains("h264parse"));
+        let vp9 = choose("video/x-vp9", |_| false).unwrap_err();
         assert_eq!(
-            choose("video/x-vp9", |_| false).unwrap_err(),
-            "unsupported_codec: system has no decoder for VP9 (video/x-vp9; vp9dec or avdec_vp9)"
+            vp9.code,
+            Code::UnsupportedCodec {
+                codec: Some(vw_video_types::Codec::Vp9)
+            }
         );
+        assert!(vp9.detail.contains("vp9dec or avdec_vp9"));
+        let h264 = choose("video/x-h264", |n| n == "h264parse").unwrap_err();
         assert_eq!(
-            choose("video/x-h264", |n| n == "h264parse").unwrap_err(),
-            "unsupported_codec: system has no decoder for H.264 (video/x-h264; avdec_h264 or openh264dec)"
+            h264.code,
+            Code::UnsupportedCodec {
+                codec: Some(vw_video_types::Codec::H264)
+            }
         );
+        assert!(h264.detail.contains("avdec_h264 or openh264dec"));
         assert_eq!(
             choose("video/x-h264", |n| ["h264parse", "avdec_h264"].contains(&n))
                 .unwrap()

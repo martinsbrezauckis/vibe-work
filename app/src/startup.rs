@@ -149,6 +149,10 @@ fn launch() -> Result<vw_supervisor::SupervisorConfig, String> {
         std::env::var("VW_DEV_SERVER_ARGS").ok().as_deref(),
     ));
     config.launcher = dev_server_args(std::env::var("VW_DEV_SERVER_LAUNCHER").ok().as_deref());
+    let keyring = std::env::var_os(vw_host::launch::DEV_VIBE_KEYRING_VAR);
+    if vw_host::launch::keep_os_keyring(&mut config, keyring.as_deref()) {
+        tracing::info!("Vibe keeps the OS keyring (VW_DEV_VIBE_KEYRING=os, development build)");
+    }
     Ok(config)
 }
 
@@ -417,7 +421,18 @@ fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::Previe
     let host = app.state::<vw_host::HostHandle>().inner().clone();
     engine = engine.with_context_sink(Arc::new(move |session_id, choice| {
         if let Some(host) = host.try_get() {
-            host.browser_context_menu(session_id, choice == vw_webview::PageMenuChoice::PointVibe);
+            if choice == vw_webview::PageMenuChoice::Share {
+                if let Some(core) = host.core().cloned() {
+                    tauri::async_runtime::spawn(async move {
+                        core.share_browser_menu(&session_id).await;
+                    });
+                }
+            } else {
+                host.browser_context_menu(
+                    session_id,
+                    choice == vw_webview::PageMenuChoice::PointVibe,
+                );
+            }
         }
     }));
     if let Some(guard) = &guard {

@@ -1,5 +1,7 @@
 //! Held native dialog access, pinned to one live browser mount; used by the browser tool and vault writer.
 //! Answers never evaluate page JavaScript and credentials never enter a serialized receipt.
+//! Depends on: preview mount ownership and native dialog engines.
+//! Called by: browser tools and the vault authentication writer.
 use crate::{EngineError, MountId, PreviewError, PreviewService};
 use serde_json::Value;
 use zeroize::Zeroizing;

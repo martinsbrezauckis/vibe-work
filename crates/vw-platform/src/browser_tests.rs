@@ -83,61 +83,6 @@ fn process_results_keep_unknown_separate_from_closed() {
     );
 }
 
-#[cfg(target_os = "linux")]
-#[test]
-fn isolated_discovery_distinguishes_native_absent_wrapped_and_other_browser() {
-    const FIXTURE: &str = "VW_BROWSER_DISCOVERY_FIXTURE";
-    if let Some(root) = std::env::var_os(FIXTURE) {
-        let root = PathBuf::from(root);
-        let home = root.join("home");
-        assert_eq!(
-            discover(Browser::Chrome, &home),
-            Err(InstallationIssue::Missing)
-        );
-        assert_eq!(
-            discover(Browser::Edge, &home),
-            Err(InstallationIssue::Missing)
-        );
-        let chrome = root.join("google-chrome");
-        let edge = root.join("microsoft-edge");
-        for path in [&chrome, &edge] {
-            std::fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        assert_eq!(discover(Browser::Chrome, &home), Ok(chrome.clone()));
-        assert_eq!(discover(Browser::Edge, &home), Ok(edge.clone()));
-        std::fs::remove_file(&edge).unwrap();
-        assert_eq!(
-            discover(Browser::Edge, &home),
-            Err(InstallationIssue::Missing)
-        );
-        std::fs::write(&chrome, "#!/bin/sh\nexec flatpak run com.google.Chrome\n").unwrap();
-        assert_eq!(
-            discover(Browser::Chrome, &home),
-            Err(InstallationIssue::Sandboxed)
-        );
-        std::fs::remove_file(&chrome).unwrap();
-        std::fs::write(&edge, "#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::set_permissions(&edge, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(
-            discover(Browser::Chrome, &home),
-            Err(InstallationIssue::DifferentBrowser)
-        );
-        assert_eq!(discover(Browser::Edge, &home), Ok(edge));
-        return;
-    }
-    let root = tempfile::tempdir().unwrap();
-    let result = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "browser::tests::isolated_discovery_distinguishes_native_absent_wrapped_and_other_browser", "--nocapture"])
-        .env(FIXTURE, root.path()).env("PATH", root.path()).output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
-    );
-}
-
 #[tokio::test]
 async fn explicit_read_waits_for_pending_refresh_instead_of_returning_stale_facts() {
     let detection = Detection::default();

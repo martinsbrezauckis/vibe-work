@@ -32,7 +32,7 @@ export type Decision = (typeof DECISIONS)[number];
 /** Past-tense text per decision for the audit row. */
 const DECISION_DONE: Record<Decision, string> = {
   approve: "Allowed once",
-  approve_for_session: "Allowed for this session",
+  approve_for_session: "Allowed for this chat",
   approve_permanently: "Always allowed",
   deny: "Said No",
   cancel_turn: "Stopped",

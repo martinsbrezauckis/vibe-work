@@ -77,21 +77,29 @@ impl Step {
     }
 }
 
-/// Why a step did not succeed.
+/// Why a step did not succeed. The text follows "<step> did not finish: " in the failure the user sees, so it is a
+/// plain phrase with no Rust formatting (F2 showed "it exited with code Some(2)").
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
     /// It ran longer than its limit (killed).
-    #[error("it did not finish within {0:?}")]
+    #[error("stopped after {} s", .0.as_secs())]
     Timeout(Duration),
     /// The user cancelled (killed).
     #[error("cancelled")]
     Cancelled,
-    /// It exited with an error.
-    #[error("it exited with code {0:?}")]
+    /// It exited with an error (`None`: ended by a signal, no exit code).
+    #[error("{}", failed_text(*.0))]
     Failed(Option<i32>),
     /// It could not start.
-    #[error("it could not start: {0}")]
+    #[error("could not start: {0}")]
     Spawn(std::io::Error),
+}
+
+fn failed_text(code: Option<i32>) -> String {
+    code.map_or_else(
+        || "ended without an exit code".to_owned(),
+        |code| format!("exit code {code}"),
+    )
 }
 
 /// The environment of every step: the allowlisted parent names plus `own`.

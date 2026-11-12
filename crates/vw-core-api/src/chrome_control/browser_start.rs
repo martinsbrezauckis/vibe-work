@@ -94,9 +94,7 @@ fn active(shared: &Shared, session: &str, browser: Browser, generation: u64) -> 
     if generation != crate::stops::generation(shared, session)
         || shared.store.view(session).is_none()
     {
-        return Err(browser.words(
-            "Not run: this chat's {browser} work ended. Start a new turn before trying again.",
-        ));
+        return Err(super::person_stop::ended(browser));
     }
     super::check::authorize(
         shared,
@@ -205,7 +203,7 @@ mod wording_tests {
             assert_eq!(
                 error,
                 format!(
-                    "Not run: this chat's {} work ended. Start a new turn before trying again.",
+                    "Not run: this chat's {} work ended with this turn. Finish the reply; the browser can be used again in the next turn.",
                     browser.short_name()
                 )
             );

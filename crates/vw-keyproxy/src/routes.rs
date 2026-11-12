@@ -60,9 +60,7 @@ pub const ALLOWLIST: &[RouteSpec] = &[
     api("GET", "/v1/models"),
     api("GET", "/v1/models/{}"),
     // Vibe 3.1 `_billing.HttpBillingGateway`: optional monthly allowance reads.
-    #[cfg(feature = "plan-usage")]
     api("GET", "/v1/billing/subscription"),
-    #[cfg(feature = "plan-usage")]
     api("GET", "/v1/billing/budget"),
     // RegistrySkillsClient (Vibe 2.26.1, core/skills/registry/_client.py): catalog, pinned payload, versions.
     api("GET", "/v1/skills"),

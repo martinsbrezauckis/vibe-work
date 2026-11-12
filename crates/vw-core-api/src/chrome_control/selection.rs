@@ -2,6 +2,19 @@
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 
+/// Browser context explicitly shared through the person's menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ChromeShareKind {
+    /// A page read through the existing tab picker.
+    Page,
+    /// A link address, kept as text.
+    Link,
+    /// An image address, kept as text.
+    Image,
+}
+
 /// A person-selected Chrome context item, with separate display and model text.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -19,6 +32,10 @@ pub struct ChromeSelection {
     pub text: String,
     /// The page content inside the browser's untrusted-content boundary.
     pub model_text: String,
+    /// Menu context kind; absent for the original selected-text delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub kind: Option<ChromeShareKind>,
 }
 
 impl ChromeSelection {
@@ -31,10 +48,17 @@ impl ChromeSelection {
 
 #[derive(Default)]
 pub(super) struct Selections {
-    pending: VecDeque<ChromeSelection>,
+    pending: VecDeque<PendingSelection>,
     recent: VecDeque<String>,
     pub(super) error: Option<String>,
 }
+
+pub(super) struct PendingSelection {
+    pub selection: ChromeSelection,
+    pub handover: Option<super::sharing::Handover>,
+    pub builtin: Option<super::builtin_share::Proof>,
+}
+
 impl Selections {
     pub(super) fn receive(&mut self, params: &Value, chat_exists: impl Fn(&str) -> bool) -> bool {
         let Some(id) = params["selectionId"]
@@ -56,12 +80,6 @@ impl Selections {
         let Some(title) = value["pageTitle"].as_str().filter(|s| s.len() <= 4096) else {
             return false;
         };
-        if self.pending.len() >= 32 {
-            self.error = Some(
-                "Too many selections are waiting. Send or remove some, then select again.".into(),
-            );
-            return true;
-        }
         let mut marked = json!({"structuredContent":{"url":url,"title":title,"selection":text}});
         super::content::mark(&mut marked);
         let target = &params["browserTab"];
@@ -75,19 +93,43 @@ impl Selections {
             marked["structuredContent"]["browserTab"] =
                 json!({"profileId":target["profileId"],"tabId":target["tabId"]});
         }
-        self.pending.push_back(ChromeSelection {
-            selection_id: id.into(),
-            session_id: value["clientSessionId"]
-                .as_str()
-                .filter(|id| chat_exists(id))
-                .map(str::to_owned),
-            title: title.into(),
-            url: url.into(),
-            text: text.into(),
-            model_text: marked["structuredContent"].to_string(),
-        });
+        self.enqueue(PendingSelection {
+            selection: ChromeSelection {
+                selection_id: id.into(),
+                session_id: value["clientSessionId"]
+                    .as_str()
+                    .filter(|id| chat_exists(id))
+                    .map(str::to_owned),
+                title: title.into(),
+                url: url.into(),
+                text: text.into(),
+                model_text: marked["structuredContent"].to_string(),
+                kind: None,
+            },
+            handover: None,
+            builtin: None,
+        })
+    }
+    pub(super) fn receive_share(&mut self, params: &Value) -> bool {
+        let Some(item) = super::sharing::decode(params) else {
+            return false;
+        };
+        self.enqueue(item)
+    }
+    pub(super) fn enqueue(&mut self, item: PendingSelection) -> bool {
+        let id = &item.selection.selection_id;
+        if self.recent.contains(id) {
+            return false;
+        }
+        if self.pending.len() >= 32 {
+            self.error = Some(
+                "Too many selections are waiting. Send or remove some, then select again.".into(),
+            );
+            return true;
+        }
         self.error = None;
-        self.recent.push_back(id.into());
+        self.recent.push_back(id.clone());
+        self.pending.push_back(item);
         while self.recent.len() > 128 {
             self.recent.pop_front();
         }
@@ -96,11 +138,14 @@ impl Selections {
     pub(super) fn ids(&self) -> Vec<String> {
         self.pending
             .iter()
-            .map(|s| s.selection_id.clone())
+            .map(|s| s.selection.selection_id.clone())
             .collect()
     }
-    pub(super) fn take(&mut self, id: &str) -> Option<ChromeSelection> {
-        let index = self.pending.iter().position(|s| s.selection_id == id)?;
+    pub(super) fn take(&mut self, id: &str) -> Option<PendingSelection> {
+        let index = self
+            .pending
+            .iter()
+            .position(|s| s.selection.selection_id == id)?;
         self.pending.remove(index)
     }
 }
@@ -115,7 +160,7 @@ mod tests {
     fn context_is_claimed_once_bound_to_a_live_chat_and_marked() {
         let mut queue = Selections::default();
         assert!(queue.receive(&selection("one"), |id| id == "chat-1"));
-        let item = queue.take("one").unwrap();
+        let item = queue.take("one").unwrap().selection;
         assert_eq!(item.session_id.as_deref(), Some("chat-1"));
         assert!(item.model_text.contains("untrustedPageContent"));
         assert!(item.model_text.contains("promptGuard"));
@@ -130,7 +175,7 @@ mod tests {
         assert!(queue.take("one").is_none());
         assert!(!queue.receive(&selection("one"), |_| true));
         assert!(queue.receive(&selection("two"), |_| false));
-        assert!(queue.take("two").unwrap().session_id.is_none());
+        assert!(queue.take("two").unwrap().selection.session_id.is_none());
     }
     #[test]
     fn pending_context_is_bounded_and_overflow_is_visible() {

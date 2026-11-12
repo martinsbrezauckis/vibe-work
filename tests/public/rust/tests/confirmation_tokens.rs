@@ -38,16 +38,8 @@ fn p2_cases() -> Vec<(&'static str, Value)> {
             json!({"sessionId": "s1", "skillId": "sk-1"}),
         ),
         (
-            "vibeCode/teleport/start",
-            json!({"sessionId": "s1", "pickerId": "p", "operationId": "o", "projectId": "pr"}),
-        ),
-        (
-            "vibeCode/projects/create",
-            json!({"sessionId": "s1", "pickerId": "p", "name": "n", "defaultBranch": "main"}),
-        ),
-        (
-            "projectLinks/create",
-            json!({"rootPath": "/work/repo", "name": "n", "defaultBranch": "main"}),
+            "projectLinks/save",
+            json!({"rootPath": "/work/repo", "projectId": "p", "projectName": "n", "expectedGithubRepoUrl": null}),
         ),
     ]
 }
@@ -80,7 +72,7 @@ async fn every_p2_method_is_refused_without_a_token() {
         .filter(|(_, c)| *c == Class::Confirmed)
         .map(|(m, _)| m)
         .collect();
-    assert!(p2.len() >= 25, "suspiciously few confirmed methods: {p2:?}");
+    assert_eq!(p2.len(), 18, "confirmed methods changed: {p2:?}");
     for method in p2 {
         let r = rig.gate.call(method, json!({}), None).await;
         assert!(r.is_err(), "{method}: {r:?}");

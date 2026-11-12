@@ -18,11 +18,11 @@ function ScanSettings({ scan }: { scan: NonNullable<ReturnType<typeof useApp>["s
   const busy = pending.includes("settings");
   const status = view === null ? null : scanStatus(view);
   return (
-    <section className="set-group ui-body" data-setting="secret-scan" aria-label="Session logs">
-      <h3>Session logs</h3>
+    <section className="set-group ui-body" data-setting="secret-scan" aria-label="Chat logs">
+      <h3>Chat logs</h3>
       <label className="check" htmlFor={`${id}-scan`}>
         <span>
-          <span id={`${id}-scan-label`}>Scan session logs for my secrets</span>
+          <span id={`${id}-scan-label`}>Scan chat logs for my secrets</span>
           <span className="d" id={`${id}-scan-description`}>
             Looks for your Vault secrets and website passwords in saved chats, in the background
             when the app starts. Short or simple ones are skipped: a guess could be tested against

@@ -162,6 +162,7 @@ pub(crate) struct Mount {
 
 /// One session's preview.
 pub(crate) struct Entry {
+    pub(crate) local_document: Option<Url>,
     pub(crate) agent_navigation: usize,
     pub(crate) session_id: String,
     pub(crate) url: Option<Url>,
@@ -184,6 +185,9 @@ pub(crate) struct Entry {
     pub(crate) pending_started: bool,
     pub(crate) browser_mount: BrowserMountState,
     pub(crate) width: DeviceWidth,
+    pub(crate) viewport: Option<(u32, u32)>,
+    pub(crate) color_scheme: Option<bool>,
+    pub(crate) scripted_at: Option<u64>,
     pub(crate) mount: Option<Mount>,
     /// Ports the preview may navigate to (attributed + leased when last opened or listed).
     pub(crate) allowed: Vec<u16>,
@@ -230,6 +234,10 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
+    pub(crate) fn parked(&self, area: Option<crate::Rect>) -> crate::Placement {
+        crate::layout::parked_viewport(area, self.width, self.viewport)
+    }
+
     pub(crate) fn new(session_id: &str) -> Self {
         Self {
             agent_navigation: 0,
@@ -239,6 +247,7 @@ impl Entry {
             favicon: None,
             loading: false,
             server_status: None,
+            local_document: None,
             pending_open: None,
             pending_previous_url: None,
             pending_requested_admitted: None,
@@ -246,6 +255,9 @@ impl Entry {
             pending_started: false,
             browser_mount: BrowserMountState::Ready,
             width: DeviceWidth::Fit,
+            viewport: None,
+            color_scheme: None,
+            scripted_at: None,
             mount: None,
             allowed: Vec::new(),
             last_used: 0,
@@ -448,9 +460,6 @@ pub(crate) struct State {
     pub(crate) last_area: Option<Rect>,
     pub(crate) clock: u64,
     pub(crate) generation: u64,
-    /// Ports any session's server listens on now (from the core's re-check): a Local page may reach
-    /// them (as the egress guard allows), so the URL rules include them.
-    pub(crate) server_ports: Vec<u16>,
     /// Storage keys a page was mounted with in this run (that owner has website data of its own).
     pub(crate) used_keys: std::collections::HashSet<crate::ids::StorageKey>,
 }
@@ -463,6 +472,7 @@ pub(crate) struct SessionTabs {
     pub(crate) selected: Option<String>,
     pub(crate) agent: Option<String>,
     pub(crate) snapshots: HashMap<String, String>,
+    pub(crate) popups: crate::popups::Tracker,
 }
 
 impl State {
@@ -513,7 +523,7 @@ impl State {
     }
 
     /// The URL rules for `session_id`'s mount of `class`: a Local mount reaches the ports any session's
-    /// preview may open and every session's servers (as the egress guard decides), never one of `internal`
+    /// preview holds, never one of `internal`
     /// (Vibe Work's own); a Lan mount its own host. `internal` unknown (`None`, no guard): fail closed, a Local mount
     /// reaches only its own session's listed ports (never "no internal ports").
     pub(crate) fn rule_page(
@@ -536,7 +546,6 @@ impl State {
                         .entries
                         .values()
                         .flat_map(|e| e.allowed.iter().copied())
-                        .chain(self.server_ports.iter().copied())
                         .filter(|p| !internal.contains(p))
                         .collect(),
                     None => self

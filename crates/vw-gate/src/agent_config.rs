@@ -90,7 +90,11 @@ pub(crate) fn filter(
             // Typed validation (`AgentConfig`, `WorktreeInput`) already ran; these only need
             // to be present in the allowlist.
             "worktree" => value.is_object() || value.is_null(),
-            "maxTurns" | "maxSessionTokens" | "maxPrice" => value.is_null() || value.is_number(),
+            "maxTurns" => value.is_null() || value.is_i64(),
+            "maxSessionTokens" => value.is_null() || value.as_i64().is_some_and(|n| n >= 0),
+            "maxPrice" => {
+                value.is_null() || value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
+            }
             "trustWorkspace" => value.is_boolean(),
             other => {
                 return Err(policy(

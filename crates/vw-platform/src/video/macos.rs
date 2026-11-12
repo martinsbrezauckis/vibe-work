@@ -12,6 +12,7 @@ use objc2_core_media::{
 };
 use objc2_foundation::{NSString, NSURL};
 use std::path::Path;
+use vw_video_types::{Code, Error};
 /// Fresh `AVFoundation` generator; each job owns its asset and callback state.
 pub struct Decoder {
     generator: Retained<AVAssetImageGenerator>,
@@ -21,39 +22,50 @@ impl Decoder {
     /// Opens the sandbox-authorized file URL and validates its video track.
     /// # Errors
     /// Unsupported format, missing track or unbounded source metadata.
-    pub fn open(path: &Path, _edge: u32) -> Result<Self, String> {
+    pub fn open(path: &Path, _edge: u32) -> Result<Self, Error> {
         super::container::check(path)?;
-        let path = path.to_str().ok_or("decode_failed: input path encoding")?;
+        let path = path
+            .to_str()
+            .ok_or(Error::new(Code::DecodeFailed, "input path encoding"))?;
         // SAFETY: the URL is a local file; owned Objective-C objects remain alive across every synchronous call.
         unsafe {
             let url = NSURL::fileURLWithPath(&NSString::from_str(path));
             let asset = AVAsset::assetWithURL(&url);
-            let tracks = asset.tracksWithMediaType(
-                AVMediaTypeVideo.ok_or("backend_unavailable: AVFoundation video type")?,
-            );
+            let tracks = asset.tracksWithMediaType(AVMediaTypeVideo.ok_or(Error::new(
+                Code::MediaUnavailable {
+                    media: vw_video_types::Media::AvFoundation,
+                },
+                "AVFoundation video type",
+            ))?);
             let Some(track) = tracks.firstObject() else {
                 // An ISO file that passed the structural preflight but shows no track at all was never opened
                 // by AVFoundation (an extensionless snapshot did this): a worker failure, not the file's format.
                 return Err(if asset.tracks().count() == 0 && iso_media(path) {
-                    "worker_failed: AVFoundation could not open the video snapshot".into()
+                    Error::new(
+                        Code::MediaOpen,
+                        "AVFoundation could not open the video snapshot",
+                    )
                 } else {
-                    "unsupported_container: AVFoundation has no video track".into()
+                    Error::new(Code::NoVideoTrack, "AVFoundation has no video track")
                 });
             };
             let descriptions = track.formatDescriptions();
-            let format = descriptions
-                .firstObject()
-                .ok_or("unsupported_codec: no video format description")?;
+            let format = descriptions.firstObject().ok_or(Error::new(
+                Code::NoVideoTrack,
+                "no video format description",
+            ))?;
             // AVAssetTrack's formatDescriptions contains CMFormatDescription CF objects (Apple API contract).
             let format = &*(Retained::as_ptr(&format).cast::<CMFormatDescription>());
             let size = CMVideoFormatDescriptionGetDimensions(format);
-            let width = u32::try_from(size.width).map_err(|_| "limit_exceeded: source width")?;
-            let height = u32::try_from(size.height).map_err(|_| "limit_exceeded: source height")?;
+            let width = u32::try_from(size.width)
+                .map_err(|error| Error::at(Code::Dimensions, "source width", error))?;
+            let height = u32::try_from(size.height)
+                .map_err(|error| Error::at(Code::Dimensions, "source height", error))?;
             geometry::geometry(width, height)?;
             let display = CMVideoFormatDescriptionGetPresentationDimensions(format, true, false);
             let par = (display.width / f64::from(width) * 1_000_000.0).round();
             if !par.is_finite() || par < 1.0 || par > 16_000_000.0 {
-                return Err("limit_exceeded: pixel aspect ratio".into());
+                return Err(Error::new(Code::PixelAspect, "pixel aspect ratio"));
             }
             #[allow(
                 clippy::cast_possible_truncation,
@@ -74,7 +86,7 @@ impl Decoder {
             let codec = CMFormatDescriptionGetMediaSubType(format).to_be_bytes();
             let duration_ns = time_ns(asset.duration())?;
             if duration_ns == 0 || duration_ns > 7_200_000_000_000 {
-                return Err("limit_exceeded: duration".into());
+                return Err(Error::new(Code::Duration, "duration"));
             }
             let generator = AVAssetImageGenerator::assetImageGeneratorWithAsset(&asset);
             generator.setAppliesPreferredTrackTransform(true);
@@ -96,18 +108,21 @@ impl Decoder {
     /// Validated source metadata.
     /// # Errors
     /// No error after a successful open.
-    pub fn metadata(&self) -> Result<Metadata, String> {
+    pub fn metadata(&self) -> Result<Metadata, Error> {
         Ok(self.meta.clone())
     }
     /// Returns a display-oriented square-pixel frame and `AVFoundation`'s actual presentation timestamp.
     /// # Errors
     /// EOF, unsupported conversion or failed native image generation.
-    pub fn frame(&mut self, ns: u64, edge: u32) -> Result<Frame, String> {
+    pub fn frame(&mut self, ns: u64, edge: u32) -> Result<Frame, Error> {
         if ns >= self.meta.duration_ns {
-            return Err("decode_failed: requested time is at or after EOF".into());
+            return Err(Error::new(
+                Code::FrameMissing,
+                "requested time is at or after EOF",
+            ));
         }
         if edge == 0 || edge > 4096 {
-            return Err("limit_exceeded: image edge".into());
+            return Err(Error::new(Code::ImageEdge, "image edge"));
         }
         // SAFETY: generator and actual-time storage outlive the synchronous call; allocations are bounded below.
         unsafe {
@@ -120,7 +135,8 @@ impl Decoder {
                 .generator
                 .copyCGImageAtTime_actualTime_error(
                     CMTimeMake(
-                        i64::try_from(ns).map_err(|_| "limit_exceeded: time")?,
+                        i64::try_from(ns)
+                            .map_err(|error| Error::at(Code::DecodeLimit, "time", error))?,
                         1_000_000_000,
                     ),
                     &raw mut actual,
@@ -130,39 +146,45 @@ impl Decoder {
                     // exists but fails here (-11821; the IOSurface sandbox denial looked exactly like this) is
                     // not a missing codec. The framework's domain and code stay in the reason.
                     let kind = if error.code() == -11833 {
-                        "unsupported_codec"
+                        Code::UnsupportedCodec { codec: None }
                     } else {
-                        "decode_failed"
+                        Code::DecodeFailed
                     };
-                    format!(
-                        "{kind}: AVFoundation could not decode {} ({} {})",
-                        self.meta.codec,
-                        error.domain(),
-                        error.code()
+                    Error::new(
+                        kind,
+                        format!(
+                            "AVFoundation could not decode {} ({} {})",
+                            self.meta.codec,
+                            error.domain(),
+                            error.code()
+                        ),
                     )
                 })?;
             let pts_ns = time_ns(actual)?;
             if pts_ns > ns {
-                return Err("decode_failed: AVFoundation returned a later frame".into());
+                return Err(Error::new(
+                    Code::FrameMissing,
+                    "AVFoundation returned a later frame",
+                ));
             }
             let width = CGImage::width(Some(&image));
             let height = CGImage::height(Some(&image));
             if width == 0 || height == 0 || width > edge as usize || height > edge as usize {
-                return Err("limit_exceeded: generated geometry".into());
+                return Err(Error::new(Code::Dimensions, "generated geometry"));
             }
-            let frame_width =
-                u32::try_from(width).map_err(|_| "limit_exceeded: generated width")?;
-            let frame_height =
-                u32::try_from(height).map_err(|_| "limit_exceeded: generated height")?;
+            let frame_width = u32::try_from(width)
+                .map_err(|error| Error::at(Code::Dimensions, "generated width", error))?;
+            let frame_height = u32::try_from(height)
+                .map_err(|error| Error::at(Code::Dimensions, "generated height", error))?;
             if CGImage::bits_per_component(Some(&image)) > 8 {
-                return Err(
-                    "unsupported_codec: HDR or high-bit-depth display conversion unavailable"
-                        .into(),
-                );
+                return Err(Error::new(
+                    Code::Hdr,
+                    "HDR or high-bit-depth display conversion unavailable",
+                ));
             }
             let mut pixels = vec![0; width * height * 4];
-            let color =
-                CGColorSpace::new_device_rgb().ok_or("backend_unavailable: RGB color space")?;
+            let color = CGColorSpace::new_device_rgb()
+                .ok_or(Error::new(Code::DecodeFailed, "RGB color space"))?;
             let context = CGBitmapContextCreate(
                 pixels.as_mut_ptr().cast(),
                 width,
@@ -172,7 +194,7 @@ impl Decoder {
                 Some(&color),
                 1 | 0x4000,
             )
-            .ok_or("decode_failed: bitmap context")?;
+            .ok_or(Error::new(Code::DecodeFailed, "bitmap context"))?;
             // No CTM flip: drawing into a bitmap context already stores the image's top row first in `pixels`.
             // A flip here delivered every macOS frame upside down (owned-corpus barcodes appeared at the bottom).
             CGContext::draw_image(
@@ -203,6 +225,6 @@ fn iso_media(path: &str) -> bool {
         .and_then(|mut file| file.read_exact(&mut header))
         .is_ok_and(|()| &header[4..8] == b"ftyp")
 }
-fn time_ns(time: CMTime) -> Result<u64, String> {
+fn time_ns(time: CMTime) -> Result<u64, Error> {
     super::native_values::time_ns(time.value, time.timescale, time.epoch, time.flags.0)
 }

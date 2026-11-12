@@ -106,7 +106,7 @@ export function PreviewTab({
     });
   }, [app, sessionId, shownLocal, shownWeb]);
 
-  if (sessionId === null) return <div className="empty">Choose a session to use its browser.</div>;
+  if (sessionId === null) return <div className="empty">Choose a chat to use its browser.</div>;
   const selected = tabs?.find((tab) => tab.active);
   const webTabId = selected?.kind === "web" ? selected.pageKey : undefined;
   const selectedTabId = selected?.pageKey ?? sessionId;
@@ -119,7 +119,7 @@ export function PreviewTab({
   const shownError = error ?? agentError;
   const servers =
     list === undefined ? (
-      <div className="empty">Reading this session's servers…</div>
+      <div className="empty">Reading this chat's servers…</div>
     ) : (
       <Servers sessionId={sessionId} list={list} previews={previews} busy={busy} />
     );
@@ -152,6 +152,20 @@ export function PreviewTab({
         sessionId={sessionId}
         busy={busy}
         error={shownError}
+        share={() => {
+          void app.core
+            ?.run(
+              { type: "browser", request: { op: "share", pageKey: selectedTabId } },
+              { origin: "window" },
+            )
+            .catch((error: unknown) => {
+              setNotice({
+                sessionId,
+                text:
+                  error instanceof Error ? error.message : "Could not share this page. Try again.",
+              });
+            });
+        }}
         address={
           <AddressBar
             key={selectedTabId}

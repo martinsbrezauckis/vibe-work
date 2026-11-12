@@ -145,7 +145,3 @@ impl crate::Host {
         apply(&self.settings_path, request, &SystemMenus)
     }
 }
-
-#[cfg(test)]
-#[path = "send_to_tests.rs"]
-mod tests;

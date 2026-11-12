@@ -102,7 +102,7 @@ function switchVoiceChat(
     return;
   }
   if (on !== true) throw new UiControlError("invalidParams", "voiceChat needs on: true or false");
-  if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+  if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
   const refused = voice.voiceChat.turnOn(sessionId);
   if (refused !== null) throw new UiControlError("denied", refused);
 }
@@ -147,7 +147,7 @@ async function handleVoice(app: App, body: unknown): Promise<unknown> {
       case "read":
         return readVoice(app);
       case "start":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
         // While the previous text is being made, `start` queues (a second one cancels the queue): the reply's
         // `dictation.queued` says which happened.
         if (voice.dictation.store.get().phase === "transcribing")
@@ -161,7 +161,7 @@ async function handleVoice(app: App, body: unknown): Promise<unknown> {
         voice.dictation.cancel();
         return readVoice(app);
       case "readAloud": {
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
         const text = input["text"];
         if (text !== undefined && typeof text !== "string")
           throw new UiControlError("invalidParams", "Reading aloud needs text in plain words.");
@@ -172,7 +172,7 @@ async function handleVoice(app: App, body: unknown): Promise<unknown> {
         return answer?.type === "speech" ? answer.result : null;
       }
       case "narrateLast":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
         await voice.narration.narrateLast(sessionId);
         return readVoice(app);
       case "stopNarration":

@@ -238,8 +238,12 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
         Some(Holder::Hook) if tool == names::GUARD_REFUSED => {
             crate::guard_refusals::hook(&shared, request.args)
         }
+        // Vibe's pre-tool hook reports every agent shell command here before it runs: the moment to pick up a gh
+        // auth failure the shim marked (recorded first, so a hook that stops waiting loses nothing).
         Some(Holder::Hook) if tool == names::SHELL_COMMAND => {
-            tools.shell_commands.record(&request.args)
+            let recorded = tools.shell_commands.record(&request.args);
+            crate::github_reads::refresh_if_marked(&shared).await;
+            recorded
         }
         Some(Holder::Hook) if tool == names::KILL_CHECK => {
             let outcome = super::killcheck::check(&shared, request.args).await;

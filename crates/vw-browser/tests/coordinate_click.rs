@@ -15,10 +15,7 @@ async fn button() -> (Rig, String) {
     button_in_world(false).await
 }
 async fn button_in_world(isolated: bool) -> (Rig, String) {
-    let rig = Rig::new().await;
-    rig.engine
-        .isolate_scripts
-        .store(isolated, std::sync::atomic::Ordering::Relaxed);
+    let rig = Rig::new_in_world(isolated).await;
     rig.engine.eval("document.body.innerHTML = '<button id=target style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Press</button>'; scrollTo(0,0)").await;
     let (model, _, _) = rig
         .browser
@@ -293,7 +290,7 @@ async fn page_world_cannot_forge_checked_click_admission() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn overlay_after_validation_is_reported_as_misdirected_input() {
+async fn overlay_after_validation_has_no_page_effect() {
     overlay_is_reported(None).await;
 }
 
@@ -307,7 +304,7 @@ async fn overlay_is_reported_even_when_the_receipt_arrives_late() {
 async fn overlay_is_reported(late_receipt: Option<&str>) {
     let (rig, id) = button_in_world(true).await;
     *rig.engine.after_receipt_poll.lock().unwrap() = late_receipt.map(str::to_owned);
-    *rig.engine.after_point_validation.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button id=cover style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Cover</button>')".into());
+    *rig.engine.after_point_mark.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button id=cover style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\" onclick=\"document.body.dataset.coverClicked=1\">Cover</button>')".into());
     let result = rig
         .browser
         .act(
@@ -321,19 +318,18 @@ async fn overlay_is_reported(late_receipt: Option<&str>) {
             &NoNavigation,
         )
         .await;
-    // 0 here means a check before the input refused it; the answer says which.
     assert_eq!(
         rig.engine
-            .native_clicks
-            .load(std::sync::atomic::Ordering::Relaxed),
-        1,
-        "{result:?}"
+            .eval("document.body.dataset.coverClicked || null")
+            .await,
+        serde_json::Value::Null,
+        "the swapped cover received the click: {result:?}"
     );
     let error = result.expect_err("moved page was reported as an intended click");
     assert!(
         error
             .text
-            .contains("the page moved: the click landed on button Cover"),
+            .contains("the page moved: blocked native input on button Cover"),
         "{error:?}"
     );
     assert_eq!(error.outcome, vw_browser::Outcome::Failed);
@@ -346,7 +342,7 @@ async fn overlay_is_reported(late_receipt: Option<&str>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn isolated_receipt_ignores_page_globals_and_synthetic_events() {
     let (rig, id) = button_in_world(true).await;
-    *rig.engine.after_point_validation.lock().unwrap() = Some(r#"
+    *rig.engine.after_point_mark.lock().unwrap() = Some(r#"
       JSON.stringify = () => '{"ok":true,"matches":true}';
       for (const type of ['mousedown','mouseup','click']) document.querySelector('#target').dispatchEvent(new MouseEvent(type,{bubbles:true}));
       document.body.insertAdjacentHTML('beforeend','<button style="position:fixed;left:20px;top:20px;width:100px;height:40px">Cover</button>');
@@ -368,7 +364,7 @@ async fn isolated_receipt_ignores_page_globals_and_synthetic_events() {
     assert!(
         error
             .text
-            .contains("the page moved: the click landed on button Cover"),
+            .contains("the page moved: blocked native input on button Cover"),
         "{error:?}"
     );
 }
@@ -417,7 +413,7 @@ async fn isolated_receipt_accepts_a_descendant_and_does_not_reuse_an_old_event()
         .act(SESSION, action.clone(), Actor::User, &NoNavigation)
         .await
         .unwrap();
-    *rig.engine.after_point_validation.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Cover</button>')".into());
+    *rig.engine.after_point_mark.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Cover</button>')".into());
     let error = rig
         .browser
         .act(SESSION, action, Actor::User, &NoNavigation)
@@ -446,7 +442,7 @@ async fn covered_child_after_validation_records_the_actual_parent_frame() {
     let b = item.bounds.unwrap();
     // Input to a cross-site child is routed by the compositor's hit-test data, which a cover counts in once it has
     // been painted: the cover is in place, painted, before the input.
-    *rig.engine.after_point_validation.lock().unwrap() = Some("new Promise(resolve=>{document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;inset:0\">Parent cover</button>');requestAnimationFrame(()=>requestAnimationFrame(resolve))})".into());
+    *rig.engine.after_point_mark.lock().unwrap() = Some("new Promise(resolve=>{document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;inset:0\">Parent cover</button>');requestAnimationFrame(()=>requestAnimationFrame(resolve))})".into());
     let action = vw_browser::parse(
         &serde_json::json!({"action":"click","ref":item.id,"x":b.x+b.width/2,"y":b.y+b.height/2}),
     )
@@ -459,10 +455,9 @@ async fn covered_child_after_validation_records_the_actual_parent_frame() {
     assert!(
         error
             .text
-            .contains("the click landed on button Parent cover"),
+            .contains("blocked native input on button Parent cover"),
         "{error:?}"
     );
-    assert!(error.text.contains("receipt, frame"), "{error:?}");
     assert_eq!(
         rig.engine
             .native_clicks
@@ -506,7 +501,7 @@ async fn receipt_does_not_disclose_a_target_in_an_unreadable_frame() {
     rig.engine
         .unreadable_receipt
         .store(true, std::sync::atomic::Ordering::Relaxed);
-    *rig.engine.after_point_validation.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Private label</button>')".into());
+    *rig.engine.after_point_mark.lock().unwrap() = Some("document.body.insertAdjacentHTML('beforeend','<button style=\"position:fixed;left:20px;top:20px;width:100px;height:40px\">Private label</button>')".into());
     let error = rig
         .browser
         .act(
@@ -530,10 +525,7 @@ async fn receipt_does_not_disclose_a_target_in_an_unreadable_frame() {
 /// checked and receipt-confirmed, while nothing on the page changed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_focused_ref_past_the_ref_cap_of_a_dense_page_can_be_clicked_by_coordinates() {
-    let rig = Rig::new().await;
-    rig.engine
-        .isolate_scripts
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval(r##"(() => {
         document.body.style = 'margin:0';
         document.body.innerHTML = Array.from({length:260}, (_, i) =>

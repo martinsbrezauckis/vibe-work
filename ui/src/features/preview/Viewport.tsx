@@ -125,7 +125,7 @@ export function Viewport({
             <div className="empty">
               {beforeChat
                 ? "Type an address above, or open a server you started in the Terminal, to see the page here."
-                : "Type an address above, or open one of this session's servers, to see the page here."}
+                : "Type an address above, or open one of this chat's servers, to see the page here."}
             </div>
           </>
         )

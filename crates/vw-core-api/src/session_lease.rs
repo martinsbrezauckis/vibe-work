@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,40 @@ struct Pointer {
 
 /// A claim held across one operation, and retained while its channel is open.
 pub(crate) struct Lease {
-    _lock: File,
+    lock: Option<File>,
+    id: String,
+    claims: Arc<Claims>,
+}
+
+#[derive(Default)]
+struct Claims {
+    entries: Mutex<HashMap<String, Weak<Lease>>>,
+    released: Condvar,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut claims = self
+            .claims
+            .entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // Weak::upgrade stops succeeding before Drop starts. Publish absence only after closing the OS handle.
+        if let Some(lock) = self.lock.take() {
+            let _ = lock.unlock();
+            drop(lock);
+        }
+        claims.remove(&self.id);
+        drop(claims);
+        self.claims.released.notify_all();
+    }
+}
+
+fn probe(lock: File) -> Result<(), TryLockError> {
+    lock.try_lock()?;
+    let result = lock.unlock().map_err(TryLockError::Error);
+    drop(lock);
+    result
 }
 
 /// Optional disk leases, enabled when the app configures session bookkeeping.
@@ -30,8 +63,10 @@ pub(crate) struct Leases {
     root: PathBuf,
     data: Option<PathBuf>,
     instance: String,
-    claims: Mutex<HashMap<String, Weak<Lease>>>,
+    claims: Arc<Claims>,
     active: Mutex<HashMap<String, Arc<Lease>>>,
+    #[cfg(test)]
+    before_wait: Mutex<Option<tests::Pause>>,
 }
 
 fn failure(error: impl std::fmt::Display) -> CoreError {
@@ -41,7 +76,7 @@ fn failure(error: impl std::fmt::Display) -> CoreError {
     )
 }
 
-/// Longest a claim waits for this instance's own lease to finish its release, in milliseconds. A child process
+/// Longest a claim waits for a forked child to close this instance's inherited lock handle, in milliseconds. A child process
 /// started at that moment shares the lock file until it runs its own program, which can take a while on a busy
 /// machine; the wait applies only when the pointer names this instance, so another window is refused at once.
 const RELEASE_WAIT_MS: u32 = 250;
@@ -54,8 +89,10 @@ impl Leases {
             root: home.join("vibe-work-leases"),
             data: data.map(|path| path.join("leases")),
             instance: blake3::hash(&random).to_hex().to_string(),
-            claims: Mutex::new(HashMap::new()),
+            claims: Arc::default(),
             active: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            before_wait: Mutex::new(None),
         })
     }
 
@@ -89,8 +126,7 @@ impl Leases {
     }
 
     /// True when the busy lock is this instance's own lease being released: no live claim here, but the pointer
-    /// still names this instance. Dropping a lease ends its claim before its lock file is closed, so a claim or probe
-    /// on another thread can find the lock busy for that moment.
+    /// still names this instance. In-process release is ordered; a child may inherit the handle until exec.
     fn releasing(&self, id: &str) -> bool {
         self.read_pointer(id)
             .is_some_and(|pointer| pointer.instance_id == self.instance)
@@ -103,12 +139,16 @@ impl Leases {
         }
         // A probe also briefly owns the OS lock. Serialize it with our claims and other probes so
         // this instance cannot mistake its own ownership check for a foreign owner.
-        let claims = self.claims.lock().unwrap_or_else(PoisonError::into_inner);
-        if claims.get(id).and_then(Weak::upgrade).is_some() {
+        let claims = self
+            .claims
+            .entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if claims.contains_key(id) {
             return Ok(None);
         }
         let lock = self.lock(id)?;
-        match lock.try_lock() {
+        match probe(lock) {
             Ok(()) => Ok(None),
             Err(TryLockError::WouldBlock) if self.releasing(id) => Ok(None),
             Err(TryLockError::WouldBlock) => Ok(Some(self.holder(id))),
@@ -121,21 +161,44 @@ impl Leases {
         let Some(data) = &self.data else {
             return Ok(None);
         };
-        let mut claims = self.claims.lock().unwrap_or_else(PoisonError::into_inner);
-        claims.retain(|_, lease| lease.strong_count() > 0);
-        if let Some(lease) = claims.get(id).and_then(Weak::upgrade) {
-            return Ok(Some(lease));
-        }
-        let lock = self.lock(id)?;
-        // Our own lease's release finishes within moments; wait for it (at most RELEASE_WAIT_MS) instead of reporting
-        // our own process as another window. A lock another instance holds is refused at once.
+        let mut claims = self
+            .claims
+            .entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut lock = None;
         let mut waited = 0;
         loop {
-            match lock.try_lock() {
+            if let Some(previous) = claims.get(id) {
+                if let Some(lease) = previous.upgrade() {
+                    return Ok(Some(lease));
+                }
+                // The last Arc is in Drop. Its ordered close wakes this claim without polling the pointer file.
+                claims = self
+                    .claims
+                    .released
+                    .wait(claims)
+                    .unwrap_or_else(PoisonError::into_inner);
+                continue;
+            }
+            let Some(file) = &lock else {
+                lock = Some(self.lock(id)?);
+                continue;
+            };
+            match file.try_lock() {
                 Ok(()) => break,
                 Err(TryLockError::WouldBlock) if waited < RELEASE_WAIT_MS && self.releasing(id) => {
+                    // Only a fork-until-exec handle can outlive the ordered in-process close. Other chats proceed.
+                    drop(claims);
+                    #[cfg(test)]
+                    tests::pause(&self.before_wait);
                     std::thread::sleep(std::time::Duration::from_millis(1));
                     waited += 1;
+                    claims = self
+                        .claims
+                        .entries
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
                 }
                 Err(TryLockError::WouldBlock) => {
                     return Err(crate::session_holder::held_refusal(self.holder(id)));
@@ -143,7 +206,6 @@ impl Leases {
                 Err(TryLockError::Error(error)) => return Err(failure(error)),
             }
         }
-        let lease = Arc::new(Lease { _lock: lock });
         let name = format!("{}-{}", Self::key(id), self.instance);
         let record = data.join(format!(
             "{}.json",
@@ -159,6 +221,11 @@ impl Leases {
             .map_err(failure)?,
         )
         .map_err(failure)?;
+        let lease = Arc::new(Lease {
+            lock,
+            id: id.to_owned(),
+            claims: Arc::clone(&self.claims),
+        });
         claims.insert(id.to_owned(), Arc::downgrade(&lease));
         Ok(Some(lease))
     }
@@ -189,52 +256,5 @@ impl Leases {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A claim racing this instance's own lease release (the lock file still open for a moment after the last
-    /// handle dropped) must wait for it, never report the session as held by another window with our own pid.
-    #[test]
-    fn a_claim_during_our_own_release_waits_instead_of_refusing() {
-        let dir = std::env::temp_dir().join(format!("vw-lease-race-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let leases = Leases::new(&dir.join("home"), Some(&dir.join("data"))).unwrap();
-        drop(leases.claim("s1").unwrap());
-        // The released lease's lock file is still open: hold the OS lock the way its closing handle does. A child
-        // process another test starts at this moment can share the released lock until it runs its own program, so
-        // the setup waits (at most 5 s) for the lock to come free first.
-        let closing = leases.lock("s1").unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while let Err(error) = closing.try_lock() {
-            assert!(
-                matches!(error, TryLockError::WouldBlock) && std::time::Instant::now() < deadline,
-                "the released lock did not come free: {error:?}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        assert_eq!(
-            leases.foreign("s1").unwrap(),
-            None,
-            "our own release is not another window"
-        );
-        let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            drop(closing);
-        });
-        assert!(
-            leases.claim("s1").unwrap().is_some(),
-            "the claim waits for our release"
-        );
-        release.join().unwrap();
-
-        // Another instance (another window sharing the Vibe home) is still refused at once.
-        let other = Leases::new(&dir.join("home"), Some(&dir.join("other-data"))).unwrap();
-        let held = leases.claim("s2").unwrap();
-        let refused = other.claim("s2").err().expect("held by the first instance");
-        assert_eq!(refused.server_code.as_deref(), Some("sessionHeld"));
-        assert_eq!(other.foreign("s2").unwrap(), Some(std::process::id()));
-        drop(held);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+#[path = "session_lease_tests.rs"]
+mod tests;

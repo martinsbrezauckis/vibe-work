@@ -8,7 +8,23 @@
 import type { JsonValue } from "./index";
 
 import type { PickTarget, PageTab, EnginePoolSnapshot, Rect } from "./preview";
-export type BrowserRequest = { "op": "shields", } | { "op": "setShields",
+export type BrowserRequest = { "op": "preferences", } | { "op": "setComposerBrowser",
+/**
+ * Browser whose composer entry changes.
+ */
+browser: ComposerBrowser,
+/**
+ * Whether its entry is shown.
+ */
+shown: boolean, } | { "op": "setBuiltinEnabled",
+/**
+ * Whether browser tools can use it.
+ */
+enabled: boolean, } | { "op": "share",
+/**
+ * Exact mounted page key from the Browser pane.
+ */
+pageKey: string, } | { "op": "shields", } | { "op": "setShields",
 /**
  * Selected mode.
  */
@@ -250,6 +266,22 @@ items: Array<RecheckItem>,
  */
 reload: boolean, };
 
+export type ComposerBrowser = "Builtin" | "Chrome" | "Edge" | "Safari" | "Firefox";
+
+export type BrowserPreferences = {
+/**
+ * Whether the agent can use the built-in browser.
+ */
+builtinEnabled: boolean,
+/**
+ * Whether this app run has a built-in browser engine.
+ */
+builtinAvailable: boolean,
+/**
+ * Browsers shown in the composer. Hiding one does not revoke a pairing or change an access mode.
+ */
+shown: Array<ComposerBrowser>, };
+
 export type Mode = "off" | "balanced" | "strict";
 
 export type Settings = {
@@ -262,7 +294,11 @@ mode: Mode,
  */
 supported: boolean, };
 
-export type BrowserResult = { "type": "shields",
+export type BrowserResult = { "type": "preferences",
+/**
+ * Current saved settings and native availability.
+ */
+preferences: BrowserPreferences, } | { "type": "shields",
 /**
  * Confirmed mode and platform availability.
  */
@@ -409,6 +445,10 @@ export type BrowserState = {
  * The session.
  */
 sessionId: string,
+/**
+ * Window focus handle of the chat's current agent web page, supplied by core's page registry.
+ */
+windowId?: string,
 /**
  * The agent acted within the last 30 s or is acting now ("Agent is using the browser").
  */

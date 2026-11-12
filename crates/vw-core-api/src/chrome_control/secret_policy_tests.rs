@@ -57,6 +57,10 @@ fn cases() -> Vec<(&'static str, Value, bool)> {
             true,
         ),
         ("clipboard.read", json!({}), true),
+        ("page.key", json!({"key":"v","modifiers":["Meta"]}), true),
+        ("page.key", json!({"key":"Control+V"}), true),
+        ("page.key", json!({"key":"c","modifiers":["Control"]}), true),
+        ("clipboard.write", json!({"text":"note"}), true),
         (
             "network.body",
             json!({"requestId":"authenticated-json-response"}),
@@ -126,12 +130,7 @@ async fn higher_modes_keep_the_same_write_approval_options_in_every_browser() {
                 "s",
                 &json!({"agentName":mode}),
             );
-            for action in [
-                "auth.basic",
-                "cookies.change",
-                "storage.change",
-                "clipboard.write",
-            ] {
+            for action in ["auth.basic", "cookies.change", "storage.change"] {
                 let args =
                     json!({"sessionId":"t","action":action,"args":{"login":"approved-login"}});
                 let needs_card = mode != "auto-approve";
@@ -282,7 +281,7 @@ async fn secret_read_receipts_are_revoked_when_the_chat_mode_changes_during_the_
             &json!({"agentName":"auto-approve"}),
         );
         let args = json!({"sessionId":"t","action":action,"args":input});
-        if super::escalation::send(&core.shared, "s", "chrome_execute", args)
+        if super::escalation::send(&core.shared, "s", "chrome_execute", args, None)
             .await
             .is_ok()
         {
@@ -340,7 +339,7 @@ async fn site_secret_reads_require_full_access_in_every_browser_and_mode() {
                         for words in [
                             Tier::FullAccess.label(),
                             "because",
-                            "ask the person",
+                            "ask the user",
                             "switch this chat",
                         ] {
                             if !reason.contains(words) {
@@ -373,7 +372,6 @@ fn browser_read_tiers_are_cumulative_and_builtin_uses_the_shared_table() {
             json!({"area":"local","operation":"clear"}),
             false,
         ),
-        ("clipboard.write", json!({"text":"note"}), false),
     ]) {
         let external = json!({"action":action,"args":input});
         let mut native = input;
@@ -413,4 +411,51 @@ fn browser_read_tiers_are_cumulative_and_builtin_uses_the_shared_table() {
         }
     }
     assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+#[test]
+fn native_form_choices_use_the_same_classification_as_connected_browsers() {
+    for (native, connected) in [
+        ("select", "page.select"),
+        ("check", "page.check"),
+        ("uncheck", "page.uncheck"),
+    ] {
+        let args = json!({"action":native,"ref":"e00000001"});
+        let request = json!({"action":connected,"args":args});
+        assert_eq!(
+            builtin::required(&args),
+            mapping::required("chrome_execute", &request),
+            "{native}"
+        );
+        assert_eq!(
+            builtin::ask_required(&args),
+            mapping::ask_required("chrome_execute", &request),
+            "{native}"
+        );
+    }
+}
+
+#[test]
+fn native_form_batch_uses_the_shared_text_entry_tier() {
+    let args =
+        json!({"action":"form","fields":[{"action":"type","ref":"e00000001","text":"Name"}]});
+    assert_eq!(builtin::required(&args), Some(Tier::AcceptEdits));
+    assert_eq!(builtin::ask_required(&args), Some(Tier::AcceptEdits));
+    assert_eq!(
+        builtin::approval_tier(Some("ask"), &args),
+        Some(Tier::AcceptEdits)
+    );
+    assert_eq!(builtin::approval_tier(Some("accept-edits"), &args), None);
+    assert_eq!(builtin::approval_tier(Some("auto-approve"), &args), None);
+    assert!(vw_agent_tools::browser_input::validate("browser_act", &args).is_ok());
+    let choices = json!({"action":"form","fields":[{"action":"check","ref":"e00000001"}]});
+    assert_eq!(
+        builtin::required(&choices),
+        builtin::required(&choices["fields"][0])
+    );
+    assert_eq!(
+        builtin::ask_required(&choices),
+        builtin::ask_required(&choices["fields"][0])
+    );
+    assert_eq!(builtin::approval_tier(Some("ask"), &choices), None);
 }

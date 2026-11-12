@@ -69,7 +69,10 @@ fn separate_browser_setups_keep_profile_labels_separate() {
     let home = scratch.root.join("home");
     let state = scratch.state();
     let config = scratch.config();
-    let places = targets(&home, &config);
+    let places: Vec<_> = targets(&home, &config)
+        .into_iter()
+        .filter(|target| target.name != "Mozilla Firefox")
+        .collect();
     let expected_names = vec!["Google Chrome", "Microsoft Edge"];
     assert_eq!(
         places.iter().map(|t| t.name).collect::<Vec<_>>(),

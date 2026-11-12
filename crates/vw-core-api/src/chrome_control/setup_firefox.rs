@@ -1,4 +1,4 @@
-//! Retained legacy manifest/removal compatibility. The owned Firefox window creates no native registration.
+//! Firefox sharing add-on registration. The owned automation window uses its independent `BiDi` connection.
 //! Firefox's `allowed_extensions` identity is independent of Chromium origins; no profile preference is changed.
 use super::{FIREFOX_EXTENSION_ID, HOST_NAME, Path};
 

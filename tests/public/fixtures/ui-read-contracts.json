@@ -1,0 +1,249 @@
+{
+  "description": "Read-route specification shared by the UI fake and real host bridge tests; unknown route/actions drive. Field ! means required.",
+  "reads": [
+    {
+      "route": "controls",
+      "action": null,
+      "fields": {
+        "selector": "nonempty",
+        "includeHidden": "bool"
+      }
+    },
+    {
+      "route": "settle",
+      "action": null,
+      "fields": {
+        "quietMs": "duration",
+        "timeoutMs": "duration"
+      }
+    },
+    {
+      "route": "rect",
+      "action": null,
+      "fields": {
+        "selector": "nonempty!"
+      }
+    },
+    {
+      "route": "trace",
+      "action": null,
+      "fields": {
+        "since": "index"
+      }
+    },
+    {
+      "route": "secrets",
+      "action": null,
+      "fields": {
+        "lock": "bool"
+      }
+    },
+    {
+      "route": "state",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "revision",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "layout",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "setup",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "toasts",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "toasts",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "notifications",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "notifications",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "walkthrough",
+      "action": null,
+      "fields": {}
+    },
+    {
+      "route": "walkthrough",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "rail",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "sessions",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "settings",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "connectors",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "libraries",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "marketplace",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "models",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "updates",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "processes",
+      "action": "read",
+      "fields": {}
+    },
+    {
+      "route": "menu",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "worktrees",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "projects",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "changes",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "explorer",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "skills",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "terminal",
+      "action": "state",
+      "fields": {}
+    },
+    {
+      "route": "composer",
+      "action": "read",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "documents",
+      "action": "read",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "transcript",
+      "action": "read",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "voice",
+      "action": "read",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "git",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "files",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "editors",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "project",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "pages",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "browser",
+      "action": "state",
+      "fields": {
+        "sessionId": "nonempty"
+      }
+    },
+    {
+      "route": "git-browser",
+      "action": "read",
+      "fields": {
+        "projectId": "nonempty"
+      }
+    }
+  ]
+}

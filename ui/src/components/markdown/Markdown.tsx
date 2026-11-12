@@ -12,7 +12,10 @@
  *   session file the core resolved and read (`MarkdownExtension.image`); never a URL.
  * - Links never navigate the main window: the click is cancelled and `onOpenLink` decides what
  *   happens (the transcript shows the URL in full first). Nothing here can reach the core.
- * - Fenced code goes to `CodeBlock` (copy button, highlighting as classes).
+ * - Fenced code goes to `CodeBlock` (copy button, highlighting as classes). Finished Mermaid fences
+ *   load a DOM-free renderer; only allowlisted SVG elements/attributes become React elements.
+ * - Math delimiters load KaTeX with trust off, producing allowlisted native MathML. Renderer styles,
+ *   HTML, links and resource references never enter the DOM; copy/narration keep the original source.
  * - `streaming`: while Vibe is still generating the text, `remend` 1.4.0 closes what a
  *   half-written message leaves open (`**`, code fences, links: link text only, never a placeholder
  *   URL) so the partial text renders as it will look, without flicker into raw syntax. `remend` is
@@ -35,6 +38,10 @@ import remarkGfm from "remark-gfm";
 
 import { CodeBlock } from "./CodeBlock";
 import { remarkLineBreaks } from "./remarkLineBreaks";
+import { remarkMath } from "./remarkMath";
+import { MermaidBlock } from "./MermaidBlock";
+import { MathFormula } from "./MathFormula";
+import "../../styles/markdown-rich.css";
 
 /** Props of [`Markdown`]. */
 export interface MarkdownProps {
@@ -141,7 +148,7 @@ export function Markdown({
       ? close(source, { linkMode: "text-only", katex: false, inlineKatex: false, images: false })
       : source;
   // Line breaks run before the extension, so file references see one line per text node.
-  const plugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
+  const plugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkMath];
   if (lineBreaks) plugins.push(remarkLineBreaks as (typeof plugins)[number]);
   if (extension !== undefined) plugins.push(extension.plugin);
   return (
@@ -149,6 +156,19 @@ export function Markdown({
       remarkPlugins={plugins}
       skipHtml
       components={{
+        span: ({ node, children }) => {
+          const properties = node?.properties ?? {};
+          const math = properties["data-math"];
+          return typeof math === "string" ? (
+            <MathFormula
+              source={math}
+              raw={String(properties["data-source"] ?? math)}
+              display={properties["data-display"] === "display"}
+            />
+          ) : (
+            <span>{children}</span>
+          );
+        },
         input: ({ checked }) => <TaskCheckbox checked={checked} />,
         // Only present with an extension; react-markdown looks custom tags up by name.
         ...(extension === undefined
@@ -190,6 +210,8 @@ export function Markdown({
           const code = (node as HastNode | undefined)?.children?.find((c) => c.tagName === "code");
           // remark adds one trailing newline to a fenced block's text; the block shows without it.
           const body = textOf(code).replace(/\n$/, "");
+          if (fenceOf(code)?.toLowerCase() === "mermaid")
+            return <MermaidBlock source={body} streaming={streaming} />;
           return <CodeBlock code={body} fence={fenceOf(code)} streaming={streaming} />;
         },
       }}

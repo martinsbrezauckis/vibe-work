@@ -1,7 +1,8 @@
 /**
  * New chat: the rail's second item, Ctrl N and the list's "New chat" button all open the same
  * view: the start view with a real composer, focused, its folder chip preselected (the current project's main folder,
- * else the folder chosen last, else the newest session's folder, else none). No session exists until the first
+ * else the folder chosen last, else the newest session's folder, else none; never a temporary chat's folder, and the
+ * core drops a folder that no longer exists). No session exists until the first
  * send (`state/composer.ts`); pressing New chat again on that view only focuses the composer, keeping its draft.
  * Depends on: home (leaving pages), composerFocus, the session summaries. Called by: Rail, shell actions (Ctrl N),
  * SessionList, the `ui/rail` route.
@@ -15,8 +16,12 @@ import { requestComposerFocus } from "../../state/composerFocus";
 import type { App } from "./AppContext";
 import { goHome } from "./home";
 
-/** The project's main folder, falling back to an ordinary session's working folder. */
+/**
+ * The project's main folder, falling back to an ordinary session's working folder. A temporary chat gives none: a
+ * folder Vibe Work made for it is deleted with it, so a chat started there would lose its files (F7).
+ */
 function folderOf(app: App, id: string): string | null {
+  if (app.sessionTools?.isTemporary(id) === true) return null;
   const groups = app.projects?.groups.store.get().data;
   const project = groups?.projects.find((p) => p.id === groups.members[id]);
   if (project?.mainFolder) return project.mainFolder;

@@ -10,7 +10,7 @@ async fn a_stopped_worker_is_woken_before_the_action_is_sent_once() {
         let launches = Arc::new(Mutex::new(Vec::new()));
         let recorded = launches.clone();
         let core = fixture_with(
-            "browser-worker-wake",
+            &format!("browser-worker-wake-{profile}"),
             json!([{"profileId":profile,"connected":true}]),
             move |config| {
                 let launch = Arc::new(move |url: &str| {

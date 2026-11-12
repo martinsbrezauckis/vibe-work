@@ -1,5 +1,7 @@
 //! Stable download receipts and URL transfers scoped to the chat owning a browser page.
 //! Uses the existing staging/delivery hooks; the native engine supplies its profile cookies internally.
+//! Depends on: preview staging/delivery hooks and engine transfers.
+//! Called by: browser download actions.
 use crate::{DownloadState, EngineError, PreviewError, PreviewHooks, PreviewService};
 use serde_json::{Value, json};
 use std::path::Path;

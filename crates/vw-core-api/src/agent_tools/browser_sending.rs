@@ -1,5 +1,7 @@
 //! Built-in browser activations run in Ask until the driver identifies POST activation, then use the existing card.
 //! The hook pins the page and checked result, so the transport consumes it without replaying input.
+//! Depends on: browser send classification and existing Ask receipts.
+//! Called by: the authenticated browser tool hook.
 use crate::{ask::tool_calls, core::Shared};
 use serde_json::{Value, json};
 use std::sync::Arc;

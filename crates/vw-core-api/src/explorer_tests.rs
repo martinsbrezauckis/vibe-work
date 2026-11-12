@@ -185,12 +185,15 @@ fn git_text_search_returns_lines_and_stops_at_the_cap() {
     assert_eq!(hits[0].path, "spaced ābols.rs");
     assert_eq!(hits[0].line, 1);
     let cancelled = AtomicBool::new(true);
-    let started = std::time::Instant::now();
-    assert!(matches!(
-        crate::explorer_read::search(&f.0, "multiply", None, Some(&cancelled)).unwrap(),
-        ExplorerResult::Done {}
-    ));
-    assert!(started.elapsed() < std::time::Duration::from_millis(50));
+    for scope in [None, Some("../must-not-be-resolved")] {
+        assert!(
+            matches!(
+                crate::explorer_read::search(&f.0, "multiply", scope, Some(&cancelled)).unwrap(),
+                ExplorerResult::Done {}
+            ),
+            "an already-cancelled search must return before path validation or Git work"
+        );
+    }
 }
 
 #[test]

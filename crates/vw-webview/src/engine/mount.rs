@@ -128,7 +128,11 @@ impl TauriEngine {
         parked: vw_preview::Placement,
     ) -> Result<(), EngineError> {
         match (own_window, spec.placement) {
-            (true, Some(placement)) => self.show_window_page(webview, placement).await,
+            (true, Some(placement)) => {
+                #[cfg(target_os = "linux")]
+                Self::prepare_window_page(webview).await?;
+                self.show_window_page(webview, placement).await
+            }
             (_, Some(placement)) => platform::place(webview, Some(placement)).await,
             (_, None) => platform::park(webview, parked, false).await,
         }

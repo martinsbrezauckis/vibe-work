@@ -33,7 +33,7 @@ export function KeySettings() {
 
   return (
     <section aria-labelledby="key-settings-title" data-setting="mistral-key">
-      <h3 id="key-settings-title">Mistral key</h3>
+      <h3 id="key-settings-title">Active Mistral key</h3>
       {unlocked && !ready && <p className="key-line">The vault is open but holds no key yet.</p>}
       {locked && (
         <p className="key-line">

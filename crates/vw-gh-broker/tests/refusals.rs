@@ -6,6 +6,21 @@ mod support;
 use support::Harness;
 
 #[test]
+fn refusal_keeps_the_diagnosis_and_addresses_remote_actions_to_the_user() {
+    let harness = Harness::new();
+    let reply = harness.call(&["pr", "create"]);
+    let text = String::from_utf8_lossy(&reply.stderr);
+    assert!(
+        text.contains("only supported read-only gh commands"),
+        "{text}"
+    );
+    assert!(text.ends_with("For remote changes, ask the user to use Push or Create PR in the folder's Changes tab, or make the change on the code hosting site.\n"), "{text}");
+    assert!(!text.contains("broker"), "{text}");
+    assert_eq!(reply.exit_code, 1);
+    assert!(!harness.cwd.path().join("runs").exists());
+}
+
+#[test]
 fn refuses_in_process_jq_environment_reads_before_gh_runs() {
     let harness = Harness::new();
     for argv in [
@@ -116,7 +131,7 @@ fn refuses_writes_and_flag_bypasses_before_gh_runs() {
         assert_eq!(reply.exit_code, 1, "accepted {argv:?}");
         assert!(reply.stdout.is_empty(), "{argv:?}");
         assert!(
-            String::from_utf8_lossy(&reply.stderr).contains("gh broker:"),
+            String::from_utf8_lossy(&reply.stderr).starts_with("Not run:"),
             "{argv:?}"
         );
         assert!(

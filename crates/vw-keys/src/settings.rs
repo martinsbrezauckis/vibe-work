@@ -42,9 +42,11 @@ impl KeySettings {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| KeyError::Settings(e.to_string()))?;
         }
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, body)
-            .and_then(|()| std::fs::rename(&tmp, &self.path))
-            .map_err(|e| KeyError::Settings(e.to_string()))
+        vw_platform::atomic_file::replace_file(
+            &self.path,
+            body.as_bytes(),
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|e| KeyError::Settings(e.to_string()))
     }
 }

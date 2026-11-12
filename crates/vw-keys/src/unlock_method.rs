@@ -49,6 +49,9 @@ impl KeyService {
         let remember = self.unlock_method() == UnlockMethod::System;
         let vault = Arc::clone(&self.vault);
         blocking(move || vault.create(&passphrase, remember)).await??;
+        if remember && self.vault.remember_note().is_some() {
+            self.save_unlock_method(UnlockMethod::Password)?;
+        }
         self.password_typed();
         self.network_unlocked().await;
         self.refresh_key().await;
@@ -85,6 +88,9 @@ impl KeyService {
         let remember = self.unlock_method() == UnlockMethod::System;
         let vault = Arc::clone(&self.vault);
         blocking(move || vault.unlock(&passphrase, Some(remember), choice)).await??;
+        if remember && self.vault.remember_note().is_some() {
+            self.save_unlock_method(UnlockMethod::Password)?;
+        }
         self.password_typed();
         self.network_unlocked().await;
         self.refresh_key().await;

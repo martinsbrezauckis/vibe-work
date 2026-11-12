@@ -1,18 +1,26 @@
 /** Checks the shipping app's resolved features on every OS, using Cargo's actual dependency graph.
  * Called by check.sh and release builders; checks the shared app defaults on every target.
+ * `--bundle` (release bundle builders only): a build with app/your-firefox must also name the Mozilla-signed
+ * Firefox add-on input (`--firefox-addon <.release/inputs/firefox-addon/<version>>`), whose bytes must match its
+ * SHA256SUMS; development and e2e builds keep Firefox Add-ons and need no input.
  */
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { REPO_ROOT } from "./lib_files.mjs";
 
 const args = process.argv.slice(2);
 let extraFeatures = "";
 let selectedTarget;
 let safariPackage = false;
+let bundle = false;
+let firefoxAddon;
 while (args.length) {
   const option = args.shift();
   if (option === "--features") extraFeatures = args.shift() ?? "";
+  else if (option === "--bundle") bundle = true;
+  else if (option === "--firefox-addon") firefoxAddon = args.shift() ?? "";
   else if (option === "--target") selectedTarget = args.shift();
   else if (option === "--safari-package") safariPackage = true;
   else throw new Error(`Unknown release feature option: ${option}`);
@@ -24,39 +32,25 @@ const targets = selectedTarget
       "x86_64-pc-windows-msvc",
       "aarch64-apple-darwin",
     ];
-const manifest = readFileSync(join(REPO_ROOT, "app/Cargo.toml"), "utf8");
-const defaults = manifest.match(/^default = \[([^\]]+)\]/m);
-if (!defaults) throw new Error("app/Cargo.toml has no default feature list");
-const selected = new Set(
-  [...defaults[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]),
-);
 const required = new Map([
-  ["app", ["macos-proxy", "your-edge", "proxy-transports", "video"]],
-  ["vw-core-api", ["your-edge", "proxy-transports", "video"]],
+  ["app", ["macos-proxy", "your-edge", "your-firefox", "proxy-transports", "video"]],
+  ["vw-core-api", ["your-edge", "your-firefox", "proxy-transports", "video"]],
   ["vw-agent-tools", ["video"]],
   ["vw-netguard", ["proxy-transports"]],
   ["vw-mistral", ["proxy-transports"]],
   ["vw-gate", ["proxy-transports"]],
   ["tauri", ["tray-icon"]],
 ]);
-const controlled = new Map([
-  ["plan-usage", ["app", "vw-keyproxy"]],
-  ["context-composition", ["app", "vw-core-api", "vw-gate"]],
-  ["feedback", ["app", "vw-core-api", "vw-agent-tools"]],
-  [
-    "click-marker",
-    [
-      "app",
-      "vw-core-api",
-      "vw-browser",
-      "vw-preview",
-      "vw-webview",
-      "vw-platform",
-    ],
-  ],
-]);
+const permanent = ["plan-usage", "context-composition", "feedback", "click-marker"];
+// Permanent behavior cannot acquire a Cargo off-path again, even when not selected in defaults.
+for (const name of ["app", "vw-keyproxy", "vw-core-api", "vw-gate", "vw-agent-tools", "vw-browser", "vw-preview", "vw-webview", "vw-platform"]) {
+  const path = name === "app" ? "app/Cargo.toml" : `crates/${name}/Cargo.toml`;
+  const manifest = readFileSync(join(REPO_ROOT, path), "utf8");
+  for (const feature of permanent)
+    if (new RegExp(`^${feature}\\s*=`, "m").test(manifest))
+      throw new Error(`${name}/${feature} must be permanent, not a feature switch`);
+}
 const forbidden = new Set([
-  "your-firefox",
   "your-safari",
   "video-test",
   "agent-vault",
@@ -67,6 +61,23 @@ if (safariPackage) {
   forbidden.delete("your-safari");
 }
 const errors = [];
+// The signed add-on input's digest, or the reason it is unusable (checked once, required per target below).
+let firefoxSigned;
+let firefoxRefusal = "no --firefox-addon input";
+if (firefoxAddon) {
+  try {
+    const version = basename(firefoxAddon);
+    const name = `vibe-work-firefox-${version}.xpi`;
+    const digest = createHash("sha256").update(readFileSync(join(firefoxAddon, name))).digest("hex");
+    const rows = readFileSync(join(firefoxAddon, "SHA256SUMS"), "utf8").split("\n").filter((l) => l.trim());
+    const row = rows.length === 1 ? rows[0].trim().split(/\s+/) : [];
+    if (row.length !== 2 || row[1].replace(/^\*/, "") !== name || row[0].toLowerCase() !== digest)
+      firefoxRefusal = `${name} differs from its SHA256SUMS`;
+    else firefoxSigned = digest;
+  } catch (error) {
+    firefoxRefusal = `unreadable input ${firefoxAddon} (${error.code ?? error.message})`;
+  }
+}
 for (const target of targets) {
   const tree = execFileSync(
     "cargo",
@@ -103,15 +114,6 @@ for (const target of targets) {
         errors.push(`${target}: ${name}/${feature} is off`);
     }
   }
-  for (const [feature, names] of controlled) {
-    for (const name of names) {
-      const present = packages.get(name)?.has(feature) ?? false;
-      if (present !== selected.has(feature))
-        errors.push(
-          `${target}: ${name}/${feature} is ${present ? "on" : "off"}, app default says ${selected.has(feature) ? "on" : "off"}`,
-        );
-    }
-  }
   for (const [name, features] of packages) {
     if (name !== "app" && !name.startsWith("vw-")) continue;
     for (const feature of features) {
@@ -128,12 +130,14 @@ for (const target of targets) {
     errors.push(`${target}: video module is missing`);
   if (!packages.get("vw-webview")?.has("macos-proxy"))
     errors.push(`${target}: preview guard is off`);
+  if (bundle && packages.get("app")?.has("your-firefox") && !firefoxSigned)
+    errors.push(`${target}: app/your-firefox needs the signed Firefox add-on input: ${firefoxRefusal}`);
 }
 if (errors.length) {
   for (const error of errors) console.error(error);
   process.exitCode = 1;
 } else {
   console.log(
-    `Release features: Edge, proxies, tray and video on; plan usage, context breakdown and click markers follow app defaults; feedback ${selected.has("feedback") ? "on" : "off"}; Firefox and agent vault off; Safari ${safariPackage ? "package enabled" : "off"}`,
+    `Release features: Edge, Firefox, proxies, tray and video on; plan usage, context breakdown, feedback and click markers permanent; agent vault off; Safari ${safariPackage ? "package enabled" : "off"}${firefoxSigned ? `; signed Firefox add-on ${firefoxSigned}` : ""}`,
   );
 }

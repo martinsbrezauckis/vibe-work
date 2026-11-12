@@ -2,6 +2,8 @@
 //! The signed build supplies identities; agent arguments and environment cannot select another containing app.
 use std::path::{Path, PathBuf};
 
+pub(super) const EXTENSION_RELATIVE_PATH: &str = "Contents/PlugIns/Your Safari Extension.appex";
+
 pub(super) fn app_at(executable: &Path) -> Option<PathBuf> {
     let macos = executable.parent()?;
     let contents = macos.parent()?;
@@ -17,9 +19,7 @@ fn app_path() -> Option<PathBuf> {
 }
 
 fn assets_present(app: &Path) -> bool {
-    app.join("Contents/PlugIns/Your Safari Extension.appex")
-        .is_dir()
-        && app.join("Contents/MacOS/SafariSetup").is_file()
+    app.join(EXTENSION_RELATIVE_PATH).is_dir() && app.join("Contents/MacOS/SafariSetup").is_file()
 }
 
 pub(super) fn installed() -> bool {
@@ -192,12 +192,12 @@ mod tests {
         );
         assert_eq!(app_at(&app.join("Resources/other")), None);
         assert_eq!(app_at(Path::new("/tmp/vibe-work")), None);
-        std::fs::create_dir_all(app.join("Contents/PlugIns/Your Safari Extension.appex")).unwrap();
+        std::fs::create_dir_all(app.join(EXTENSION_RELATIVE_PATH)).unwrap();
         assert!(!assets_present(&app));
         std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         std::fs::write(app.join("Contents/MacOS/SafariSetup"), b"fixture").unwrap();
         assert!(assets_present(&app));
-        std::fs::remove_dir(app.join("Contents/PlugIns/Your Safari Extension.appex")).unwrap();
+        std::fs::remove_dir(app.join(EXTENSION_RELATIVE_PATH)).unwrap();
         assert!(!assets_present(&app));
     }
 }

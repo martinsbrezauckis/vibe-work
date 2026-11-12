@@ -6,10 +6,11 @@ use crate::{
 };
 use process_wrap::tokio::CommandWrap;
 use std::path::Path;
+use vw_video_types::{Code, Error};
 /// Starts a fresh restricted process; dropping this future cancels and reaps the job.
 /// # Errors
 /// Isolation unavailable, resource/output limit or decoding failure.
-pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, String> {
+pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, Error> {
     let mut job = job;
     #[cfg(target_os = "linux")]
     {
@@ -35,7 +36,8 @@ pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, Str
         "--sandbox-launch",
         Path::new(&job.request.path),
     );
-    let bytes = serde_json::to_vec(&job).map_err(|_| "decode_failed: request serialization")?;
+    let bytes = serde_json::to_vec(&job)
+        .map_err(|error| Error::at(Code::WorkerFailed, "request serialization", error))?;
     #[cfg(windows)]
     let directory = Some(crate::staging::Directory(stage));
     #[cfg(not(windows))]
@@ -47,15 +49,7 @@ pub async fn extract(helper: &Path, input: Input, job: Job) -> Result<Reply, Str
         directory,
     )
     .await?;
-    if let Ok(error) = serde_json::from_slice::<serde_json::Value>(&reply)
-        && let Some(message) = error["error"].as_str()
-    {
-        return Err(message.chars().take(256).collect());
-    }
-    let reply: Reply =
-        serde_json::from_slice(&reply).map_err(|_| "decode_failed: helper reply shape")?;
-    crate::protocol::validate(&job, &reply)?;
-    Ok(reply)
+    crate::protocol::decode(&job, &reply)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -77,19 +71,28 @@ fn native_command(helper: &Path, mode: &str, input: &Path) -> CommandWrap {
 }
 
 #[cfg(windows)]
-fn stage_windows(helper: &Path, input: &Input) -> Result<tempfile::TempDir, String> {
-    let stage = tempfile::tempdir().map_err(|_| "backend_unavailable: media worker directory")?;
+fn stage_windows(helper: &Path, input: &Input) -> Result<tempfile::TempDir, Error> {
+    let helper = helper.canonicalize().map_err(helper_error)?;
+    let stage = tempfile::tempdir()
+        .map_err(|error| Error::at(Code::InputStaging, "media worker directory", error))?;
     std::fs::copy(helper, stage.path().join("vw-video-helper.exe"))
-        .map_err(|_| "backend_unavailable: video helper is missing")?;
+        .map_err(|error| Error::at(Code::WorkerStart, "copy video component", error))?;
     std::fs::copy(input.path(), stage.path().join("input"))
-        .map_err(|_| "backend_unavailable: sandbox input snapshot")?;
+        .map_err(|error| Error::at(Code::InputStaging, "sandbox input snapshot", error))?;
     Ok(stage)
 }
+#[cfg(any(windows, target_os = "linux"))]
+fn helper_error(error: std::io::Error) -> Error {
+    let code = if error.kind() == std::io::ErrorKind::NotFound {
+        Code::WorkerMissing
+    } else {
+        Code::WorkerStart
+    };
+    Error::at(code, "locate video component", error)
+}
 #[cfg(target_os = "linux")]
-fn command(helper: &Path, input: &Input) -> Result<CommandWrap, String> {
-    let helper = helper
-        .canonicalize()
-        .map_err(|_| "backend_unavailable: video helper is missing")?;
+fn command(helper: &Path, input: &Input) -> Result<CommandWrap, Error> {
+    let helper = helper.canonicalize().map_err(helper_error)?;
     let packaged = helper.with_file_name("vw-video-sandbox");
     let launcher = if packaged.is_file() {
         packaged.as_path()
@@ -219,6 +222,21 @@ pub fn system_plugins() -> Vec<std::path::PathBuf> {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+    #[test]
+    fn helper_lookup_preserves_its_cause_and_does_not_call_every_failure_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("ordinary-file");
+        std::fs::write(&file, b"fixture").unwrap();
+        let input = Input::copy(std::fs::File::open(&file).unwrap(), &file).unwrap();
+        let missing = command(&root.path().join("absent"), &input).err().unwrap();
+        assert_eq!(missing.code, Code::WorkerMissing);
+        assert!(missing.detail.contains("NotFound"));
+        let invalid = command(&file.join("helper"), &input).err().unwrap();
+        assert_eq!(invalid.code, Code::WorkerStart);
+        assert!(invalid.detail.contains("NotADirectory"));
+        assert!(!invalid.agent().contains("NotADirectory"));
+    }
+
     #[test]
     fn library_alternatives_stay_inside_the_visible_system_roots() {
         let tree = tempfile::tempdir().unwrap();

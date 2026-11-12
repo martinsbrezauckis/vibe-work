@@ -73,9 +73,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-11);
 }
-.loops-item .tb-btn {
-  grid-area: delete;
-}
 .loops-help {
   margin: 0;
   color: var(--text-3);

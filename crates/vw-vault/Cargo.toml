@@ -12,25 +12,25 @@ publish = false
 workspace = true
 
 [dependencies]
-vw-platform = { path = "../vw-platform" }
-vw-vocabulary = { path = "../vw-vocabulary" }
+vw-platform = { workspace = true }
+vw-vocabulary = { workspace = true }
 # stored secret values register here so the Debug API never returns them.
-vw-secrets = { path = "../vw-secrets" }
+vw-secrets = { workspace = true }
 # The shared Vault storage core, a byte-identical copy at the pin in
 # third_party/shellx-vault/PROVENANCE.json (only the core is shared).
 vault-core = { path = "../../third_party/shellx-vault/crates/vault-core" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-blake3 = "1.8"
-base64 = "0.22"
-hex = "0.4"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
 # a login's site address (origin of a URL).
-url = "2"
-thiserror = "2"
-zeroize = "1.8"
+url = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
 # Remembered device (ShellX's scheme): the OS credential store through keyring-core.
 # Versions checked on crates.io (keyring-core 1.0.0; store crates need Rust 1.88).
-keyring-core = "=1.0.0"
+keyring-core = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Pure-Rust zbus (no libdbus), its own async-io runtime: safe to call from a blocking thread of a
@@ -41,7 +41,7 @@ zbus-secret-service-keyring-store = { version = "=1.0.1", default-features = fal
 windows-native-keyring-store = "=1.1.0"
 # Rust-only BLAKE3 on Windows (same output; no C/asm build): the copied vault-core uses blake3, and
 # its C/assembly backends cannot be cross-built for the msvc target from WSL (the Windows cross-target lint).
-blake3 = { version = "1.8", features = ["pure"] }
+blake3 = { workspace = true, features = ["pure"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "=1.0.2", default-features = false, features = ["keychain"] }

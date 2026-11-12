@@ -296,12 +296,24 @@ fn only_the_own_copy_is_exempt_and_a_vault_inside_it_is_still_excluded() {
 }
 
 pub(crate) fn test_link_created(result: std::io::Result<()>, test: &str) -> bool {
+    link_created_for_gate(
+        result,
+        test,
+        std::env::var("VW_REQUIRE_ALL").is_ok_and(|value| value == "1"),
+    )
+}
+
+fn link_created_for_gate(result: std::io::Result<()>, test: &str, required: bool) -> bool {
     match result {
         Ok(()) => true,
         Err(error) if error.raw_os_error() == Some(1314) => {
             use std::io::Write;
             // Write directly so libtest's normal output capture cannot hide the skip.
             writeln!(std::io::stderr(), "NOT RUN {test}: Windows link privilege is missing (ERROR_PRIVILEGE_NOT_HELD, 1314).").unwrap();
+            assert!(
+                !required,
+                "{test}: Windows link privilege is required; enable Developer Mode or run the native gate with link privilege"
+            );
             false
         }
         Err(error) => panic!("{test}: link fixture failed: {error}"),
@@ -310,9 +322,10 @@ pub(crate) fn test_link_created(result: std::io::Result<()>, test: &str) -> bool
 
 #[test]
 fn missing_link_privilege_is_reported_as_a_named_skip() {
-    assert!(!test_link_created(
+    assert!(!link_created_for_gate(
         Err(std::io::Error::from_raw_os_error(1314)),
-        "synthetic missing-privilege case"
+        "synthetic missing-privilege case",
+        false
     ));
     assert!(test_link_created(Ok(()), "synthetic permitted case"));
 }
@@ -371,4 +384,24 @@ fn protected_junctions_do_not_own_outside_hard_links_but_direct_files_do() {
     std::fs::remove_dir(linked_outside).unwrap();
     std::fs::remove_dir(linked_protected).unwrap();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn missing_link_privilege_fails_a_required_gate() {
+    let refused = std::panic::catch_unwind(|| {
+        link_created_for_gate(
+            Err(std::io::Error::from_raw_os_error(1314)),
+            "synthetic required case",
+            true,
+        )
+    });
+    assert!(
+        refused.is_err(),
+        "required link coverage must never become a passing skip"
+    );
+    assert!(link_created_for_gate(
+        Ok(()),
+        "synthetic permitted gate",
+        true
+    ));
 }

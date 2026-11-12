@@ -12,23 +12,56 @@ pub(crate) fn next_token() -> String {
     NEXT.fetch_add(1, Ordering::Relaxed).to_string()
 }
 
+/// Collects only the blocked bit after dispatch admission failed (for example the person clicked during the
+/// mark). No native lease exists then. Never reads page labels across frame policy boundaries; always disarms
+/// this receipt so the person's next click works immediately.
+pub(crate) async fn cancelled(
+    service: &vw_preview::PreviewService,
+    mount: &vw_preview::MountId,
+    (page, token): (&str, &str),
+    mut diagnosis: ActError,
+) -> ActError {
+    let script = format!(
+        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token) return false; const blocked = Boolean(state.result.blocked); state.clear(); return blocked; }})()",
+        serde_json::json!({"page":page,"token":token})
+    );
+    let Ok(Some(answers)) = service
+        .evaluate_frames_on_mount(mount, None, script, None)
+        .await
+    else {
+        return diagnosis;
+    };
+    if answers.iter().any(|answer| {
+        let raw: Value = serde_json::from_str(&answer.value).unwrap_or(Value::Null);
+        raw == true || raw.as_str() == Some("true")
+    }) {
+        diagnosis.text = "the page moved: native input was blocked; read the page again".into();
+    }
+    diagnosis
+}
+
 /// How long the page's mouse events normally take to reach the receipt; no new read starts after it.
 const WAIT: Duration = Duration::from_millis(1000);
 /// A read already in flight at [`WAIT`] is never cut short before this: its answer may hold the diagnosis.
 const READ_LIMIT: Duration = Duration::from_secs(5);
 
+pub(crate) struct Confirmation {
+    pub scroll: Option<Value>,
+    pub effect: Option<String>,
+}
+
 /// Confirms one dispatched native click from its event-time receipt. The input is never repeated. Whatever was
 /// observed decides the answer, also when the receipt is delivered late: a read in flight at the deadline is
 /// awaited, and the final read-and-clear (always made) is interpreted too, so a misdirected or overlapping click
 /// is reported with its reason instead of "could not be confirmed".
-pub(crate) async fn confirm(
+pub(crate) async fn confirm_events(
     input: &vw_preview::NativeClickLease<'_>,
     page: &str,
     token: &str,
     frame: &str,
     document: &str,
-    options: vw_preview::ClickOptions,
-) -> Result<(), ActError> {
+    (options, expected): (vw_preview::ClickOptions, &[&str]),
+) -> Result<Confirmation, ActError> {
     let read = |clear: bool| async move {
         input
             .evaluate_frames(crate::scripts::point_receipt(page, token, clear))
@@ -38,7 +71,14 @@ pub(crate) async fn confirm(
     let deadline = tokio::time::Instant::now() + WAIT;
     let polled = async {
         loop {
-            if complete(&read(false).await?, token, frame, document, options)? {
+            if complete_events(
+                &read(false).await?,
+                token,
+                frame,
+                document,
+                options,
+                expected,
+            )? {
                 return Ok(true);
             }
             if tokio::time::Instant::now() >= deadline {
@@ -55,8 +95,31 @@ pub(crate) async fn confirm(
     let last = read(true).await;
     polled?;
     // A final read that failed says why (for example the page's frames changed while clicking).
-    match complete(&last?, token, frame, document, options) {
-        Ok(true) => Ok(()),
+    match complete_events(
+        last.as_ref().map_err(Clone::clone)?,
+        token,
+        frame,
+        document,
+        options,
+        expected,
+    ) {
+        Ok(true) => {
+            let value = last?
+                .iter()
+                .find_map(|answer| {
+                    let raw: Value = serde_json::from_str(&answer.value).ok()?;
+                    let value = raw
+                        .as_str()
+                        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                        .unwrap_or(raw);
+                    (answer.id == frame && value["token"] == token).then_some(value)
+                })
+                .unwrap_or(Value::Null);
+            Ok(Confirmation {
+                scroll: value["scroll"].is_object().then(|| value["scroll"].clone()),
+                effect: value["effect"].as_str().map(str::to_owned),
+            })
+        }
         Ok(false) => Err(unconfirmed()),
         Err(diagnosis) => Err(diagnosis),
     }
@@ -72,14 +135,14 @@ fn ambiguous() -> ActError {
     )
 }
 
-fn complete(
+fn complete_events(
     answers: &[FrameAnswer],
     token: &str,
     frame: &str,
     document: &str,
     options: vw_preview::ClickOptions,
+    expected: &[&str],
 ) -> Result<bool, ActError> {
-    let expected = options.events();
     let receipts: Vec<_> = answers
         .iter()
         .filter_map(|answer| {
@@ -92,6 +155,15 @@ fn complete(
             (value["token"] == token).then_some((answer, value))
         })
         .collect();
+    for (_, value) in &receipts {
+        if value["blocked"].is_object() {
+            let role = safe_label(&value["blocked"]["role"], "element");
+            let name = safe_label(&value["blocked"]["name"], "");
+            return Err(failed(format!(
+                "the page moved: blocked native input on {role} {name}; read the page again"
+            )));
+        }
+    }
     // Check overlap across every frame before interpreting target labels, including a second sequence
     // delivered to a different frame. Receipt storage is bounded, with a sticky ambiguity flag on overflow.
     let count: usize = receipts
@@ -110,6 +182,16 @@ fn complete(
         let Some(dispatch) = value["dispatchedAt"].as_f64().filter(|v| v.is_finite()) else {
             continue;
         };
+        if answer.id == frame
+            && value["document"] == document
+            && value["ready"] == true
+            && value["rejected"] == true
+            && expected.first() == Some(&"beforeinput")
+        {
+            return Err(failed(
+                "The field does not contain the requested text; the page canceled native text entry. Read the field before another action.",
+            ));
+        }
         for (index, event) in events.iter().enumerate() {
             if !event["timeStamp"]
                 .as_f64()
@@ -130,8 +212,11 @@ fn complete(
                 )));
             }
         }
-        confirmed |=
-            answer.id == frame && value["document"] == document && events.len() == expected.len();
+        confirmed |= answer.id == frame
+            && value["document"] == document
+            && events.len() == expected.len()
+            && ((options.wheel.is_none() && expected.first() != Some(&"beforeinput"))
+                || value["ready"] == true);
     }
     Ok(confirmed)
 }

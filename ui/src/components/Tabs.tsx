@@ -74,7 +74,7 @@ export function Tab(props: TabProps) {
           : props.tabIndex
       }
       data-testid={props["data-testid"]}
-      className={PRESENTATIONS[variant][1]}
+      className={`ui-tab ${PRESENTATIONS[variant][1]}`}
       role="tab"
     />
   );
@@ -87,7 +87,7 @@ export function TabClose(props: TabProps) {
       type="button"
       {...props}
       data-testid={props["data-testid"]}
-      className={PRESENTATIONS[variant][2]}
+      className={`ui-tab-close ${PRESENTATIONS[variant][2]}`}
     />
   );
 }

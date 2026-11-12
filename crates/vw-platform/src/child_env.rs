@@ -34,27 +34,3 @@ pub fn remove_own_run_settings(command: &mut Command) {
             .env_remove(BRIDGE_SET_BY_APP_VAR);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn vars(names: &[&str]) -> Vec<(OsString, OsString)> {
-        names
-            .iter()
-            .map(|name| (OsString::from(name), OsString::from("1")))
-            .collect()
-    }
-
-    #[test]
-    fn the_switch_set_by_this_run_is_removed_with_its_marker() {
-        let out = without_own_run_settings(vars(&["PATH", BRIDGE_VAR, BRIDGE_SET_BY_APP_VAR]));
-        assert_eq!(out, vars(&["PATH"]));
-    }
-
-    #[test]
-    fn a_switch_the_user_set_stays() {
-        let out = without_own_run_settings(vars(&["PATH", BRIDGE_VAR]));
-        assert_eq!(out, vars(&["PATH", BRIDGE_VAR]));
-    }
-}

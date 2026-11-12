@@ -8,7 +8,6 @@
  * (table order inside a rank). Skills Vibe marks `userInvocable: false` or disabled are not offered.
  */
 import type { JsonValue } from "../../../protocol/core";
-import { FEEDBACK_ENABLED } from "../../../state/feedbackEnabled";
 import { TEXT } from "../../../vocabulary";
 import type { ClientCommand } from "./slashNames";
 
@@ -33,7 +32,7 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
     description: "Start a new chat",
     runs: "session/history/clear",
   },
-  { name: "rename", description: "Rename this session", runs: "session/rename" },
+  { name: "rename", description: "Rename this chat", runs: "session/rename" },
   {
     name: "rewind",
     description: "Go back to your last message, restoring files",
@@ -41,7 +40,7 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
   },
   {
     name: "branch",
-    description: "Branch this session into a new session",
+    description: "Branch this chat into a new chat",
     runs: "session/fork",
   },
   {
@@ -57,16 +56,16 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
     description: "Model, context window, tokens and access mode",
     runs: "runtime/read",
   },
-  { name: "log", description: "Where this session's log file is", runs: "session/log/read" },
+  { name: "log", description: "Where this chat's log file is", runs: "session/log/read" },
   { name: "copy", description: "Copy the last answer", runs: "in the app" },
   { name: "help", description: "All commands and shortcuts", runs: "in the app" },
   // Vibe's plugin commands, then the commands that open the app's own page for them, then aliases.
   {
     name: "reload-plugins",
-    description: "Reload this session's plugins and say what changed",
+    description: "Reload this chat's plugins and say what changed",
     runs: "refreshPlugins",
   },
-  { name: "plugins", description: "The plugins this session runs", runs: "plugin/info" },
+  { name: "plugins", description: "The plugins this chat runs", runs: "plugin/info" },
   {
     name: "loop",
     description: "Run a prompt on a timer: /loop 5m <prompt>",
@@ -75,7 +74,7 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
   { name: "config", description: "Open Settings", runs: "in the app" },
   { name: "mcp", description: "Open Tools: connectors and MCP servers", runs: "in the app" },
   { name: "connectors", description: "Same as /mcp", runs: "in the app" },
-  { name: "resume", description: "Show the sessions list", runs: "in the app" },
+  { name: "resume", description: "Show the chats list", runs: "in the app" },
   { name: "continue", description: "Same as /resume", runs: "in the app" },
   { name: "todo", description: "Open the Plan tab with the todo list", runs: "in the app" },
   {
@@ -86,9 +85,7 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
   { name: "new", description: "Same as /clear", runs: "session/history/clear" },
 ];
 
-export const SLASH_COMMANDS = ALL_COMMANDS.filter(
-  (row) => row.name !== "feedback" || FEEDBACK_ENABLED,
-);
+export const SLASH_COMMANDS = ALL_COMMANDS;
 
 /** A skill as the menu shows it. */
 export interface SkillRow {

@@ -63,7 +63,7 @@ export function alwaysControl(setting: string | null | undefined): AlwaysControl
  */
 const CHOICE_LABEL: Readonly<Record<Exclude<AskChoice, "always">, string>> = {
   once: "Allow once",
-  session: "Allow for this session",
+  session: "Allow for this chat",
   no: "No",
   keepBoth: "Keep both",
 };
@@ -309,7 +309,7 @@ export function auditLine(
       };
     case "allowed":
       if (outcome.by === "grant")
-        return { square: "ok", text: `Allowed for this session (your earlier answer): ${summary}` };
+        return { square: "ok", text: `Allowed for this chat (your earlier answer): ${summary}` };
       if (always !== undefined)
         return {
           square: "ok",
@@ -317,7 +317,7 @@ export function auditLine(
         };
       return {
         square: "ok",
-        text: `${outcome.scope === "session" ? "Allowed for this session" : "Allowed once"}: ${summary} · ${who}`,
+        text: `${outcome.scope === "session" ? "Allowed for this chat" : "Allowed once"}: ${summary} · ${who}`,
       };
     case "refused": {
       if (outcome.by === "core")

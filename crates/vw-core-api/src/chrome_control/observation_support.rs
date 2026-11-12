@@ -55,6 +55,6 @@ pub(super) async fn require(shared: &Shared, request: &Value) -> Result<(), Stri
     {
         Ok(())
     } else {
-        Err("Not run: the connected browser extension or helper does not accept these observation arguments. Use chrome_status with this action for its supported schema.".into())
+        Err("Not run: this browser connection does not accept these observation arguments. Use chrome_status with this action for its supported schema.".into())
     }
 }

@@ -23,39 +23,39 @@ rustls-pki-types = { version = "1", optional = true, features = ["std"] }
 # store and corporate CAs, and no C cross-compile (ring cannot be built for the msvc target from
 # WSL, which the Windows cross-target lint needs). No decompression features: the model proxy passes
 # compressed bodies through untouched. Versions.
-reqwest = { version = "0.13.5", default-features = false, features = ["http2", "stream", "system-proxy"] }
+reqwest = { workspace = true, features = ["http2", "stream", "system-proxy"] }
 # base64 0.23.1 (already in the lock file): the OCR request carries the file as a data: URL.
 base64 = "0.23"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 # Warnings about a proxy or certificate setting that cannot be applied (never with a sign-in or key in them).
-tracing = "0.1"
-tokio = { version = "1.53", features = ["time", "net", "sync", "macros"] }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["time", "net", "sync", "macros"] }
 # The key-bearing header is built in a zeroized string.
-zeroize = "1.8"
+zeroize = { workspace = true }
 # Authenticates the exact saved network record using a key held in the existing vault.
 hmac = "0.12.1"
-sha2 = "0.10.9"
+sha2 = { workspace = true }
 # Voxtral realtime transcription is a WebSocket. Only the handshake and framing: TLS is
 # opened by us with the TLS stack the rest of the crate already uses (below), so no second TLS stack and
 # no aws-lc. 0.30.0 checked on crates.io.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+futures-util = { workspace = true, features = ["sink", "std"] }
 # image-rs TIFF 0.11.3 (MIT): bounded frame decoding before image OCR.
 # PNG 0.18.1 (MIT OR Apache-2.0, already used by image): lossless per-frame input.
 tiff = "0.11.3"
 png = "0.18.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+reqwest = { workspace = true, features = ["rustls-no-provider"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12", "logging"] }
 # TLS for the realtime WebSocket on Linux: the same rustls + ring and the OS trust store reqwest uses.
-tokio-rustls = { version = "0.26.6", default-features = false, features = ["logging", "tls12"] }
-rustls-platform-verifier = "0.7.1"
+tokio-rustls = { workspace = true, features = ["logging", "tls12"] }
+rustls-platform-verifier = { workspace = true }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-reqwest = { version = "0.13.5", default-features = false, features = ["native-tls"] }
+reqwest = { workspace = true, features = ["native-tls"] }
 # TLS for the realtime WebSocket on Windows and macOS: the OS TLS stack, as for reqwest.
-native-tls = "0.2.18"
-tokio-native-tls = "0.3.1"
+native-tls = { workspace = true }
+tokio-native-tls = { workspace = true }

@@ -7,6 +7,7 @@ import { panelOf, panelOwner, type ShellState } from "../../state/shellState";
 import type { App } from "../shell/AppContext";
 import { awayFromHome } from "../shell/home";
 import type { Browser } from "./browser";
+import { reportAppDialog } from "./appDialog";
 
 export type PreviewVisibilityReport = ReturnType<typeof previewVisibility>;
 export type VisibilityReason =
@@ -64,6 +65,7 @@ export function reportPreviewVisibility(
   app: App,
   browser: Browser,
 ): () => void {
+  const stopDialogs = reportAppDialog(core);
   let latest = previewVisibility(app.shell.store.get(), browser, awayFromHome(app));
   let sent = "";
   let sending = false;
@@ -114,6 +116,7 @@ export function reportPreviewVisibility(
   changed();
   return () => {
     active = false;
+    stopDialogs();
     stopShell();
     stopBrowser();
     stopProjects?.();

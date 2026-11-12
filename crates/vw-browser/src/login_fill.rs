@@ -158,6 +158,12 @@ impl Browser {
             return Err(refusal("stopped", STOPPED));
         }
 
+        if self.service.page_was_scripted(session_id) {
+            return Err(refusal(
+                "pageScript",
+                "Vault fill is blocked because page JavaScript ran in this document; reload or navigate before filling.",
+            ));
+        }
         if !is_ref(reference) {
             return Err(refusal(
                 "observation",
@@ -293,7 +299,9 @@ impl Browser {
         if target.role == LoginRole::Password {
             // Before the write: no screenshot of this document from now on, so a
             // page that shows the password in clear (a swapped "show password" field) is never pictured.
-            self.service.block_shots_on_this_document(session_id);
+            self.service
+                .admit_vault_fill(session_id)
+                .map_err(|e| refusal("pageScript", e))?;
         }
         let result = self.fill_page(session_id, target, Some(value)).await;
         self.sessions.end(

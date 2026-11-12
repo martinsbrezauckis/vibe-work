@@ -51,7 +51,7 @@ export function GitReview(props: {
           (completionText(completion) ??
           (view.mode === "uncommitted"
             ? "No uncommitted files in this repository."
-            : "No file changes in this session yet."))
+            : "No file changes in this chat yet."))
         )}
         {live ? <br /> : null}
         {live ? "This list refreshes as files change." : null}

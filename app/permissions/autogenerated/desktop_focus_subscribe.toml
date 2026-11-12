@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-focus-subscribe"
+description = "Enables the desktop_focus_subscribe command without any pre-configured scope."
+commands.allow = ["desktop_focus_subscribe"]
+
+[[permission]]
+identifier = "deny-desktop-focus-subscribe"
+description = "Denies the desktop_focus_subscribe command without any pre-configured scope."
+commands.deny = ["desktop_focus_subscribe"]

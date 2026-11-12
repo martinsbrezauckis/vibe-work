@@ -87,7 +87,7 @@ export function createVoice(deps: {
     },
     titleOf: (id) => {
       const title = deps.core.store.get().sessions[id]?.session["title"];
-      return typeof title === "string" && title !== "" ? title : "another session";
+      return typeof title === "string" && title !== "" ? title : "another chat";
     },
   });
   narration = createNarration({

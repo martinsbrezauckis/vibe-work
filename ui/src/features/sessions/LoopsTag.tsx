@@ -16,7 +16,7 @@ import { loopsRun } from "../composer/model/loops";
 export function LoopsTag({ sessionId }: { sessionId: string }): ReactElement | null {
   const n = useComposerState((s) => s.loops[sessionId]?.length ?? 0);
   if (n === 0) return null;
-  const words = `${loopsRun(n)} in this session`;
+  const words = `${loopsRun(n)} in this chat`;
   return (
     <span
       className="loops-row"

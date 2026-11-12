@@ -75,7 +75,7 @@ export function registerPagesTab(app: App): () => void {
     app.shortcuts.register({
       id: "project.plan",
       keys: "Mod+Shift+P",
-      description: "Open the plan of this session's project",
+      description: "Open the plan of this chat's project",
       run: () => {
         openPlan(app, pages);
       },

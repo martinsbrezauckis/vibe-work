@@ -147,20 +147,18 @@ async fn clamped_unicode_receipts_reconstruct_without_shortening_fragment_text()
 }
 
 #[tokio::test]
-async fn reopened_batch_buffer_binds_the_replacement_session_and_keeps_its_notice() {
-    let core = output_tests::core("chrome-cache-reopened").await;
+async fn batch_buffer_remains_bound_to_the_same_session() {
+    let core = output_tests::core("chrome-cache-retained").await;
     let mut result = json!({"structuredContent":{"status":"completed",
-        "sessionReopened":{"from":"old","sessionId":"t"},
         "steps":[{"step":1,"result":{"status":"completed","operationId":"op",
             "untrustedPageContent":{"data":{"readId":"r","text":"x".repeat(15000)}}}}]}});
     bound(
         &core.shared,
         "s",
-        &json!({"sessionId":"old","steps":[{"action":"page.read","args":{}}]}),
+        &json!({"sessionId":"t","steps":[{"action":"page.read","args":{}}]}),
         &mut result,
     );
     let body = &result["structuredContent"];
-    assert_eq!(body["sessionReopened"]["sessionId"], "t");
     let next = &body["continuation"];
     let reply = gateway::call(
         &core.shared,

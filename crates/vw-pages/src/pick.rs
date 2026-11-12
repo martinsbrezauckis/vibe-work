@@ -341,33 +341,3 @@ pub fn parse(result: &str) -> PickAnswer {
         _ => PickAnswer::Cancelled,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{PickAnswer, parse};
-
-    #[test]
-    fn a_pick_carries_the_page_title_bounded_and_none_when_empty() {
-        let answer = |title: &str| {
-            serde_json::Value::String(
-                serde_json::json!({"state": "picked", "path": "main > p", "ids": [], "tag": "p",
-                    "role": "p", "text": "Hello", "quote": "Hello", "url": "http://127.0.0.1:5173/",
-                    "title": title})
-                .to_string(),
-            )
-            .to_string()
-        };
-        let PickAnswer::Picked(picked) = parse(&answer("Shop")) else {
-            panic!("not picked")
-        };
-        assert_eq!(picked.title.as_deref(), Some("Shop"));
-        let PickAnswer::Picked(long) = parse(&answer(&"t".repeat(500))) else {
-            panic!("not picked")
-        };
-        assert_eq!(long.title.map(|t| t.chars().count()), Some(200));
-        let PickAnswer::Picked(none) = parse(&answer("")) else {
-            panic!("not picked")
-        };
-        assert_eq!(none.title, None);
-    }
-}

@@ -72,14 +72,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     output.push_str("        _ => None,\n    }\n}\n");
     output.push_str(
-        "// One arm per vocabulary text: its length follows the vocabulary, not a design choice.\n#[allow(clippy::too_many_lines)]\npub(crate) fn generated_text(id: &str) -> Option<&'static str> {\n    match id {\n",
+        "// One arm per distinct text: its length follows the vocabulary, not a design choice.\n#[allow(clippy::too_many_lines)]\npub(crate) fn generated_text(id: &str) -> Option<&'static str> {\n    match id {\n",
     );
+    let mut text_ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, value) in texts {
         let text = value
             .as_str()
             .filter(|value| !value.is_empty())
             .ok_or_else(|| invalid(format!("vocabulary text {id} must be a nonempty string")))?;
-        writeln!(output, "        {id:?} => Some({text:?}),")?;
+        text_ids.entry(text).or_default().push(id);
+    }
+    for (text, ids) in text_ids {
+        let patterns = ids
+            .iter()
+            .map(|id| format!("{id:?}"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        writeln!(output, "        {patterns} => Some({text:?}),")?;
     }
     output.push_str("        _ => None,\n    }\n}\n");
     text_constants(&mut output, texts)?;

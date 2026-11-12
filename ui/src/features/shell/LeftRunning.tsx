@@ -54,7 +54,7 @@ function Button({ left }: { left: NonNullable<ReturnType<typeof useApp>["leftRun
           type="button"
           className="sb-usage sb-left"
           data-testid="shell.statusbar-left-running"
-          title="Dev servers and long commands: this session's, and those deleted sessions left running. Click to see their output and stop them."
+          title="Dev servers and long commands: this chat's, and those deleted chats left running. Click to see their output and stop them."
           aria-haspopup="dialog"
           onClick={() => {
             left.open();
@@ -102,8 +102,8 @@ function LeftRunningDialog({
         <section className="proc-section">
           <h3>Left running</h3>
           <p className="left-running-intro">
-            The agent started these and they kept running after their session was deleted. Stop ends
-            a process and the processes it started.
+            The agent started these and they kept running after their chat was deleted. Stop ends a
+            process and the processes it started.
           </p>
           {state.items.length === 0 ? (
             <p data-testid="left-running-empty">Nothing is left running.</p>
@@ -115,7 +115,7 @@ function LeftRunningDialog({
                     <span>{processLabel(item)}</span>
                     <span className="d">
                       {item.sessionTitle === null
-                        ? "from a deleted session"
+                        ? "from a deleted chat"
                         : `from “${item.sessionTitle}” (deleted)`}
                       {` · pid ${String(item.pid)}`}
                     </span>

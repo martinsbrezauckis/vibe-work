@@ -29,6 +29,13 @@ fn helper_child() {
     if let Some(path) = std::env::var_os("VW_VIDEO_CHILD_PID") {
         std::fs::write(path, std::process::id().to_string()).unwrap();
     }
+    if mode == "sandbox-refusal" {
+        eprintln!("bwrap: No permissions to create a new namespace");
+        std::process::exit(1);
+    }
+    if mode == "early-success" {
+        std::process::exit(0);
+    }
     #[cfg(windows)]
     if mode == "quota" {
         // The exit code Windows gives a process ended at its Job's CPU-time limit.
@@ -49,6 +56,59 @@ fn helper_child() {
 }
 
 #[tokio::test]
+async fn failed_start_keeps_the_os_cause_only_in_diagnostics() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing-video-process");
+    let error = capture(
+        child_at(&missing, "unused", None),
+        Duration::from_secs(5),
+        vec![],
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, Code::WorkerStart);
+    assert!(error.detail.contains("NotFound"), "{}", error.detail);
+    assert!(!error.agent().contains("NotFound"));
+    assert!(!error.agent().contains("missing-video-process"));
+}
+
+#[tokio::test]
+async fn sandbox_refusal_before_reading_input_keeps_its_reason() {
+    let error = capture(
+        child("sandbox-refusal", None),
+        Duration::from_secs(5),
+        vec![0; 1024 * 1024],
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, Code::WorkerFailed);
+    assert!(
+        error
+            .detail
+            .contains("No permissions to create a new namespace")
+    );
+    assert!(!error.agent().contains("bwrap"));
+}
+
+#[tokio::test]
+async fn successful_exit_without_reading_the_request_is_still_refused() {
+    assert_eq!(
+        capture(
+            child("early-success", None),
+            Duration::from_secs(5),
+            vec![0; 1024 * 1024],
+            None,
+        )
+        .await
+        .unwrap_err()
+        .code,
+        Code::WorkerFailed
+    );
+}
+
+#[tokio::test]
 async fn helper_deadline_is_external() {
     assert_eq!(
         capture(
@@ -58,8 +118,9 @@ async fn helper_deadline_is_external() {
             None
         )
         .await
-        .unwrap_err(),
-        "timeout: video helper deadline"
+        .unwrap_err()
+        .code,
+        Code::Timeout
     );
 }
 
@@ -73,8 +134,9 @@ async fn helper_output_flood_is_bounded() {
             None
         )
         .await
-        .unwrap_err(),
-        "limit_exceeded: helper output"
+        .unwrap_err()
+        .code,
+        Code::OutputLimit
     );
 }
 
@@ -125,8 +187,9 @@ async fn cpu_time_limit_is_a_named_timeout() {
             None
         )
         .await
-        .unwrap_err(),
-        "timeout: video worker CPU time limit"
+        .unwrap_err()
+        .code,
+        Code::Timeout
     );
 }
 
@@ -138,6 +201,18 @@ fn staged_child() -> (CommandWrap, crate::staging::Directory, std::path::PathBuf
     } else {
         "worker"
     });
+    // A concurrent fork can inherit a writable copy descriptor until it execs, producing
+    // ETXTBSY when this worker starts. Keep that descriptor in a separate copying process.
+    #[cfg(unix)]
+    assert!(
+        std::process::Command::new("/bin/cp")
+            .arg(std::env::current_exe().unwrap())
+            .arg(&helper)
+            .status()
+            .unwrap()
+            .success()
+    );
+    #[cfg(windows)]
     std::fs::copy(std::env::current_exe().unwrap(), &helper).unwrap();
     let command = child_at(&helper, "hang", Some(&directory.path().join("pid")));
     let path = directory.path().to_path_buf();
@@ -154,7 +229,8 @@ async fn timed_out_helper_removes_its_executable_copy() {
         Some(directory),
     )
     .await;
-    assert_eq!(result.unwrap_err(), "timeout: video helper deadline");
+    let error = result.unwrap_err();
+    assert_eq!(error.code, Code::Timeout, "{error:?}");
     assert!(
         !path.exists(),
         "timed-out helper copy remains: {}",
@@ -173,6 +249,11 @@ async fn cancelled_helper_removes_its_executable_copy_after_reaping() {
     ));
     let started = std::time::Instant::now();
     while !path.join("pid").exists() && started.elapsed() < Duration::from_secs(5) {
+        assert!(
+            !task.is_finished(),
+            "helper ended before reporting its PID: {:?}",
+            task.await
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let pid = std::fs::read_to_string(path.join("pid"))

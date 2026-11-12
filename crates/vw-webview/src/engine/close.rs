@@ -57,6 +57,10 @@ impl TauriEngine {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);
         self.context_pollers.stop(&id.label);
+        self.request_logs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id.label);
         self.initializers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

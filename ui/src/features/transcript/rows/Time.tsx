@@ -14,14 +14,19 @@ function fmtTime(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** `850ms`, `3.2s`, `42s`, `2m05s` (ShellX's format). */
+/**
+ * `850ms`, `3.2s`, `42s`, `2m05s` (ShellX's format).
+ * Each unit is chosen from the already rounded value, so a duration just under a boundary carries
+ * (239.6s is `4m00s`, never `3m60s`; 59.6s is `1m00s`, never `60s`).
+ */
 export function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${String(Math.round(ms))}ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 60_000) return `${String(Math.round(ms / 1000))}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return `${String(m)}m${pad(s)}s`;
+  const whole = Math.round(ms);
+  if (whole < 1000) return `${String(whole)}ms`;
+  const tenths = Math.round(ms / 100);
+  if (tenths < 100) return `${(tenths / 10).toFixed(1)}s`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${String(seconds)}s`;
+  return `${String(Math.floor(seconds / 60))}m${pad(seconds % 60)}s`;
 }
 
 /** A row's time; nothing for a missing (0) time. */

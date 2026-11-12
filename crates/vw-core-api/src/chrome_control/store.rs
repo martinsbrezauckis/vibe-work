@@ -68,6 +68,7 @@ mod tests {
 pub(super) struct Switches {
     pub chrome: bool,
     pub edge: bool,
+    pub firefox: bool,
 }
 impl Switches {
     pub(super) fn load(dir: Option<&Path>) -> Self {
@@ -75,15 +76,25 @@ impl Switches {
             return Self {
                 chrome: true,
                 edge: true,
+                firefox: true,
             };
         };
         match std::fs::read(dir.join("browser-enabled.json")) {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|mut value| {
+                    if value.get("firefox").is_none() {
+                        value["firefox"] = value["chrome"].clone();
+                    }
+                    serde_json::from_value(value).ok()
+                })
+                .unwrap_or_default(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let legacy = enabled(dir);
                 Self {
                     chrome: legacy,
                     edge: legacy,
+                    firefox: legacy,
                 }
             }
             Err(_) => Self::default(),

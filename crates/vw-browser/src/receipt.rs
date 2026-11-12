@@ -202,6 +202,9 @@ fn state_changed(before: &RefItem, after: &RefItem) -> bool {
     before.name != after.name
         || before.value != after.value
         || before.checked != after.checked
+        || before.selected != after.selected
+        || before.valid != after.valid
+        || before.validation_message != after.validation_message
         || before.expanded != after.expanded
         || before.pressed != after.pressed
         || before.disabled != after.disabled

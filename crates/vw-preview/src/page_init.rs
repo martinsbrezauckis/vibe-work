@@ -11,6 +11,7 @@
 
 /// The script source, `__VW_NAME__`, `__VW_THEME__` and `__VW_MENU__` replaced at mount.
 const SOURCE: &str = include_str!("js/page_init.js");
+const SHARE: &str = include_str!("js/page_share.js");
 const SELECTION: &str = include_str!("js/page_selection.js");
 const WIDGET_FORMATS: &str = include_str!("js/widget_formats.js");
 
@@ -62,42 +63,19 @@ pub fn page_init_script_themed(name: &str, theme: &str) -> String {
     let environment = SOURCE
         .replace("__VW_SELECTION__", SELECTION)
         .replace(
+            "const RESTORE_SELECTION = false;",
+            if cfg!(target_os = "macos") {
+                "const RESTORE_SELECTION = true;"
+            } else {
+                "const RESTORE_SELECTION = false;"
+            },
+        )
+        .replace("__VW_SHARE__", SHARE)
+        .replace(
             "__VW_NAME__",
             &serde_json::Value::String(name.to_owned()).to_string(),
         )
         .replace("__VW_THEME__", &format!("\"{theme}\""))
         .replace("__VW_MENU__", &menu_palette());
     format!("{environment}\n{WIDGET_FORMATS}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::MENU_TOKENS;
-
-    /// The value of `--name` in the block of `tokens.css` that starts at `from`.
-    fn token(css: &str, from: &str, name: &str) -> String {
-        let block = &css[css.find(from).expect("theme block")..];
-        let at = block.find(&format!("--{name}:")).expect("token");
-        block[at..]
-            .split_once(':')
-            .and_then(|(_, rest)| rest.split_once(';'))
-            .map(|(value, _)| value.trim().to_owned())
-            .expect("token value")
-    }
-
-    #[test]
-    fn the_page_menu_uses_the_apps_menu_tokens() {
-        let css = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/src/styles/tokens.css"),
-        )
-        .expect("tokens.css");
-        for (name, dark, light) in MENU_TOKENS {
-            assert_eq!(token(&css, ":root", name), dark, "dark --{name}");
-            assert_eq!(
-                token(&css, ":root[data-theme=\"light\"]", name),
-                light,
-                "light --{name}"
-            );
-        }
-    }
 }

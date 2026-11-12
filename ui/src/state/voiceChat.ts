@@ -21,21 +21,16 @@
  */
 import { quietPlayback } from "../features/voice/playbackGate";
 import { createVoicePrompt } from "./voicePrompt";
-import type { Accessibility } from "./accessibility";
 import type { CoreEvent, SpeechRequest, SpeechResult } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
-import type { Player } from "../features/voice/audioPlayer";
-import { type PrepareCapture, micErrorText } from "../features/voice/pcmCapture";
+import { micErrorText } from "../features/voice/pcmCapture";
 import { type TurnEnd, createTurnEnd, pcmRms } from "../features/voice/turnEnd";
 import { FAILED_SAID } from "../features/voice/voiceChatText";
 import { type VoiceLatency, voiceLatency } from "../features/voice/voiceLatency";
 import { type VoiceReplyBudget, createVoiceReplyStream } from "../features/voice/voiceReplyStream";
-import type { Composer } from "./composer";
-import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 import { toBase64 } from "./dictation";
 import { NEW_CHAT } from "./newChatKey";
-import type { Toasts } from "./toastStore";
 import {
   endedTurns,
   finalAnswer,
@@ -46,13 +41,13 @@ import {
   turnAnswers,
   voiceTurnId,
 } from "./voiceChatTurns";
-import type { VoiceSettingsStore } from "./voiceSettings";
 
 import {
   VOICE_CHAT_OFF,
   type VoiceChatState,
+  type VoiceChatDeps,
+  type VoiceChatUtterance as Say,
   type TurnEndedBy,
-  type SpokenKind,
 } from "./voiceChatState";
 export {
   VOICE_CHAT_OFF,
@@ -75,24 +70,7 @@ function decode(base64: string): Uint8Array {
 }
 
 /** Creates the voice chat controller. */
-export function createVoiceChat(deps: {
-  accessibility?: Accessibility;
-  promptBlocked?: () => boolean;
-  core: CoreController;
-  composer: Composer;
-  settings: VoiceSettingsStore;
-  toasts: Toasts;
-  prepare: PrepareCapture;
-  player: Player;
-  canUseKey?: (() => boolean) | undefined;
-  /** True while a dictation runs (voice chat then cannot start). */
-  dictating: () => boolean;
-  /** Called when voice chat starts (narration stops). */
-  onStart: () => void;
-  /** A session's title for messages. */
-  titleOf: (sessionId: string) => string;
-  now?: () => number;
-}) {
+export function createVoiceChat(deps: VoiceChatDeps) {
   const { core, composer, settings, toasts, player } = deps;
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const store = createStore<VoiceChatState>(VOICE_CHAT_OFF);
@@ -109,14 +87,7 @@ export function createVoiceChat(deps: {
   let expecting: number | null = null;
   let expectTimer: ReturnType<typeof setTimeout> | null = null;
   let listenTimer: ReturnType<typeof setTimeout> | null = null;
-  type Say = {
-    text: string;
-    kind: SpokenKind;
-    turnId?: string;
-    callbackId?: string;
-    repeat?: boolean;
-    ready?: Promise<SpeechResult>;
-  };
+
   let queue: Say[] = [];
   let currentSpeech: Say | null = null;
   const streams = new Map<string, ReturnType<typeof createVoiceReplyStream>>();
@@ -610,14 +581,14 @@ export function createVoiceChat(deps: {
               owner !== NEW_CHAT &&
               entryOf(owner) === undefined
             ) {
-              turnOff("The session closed, so voice chat stopped.");
+              turnOff("The chat closed, so voice chat stopped.");
             } else settle();
           });
         }
         return;
       }
       if (sessionClosed(entry)) {
-        turnOff("The session was archived, so voice chat stopped.");
+        turnOff("The chat was archived, so voice chat stopped.");
         return;
       }
     }

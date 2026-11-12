@@ -62,7 +62,7 @@ pub(super) async fn prepare(
         .config
         .keys
         .as_ref()
-        .ok_or("No vault is connected; ask the user to set up the vault.")?;
+        .ok_or(vw_vocabulary::texts::AGENT_VAULT_MISSING)?;
     let plan = keys
         .plan_capture(name.into())
         .await

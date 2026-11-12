@@ -10,45 +10,45 @@ publish = false
 # Strict OCR fixtures decode files before claiming the provider accepts them.
 oxideav-avif = "0.0.11"
 oxideav-core = "0.1"
-lopdf = { version = "0.42", default-features = false }
+lopdf = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
-serde = "1"
-serde_json = "1"
-regex = "1"
-tokio = { version = "1.53", features = ["full", "test-util"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
-axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["stream"] }
-futures-util = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, default-features = true, features = ["fmt"] }
+axum = { workspace = true, features = ["http1", "tokio", "ws"] }
+reqwest = { workspace = true, features = ["stream"] }
+futures-util = { workspace = true, default-features = true }
 sha2 = "0.10"
 base64 = "0.23"
-minisign = "0.9.1"
+minisign = { workspace = true }
 toml = "0.8"
-url = "2"
-zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
-tar = { version = "0.4.46", default-features = false }
+url = { workspace = true }
+zip = { workspace = true, features = ["deflate"] }
+tar = { workspace = true }
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
-vw-rpc = { path = "../../../crates/vw-rpc" }
-vw-supervisor = { path = "../../../crates/vw-supervisor" }
-vw-platform = { path = "../../../crates/vw-platform" }
-vw-secrets = { path = "../../../crates/vw-secrets" }
-vw-gate = { path = "../../../crates/vw-gate" }
-vw-core-api = { path = "../../../crates/vw-core-api" }
-vw-debug-api = { path = "../../../crates/vw-debug-api" }
-vw-host = { path = "../../../crates/vw-host" }
-vw-vault = { path = "../../../crates/vw-vault" }
-vw-keyproxy = { path = "../../../crates/vw-keyproxy" }
-vw-keys = { path = "../../../crates/vw-keys" }
-vw-procmon = { path = "../../../crates/vw-procmon" }
-vw-documents = { path = "../../../crates/vw-documents" }
-vw-agent-tools = { path = "../../../crates/vw-agent-tools" }
-vw-changes = { path = "../../../crates/vw-changes" }
-vw-worktrees = { path = "../../../crates/vw-worktrees" }
-vw-pages = { path = "../../../crates/vw-pages" }
-vw-vibe-install = { path = "../../../crates/vw-vibe-install" }
-vw-netguard = { path = "../../../crates/vw-netguard" }
-make-latest-json = { path = "../../../tools/public/update-manifest" }
+vw-rpc = { workspace = true }
+vw-supervisor = { workspace = true }
+vw-platform = { workspace = true }
+vw-secrets = { workspace = true }
+vw-gate = { workspace = true }
+vw-core-api = { workspace = true }
+vw-debug-api = { workspace = true }
+vw-host = { workspace = true }
+vw-vault = { workspace = true }
+vw-keyproxy = { workspace = true }
+vw-keys = { workspace = true }
+vw-procmon = { workspace = true }
+vw-documents = { workspace = true }
+vw-agent-tools = { workspace = true }
+vw-changes = { workspace = true }
+vw-worktrees = { workspace = true }
+vw-pages = { workspace = true }
+vw-vibe-install = { workspace = true }
+vw-netguard = { workspace = true }
+make-latest-json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process"] }

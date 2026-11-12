@@ -17,8 +17,8 @@ mod frame_click;
 mod frames_win;
 #[cfg(any(windows, test))]
 mod full_screen;
-#[cfg(feature = "click-marker")]
 mod input_marker;
+mod keyboard_fence;
 #[cfg(target_os = "linux")]
 mod linux_agent;
 #[cfg(target_os = "linux")]
@@ -56,3 +56,7 @@ pub const CRATE_ROLE: &str =
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+mod color_scheme;
+mod reload;
+
+mod request_log;

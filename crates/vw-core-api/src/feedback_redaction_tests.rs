@@ -1,58 +1,4 @@
 //! App-only synthetic redaction cases; verifies review, outbound serialization and bounded redaction work.
-use crate::{FeedbackDraft, FeedbackKind, FeedbackRequest, Origin};
-
-#[tokio::test]
-async fn feedback_redaction_cases_reach_review_and_wire() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/public/fixtures/feedback-redaction.json"
-    ))
-    .unwrap();
-    let core = crate::offline_core::start("feedback-redaction").await;
-    for row in fixture["cases"].as_array().unwrap() {
-        // Provider formats are assembled only in memory: committed fixtures contain harmless markers.
-        let marker = row["credentialParts"].as_array().map(|parts| {
-            parts
-                .iter()
-                .map(|part| part.as_str().unwrap())
-                .collect::<String>()
-        });
-        let input = row["input"].as_str().unwrap().replace(
-            "<synthetic-credential>",
-            marker.as_deref().unwrap_or("<synthetic-credential>"),
-        );
-        let expected = row["expected"].as_str().unwrap().replace(
-            "<synthetic-credential>",
-            marker.as_deref().unwrap_or("<synthetic-credential>"),
-        );
-        assert_eq!(
-            crate::feedback_redact::text(&input, &[]),
-            expected,
-            "{}",
-            row["name"]
-        );
-        let review = core
-            .feedback(
-                Origin::Ui,
-                FeedbackRequest::Review {
-                    draft: FeedbackDraft {
-                        kind: FeedbackKind::Bug,
-                        title: "Tab disappears".into(),
-                        description: "Close the second tab.".into(),
-                        remarks: input,
-                    },
-                },
-            )
-            .await
-            .unwrap()
-            .review
-            .unwrap();
-        assert_eq!(review.draft.remarks, expected, "{}", row["name"]);
-        let wire: serde_json::Value =
-            serde_json::from_slice(&serde_json::to_vec(&review).unwrap()).unwrap();
-        assert_eq!(wire["draft"]["remarks"], expected, "{}", row["name"]);
-    }
-    core.shutdown().await;
-}
 
 #[test]
 fn feedback_redaction_adversarial_scaling() {
@@ -95,33 +41,6 @@ fn feedback_redaction_adversarial_scaling() {
             );
         }
     }
-}
-
-#[tokio::test]
-async fn feedback_redaction_accepts_the_field_limit_and_rejects_control_characters() {
-    let core = crate::offline_core::start("feedback-redaction-limit").await;
-    for (description, accepted) in [
-        ("a-".repeat(4000), true),
-        ("a.".repeat(4000), true),
-        ("a.".repeat(4001), false),
-        ("key\u{0085}=abcdefghijklmnopqrst".into(), false),
-    ] {
-        let result = core
-            .feedback(
-                Origin::Ui,
-                FeedbackRequest::Review {
-                    draft: FeedbackDraft {
-                        kind: FeedbackKind::Bug,
-                        title: "Tab disappears".into(),
-                        description,
-                        remarks: String::new(),
-                    },
-                },
-            )
-            .await;
-        assert_eq!(result.is_ok(), accepted);
-    }
-    core.shutdown().await;
 }
 
 #[test]

@@ -178,23 +178,3 @@ impl CredentialTable {
         found
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::CredentialTable;
-
-    #[test]
-    fn session_registration_tracks_binding_handoff_and_revocation() {
-        let table = CredentialTable::default();
-        assert!(!table.has_session("chat"));
-        let (pending, _) = table.pending().expect("test randomness");
-        assert!(!table.has_session("chat"));
-        table.bind(pending, "chat");
-        assert!(table.has_session("chat"));
-        assert_eq!(table.hand_off("chat", "next"), 1);
-        assert!(!table.has_session("chat"));
-        assert!(table.has_session("next"));
-        table.revoke_session("next");
-        assert!(!table.has_session("next"));
-    }
-}

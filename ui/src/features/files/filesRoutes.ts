@@ -157,7 +157,7 @@ async function route(app: App, files: Files, body: unknown): Promise<unknown> {
   const given = input["sessionId"];
   const sessionId =
     typeof given === "string" && given !== "" ? given : app.shell.store.get().selected;
-  if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+  if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
   const actions = files.debugApi;
   const action = input["action"] ?? "state";
   const recent = (file: string) => {
@@ -169,7 +169,7 @@ async function route(app: App, files: Files, body: unknown): Promise<unknown> {
     if (ref?.status === "ok") return { file: ref.file, display: ref.display, line: null };
     throw new UiControlError(
       "notFound",
-      "no such file handle in this session's transcript or recent list",
+      "no such file handle in this chat's transcript or recent list",
     );
   };
   try {
@@ -188,10 +188,7 @@ async function route(app: App, files: Files, body: unknown): Promise<unknown> {
         )
           throw new UiControlError("invalidParams", "item must be open, edit, reveal or copy-path");
         if (ref.status !== "ok" && ref.status !== "choices")
-          throw new UiControlError(
-            "notFound",
-            "that path does not name a file this session may show",
-          );
+          throw new UiControlError("notFound", "that path does not name a file this chat may show");
         if (ref.status === "choices" && input["file"] === undefined)
           return { choices: ref.choices, total: ref.total };
         const target =
@@ -279,7 +276,7 @@ async function route(app: App, files: Files, body: unknown): Promise<unknown> {
           if (!(await actions.openText(sessionId, text(input, "text"), line)))
             throw new UiControlError(
               "notFound",
-              "that path does not name a file this session may show",
+              "that path does not name a file this chat may show",
             );
         }
         return state(app, files, sessionId);

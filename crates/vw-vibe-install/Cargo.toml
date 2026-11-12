@@ -17,35 +17,35 @@ ts = ["dep:ts-rs"]
 
 [dependencies]
 # Probe homes can hold immutable Vibe plugin package copies.
-vw-platform = { path = "../vw-platform" }
+vw-platform = { workspace = true }
 # The shared HTTPS client (OS trust store, system proxy) for the uv download.
-vw-mistral = { path = "../vw-mistral" }
+vw-mistral = { workspace = true }
 # Server discovery (PATH + known locations, canonical, `.exe` only on Windows) for "use my existing install",
 # and the `initialize` parameters of the version probe.
-vw-supervisor = { path = "../vw-supervisor" }
-reqwest = { version = "0.13.5", default-features = false, features = ["stream"] }
+vw-supervisor = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 # Loopback check of redirect targets (already in Cargo.lock through reqwest and vw-host).
-url = "2"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10.9"
+url = { workspace = true }
+futures-util = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 # The offer id (OS random source), as vw-debug-api and vw-agent-tools.
-getrandom = "0.3"
-thiserror = "2"
-tokio = { version = "1.53", features = ["rt", "sync", "time", "process", "io-util", "fs", "macros"] }
-tracing = "0.1"
+getrandom = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util", "fs", "macros"] }
+tracing = { workspace = true }
 # Archives of Astral's uv release: .tar.gz (Linux, macOS) and .zip (Windows). All three are already in
 # Cargo.lock (zip 9.1.3 + flate2 1.1.10 with zlib-rs through calamine, tar 0.4.46); same features, no new crates.
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
-tar = { version = "0.4.46", default-features = false }
-zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
+tar = { workspace = true }
+zip = { workspace = true, features = ["deflate"] }
 # Whole-tree containment of the uv steps (cancel and timeout kill uv and every child it started), as the
 # supervisor does for the server: process group on Unix, kill-on-close Job Object on Windows.
-process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
-ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+process-wrap = { workspace = true, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 # The signed supported-Vibe manifest: the same minisign check and encodings the app updater uses
 # (vw-host `update_verify`); all three are already in Cargo.lock through vw-host and the updater plugin.
-minisign-verify = "0.2.5"
-base64 = "0.22"
-semver = "1"
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
+semver = { workspace = true }

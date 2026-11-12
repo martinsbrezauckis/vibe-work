@@ -138,7 +138,7 @@ export function createRewindActions(deps: {
         });
         const result = reply.type === "reply" ? reply.result : null;
         const id = field(field(field(result, "state"), "session"), "id");
-        if (typeof id !== "string") throw new Error("Vibe did not return the new session.");
+        if (typeof id !== "string") throw new Error("Vibe did not return the new chat.");
         // Load it into the store (a detached fork is stored by Vibe, the lobby can read it).
         await core.run({ type: "refreshSession", sessionId: id });
         shell.actions.selectSession(id);

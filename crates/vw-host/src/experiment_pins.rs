@@ -11,7 +11,10 @@ use toml::{Table, Value};
 use toml_edit::{DocumentMut, value};
 
 /// The keys pinned off (top level of Vibe's config).
-pub const KEYS: [&str; 8] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
+pub const KEYS: [&str; 6] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
+
+/// Stable features disabled until the app offers them through its own controls.
+pub const STABLE_KEYS: [&str; 1] = vw_supervisor::STABLE_CONFIG_KEYS;
 
 /// Registry skills have their own default; all unsupported experiments remain unavailable.
 const NOTE: &str = "# Vibe Work: unsupported experimental features stay off.";
@@ -69,6 +72,18 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
         disabled: Vec::new(),
         skipped: None,
     };
+    // The stable replacement defaults on. Retired keys also fail strict config validation.
+    // Carry the old monitoring line's comment to the replacement, then pin its value below.
+    if let Some(old) = doc.remove("experimental_enable_pr_monitoring")
+        && !doc.contains_key("enable_pr_monitoring")
+    {
+        doc["enable_pr_monitoring"] = old;
+    }
+    if let Some(old) = expected.remove("experimental_enable_pr_monitoring") {
+        expected.entry("enable_pr_monitoring").or_insert(old);
+    }
+    doc.remove("experimental_enable_pr_discovery");
+    expected.remove("experimental_enable_pr_discovery");
     doc.remove("smart_approve_default");
     expected.remove("smart_approve_default");
     if let Some(old) = doc.remove(OLD_COW)
@@ -97,7 +112,7 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
         }
         expected.insert(REGISTRY.into(), Value::Boolean(true));
     }
-    for key in KEYS {
+    for key in KEYS.into_iter().chain(STABLE_KEYS) {
         match expected.get(key) {
             None => outcome.added.push(key),
             Some(Value::Boolean(false)) => continue,

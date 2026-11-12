@@ -101,7 +101,7 @@ export function commentChip(view: LineCommentView, current: readonly DiffLine[] 
   const quoted = lines.map((l) => `${sign(l)}${l.text}`).join("\n");
   const fenced = fence(quoted);
   const out = [
-    `Comment on ${comment.path}, ${rangeText(lines)} (a change made in this session; "+" added, "-" removed):`,
+    `Comment on ${comment.path}, ${rangeText(lines)} (a change made in this chat; "+" added, "-" removed):`,
     `${fenced}diff`,
     quoted,
     fenced,

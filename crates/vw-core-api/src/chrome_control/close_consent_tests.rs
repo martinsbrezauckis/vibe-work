@@ -30,8 +30,14 @@ async fn connected_core(profile: &str, label: &str) -> crate::Core {
         .lock()
         .unwrap()
         .0 = super::PairingState::Paired;
+    // Safari ships inside this app and must report the app version; store extensions version separately.
+    let version = if profile.starts_with("safari:") {
+        crate::version()
+    } else {
+        "0.1.8"
+    };
     core.shared.chrome_control.owner.connected_profiles.observe(
-        &json!({"profiles":[{"profileId":profile,"connected":true,"extensionVersion":"0.1.8"}]}),
+        &json!({"profiles":[{"profileId":profile,"connected":true,"extensionVersion":version}]}),
     );
     core
 }
@@ -92,16 +98,14 @@ async fn closing_owned_and_handed_tabs_runs_without_cards_in_ask() {
 }
 
 #[tokio::test]
-async fn ask_close_reopens_its_turn_ended_session_without_a_card() {
+async fn ask_close_resumes_its_retained_session_without_a_card() {
     for batch in [false, true] {
-        let core = core(&format!("close-reopens-ended-turn-{batch}")).await;
+        let core = core(&format!("close-resumes-ended-turn-{batch}")).await;
         let seen = test_support::answering(&core.shared, |tool, args| {
             if tool == "chrome_status" {
                 output_tests::status(args)
-            } else if tool == "chrome_session" && args["action"] == "open" {
-                output_tests::mcp(
-                    json!({"sessionId":"fresh","profileId":"chrome:p","state":"active"}),
-                )
+            } else if tool == "chrome_session" && args["action"] == "resume" {
+                output_tests::mcp(json!({"sessionId":"t","profileId":"chrome:p","state":"active"}))
             } else {
                 output_tests::mcp(json!({"status":"completed","data":{"closed":true}}))
             }
@@ -115,13 +119,13 @@ async fn ask_close_reopens_its_turn_ended_session_without_a_card() {
         let answer = super::gateway::call(&core.shared, "s", "chrome_execute", args)
             .await
             .unwrap();
-        assert!(answer.to_string().contains("sessionReopened"), "{answer}");
+        assert!(!answer.to_string().contains("sessionReopened"), "{answer}");
         assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
         assert!(
             seen.lock()
                 .unwrap()
                 .iter()
-                .any(|(tool, args)| tool == "chrome_execute" && args["sessionId"] == "fresh")
+                .any(|(tool, args)| tool == "chrome_execute" && args["sessionId"] == "t")
         );
         core.shutdown().await;
     }

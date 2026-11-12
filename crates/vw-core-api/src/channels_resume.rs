@@ -1,6 +1,7 @@
 //! Resuming an existing conversation, including CLI histories imported under a new id.
 //! Depends on the channel registry and supervisor; called by `Channels::request_routed`.
-use super::{Channels, RpcError, Value, local_error, locked, result_session, to_rpc};
+use super::{Channels, RpcError, Value, local_error, locked, to_rpc};
+use crate::routing::result_session;
 
 impl Channels {
     /// `session/resume`: on the session's channel, or on a new one bound on success. Uses the

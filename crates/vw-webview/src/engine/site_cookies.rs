@@ -1,5 +1,7 @@
 //! Native current-site cookie access through Tauri's `WebKitGTK`, `WKWebView` and `WebView2` adapters.
 //! Runs off the UI thread to avoid `WebView2` cookie-manager deadlocks; never accepts a caller's domain.
+//! Depends on: platform cookie managers and current-document verification.
+//! Called by: preview engine site-cookie requests.
 use super::cookie_verification::{CHANGE_WAIT, changed};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -34,7 +36,7 @@ fn cookies(
     let fault = |_| "Native cookie access failed; check this site before trying again.".to_owned();
     let host = url.host_str().ok_or("Cookies need a current site.")?;
     if request.name() != "cookies.change" {
-        let current = webview.cookies_for_url(url.clone()).map_err(fault)?;
+        let current = super::url_cookies::read(webview, url).map_err(fault)?;
         let names = args["names"].as_array();
         let mut rows = Vec::new();
         for cookie in current
@@ -80,7 +82,7 @@ fn cookies(
             query.set_path(path);
             let set = changed(CHANGE_WAIT, || {
                 page()?;
-                let rows = webview.cookies_for_url(query.clone()).map_err(fault)?;
+                let rows = super::url_cookies::read(webview, &query).map_err(fault)?;
                 page()?;
                 Ok(rows.iter().any(|c| {
                     c.name() == name
@@ -92,31 +94,77 @@ fn cookies(
         }
         Some("remove" | "clear") => {
             let clear = args["operation"] == "clear";
-            // Include all paths of cookies available to this host; never delete another site's cookies.
-            let matches = |c: &tauri::webview::Cookie<'_>| {
-                let domain = c.domain().unwrap_or_default().trim_start_matches('.');
-                (host == domain || host.ends_with(&format!(".{domain}")))
-                    && (clear || (c.name() == name && c.path().unwrap_or("/") == path))
+            let wanted = |c: &tauri::webview::Cookie<'_>| {
+                clear || (c.name() == name && c.path().unwrap_or("/") == path)
+            };
+            // Delete only cookies whose domain is exactly this host. The native stores do not say whether a
+            // parent-domain cookie is host-only (unavailable to this host), so those are kept and reported.
+            let exact = |c: &tauri::webview::Cookie<'_>| {
+                scope(host, c.domain().unwrap_or_default()) == Scope::Exact && wanted(c)
             };
             let all = webview.cookies().map_err(fault)?;
-            for cookie in all.into_iter().filter(matches) {
+            let kept = all
+                .iter()
+                .filter(|c| {
+                    scope(host, c.domain().unwrap_or_default()) == Scope::Parent && wanted(c)
+                })
+                .count();
+            for cookie in all.into_iter().filter(|c| exact(c)) {
                 webview.delete_cookie(cookie).map_err(fault)?;
             }
-            let complete = changed(CHANGE_WAIT, || {
+            let deleted = changed(CHANGE_WAIT, || {
                 page()?;
-                // Verify the same host/path scope we deleted, including non-root paths and secure cookies.
+                // Verify the same exact-host scope we deleted, including non-root paths and secure cookies.
                 let rows = webview.cookies().map_err(fault)?;
                 page()?;
-                Ok(!rows.iter().any(matches))
+                Ok(!rows.iter().any(&exact))
             })?;
-            Ok(if clear {
-                json!({"cleared":complete})
-            } else {
-                json!({"removed":complete,"name":name})
-            })
+            Ok(change_result(clear, name, deleted, kept))
         }
         _ => Err("Unknown cookie operation.".into()),
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Scope {
+    /// The cookie's domain is this host (with or without a leading dot).
+    Exact,
+    /// A parent domain's cookie, possibly host-only for that parent site; never deleted from here.
+    Parent,
+    Other,
+}
+
+fn scope(host: &str, domain: &str) -> Scope {
+    let parent = domain.trim_start_matches('.').to_ascii_lowercase();
+    if super::url_cookies::is_exact_host(domain, host) {
+        Scope::Exact
+    } else if !parent.is_empty() && host.to_ascii_lowercase().ends_with(&format!(".{parent}")) {
+        Scope::Parent
+    } else {
+        Scope::Other
+    }
+}
+
+/// `cleared`/`removed` is true only when nothing matching is left that this site may use: kept parent-domain
+/// cookies make the result incomplete, and the note says so in plain words for the agent.
+fn change_result(clear: bool, name: &str, deleted: bool, kept: usize) -> Value {
+    let done = deleted && kept == 0;
+    let mut out = if clear {
+        json!({"cleared":done})
+    } else {
+        json!({"removed":done,"name":name})
+    };
+    if kept > 0 {
+        out["complete"] = json!(false);
+        out["parentDomainCookiesKept"] = json!(kept);
+        out["note"] = json!(format!(
+            "{kept} cookie(s) set for a parent domain were not deleted: they may belong only to that parent site. \
+             Open the parent site to clear them there."
+        ));
+    } else if !deleted {
+        out["complete"] = json!(false);
+    }
+    out
 }
 
 /// The page check uses the preview's tracked mount address, never `Webview::url()` (which can panic on macOS).
@@ -125,4 +173,46 @@ fn check_page(hooks: &dyn PreviewHooks, label: &str, url: &Url) -> Result<(), St
         return Err("The page changed; read it again before accessing cookies.".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_exact_host_cookies_are_in_delete_scope() {
+        let host = "sub.example.test";
+        assert_eq!(scope(host, "sub.example.test"), Scope::Exact);
+        assert_eq!(scope(host, ".sub.example.test"), Scope::Exact);
+        assert_eq!(scope(host, "SUB.example.test"), Scope::Exact);
+        // A host-only cookie of the parent site and a parent domain cookie look the same in the native store;
+        // neither is deleted from the subdomain.
+        assert_eq!(scope(host, "example.test"), Scope::Parent);
+        assert_eq!(scope(host, ".example.test"), Scope::Parent);
+        for other in [
+            "other.test",
+            "xsub.example.test",
+            "deep.sub.example.test",
+            "ample.test",
+            "",
+            ".",
+        ] {
+            assert_eq!(scope(host, other), Scope::Other, "{other}");
+        }
+    }
+
+    #[test]
+    fn kept_parent_cookies_make_the_result_incomplete() {
+        let clean = change_result(true, "", true, 0);
+        assert_eq!(clean, json!({"cleared":true}));
+        let kept = change_result(true, "", true, 2);
+        assert_eq!(kept["cleared"], false);
+        assert_eq!(kept["complete"], false);
+        assert_eq!(kept["parentDomainCookiesKept"], 2);
+        assert!(kept["note"].as_str().unwrap().contains("not deleted"));
+        let removed = change_result(false, "sid", true, 1);
+        assert_eq!(removed["removed"], false);
+        assert_eq!(removed["name"], "sid");
+        assert_eq!(change_result(false, "sid", false, 0)["complete"], false);
+    }
 }

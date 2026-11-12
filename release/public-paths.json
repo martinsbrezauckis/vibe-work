@@ -26,6 +26,7 @@
     "CHANGELOG.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    ".github/pull_request_template.md",
     "NOTICE",
     "Cargo.toml",
     "Cargo.lock",

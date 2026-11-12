@@ -1,4 +1,4 @@
-/** Builds the tool sidecar with the same video and feedback features as the app's default release.
+/** Builds the tool sidecar with the same video features as the app's default release.
  * Depends on app/Cargo.toml and Cargo; called by release builders before Tauri packages the sidecar.
  */
 import { spawnSync } from "node:child_process";
@@ -16,16 +16,14 @@ const selected = new Set(
 );
 const linuxVideo = selected.has("linux-video");
 const video = selected.has("video") || linuxVideo;
-const feedback = selected.has("feedback");
 const shipping = [
   ...(video ? ["video"] : []),
-  ...(feedback ? ["feedback"] : []),
   ...(linuxVideo ? ["linux-video"] : []),
 ];
 if (process.argv[2] === "--print") {
   console.log(
     JSON.stringify({
-      feedback: feedback ? "1" : "0",
+      feedback: "1",
       video: video ? "1" : "0",
       linuxVideo: linuxVideo ? "1" : "0",
     }),
@@ -39,7 +37,7 @@ if (process.argv[2] === "--print") {
     throw new Error("release_sidecar.mjs needs a vw-agent-tools build");
   if (featuresAt >= 0 && !args[featuresAt + 1])
     throw new Error("--features needs a value");
-  const controlled = new Set(["video", "linux-video", "feedback"]);
+  const controlled = new Set(["video", "linux-video"]);
   const requested = (featuresAt < 0 ? "" : args[featuresAt + 1])
     .split(",")
     .filter(Boolean)

@@ -32,7 +32,7 @@ const MAX_JSON_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkError {
     /// HTTP 401.
-    #[error("Mistral did not accept the API key (401). Check it in Settings.")]
+    #[error("{}", crate::status_text::KEY_REJECTED)]
     Unauthorized,
     /// HTTP 402: billing.
     #[error(
@@ -54,13 +54,13 @@ pub enum WorkError {
     #[error("Mistral could not use this request ({0}).")]
     Rejected(u16),
     /// HTTP 429.
-    #[error("Mistral is rate-limiting this key right now (429). Try again in a minute.")]
+    #[error("{}", crate::status_text::RATE_LIMITED)]
     RateLimited,
     /// HTTP 5xx.
-    #[error("Mistral had a problem ({0}). Try again later.")]
+    #[error("{}", crate::status_text::service_problem(*.0, "Mistral"))]
     Server(u16),
     /// Any other status (a redirect included: never followed).
-    #[error("Mistral answered with an unexpected status ({0}).")]
+    #[error("{}", crate::status_text::unexpected(*.0))]
     Unexpected(u16),
     /// No answer, or an answer that could not be read.
     #[error("Could not reach Mistral: {0}.")]
@@ -72,7 +72,7 @@ pub enum WorkError {
     #[error("Mistral's answer was not in the expected form ({0}).")]
     Shape(&'static str),
     /// The key cannot be put in a header.
-    #[error("The stored key contains characters a key cannot have.")]
+    #[error("{}", crate::status_text::MALFORMED_STORED_KEY)]
     MalformedKey,
     /// The image tool ran but made no image (its own reason, sanitized and capped).
     #[error("No image was made: {0}")]

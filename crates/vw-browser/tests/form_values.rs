@@ -90,8 +90,12 @@ async fn sets_form_values_once_with_events_and_current_state() {
             rig.engine
                 .eval(&format!("window.events.filter(e=>e[0]==={})", json!(id)))
                 .await,
-            json!([[id, "input", value], [id, "change", value]]),
-            "one input and change for {id}"
+            if matches!(id, "city" | "text-date") {
+                json!([[id, "input", value]])
+            } else {
+                json!([[id, "input", value], [id, "change", value]])
+            },
+            "native text emits input; setter controls also commit change for {id}"
         );
         assert!(
             receipt["change"]["summary"]

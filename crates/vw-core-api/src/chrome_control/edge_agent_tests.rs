@@ -249,15 +249,15 @@ async fn edge_only_session_opens_and_executes_on_the_requested_profile() {
 
 #[tokio::test]
 async fn both_browsers_keep_explicit_selection_and_bare_chrome_ids() {
-    let core = fixture(
-        "edge-agent-selection",
-        json!([{"profileId":CHROME,"connected":true},{"profileId":"edge:p","connected":true}]),
-    )
-    .await;
     for (profile, instruction) in [
         (CHROME, format!("{CHROME_NAME} is connected.")),
         ("edge:p", format!("{EDGE_NAME} is connected.")),
     ] {
+        let core = fixture(
+            &format!("edge-agent-selection-{profile}"),
+            json!([{"profileId":CHROME,"connected":true},{"profileId":"edge:p","connected":true}]),
+        )
+        .await;
         let opened = gateway::call(
             &core.shared,
             "s",
@@ -283,8 +283,8 @@ async fn both_browsers_keep_explicit_selection_and_bare_chrome_ids() {
             instruction,
             "{status}"
         );
+        core.shutdown().await;
     }
-    core.shutdown().await;
 }
 
 #[tokio::test]
@@ -305,7 +305,7 @@ async fn selected_disconnected_edge_keeps_its_reason_and_offer_while_chrome_is_c
     let text = result.to_string();
     assert!(
         text.contains("not in Edge yet")
-            && text.contains("Ask the person")
+            && text.contains("Ask the user")
             && text.contains("addon: edge"),
         "{text}"
     );
@@ -371,9 +371,10 @@ async fn an_old_edge_extension_blocks_only_edge_and_keeps_the_update_instruction
     .await
     .unwrap();
     assert_eq!(body(&chrome)["profileId"], CHROME);
+    test_support::chat(&core.shared, "edge-chat");
     let edge = gateway::call(
         &core.shared,
-        "s",
+        "edge-chat",
         "chrome_session",
         json!({"action":"open","profileId":"edge:p"}),
     )

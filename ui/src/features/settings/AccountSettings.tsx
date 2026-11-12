@@ -27,7 +27,6 @@ import { useKeyUi } from "../setup/useKeys";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { useCoreState, useShellState } from "../shell/hooks";
 import { SessionUsageFacts } from "./SessionUsageFacts";
-import { PLAN_USAGE_ENABLED } from "../../state/planUsageEnabled";
 
 const STATUS_TEXT: Record<string, string> = {
   ready: "Connected",
@@ -84,57 +83,13 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
   const readout = contextReadout(usage, runtime);
 
   if (part === "account")
-    return (
-      <section aria-labelledby="account-settings-title" data-setting="account-facts">
-        <h3 id="account-settings-title">Your account</h3>
-        <KeyNotice
-          inSettings
-          message="Your Mistral key lets Vibe Work read your account details from Mistral."
-        />
-        {via === null && (
-          <p className="key-line">Needs a session: Vibe reads the account through one.</p>
-        )}
-        {via !== null && account === null && !keyBlocked && (
-          <p className="key-line">Reading the account…</p>
-        )}
-        {account !== null && !keyBlocked && (
-          <dl className="set-facts" data-testid="account-facts">
-            <div className="check">
-              <dt>Plan</dt>
-              <dd>{planInWords(account) ?? "Not reported"}</dd>
-            </div>
-            <div className="check">
-              <dt>Account</dt>
-              <dd>
-                {account.problem === null
-                  ? (STATUS_TEXT[account.status] ?? "Not reported")
-                  : `Could not be read: ${account.problem}`}
-              </dd>
-            </div>
-            {account.name !== null && (
-              <div className="check">
-                <dt>Name</dt>
-                <dd>{account.name}</dd>
-              </div>
-            )}
-            {(account.organization ?? account.workspace) !== null && (
-              <div className="check">
-                <dt>Workspace</dt>
-                <dd>
-                  {[account.organization, account.workspace].filter((x) => x !== null).join(" · ")}
-                </dd>
-              </div>
-            )}
-          </dl>
-        )}
-      </section>
-    );
+    return <AccountFacts via={via} account={account} keyBlocked={keyBlocked} />;
 
   return (
     <section aria-labelledby="usage-settings-title" data-setting="session-usage">
       <h3 id="usage-settings-title">{TEXT.thisSession}</h3>
       {selected === null ? (
-        <p className="key-line">Open a session to see its usage.</p>
+        <p className="key-line">Open a chat to see its usage.</p>
       ) : (
         <dl className="set-facts" data-testid="usage-facts">
           <div className="check">
@@ -171,10 +126,62 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           </div>
         </dl>
       )}
-      {!PLAN_USAGE_ENABLED && (
-        <p className="key-field-hint ui-help">
-          Plan left: on Mistral&apos;s website (links below).
-        </p>
+    </section>
+  );
+}
+
+/** Renders the selected key's account facts without changing when the parent reads them. */
+function AccountFacts({
+  via,
+  account,
+  keyBlocked,
+}: {
+  via: string | null;
+  account: AccountView | null;
+  keyBlocked: boolean;
+}) {
+  return (
+    <section aria-labelledby="account-settings-title" data-setting="account-facts">
+      <h3 id="account-settings-title">Your account</h3>
+      <KeyNotice
+        inSettings
+        message="Your Mistral key lets Vibe Work read your account details from Mistral."
+      />
+      {via === null && (
+        <p className="key-line">Needs a chat: Vibe reads the account through one.</p>
+      )}
+      {via !== null && account === null && !keyBlocked && (
+        <p className="key-line">Reading the account…</p>
+      )}
+      {account !== null && !keyBlocked && (
+        <dl className="set-facts" data-testid="account-facts">
+          <div className="check">
+            <dt>Plan</dt>
+            <dd>{planInWords(account) ?? "Not reported"}</dd>
+          </div>
+          <div className="check">
+            <dt>Account</dt>
+            <dd>
+              {account.problem === null
+                ? (STATUS_TEXT[account.status] ?? "Not reported")
+                : `Could not be read: ${account.problem}`}
+            </dd>
+          </div>
+          {account.name !== null && (
+            <div className="check">
+              <dt>Name</dt>
+              <dd>{account.name}</dd>
+            </div>
+          )}
+          {(account.organization ?? account.workspace) !== null && (
+            <div className="check">
+              <dt>Workspace</dt>
+              <dd>
+                {[account.organization, account.workspace].filter((x) => x !== null).join(" · ")}
+              </dd>
+            </div>
+          )}
+        </dl>
       )}
     </section>
   );

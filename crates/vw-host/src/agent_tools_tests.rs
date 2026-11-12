@@ -21,6 +21,9 @@ const NASTY_PATHS: &[&str] = &[
     "reversed‛quote",
     "smart’$(echo injected)",
     "double“quote”",
+    "‘’“”'",
+    "mixed ‘left’ and “right” it's",
+    "’`$() ; & ' “quoted”",
 ];
 
 #[test]
@@ -83,10 +86,14 @@ fn windows_line_preserves_nasty_paths_in_bash_and_powershell() {
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
         let endpoint = dir.join("hook.json");
         let line = hook_command(&binary, &endpoint, "kill-guard", true);
+        // The command reaches Vibe through a TOML basic string before either shell parses it.
+        let saved: toml::Value =
+            toml::from_str(&format!("command = {}", super::toml_string(&line))).unwrap();
+        let line = saved["command"].as_str().unwrap();
         for (shell, flags) in &shells {
             let output = Command::new(shell)
                 .args(flags)
-                .arg(&line)
+                .arg(line)
                 .env(vw_agent_tools::hook::ENV_ENDPOINT_FILE, &endpoint)
                 .output()
                 .unwrap();

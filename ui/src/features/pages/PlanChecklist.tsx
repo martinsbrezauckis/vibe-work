@@ -138,7 +138,7 @@ export function PlanChecklist({
   openStep: (sessionId: string, path: string, step: string) => void;
 }): ReactElement {
   const sessionId = useShellState((s) => s.selected);
-  if (sessionId === null) return <div className="empty">Choose a session to see its plan.</div>;
+  if (sessionId === null) return <div className="empty">Choose a chat to see its plan.</div>;
   return (
     <Checklist
       key={sessionId}

@@ -15,7 +15,7 @@ import { useApp } from "./AppContext";
 const LABEL: Record<NotifyLevel, string> = {
   errors: "Errors",
   permissions: "Errors and permission requests",
-  all: "Everything (also when a session finishes)",
+  all: "Everything (also when a chat finishes)",
 };
 
 /** The section. */

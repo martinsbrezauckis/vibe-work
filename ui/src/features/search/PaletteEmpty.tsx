@@ -35,10 +35,10 @@ export function PaletteEmpty({
         : failed
           ? "Search could not finish"
           : waiting
-            ? "Searching sessions, messages and files…"
+            ? "Searching chats, messages and files…"
             : filter === "all"
-              ? `No matches in sessions, messages or files for “${query}”`
-              : `No matches in ${filter === "setting" ? "settings" : `${filter}s`} for “${query}”`;
+              ? `No matches in chats, messages or files for “${query}”`
+              : `No matches in ${filter === "setting" ? "settings" : filter === "session" ? "chats" : `${filter}s`} for “${query}”`;
   return (
     <li className="pal-empty" role="presentation">
       <b>{title}</b>

@@ -82,7 +82,7 @@ export function GrantsChip({ sessionId }: { sessionId: string }): ReactElement |
         <Icon name={expanded ? "chevron-up" : "chevron-down"} size={12} />
       </Badge>
       <div id={id} ref={list} className="ask-grants-list" hidden={!expanded}>
-        <p className="ui-help">Vibe Work answers these again for you until this session ends.</p>
+        <p className="ui-help">Vibe Work answers these again for you until this chat ends.</p>
         {grants.map((grant, index) => (
           <div key={grant.id} className="check ask-grant" data-grant-id={grant.id}>
             <span>

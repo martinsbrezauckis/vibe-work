@@ -52,6 +52,7 @@ use crate::paths::{INDEX, asset_allowed, segment_allowed};
 pub const MAX_FILE: u64 = 20 * 1024 * 1024;
 
 struct ServerState {
+    snapshot: Option<crate::snapshot::Snapshot>,
     root: PathBuf,
     capability: String,
     /// `.vw-check-<128 random bits hex>`: the check route's first segment (see the module header).
@@ -90,7 +91,7 @@ impl PagesServer {
     /// # Errors
     /// The bind or random-source error.
     pub async fn start(root: PathBuf, scripts: bool, project: String) -> std::io::Result<Self> {
-        Self::start_inner(root, scripts, project, false).await
+        Self::start_inner(root, scripts, project, false, None).await
     }
 
     /// [`Self::start`] for the File tab's viewer: also serves `.pdf` as `application/pdf` (the engine's
@@ -99,7 +100,22 @@ impl PagesServer {
     /// # Errors
     /// The bind or random-source error.
     pub async fn start_for_files(root: PathBuf, project: String) -> std::io::Result<Self> {
-        Self::start_inner(root, false, project, true).await
+        Self::start_inner(root, false, project, true, None).await
+    }
+
+    /// Serves only an immutable, passive PDF/HTML/image snapshot. No file or folder is opened by this server.
+    /// Scripts, connections, frames and forms are blocked; relative assets are unavailable.
+    /// Returns the running server and its exact document URL. Dropping it revokes that URL.
+    ///
+    /// # Errors
+    /// An unsupported extension, bytes over 20 MiB, or a bind/random-source error.
+    pub async fn start_document(name: &str, bytes: Vec<u8>) -> std::io::Result<(Self, String)> {
+        let snapshot = crate::snapshot::Snapshot::new(name, bytes)?;
+        let path = snapshot.path.clone();
+        let server =
+            Self::start_inner(PathBuf::new(), false, String::new(), true, Some(snapshot)).await?;
+        let url = format!("{}{}", server.base_url().trim_end_matches('/'), path);
+        Ok((server, url))
     }
 
     async fn start_inner(
@@ -107,6 +123,7 @@ impl PagesServer {
         scripts: bool,
         project: String,
         pdf: bool,
+        snapshot: Option<crate::snapshot::Snapshot>,
     ) -> std::io::Result<Self> {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
         let port = listener.local_addr()?.port();
@@ -118,6 +135,7 @@ impl PagesServer {
         getrandom::fill(&mut capability).map_err(|e| std::io::Error::other(e.to_string()))?;
         let capability = crate::comments::hex(&capability);
         let state = Arc::new(ServerState {
+            snapshot,
             capability: capability.clone(),
             check: check.clone(),
             root: root.clone(),
@@ -305,6 +323,9 @@ fn serve(
     uri_path: &str,
     inline_body: bool,
 ) -> Result<(&'static str, Vec<u8>, Policy), StatusCode> {
+    if let Some(snapshot) = &state.snapshot {
+        return snapshot.serve(uri_path);
+    }
     let (check, uri_path) = match uri_path
         .strip_prefix('/')
         .and_then(|p| p.strip_prefix(state.check.as_str()))

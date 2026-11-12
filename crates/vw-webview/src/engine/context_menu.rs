@@ -21,6 +21,8 @@ pub enum PageMenuChoice {
     SaveToVault,
     /// Point Vibe at this: the window runs the preview pick, which reads the selection in the page.
     PointVibe,
+    /// Share page, link or image; the core consumes the one-use document choice.
+    Share,
 }
 
 /// The choices one poll answer holds: a number, bit 1 Save to vault, bit 2 Point Vibe at this.
@@ -33,12 +35,15 @@ fn choices(answer: &str) -> Vec<PageMenuChoice> {
     if bits & 2 != 0 {
         out.push(PageMenuChoice::PointVibe);
     }
+    if bits & 4 != 0 {
+        out.push(PageMenuChoice::Share);
+    }
     out
 }
 
 const POLL: Duration = Duration::from_millis(150);
 const ANSWER_WAIT: Duration = Duration::from_secs(4);
-const INTENT: &str = "(window.__vw_context_menu_intent?.take() ? 1 : 0) + (window.__vw_point_intent?.take() ? 2 : 0)";
+const INTENT: &str = "(window === window.top ? (window.__vw_context_menu_intent?.take() ? 1 : 0) + (window.__vw_point_intent?.take() ? 2 : 0) : 0) + (window.__vw_share_intent?.take() ? 4 : 0)";
 
 /// One owned poll task per mounted browser, aborted on close or engine drop.
 #[derive(Default)]
@@ -54,15 +59,22 @@ impl Pollers {
             let mut tick = tokio::time::interval(POLL);
             loop {
                 tick.tick().await;
-                let script = vw_preview::main_script(&format!("{init}\n{INTENT}"));
+                let script = format!("{init}\n{INTENT}");
                 if let Ok(Ok(answers)) = tokio::time::timeout(
                     ANSWER_WAIT,
                     crate::agent_frames::evaluate(&webview, None, script),
                 )
                 .await
-                    && let Ok(answer) = vw_preview::main_answer(answers)
                 {
-                    for choice in choices(&answer.value) {
+                    let mut found = Vec::new();
+                    for answer in answers {
+                        for choice in choices(&answer.value) {
+                            if !found.contains(&choice) {
+                                found.push(choice);
+                            }
+                        }
+                    }
+                    for choice in found {
                         sink(session_id.clone(), choice);
                     }
                 }

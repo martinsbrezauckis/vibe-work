@@ -55,7 +55,7 @@ impl Browser {
         }
         if grew(ActRefusal::FullScreen) {
             receipt["fullScreen"] = json!(
-                "The page asked for full screen; it was refused, because agent acts may not take over the person's screen."
+                "The page asked for full screen; it was refused, because agent acts may not take over the user's screen. Continue in the Browser pane."
             );
         }
     }

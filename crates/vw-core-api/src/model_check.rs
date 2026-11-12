@@ -74,6 +74,7 @@ async fn bare_lobby(
     shared: &Shared,
     home: &Path,
     path: &Path,
+    account_models_available: bool,
 ) -> Result<(Value, String), CoreError> {
     let original = crate::default_model::read(path)?;
     let written = crate::model_facts::recorded(home);
@@ -90,13 +91,19 @@ async fn bare_lobby(
         return Ok((lobby(shared).await?, original));
     }
     let read = lobby(shared).await;
-    // A successful, settled read is authoritative even when it has no account models:
-    // facts-only overrides for absent experiments are orphans in Vibe. If the model returns,
-    // the next check can add its missing facts again. Only our exact facts rows were removed.
+    // Without a usable vault key an empty account list does not establish that a model was retired.
+    // Keep the saved facts through a locked update, including a file Vibe rewrote without our comment.
+    // An authenticated empty list remains authoritative (e.g. experiments disabled).
     if read.is_err()
-        || read
-            .as_ref()
-            .is_ok_and(|r| r["config"]["awaitingExperimentModel"] == true)
+        || read.as_ref().is_ok_and(|r| {
+            r["config"]["awaitingExperimentModel"] == true
+                || (!account_models_available
+                    && !r["config"]["models"].as_array().is_some_and(|models| {
+                        models.iter().any(|model| {
+                            matches!(model["source"].as_str(), Some("growthbook" | "catalog"))
+                        })
+                    }))
+        })
     {
         if replace(path, &bare, &original).await? {
             crate::model_facts::record(home, written.as_ref())?;
@@ -113,7 +120,17 @@ async fn bare_lobby(
 pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
     let home = &shared.instructions.own_home;
     let path = home.join("config.toml");
-    let (mut reply, current) = bare_lobby(shared, home, &path).await?;
+    let (mut reply, current) = bare_lobby(
+        shared,
+        home,
+        &path,
+        shared
+            .config
+            .keys
+            .as_ref()
+            .is_none_or(|keys| keys.speech_available()),
+    )
+    .await?;
     if reply["config"]["awaitingExperimentModel"] == true {
         return Ok(json!({"gone": null}));
     }

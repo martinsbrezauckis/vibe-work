@@ -35,7 +35,6 @@ mod attention;
 mod commands;
 mod dialog_plugin;
 mod dialogs;
-#[cfg(feature = "feedback")]
 mod feedback_entry;
 mod in_front;
 mod instance;
@@ -49,6 +48,7 @@ mod startup_market;
 mod tray;
 mod updater;
 mod window_api;
+mod window_focus;
 
 use tauri::webview::{PageLoadEvent, PermissionResponse};
 use tauri::{Manager, RunEvent};
@@ -106,6 +106,11 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// type (`ui/src/features/files/drop.ts`: pictures inline, everything else `documents addDropped`).
 /// Kept for the day the Tauri drop is turned back on (then both paths must not add the same file twice).
 fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if window.label() == MAIN_WINDOW
+        && let tauri::WindowEvent::Focused(focused) = event
+    {
+        window_focus::report(window, *focused);
+    }
     if window.label() == MAIN_WINDOW
         && let tauri::WindowEvent::CloseRequested { api, .. } = event
     {
@@ -235,6 +240,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::desktop_settings,
         attention::desktop_attention,
         commands::desktop_subscribe,
+        commands::desktop_focus_subscribe,
         commands::app_quit,
         commands::core_subscribe,
         commands::ui_control_next,
@@ -296,6 +302,7 @@ pub fn run() -> tauri::Result<()> {
     }
     let app = builder
         .manage(handle.clone())
+        .manage(window_focus::WindowFocus::default())
         .manage(updater::UpdatesHandle::default())
         .manage(updater::VibeSlot::default())
         .invoke_handler(bridge_commands())

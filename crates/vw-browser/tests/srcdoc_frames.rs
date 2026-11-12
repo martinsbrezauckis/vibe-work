@@ -14,15 +14,11 @@ use vw_browser::{Actor, ReadOptions};
 const PAGE_ORIGIN: &str = "https://93.184.215.14";
 
 async fn page(isolated: bool, script: &str) -> Rig {
-    let rig = Rig::new().await;
-    rig.engine
-        .isolate_scripts
-        .store(isolated, Ordering::Relaxed);
+    let rig = Rig::new_in_world(isolated).await;
     rig.engine
         .eval("document.body.innerHTML = '<button style=\"position:fixed;left:4px;top:4px\">Main button</button>'; scrollTo(0,0)")
         .await;
-    rig.engine.eval(script).await;
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    rig.engine.eval_frames(script).await;
     rig
 }
 
@@ -98,7 +94,7 @@ async fn a_srcdoc_frame_is_read_and_filled_with_its_parents_origin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_nested_srcdoc_inherits_up_the_chain_and_a_cross_origin_child_keeps_its_own() {
     for isolated in [false, true] {
-        let rig = page(isolated, "new Promise(resolve=>{const f=document.createElement('iframe');f.style='position:fixed;left:4px;top:40px;width:290px;height:150px';f.srcdoc=`<button>Outer inline</button><iframe srcdoc=\"<button>Inner inline</button>\"></iframe><iframe src=\"https://frame.example.test/login\"></iframe>`;f.onload=()=>setTimeout(resolve,400);document.body.append(f)})").await;
+        let rig = page(isolated, "new Promise(resolve=>{const f=document.createElement('iframe');f.style='position:fixed;left:4px;top:40px;width:290px;height:150px';f.srcdoc=`<button>Outer inline</button><iframe srcdoc=\"<button>Inner inline</button>\"></iframe><iframe src=\"https://frame.example.test/login\"></iframe>`;f.onload=resolve;document.body.append(f)})").await;
         let answer = read(&rig).await;
         let refs = refs(&answer);
         for name in ["Outer inline", "Inner inline"] {
@@ -162,7 +158,7 @@ async fn a_frame_written_by_its_parents_script_uses_the_parents_origin() {
     }
 }
 
-const DATA_AND_BLOB: &str = "new Promise(resolve=>{const login='<form method=post><label>Password <input type=password></label><button>SEND</button></form>';const d=document.createElement('iframe');d.src='data:text/html,'+encodeURIComponent(login.replace('SEND','Data sign in'));document.body.append(d);const b=document.createElement('iframe');b.src=URL.createObjectURL(new Blob([login.replace('SEND','Blob sign in')],{type:'text/html'}));b.onload=()=>setTimeout(resolve,300);document.body.append(b)})";
+const DATA_AND_BLOB: &str = "new Promise(resolve=>{const login='<form method=post><label>Password <input type=password></label><button>SEND</button></form>';const d=document.createElement('iframe');d.src='data:text/html,'+encodeURIComponent(login.replace('SEND','Data sign in'));document.body.append(d);const b=document.createElement('iframe');b.src=URL.createObjectURL(new Blob([login.replace('SEND','Blob sign in')],{type:'text/html'}));b.onload=resolve;document.body.append(b)})";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn data_and_blob_frames_are_read_a_data_frame_without_an_origin() {
@@ -444,7 +440,7 @@ async fn a_main_frame_on_a_data_or_blob_address_is_never_read() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_data_frame_is_read_when_its_native_address_is_percent_encoded() {
-    let rig = page(true, "new Promise(resolve=>{const d=document.createElement('iframe');d.src='data:text/html,<button>Data button</button>';d.onload=()=>setTimeout(resolve,200);document.body.append(d)})").await;
+    let rig = page(true, "new Promise(resolve=>{const d=document.createElement('iframe');d.src='data:text/html,<button>Data button</button>';d.onload=resolve;document.body.append(d)})").await;
     rig.engine
         .encoded_data_addresses
         .store(true, Ordering::Relaxed);
@@ -455,7 +451,7 @@ async fn a_data_frame_is_read_when_its_native_address_is_percent_encoded() {
     assert!(unread(&answer).is_empty(), "{answer}");
 }
 
-const SCRIPTLESS: &str = "new Promise(resolve=>{const f=document.createElement('iframe');f.sandbox='';f.style='position:fixed;left:4px;top:40px;width:200px;height:60px';f.srcdoc='<button>Scriptless sandbox</button>';f.onload=()=>setTimeout(resolve,200);document.body.append(f)})";
+const SCRIPTLESS: &str = "new Promise(resolve=>{const f=document.createElement('iframe');f.sandbox='';f.style='position:fixed;left:4px;top:40px;width:200px;height:60px';f.srcdoc='<button>Scriptless sandbox</button>';f.onload=resolve;document.body.append(f)})";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scriptless_sandbox_never_fails_a_read_and_is_named_when_left_out() {

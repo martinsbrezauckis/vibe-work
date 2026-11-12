@@ -1,7 +1,20 @@
 // Native value validation and range key defaults for the built-in action script.
 // Uses detached controls before live mutation; called by act.js with the native setter and event dispatcher.
 /* global fire, setValue, viewOf, widgetDateValue */
-/* exported requestedValue, rangeKey */
+/* exported requestedValue, rangeKey, valueMatches */
+const valueMatches = (el, expected) => {
+  if (String(el.isContentEditable ? el.innerText : el.value) === expected) return true;
+  if (!el.isContentEditable) return false;
+  // Editors (including WebKit's insertText) wrap lines in paragraphs. innerText adds paragraph
+  // spacing, which is not an extra typed line. Only normalize this explicit line structure;
+  // keep empty paragraphs, leading/trailing lines and any text the page rewrote intact.
+  const lines = Array.from(el.childNodes);
+  if (!lines.length || lines.some(line => !["p", "div"].includes(line.localName) ||
+    !line.getClientRects().length || viewOf(line).getComputedStyle(line).visibility !== "visible")) return false;
+  return lines.map(line => line.childNodes.length === 1 && line.firstChild.localName === "br"
+    ? "" : line.innerText).join("\n") === expected;
+};
+
 const requestedValue = (el, text) => {
   const widget = widgetDateValue(el, text);
   if (widget) return widget;

@@ -13,12 +13,12 @@ workspace = true
 
 [dependencies]
 # The hijack-variable rule and the key's name, shared with vibe-app-server.
-vw-supervisor = { path = "../vw-supervisor" }
+vw-supervisor = { workspace = true }
 # Settings made for the app's own run only (the accessibility switch), kept out of the shell.
-vw-platform = { path = "../vw-platform" }
-thiserror = "2"
-tokio = { version = "1.53", features = ["rt", "sync", "time"] }
-tracing = "0.1"
+vw-platform = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing = { workspace = true }
 # PTY on Unix and ConPTY on Windows. 0.9.0 (2025-02, MIT, wezterm) is the newest;
 # ShellX pins 0.8 (library table).
 portable-pty = "0.9.0"
@@ -26,7 +26,7 @@ portable-pty = "0.9.0"
 [target.'cfg(unix)'.dependencies]
 # Safe getsid/kill for the session-wide kill (portable-pty makes every shell a session leader).
 # 0.31 is already in the lockfile (notification stack).
-nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
 # Kill-on-close Job Object per terminal through a safe API (our crates forbid unsafe code).

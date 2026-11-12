@@ -170,6 +170,6 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
 export function PagesTab({ pages }: { pages: Pages }): ReactElement {
   const sessionId = useShellState((s) => s.selected);
   if (sessionId === null)
-    return <div className="empty">Choose a session to see its project handbook.</div>;
+    return <div className="empty">Choose a chat to see its project handbook.</div>;
   return <SessionPages key={sessionId} pages={pages} sessionId={sessionId} />;
 }

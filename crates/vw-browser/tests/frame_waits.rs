@@ -17,8 +17,7 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 async fn page() -> Rig {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval("document.body.innerHTML='<button>Retained main control</button><iframe src=\"https://consent.example.test/privacy\" style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>'").await;
     rig.engine
         .wait_for_frame("https://consent.example.test/privacy", "#reject")

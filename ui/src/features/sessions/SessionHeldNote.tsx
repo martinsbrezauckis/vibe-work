@@ -36,7 +36,7 @@ export function SessionHeldNote({ sessionId }: { sessionId: string }): ReactElem
         <br />
         {kind === "terminal"
           ? "Read-only here. Quit Vibe in the terminal to continue here."
-          : "Read-only here. Close this session in the other window to continue here."}
+          : "Read-only here. Close this chat in the other window to continue here."}
       </span>
     </p>
   );

@@ -284,3 +284,18 @@ pub(crate) fn update_cosmetics(
         )),
     }
 }
+
+/// Installs or removes the future-document native keyboard fence in every protocol session.
+pub(crate) fn keyboard_fence(native: &PlatformWebview, source: Option<String>, done: CdpDone) {
+    let Some(frames) = registry(devtools_win::view_key(&native.controller())) else {
+        done(Err("isolated browser frames are unavailable".into()));
+        return;
+    };
+    let done =
+        Box::new(move |answer: Result<(), String>| done(answer.map(|()| serde_json::Value::Null)));
+    if let Some(source) = source {
+        frames.hold_keyboard(source, done);
+    } else {
+        frames.release_keyboard(done);
+    }
+}

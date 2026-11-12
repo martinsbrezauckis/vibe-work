@@ -254,7 +254,7 @@ mod tests {
             }
             let instruction = chrome["instruction"].as_str().unwrap();
             assert!(
-                instruction.contains("Ask the person") || instruction.contains("Tell the person"),
+                instruction.to_ascii_lowercase().contains("ask the user"),
                 "{instruction}"
             );
         }
@@ -465,7 +465,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(refused.contains("Tell the person"), "{refused}");
+        assert!(refused.contains("ask the user"), "{refused}");
         core.shutdown().await;
     }
 }

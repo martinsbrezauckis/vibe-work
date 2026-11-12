@@ -79,7 +79,11 @@ pub const CREDENTIAL_REASON: &str = "Not run: the agent cannot use the user's st
 /// Reason for refusing a Git identity the agent sets itself.
 pub const IDENTITY_REASON: &str = "Not run: the name and email Git writes into commits are the user's to set. When a commit needs them, Vibe Work asks the user.";
 /// Reason for refusing a GitHub CLI command while reads are off.
-pub const GH_WRITE_REASON: &str = "GitHub reads are off. The user can turn them on in Settings > General. For GitHub data use the GitHub connector.";
+pub const GH_WRITE_REASON: &str = vw_gh_broker::remote_change_refusal!(concat!(
+    "GitHub reads are off. Ask the user to turn them on in ",
+    vw_vocabulary::settings_path!("General"),
+    ", or use the GitHub connector for reads."
+));
 
 /// One recognized Git or GitHub CLI operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +266,11 @@ fn scan_reading<'a>(
                 at += 1;
             }
         }
+        // Windows shells: `cmd /c …` (Git Bash writes `cmd //c`) and `pwsh|powershell -Command …` run the rest of the
+        // line as a command, the natural Windows form of a wrapped credential read.
+        for script in windows_shell_script(&name, args) {
+            scripts.push((script, true));
+        }
         let mut switched = false;
         if name == "git" {
             out.mentions = true;
@@ -278,6 +287,103 @@ fn scan_reading<'a>(
         elsewhere |= switched;
     }
     out
+}
+
+/// The command texts a Windows shell may run: `cmd /c|/k|/r` (also `//c` from Git Bash and `/cTEXT` without a space, `^`
+/// escapes removed) or PowerShell `-Command` (any prefix) and `-EncodedCommand` (decoded), wherever they appear. Without
+/// either, Windows PowerShell runs its first plain argument as a command; which word that is depends on parameter
+/// values, so every plain word starts a candidate (pwsh's default is -File, a script file, which is not read).
+/// Reading more candidates can only add asks, never remove one.
+pub(crate) fn windows_shell_script(name: &str, args: &[&str]) -> Vec<String> {
+    match name {
+        "cmd" => cmd_script(args).into_iter().collect(),
+        "pwsh" | "powershell" => powershell_scripts(name == "powershell", args),
+        _ => Vec::new(),
+    }
+}
+
+fn cmd_script(args: &[&str]) -> Option<String> {
+    for (at, arg) in args.iter().enumerate() {
+        let Some(switch) = arg.strip_prefix("//").or_else(|| arg.strip_prefix('/')) else {
+            continue;
+        };
+        let mut chars = switch.chars();
+        if chars
+            .next()
+            .is_some_and(|c| matches!(c.to_ascii_lowercase(), 'c' | 'k' | 'r'))
+        {
+            let mut words: Vec<&str> = Vec::new();
+            let attached = chars.as_str();
+            if !attached.is_empty() {
+                words.push(attached);
+            }
+            words.extend_from_slice(&args[at + 1..]);
+            let script = words.join(" ").replace('^', "");
+            return (!script.trim().is_empty()).then_some(script);
+        }
+    }
+    None
+}
+
+fn powershell_flag(arg: &str) -> Option<String> {
+    let lower = arg.to_ascii_lowercase();
+    let flag = lower
+        .strip_prefix("--")
+        .or_else(|| lower.strip_prefix('-'))
+        .or_else(|| lower.strip_prefix('/'))?;
+    (!flag.is_empty()).then(|| flag.to_owned())
+}
+
+/// At most this many positional candidates per PowerShell call (each is read again as a command line).
+const MAX_POSITIONAL_CANDIDATES: usize = 8;
+
+fn powershell_scripts(windows_powershell: bool, args: &[&str]) -> Vec<String> {
+    let mut scripts = Vec::new();
+    for (at, arg) in args.iter().enumerate() {
+        let Some(flag) = powershell_flag(arg) else {
+            continue;
+        };
+        if "command".starts_with(flag.as_str()) {
+            let rest = &args[at + 1..];
+            if !rest.is_empty() {
+                scripts.push(rest.join(" "));
+            }
+            break;
+        }
+        if flag == "e"
+            || flag == "ec"
+            || (flag.starts_with("en") && "encodedcommand".starts_with(flag.as_str()))
+        {
+            scripts.extend(args.get(at + 1).map(|text| decode_powershell(text)));
+            break;
+        }
+    }
+    if windows_powershell {
+        scripts.extend(
+            (0..args.len())
+                .filter(|&at| powershell_flag(args[at]).is_none())
+                .take(MAX_POSITIONAL_CANDIDATES)
+                .map(|at| args[at..].join(" ")),
+        );
+    }
+    scripts
+}
+
+/// `-EncodedCommand` is base64 of UTF-16LE text. Undecodable input is returned as is, so it reads as no command.
+fn decode_powershell(text: &str) -> String {
+    use base64::Engine as _;
+    let Ok(bytes) =
+        base64::engine::general_purpose::STANDARD.decode(text.trim_matches(['"', '\'']))
+    else {
+        return text.to_owned();
+    };
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
+        .collect();
+    String::from_utf16_lossy(&units)
 }
 
 pub(crate) struct Sink<'a>(&'a mut GitScan);

@@ -15,48 +15,44 @@ const COMMENT: u32 = u32::from_be_bytes(*b"icmt");
 pub(super) struct Store<'a> {
     keychain: CFType,
     item: Option<CFType>,
+    legacy: Option<CFType>,
     initial_access: Option<CFType>,
-    service: &'a str,
+    service: String,
     account: &'a str,
     label: &'a str,
 }
 
 impl<'a> Store<'a> {
     pub(super) fn open(service: &'a str, account: &'a str, label: &'a str) -> Result<Self, String> {
-        let service_len = length(service.as_bytes())?;
-        let account_len = length(account.as_bytes())?;
         let mut keychain = ptr::null();
         // SAFETY: zero selects the User domain used by the previous keyring store.
         check(unsafe { ffi::SecKeychainCopyDomainDefault(0, &raw mut keychain) })?;
         let keychain = access::owned(keychain)?;
-        let mut item = ptr::null();
-        // SAFETY: live byte slices with checked lengths; NULL password outputs find metadata only.
-        let status = unsafe {
-            ffi::SecKeychainFindGenericPassword(
-                keychain.as_CFTypeRef(),
-                service_len,
-                service.as_ptr().cast(),
-                account_len,
-                account.as_ptr().cast(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-                &raw mut item,
-            )
-        };
-        let item = if status == -25300 {
-            None
+        // Generic passwords are unique by service/account. A distinct service lets the old item
+        // survive creation failures and process exits. Always prefer the committed replacement.
+        let migrated_service = format!("{service}.app-access-v1");
+        let migrated = find(&keychain, &migrated_service, account)?;
+        let original = find(&keychain, service, account)?;
+        let (service, item, legacy) = if migrated.is_some() {
+            (migrated_service, migrated, original)
         } else {
-            check(status)?;
-            Some(access::owned(item)?)
+            (service.to_owned(), original, None)
         };
         Ok(Self {
             keychain,
             item,
+            legacy,
             initial_access: None,
             service,
             account,
             label,
         })
+    }
+
+    pub(super) fn delete(&mut self) -> Result<(), String> {
+        // Remove the fallback first: a partial failure must leave the preferred item usable.
+        delete_item(&mut self.legacy)?;
+        delete_item(&mut self.item)
     }
 
     fn item(&self) -> Result<&CFType, String> {
@@ -155,8 +151,13 @@ impl Keychain for Store<'_> {
             .initial_access
             .as_ref()
             .ok_or_else(|| "Keychain access was not prepared".to_owned())?;
+        let service = if self.item.is_some() {
+            format!("{}.app-access-v1", self.service)
+        } else {
+            self.service.clone()
+        };
         let mut fields = [
-            attribute(*b"svce", self.service.as_bytes())?,
+            attribute(*b"svce", service.as_bytes())?,
             attribute(*b"acct", self.account.as_bytes())?,
             attribute(*b"labl", self.label.as_bytes())?,
             attribute(*b"icmt", MARKER)?,
@@ -179,7 +180,9 @@ impl Keychain for Store<'_> {
                 &raw mut item,
             )
         })?;
-        self.item = Some(access::owned(item)?);
+        let created = access::owned(item)?;
+        self.legacy = self.item.replace(created);
+        self.service = service;
         Ok(())
     }
 
@@ -195,13 +198,8 @@ impl Keychain for Store<'_> {
         })
     }
 
-    fn delete(&mut self) -> Result<(), String> {
-        if let Some(item) = &self.item {
-            // SAFETY: this is the exact item found in the selected keychain; no name-based second lookup.
-            check(unsafe { ffi::SecKeychainItemDelete(item.as_CFTypeRef()) })?;
-            self.item = None;
-        }
-        Ok(())
+    fn delete_legacy(&mut self) -> Result<(), String> {
+        delete_item(&mut self.legacy)
     }
 }
 
@@ -211,4 +209,35 @@ fn attribute(tag: [u8; 4], bytes: &[u8]) -> Result<Attribute, String> {
         length: length(bytes)?,
         data: bytes.as_ptr().cast_mut().cast(),
     })
+}
+
+fn find(keychain: &CFType, service: &str, account: &str) -> Result<Option<CFType>, String> {
+    let mut item = ptr::null();
+    // SAFETY: live slices and checked lengths; null password outputs request metadata only.
+    let status = unsafe {
+        ffi::SecKeychainFindGenericPassword(
+            keychain.as_CFTypeRef(),
+            length(service.as_bytes())?,
+            service.as_ptr().cast(),
+            length(account.as_bytes())?,
+            account.as_ptr().cast(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut item,
+        )
+    };
+    if status == -25300 {
+        return Ok(None);
+    }
+    check(status)?;
+    access::owned(item).map(Some)
+}
+
+fn delete_item(item: &mut Option<CFType>) -> Result<(), String> {
+    if let Some(found) = item {
+        // SAFETY: deletes the exact retained item, never a name-based second lookup.
+        check(unsafe { ffi::SecKeychainItemDelete(found.as_CFTypeRef()) })?;
+        *item = None;
+    }
+    Ok(())
 }

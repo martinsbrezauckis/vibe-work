@@ -57,14 +57,50 @@ impl TauriEngine {
         } else {
             self.watch_person(&webview, &id.label).await?
         };
-        crate::native_click::native_click(
+        let keyboard = guard
+            .validation
+            .as_ref()
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+            .filter(|request| request["keyboard"]["text"].is_string());
+        let fence = if let Some(request) = &keyboard {
+            Some(
+                crate::keyboard_fence::Fence::install(
+                    &webview,
+                    request["receipt"]
+                        .as_str()
+                        .ok_or(EngineError::NotMounted)?
+                        .to_owned(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let sent = guard.sent.clone();
+        let person_interval = guard.person.clone();
+        let result = crate::native_click::native_click(
             &webview,
             (point.x, point.y),
             (point.viewport_width, point.viewport_height),
             guard,
             person,
         )
-        .await
+        .await;
+        if let Some(fence) = fence
+            && (result.is_ok() || !sent.load(std::sync::atomic::Ordering::Acquire))
+        {
+            fence
+                .finish(
+                    keyboard
+                        .as_ref()
+                        .and_then(|r| r["page"].as_str())
+                        .ok_or(EngineError::NotMounted)?,
+                    sent.load(std::sync::atomic::Ordering::Acquire),
+                    &person_interval,
+                )
+                .await?;
+        }
+        result
     }
 
     /// Native frame registries, trusted initialization and pointer watches before the first navigation.
@@ -75,6 +111,13 @@ impl TauriEngine {
     ) -> Result<(), EngineError> {
         crate::agent_frames::install(webview).await?;
         self.install_dialogs(webview, label).await?;
+        let requests = crate::request_log::install(webview).await;
+        self.request_logs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(label.into(), requests);
+        #[cfg(target_os = "linux")]
+        crate::linux_agent::install_point_guard(webview).await?;
         #[cfg(target_os = "macos")]
         {
             let source = self
@@ -84,7 +127,11 @@ impl TauriEngine {
                 .get(label)
                 .cloned()
                 .ok_or(EngineError::NotMounted)?;
-            crate::mac_agent::install_initializer(webview, source).await?;
+            crate::mac_agent::install_initializer(
+                webview,
+                format!("{}\n{source}", vw_preview::POINT_GUARD),
+            )
+            .await?;
         }
         #[cfg(windows)]
         {

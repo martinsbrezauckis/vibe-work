@@ -47,7 +47,7 @@ export function UnfiledSection({
           type="button"
           className="proj-h"
           aria-expanded={open}
-          title="Sessions in no project. Drop a session here to take it out of its project."
+          title="Chats in no project. Drop a chat here to take it out of its project."
           onClick={() => {
             shell.actions.toggleProject(UNFILED_KEY);
           }}

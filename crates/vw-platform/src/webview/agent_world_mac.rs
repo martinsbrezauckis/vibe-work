@@ -272,6 +272,40 @@ pub fn install_agent_initializer(webview: *mut c_void, source: &str) -> Result<(
     Ok(())
 }
 
+/// Removes only the initializer with this exact host-generated source, preserving every other script.
+/// # Errors
+/// The native view is unavailable or this call is not on its main thread.
+pub fn remove_agent_initializer(webview: *mut c_void, source: &str) -> Result<(), String> {
+    let _main = MainThreadMarker::new().ok_or("native script cleanup requires the main thread")?;
+    // SAFETY: the engine supplies its live WKWebView on the main thread for this operation.
+    let view = unsafe { webview.cast::<WKWebView>().as_ref() }.ok_or("the browser view closed")?;
+    // SAFETY: the retained configuration/controller and scripts belong to this live main-thread view.
+    unsafe {
+        let controller = view.configuration().userContentController();
+        // `userScripts` is a live view of the controller's list, not a copy: `removeAllUserScripts` empties it too.
+        // Take our own retained copies first, or nothing is re-added and every later document loses the agent
+        // world's frame registration and point guard (native input then reports "frame is stale or detached").
+        let kept: Vec<Retained<WKUserScript>> = controller
+            .userScripts()
+            .to_vec()
+            .into_iter()
+            .filter(|script| script.source().to_string() != source)
+            .collect();
+        controller.removeAllUserScripts();
+        for script in &kept {
+            controller.addUserScript(script);
+        }
+        let now = controller.userScripts().count();
+        if now != kept.len() {
+            return Err(format!(
+                "native script cleanup kept {now} of {} scripts",
+                kept.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Forgets a closed webview's world (`WebKit` releases the scripts with the webview).
 pub fn forget_agent_world(webview: *mut c_void) {
     WORLDS.with(|w| w.borrow_mut().remove(&(webview as usize)));

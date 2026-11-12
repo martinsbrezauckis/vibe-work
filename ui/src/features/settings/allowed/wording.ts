@@ -110,7 +110,7 @@ export function folderName(folder: string): string {
 /** The status line after one entry of a kind is revoked. */
 export const REVOKED_ONE = {
   session: "Revoked. Vibe asks again next time.",
-  rule: "Revoked. New sessions ask again. A session that is open now may keep using it until it ends.",
+  rule: "Revoked. New chats ask again. A chat that is open now may keep using it until it ends.",
   vault: "Revoked.",
 } as const;
 

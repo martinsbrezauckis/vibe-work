@@ -285,3 +285,44 @@ async fn our_entry_that_lost_its_mark_is_refreshed_or_removed_without_a_record()
     core.shutdown().await;
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// The first locked launch after an update cannot use the empty account list as proof of retirement.
+#[tokio::test]
+async fn locked_update_keeps_marked_and_rewritten_facts_until_account_models_can_be_read() {
+    let (core, _root, home) = Box::pin(start("locked-update")).await;
+    let file = home.join("config.toml");
+    let (marked, written) = crate::model_facts::with(
+        "active_model = 'large-4'\n",
+        "mistral-large-4-0-3",
+        &json!({}),
+    );
+    for original in [
+        marked.clone(),
+        marked.replace(crate::model_facts::MARK.trim_end(), ""),
+    ] {
+        for rows in [json!([]), json!([{"alias":"large-4", "source":"config"}])] {
+            crate::model_facts::record(&home, written.as_ref()).unwrap();
+            std::fs::write(&file, &original).unwrap();
+            std::fs::write(home.join("rows.json"), rows.to_string()).unwrap();
+            let (_, current) = super::bare_lobby(&core.shared, &home, &file, false)
+                .await
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&file).unwrap(),
+                original,
+                "a locked launch lost the saved context window and prices"
+            );
+            assert_eq!(current, original);
+            assert_eq!(crate::model_facts::recorded(&home), written);
+            // Once unlocked, a populated account list can establish that Large 4 was retired.
+            offer(&home, None);
+            check(&core).await;
+            assert!(
+                !std::fs::read_to_string(&file)
+                    .unwrap()
+                    .contains("mistral-large-4-0-3")
+            );
+        }
+    }
+    core.shutdown().await;
+}

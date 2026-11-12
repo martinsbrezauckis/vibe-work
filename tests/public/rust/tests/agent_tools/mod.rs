@@ -21,7 +21,13 @@ use crate::common::gate::FakeConfirmer;
 use crate::common::processes::scratch;
 
 /// The test build of the `vw-agent-tools` program.
-pub const BIN: &str = env!("CARGO_BIN_EXE_vw_agent_tools_bin");
+pub const BIN: &str = match (
+    option_env!("CARGO_BIN_EXE_vw_public_agent_tools_bin"),
+    option_env!("CARGO_BIN_EXE_vw_agent_tools_bin"),
+) {
+    (Some(binary), _) | (None, Some(binary)) => binary,
+    (None, None) => panic!("agent-tools test binary is not configured"),
+};
 
 /// A lease range of 24 ports inside this test binary's own claimed block (`procmon::port`, the per-run port
 /// blocks: two worktrees never share one), below Linux's ephemeral range. Each call gets the

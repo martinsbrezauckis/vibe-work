@@ -556,6 +556,16 @@ pub fn desktop_subscribe(app: AppHandle, closing: Channel<()>, notifications: bo
     crate::tray::subscribe(&app, closing, notifications);
 }
 
+/// Reports native window activation separately from document/child-view focus.
+///
+/// # Errors
+/// The main window is unavailable or the channel cannot receive its initial state.
+#[allow(clippy::needless_pass_by_value)] // Tauri injects AppHandle by value.
+#[tauri::command]
+pub fn desktop_focus_subscribe(app: AppHandle, focused: Channel<bool>) -> Result<(), String> {
+    crate::window_focus::subscribe(&app, focused)
+}
+
 /// Explicit Quit, shared with the tray menu and the Debug API.
 // Tauri injects AppHandle by value into commands.
 #[allow(clippy::needless_pass_by_value)]

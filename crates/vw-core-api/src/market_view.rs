@@ -304,6 +304,10 @@ pub struct LocalPluginView {
     pub managed: bool,
     /// Kept in the app's off folder, outside Vibe discovery.
     pub off: bool,
+    /// Native Vibe switch state, separate from the app-owned off folder; absent for unreadable/old inventories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub native_enabled: Option<bool>,
     /// Vibe selected this installed folder for new chats (false for shadows and retained pins).
     pub available: bool,
     /// Current discovered components (skills, MCP servers and other kinds).

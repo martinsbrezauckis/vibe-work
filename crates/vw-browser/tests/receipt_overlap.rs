@@ -15,8 +15,10 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 async fn prepared() -> (Rig, vw_browser::Action) {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
+    rig.engine
+        .eval("new Promise(resolve=>setTimeout(resolve,Math.max(0,350-performance.now())))")
+        .await;
     rig.engine.eval(r#"document.body.innerHTML = '<button id="target" style="position:fixed;left:20px;top:20px;width:100px;height:40px">A</button><button id="cover" style="position:fixed;left:-200px;top:20px;width:100px;height:40px">B</button>';
       scrollTo(0,0);window.presses=[];
       window.addEventListener('mousedown',e=>{if(e.isTrusted)window.presses.push(e.target.id)},true)"#).await;
@@ -52,6 +54,17 @@ async fn overlap(before: bool, move_target: bool) {
         .browser
         .act(SESSION, action, Actor::User, &NoNavigation)
         .await;
+    if move_target {
+        assert_eq!(
+            rig.engine.eval("window.presses").await,
+            serde_json::json!(["target"])
+        );
+        assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 0);
+        let error = result.expect_err("moved target was accepted");
+        assert_eq!(error.outcome, Outcome::Refused);
+        assert!(error.text.contains("the page moved"), "{error:?}");
+        return;
+    }
     assert_eq!(
         rig.engine.eval("window.presses").await,
         serde_json::json!(["target", if move_target { "cover" } else { "target" }])

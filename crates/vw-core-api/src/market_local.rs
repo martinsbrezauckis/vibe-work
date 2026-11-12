@@ -162,6 +162,7 @@ pub(crate) fn project(
                 scope: text(row, "scope").to_owned(),
                 managed: managed(Path::new(path), home, cwd, off),
                 off,
+                native_enabled: row["nativeEnabled"].as_bool(),
                 available: row["available"].as_bool().unwrap_or(false),
                 components,
                 servers,

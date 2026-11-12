@@ -7,6 +7,7 @@
 //! queued work, background processes, loops and never-run chats (Vibe has not stored those yet).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tracing::{debug, info, warn};
@@ -26,9 +27,10 @@ impl Core {
         &self,
         origin: Origin,
         session_id: &str,
+        bound: Duration,
     ) -> Result<(), CoreError> {
         let _held = self.shared.plugin_refresh.lock(session_id).await;
-        self.reattach_session(origin, session_id, true).await
+        self.reattach_session(origin, session_id, true, bound).await
     }
 
     /// Implicit opens coalesce: concurrent sends use the already verified channel.
@@ -37,7 +39,8 @@ impl Core {
         origin: Origin,
         session_id: &str,
     ) -> Result<(), CoreError> {
-        self.reattach_session(origin, session_id, false).await
+        self.reattach_session(origin, session_id, false, self.shared.config.reopen_timeout)
+            .await
     }
 
     async fn reattach_session(
@@ -45,6 +48,7 @@ impl Core {
         origin: Origin,
         session_id: &str,
         force: bool,
+        bound: Duration,
     ) -> Result<(), CoreError> {
         debug!(session_id, "opening a channel for the session");
         let canonical = self.shared.channels.canonical(session_id);
@@ -53,6 +57,12 @@ impl Core {
         let restore = self.begin_restore(session_id, None).await;
         if restore.attached && !force {
             return Ok(());
+        }
+        if !restore.attached {
+            self.shared
+                .holders
+                .wait_for_handoff(&self.shared, session_id)
+                .await?;
         }
         if !restore.attached
             && let Ok(Some(pid)) = self.session_holder(session_id).await
@@ -65,6 +75,7 @@ impl Core {
         let (params, token) = restore.resume_request(stopping)?;
         crate::plan_profile::before_open(&self.shared, method, &params);
         let entry_project = crate::entry_projects::before_open(&self.shared, method, &params).await;
+        let mut model_hold = crate::resume_models::begin(&self.shared, session_id, bound)?;
         let mut reply = match self
             .shared
             .gate
@@ -80,8 +91,13 @@ impl Core {
                 return Err(error);
             }
         };
-        crate::interrupted_send::stop_recovered(&self.shared, session_id, &mut reply.result)
-            .await?;
+        crate::interrupted_send::stop_recovered(
+            &self.shared,
+            session_id,
+            &mut reply.result,
+            &mut model_hold,
+        )
+        .await?;
         if let Some(opening) = entry_project {
             opening.finish(&self.shared, &reply.result);
         }

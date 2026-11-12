@@ -24,6 +24,7 @@ pub mod network;
 mod ocr;
 mod ocr_tiff;
 pub mod realtime;
+mod status_text;
 pub mod stt_batch;
 mod test_call;
 pub mod tts;

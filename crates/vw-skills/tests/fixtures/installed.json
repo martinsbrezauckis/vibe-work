@@ -18,7 +18,8 @@
           "alias": null
         },
         "enabled": true,
-        "locked": false
+        "locked": false,
+        "active": false
       },
       {
         "name": "draft",
@@ -29,7 +30,8 @@
         "scope": "global",
         "registry": null,
         "enabled": false,
-        "locked": false
+        "locked": false,
+        "active": true
       },
       {
         "name": "review",
@@ -44,7 +46,8 @@
           "alias": null
         },
         "enabled": true,
-        "locked": false
+        "locked": false,
+        "active": true
       },
       {
         "name": "plugin:notes",
@@ -55,7 +58,8 @@
         "scope": "global",
         "registry": null,
         "enabled": true,
-        "locked": true
+        "locked": true,
+        "active": true
       }
     ]
   }

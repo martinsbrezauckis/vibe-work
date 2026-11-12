@@ -2,6 +2,7 @@
  * pinned state.
  * Depends on marketplace hooks and the typed core view. Called by MarketplacePage.
  */
+import { useErrorText } from "../../state/errorDetail";
 import { term } from "../../vocabulary";
 import { PathLine } from "../../components/PathLine";
 import { Button, RowDisclosure } from "../../components/Controls";
@@ -58,6 +59,7 @@ function Contents({ kinds, children }: { kinds: readonly string[]; children: Rea
 export function LocalPlugins(): ReactElement | null {
   const actions = useMarketActions();
   const view = useMarket((s) => s.view);
+  const discoveryMessage = useErrorText(view?.discoveryError ?? "");
   const search = useMarket((s) => s.search);
   const filter = useMarket((s) => s.filter);
   if (view === null) return null;
@@ -78,8 +80,8 @@ export function LocalPlugins(): ReactElement | null {
         every new chat.
       </p>
       {view.discoveryError ? (
-        <p className="server-note" role="status">
-          {view.discoveryError}
+        <p className="key-problem" role="alert">
+          Could not read local plugins: {discoveryMessage.replace(/\.$/, "")}. Try again.
         </p>
       ) : null}
       {view.dropped.map((issue) => (
@@ -111,17 +113,19 @@ export function LocalPlugins(): ReactElement | null {
                 ? p.scope === "global"
                   ? "Off: found outside the marketplace"
                   : "Turned off"
-                : p.available
-                  ? "On for new chats"
-                  : "Unavailable for new chats"}
+                : p.nativeEnabled === false
+                  ? "Off in Vibe"
+                  : p.available
+                    ? "On for new chats"
+                    : "Unavailable for new chats"}
             </p>
             <PathLine className="local-plugin-path" path={p.path} />
             <p className="cmuted">
               {p.inSession === null
                 ? "Open a chat to see whether it runs there"
                 : p.inSession.loaded
-                  ? "Runs in this session"
-                  : "Does not run in this session"}
+                  ? "Runs in this chat"
+                  : "Does not run in this chat"}
             </p>
             <Contents kinds={p.components.filter((c) => c.kind !== "tool").map((c) => c.kind)}>
               {p.components

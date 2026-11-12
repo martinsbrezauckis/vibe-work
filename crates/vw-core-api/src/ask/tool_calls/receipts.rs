@@ -77,6 +77,17 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
         return Err("The originating chat is not registered.".into());
     }
     let stop = crate::stops::generation(shared, owner);
+    let mut reservation = None;
+    let mut replay = None;
+    match super::browser_requests::admit(shared, owner, source, call, tool, &args)? {
+        Some(super::browser_requests::Admission::New(guard)) => reservation = Some(guard),
+        Some(super::browser_requests::Admission::Issued(key)) => {
+            args[names::RECEIPT_FIELD] = json!(key);
+            return Ok(args);
+        }
+        Some(super::browser_requests::Admission::Finished(answer)) => replay = Some(answer),
+        None => {}
+    }
     // Resolve a restart before opening its card and retain that exact launch in the one-use receipt.
     let restart = (tool == names::PROCESS_RESTART)
         .then(|| crate::agent_tools::restart_launch(shared, tools, owner, &args))
@@ -87,20 +98,35 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
         prepared_args["cwd"] = json!(launch.cwd);
         prepared_args["port"] = json!(launch.port);
     }
-    super::permission(shared, owner, source, call, tool, &prepared_args).await?;
     // The tool's own refusal (a vault Deny, a login-fill Cancel, a missing program) answers the agent as the
     // tool's result: inside run_typescript, Vibe shows a hook denial only as a generic skip, and the agent
     // retried the call. A No in a Vibe Work prompt asked here (the document card, a Chrome card, the vault window)
     // is such a refusal too: the hook answers with a decision whose tool call returns `vw_ask::DECLINED` and runs
     // nothing, and the turn goes on. A No that stopped the turn stays a denial with its own text.
-    let execution =
-        match crate::agent_tools::prepare(shared, owner, source, call, tool, &mut prepared_args)
-            .await
-        {
-            Ok(execution) => execution,
-            Err(refusal) if crate::stops::generation(shared, owner) != stop => return Err(refusal),
-            Err(refusal) => Some(Box::pin(std::future::ready(Err(refusal))) as Execution),
-        };
+    // A finished browser request replays its retained answer: no second card, no repeated input.
+    let (prepared, shown) = if let Some(answer) = replay {
+        let replayed = Box::pin(std::future::ready(super::browser_requests::replay(answer)));
+        (Ok(Some(replayed as Execution)), false)
+    } else {
+        crate::approval_notice::observe(async {
+            super::permission(shared, owner, source, call, tool, &prepared_args).await?;
+            crate::agent_tools::prepare(shared, owner, source, call, tool, &mut prepared_args).await
+        })
+        .await
+    };
+    let execution = match prepared {
+        Ok(execution) => execution,
+        Err(refusal) if crate::stops::generation(shared, owner) != stop => {
+            if let Some(guard) = reservation.take() {
+                guard.finish(&Err(refusal.clone()));
+            }
+            return Err(refusal);
+        }
+        Err(refusal) => Some(Box::pin(std::future::ready(Err(refusal))) as Execution),
+    };
+    if shown {
+        tools.one_ask.note_allowed(&[source, owner], call);
+    }
     if let Some(launch) = restart {
         prepared_args["_vwRestart"] = json!(launch);
     }
@@ -108,27 +134,23 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
         return Err(crate::stops::APPROVAL_ENDED.into());
     }
     let key = vw_agent_tools::credential::new_credential().map_err(|e| e.to_string())?;
-    let mut pending = tools
-        .tool_asks
-        .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    pending.retain(|r| crate::stops::generation(shared, &r.owner) == r.stop);
-    if pending.len() >= 1000 {
-        return Err("Too many tool calls are in progress.".into());
+    save(
+        shared,
+        Receipt {
+            key: key.clone(),
+            owner: owner.into(),
+            source: source.into(),
+            call: call.into(),
+            tool: tool.into(),
+            args: args.clone(),
+            prepared_args,
+            execution,
+            stop,
+        },
+    )?;
+    if let Some(guard) = reservation {
+        guard.issued(key.clone());
     }
-    pending.push_back(Receipt {
-        key: key.clone(),
-        owner: owner.into(),
-        source: source.into(),
-        call: call.into(),
-        tool: tool.into(),
-        args: args.clone(),
-        prepared_args,
-        execution,
-        stop,
-    });
-    drop(pending);
     #[cfg(feature = "video")]
     if tool == "video_frames" {
         // Vibe's effect entry carries this receipt, not the hook's call id: the saved frames are found by it.
@@ -137,6 +159,20 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
     args[names::RECEIPT_FIELD] = json!(key);
     Ok(args)
 }
+fn save(shared: &Shared, receipt: Receipt) -> Result<(), String> {
+    let calls = super::calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?;
+    let mut pending = calls
+        .transports
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    pending.retain(|r| crate::stops::generation(shared, &r.owner) == r.stop);
+    if pending.len() >= 1000 {
+        return Err("Too many tool calls are in progress.".into());
+    }
+    pending.push_back(receipt);
+    Ok(())
+}
+
 fn index(
     pending: &std::collections::VecDeque<Receipt>,
     owner: &str,
@@ -176,13 +212,18 @@ pub(super) fn verify(
     }
     Ok(())
 }
+pub(crate) struct Prepared {
+    pub(crate) execution: Option<Execution>,
+    pub(crate) approved: bool,
+}
+
 pub(crate) fn take(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     owner: &str,
     tool: &str,
     args: &mut Value,
-) -> Result<Option<Execution>, String> {
-    let calls = super::calls(shared).ok_or("Tools unavailable.")?;
+) -> Result<Prepared, String> {
+    let calls = super::calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?;
     let mut pending = calls
         .transports
         .lock()
@@ -192,8 +233,58 @@ pub(crate) fn take(
     if crate::stops::generation(shared, owner) != receipt.stop {
         return Err(crate::stops::APPROVAL_ENDED.into());
     }
-    *args = receipt.prepared_args;
-    Ok(receipt.execution)
+    *args = receipt.prepared_args.clone();
+    let approved = crate::one_ask::of(shared)
+        .is_some_and(|ledger| ledger.user_allowed(&receipt.source, &receipt.call));
+    if super::browser_requests::tracked(tool) {
+        return browser_execution(shared, receipt).map(|execution| Prepared {
+            execution: Some(execution),
+            approved,
+        });
+    }
+    Ok(Prepared {
+        execution: receipt.execution,
+        approved,
+    })
+}
+
+fn browser_execution(shared: &Arc<Shared>, receipt: Receipt) -> Result<Execution, String> {
+    let tools = shared
+        .agent_tools
+        .as_ref()
+        .ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?
+        .clone();
+    let guard = tools.tool_asks.browser_requests.running(
+        (
+            receipt.owner.clone(),
+            receipt.source.clone(),
+            receipt.call.clone(),
+        ),
+        &receipt.key,
+    )?;
+    let shared = Arc::downgrade(shared);
+    Ok(Box::pin(async move {
+        let shared = shared.upgrade().ok_or("Vibe Work closed.")?;
+        // Cached receipts never preserve a mode that has since lost site-secret access.
+        super::browser_requests::check_full(&shared, &receipt.owner, &receipt.tool, &receipt.args)?;
+        let answer = match receipt.execution {
+            Some(execution) => execution.await,
+            None => {
+                crate::agent_tools::call_prepared(
+                    &shared,
+                    &tools,
+                    &receipt.owner,
+                    &receipt.tool,
+                    receipt.prepared_args,
+                )
+                .await
+            }
+        };
+        if let Some(guard) = guard {
+            guard.finish(&answer);
+        }
+        answer
+    }))
 }
 
 #[cfg(test)]
@@ -332,5 +423,65 @@ mod tests {
                 "{other}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod decline_tests {
+    use super::*;
+    #[tokio::test]
+    async fn denying_a_tool_card_returns_the_decline_as_the_tool_result() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("s", &f.root.join("project"), &[], false);
+        let shared = &f.core.shared;
+        shared
+            .agent_tools
+            .as_ref()
+            .unwrap()
+            .table
+            .for_session("s")
+            .unwrap();
+        let owner = shared.clone();
+        let task = tokio::spawn(async move {
+            issue(
+                &owner,
+                &json!({"session_id":"s", "tool_call_id":"read-1",
+            "tool_name":"mcp_vw.search", "tool_input":{"query":"needle"}}),
+            )
+            .await
+        });
+        let ask = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Some(ask) = f.core.asks().into_iter().next() {
+                    break ask;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        super::super::answer_by(
+            shared,
+            crate::Origin::Ui,
+            "s",
+            ask.id.strip_prefix("callback:").unwrap(),
+            &json!({"decision":{"type":"deny"}}),
+            vw_ask::AnsweredBy::Person,
+        )
+        .unwrap();
+        let decision = task.await.unwrap();
+        assert!(
+            decision.is_ok(),
+            "the hook must retain a declined tool result: {decision:?}"
+        );
+        let mut args = decision.unwrap();
+        let result = take(shared, "s", "search", &mut args)
+            .unwrap()
+            .execution
+            .expect("held refusal")
+            .await;
+        assert!(result.unwrap_err().contains("the user declined"));
+        assert!(take(shared, "s", "search", &mut args).is_err());
+        f.finish().await;
     }
 }

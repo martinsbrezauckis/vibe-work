@@ -45,12 +45,15 @@ pub enum InstanceStart {
 pub struct InstanceGuard {
     _lock: File,
     stop: Arc<AtomicBool>,
+    wake: SocketAddr,
     listener: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        // An empty local connection wakes accept; it has no credential and cannot request focus or a hand-over.
+        let _ = TcpStream::connect_timeout(&self.wake, WAIT);
         if let Some(listener) = self.listener.take() {
             let _ = listener.join();
         }
@@ -112,11 +115,11 @@ pub fn start(
     // A stale endpoint from a crashed owner must not answer a second launch while this one starts.
     let _ = std::fs::remove_file(&endpoint_path);
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
-    listener.set_nonblocking(true)?;
+    let wake = listener.local_addr()?;
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
     let endpoint = Endpoint {
-        port: listener.local_addr()?.port(),
+        port: wake.port(),
         instance: random
             .iter()
             .fold(String::with_capacity(64), |mut text, byte| {
@@ -137,7 +140,6 @@ pub fn start(
             while !stopping.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let _ = stream.set_nonblocking(false);
                         let _ = stream.set_read_timeout(Some(WAIT));
                         let _ = stream.set_write_timeout(Some(WAIT));
                         if let Some(request) = read_request(&mut stream, &endpoint.instance) {
@@ -147,9 +149,6 @@ pub fn start(
                             let _ = stream.write_all(if focus() { b"1" } else { b"0" });
                         }
                     }
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(25));
-                    }
                     Err(_) => break,
                 }
             }
@@ -157,6 +156,7 @@ pub fn start(
     Ok(InstanceStart::First(InstanceGuard {
         _lock: lock,
         stop,
+        wake,
         listener: Some(thread),
     }))
 }

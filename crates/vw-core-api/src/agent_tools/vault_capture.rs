@@ -24,7 +24,7 @@ pub(super) fn vault_error(shared: &Shared, error: &vw_keys::KeyError) -> String 
         shared.emit(crate::CoreEvent::KeyNeeded {
             reason: "unlock".into(),
         });
-        "The vault is locked; ask the user to unlock it in Vibe Work, then try again.".into()
+        vw_vocabulary::texts::AGENT_VAULT_LOCKED.into()
     } else {
         "The vault save could not complete or its entry changed; ask the user to check the vault and try again.".into()
     }
@@ -89,7 +89,7 @@ pub(super) async fn prepare(
         .config
         .keys
         .as_ref()
-        .ok_or("No vault is connected; ask the user to set up the vault.")?;
+        .ok_or(vw_vocabulary::texts::AGENT_VAULT_MISSING)?;
     // A locked vault is checked before reading a value or presenting a save card.
     let plan = keys
         .plan_capture(input.name.clone())

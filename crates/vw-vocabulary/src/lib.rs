@@ -35,3 +35,12 @@ pub fn label<'a>(group: &str, id: &'a str) -> &'a str {
 pub fn text(id: &str) -> Option<&'static str> {
     generated_text(id)
 }
+
+/// A Settings route in agent instructions. Segments may contain format placeholders for shared display names.
+/// Static and formatted producers use the same plain separator; UI breadcrumbs keep their own presentation.
+#[macro_export]
+macro_rules! settings_path {
+    ($($segment:literal),+ $(,)?) => {
+        concat!("Settings", $(" > ", $segment),+)
+    };
+}

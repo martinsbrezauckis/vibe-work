@@ -13,7 +13,7 @@ use vw_gate::{Confirmation, ConfirmationRequest, Requester};
 use super::{agent_browser::Browser, enroll};
 use crate::core::Shared;
 
-/// The person-only native confirmation shared by Chromium browsers. It has no public approval command.
+/// The person-only native confirmation shared by all connected browsers. It has no public approval command.
 pub const BROWSER_PAIRING_DIALOG_METHOD: &str = "chrome/control/pair";
 const LIFE: Duration = Duration::from_secs(10 * 60);
 
@@ -47,6 +47,25 @@ impl Approvals {
             .retain(|_, pending| !browser.owns_profile(&pending.profile));
     }
 
+    /// A native pairing approval still waits for this identity (an expired one no longer counts).
+    pub(super) fn waiting(&self, profile: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .any(|pending| {
+                pending.opened.elapsed() < LIFE
+                    && super::profile_ids::same(&pending.profile, profile)
+            })
+    }
+
+    pub(super) fn cancel_profile(&self, profile: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, pending| !super::profile_ids::same(&pending.profile, profile));
+    }
+
     pub(super) fn paired(&self, profile: &str) {
         for pending in self
             .0
@@ -66,26 +85,19 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
     else {
         return;
     };
-    let Some(browser) = super::enroll_browser::Browser::from_report(Some(profile)) else {
-        return;
-    };
+    let browser = Browser::from_profile(profile);
+    let raw = profile
+        .strip_prefix(&format!("{}:", browser.id()))
+        .unwrap_or(profile);
     if !enroll::uuid_shape(id)
-        || browser.raw_profile(profile).is_none()
+        || !enroll::uuid_shape(raw)
         || params.as_object().is_none_or(|p| p.len() != 2)
+        || !browser.enabled(shared)
+        || !super::profiles::pairing_allowed(&shared.chrome_control, profile)
     {
         return;
     }
-    let (browser, name, enabled) = match browser {
-        super::enroll_browser::Browser::Chrome => {
-            (Browser::Chrome, "Chrome", shared.chrome_control.enabled())
-        }
-        super::enroll_browser::Browser::Edge => {
-            (Browser::Edge, "Edge", shared.chrome_control.edge_enabled())
-        }
-    };
-    if !enabled {
-        return;
-    }
+    let name = browser.short_name();
     let mut pending = shared
         .chrome_control
         .owner
@@ -100,6 +112,13 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
     let generation = shared.chrome_control.browser_generation(browser);
     let weak = Arc::downgrade(shared);
     let request_id = id.to_owned();
+    let profile_id = profile.to_owned();
+    let profile_generation = shared
+        .chrome_control
+        .profiles
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .generation(profile);
     let task = tokio::spawn(async move {
         let Some(shared) = weak.upgrade() else { return };
         let confirmation = shared.confirmer.begin(ConfirmationRequest {
@@ -113,10 +132,30 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
         drop(shared);
         let answer = tokio::time::timeout(LIFE, confirmation).await;
         let Some(shared) = weak.upgrade() else { return };
-        if shared.chrome_control.browser_generation(browser) != generation {
+        let _held = shared.chrome_control.lifecycle.lock().await;
+        if shared.chrome_control.browser_generation(browser) != generation
+            || shared
+                .chrome_control
+                .profiles
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .generation(&profile_id)
+                != profile_generation
+            || !super::profiles::pairing_allowed(&shared.chrome_control, &profile_id)
+        {
             return;
         }
         let approved = matches!(answer, Ok(Confirmation::Approved));
+        if approved
+            && let Err(message) = super::profiles::reapprove(&shared.chrome_control, &profile_id)
+        {
+            shared.emit(crate::CoreEvent::Alert {
+                session_id: None,
+                kind: crate::event::AlertKind::BrowserPairingFailed,
+                message,
+            });
+            return;
+        }
         let saved = shared
             .chrome_control
             .owner

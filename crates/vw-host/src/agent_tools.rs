@@ -5,7 +5,9 @@
 //! - **Binary:** next to the app executable (a bundled sidecar), else in the cargo target folder of a
 //!   development build. Missing: the tools are off, the hook block is removed (a `strict` hook whose binary is
 //!   gone would deny every bash call), and the reason is returned for the log.
-//! - **Git Bash (Windows):** a copy of the binary runs Vibe's Git Bash in a kill-on-close job ([`crate::git_bash`]).
+//! - **Git Bash and PowerShell (Windows):** a copy of the binary runs Vibe's Git Bash (or, without Git Bash, its
+//!   PowerShell) in a kill-on-close job without the server's `GIT_REDIRECT_STDIN` ([`crate::git_bash`],
+//!   [`crate::powershell_shell`]).
 //! - **`hooks.toml`:** Vibe Work owns this `VIBE_HOME`; our hook lives in a marked block that is replaced
 //!   on every start (new binary or data path) and anything outside it is kept. Vibe 3.0.4 can run native plugin
 //!   hooks; VW refuses those subprocesses because they bypass our tool guards. Our guards stay in this file,
@@ -298,7 +300,8 @@ pub fn prepare(
             ));
         }
     }
-    // Windows: Vibe's Git Bash in a kill-on-close job (the copy is of this binary), or our shell line removed.
+    // Windows: Vibe's Git Bash, or its PowerShell when it finds no Git Bash, in a kill-on-close job and without the
+    // server's GIT_REDIRECT_STDIN (the copy is of this binary), or our shell line removed.
     #[cfg(windows)]
     let shell = format!(
         "; {}",

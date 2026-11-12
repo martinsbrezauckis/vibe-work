@@ -10,13 +10,16 @@
  */
 import { literalInputProps } from "../../components/inputProps";
 import { Button } from "../../components/Controls";
-import { useId, useState } from "react";
+import { type Ref, useId, useState } from "react";
 
 import { passwordHint } from "../../state/keyText";
 import { useCaptureLocked } from "../shell/secretSafety";
 
 /** A secret text input with a Show/Hide button. */
-export function SecretField(props: {
+export function SecretField({
+  inputRef,
+  ...props
+}: {
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -28,6 +31,10 @@ export function SecretField(props: {
   /** `current-password` (default) or `new-password`: tells password managers what this is. */
   autoComplete?: "current-password" | "new-password" | "off";
   invalid?: boolean | undefined;
+  /** Inline validation is associated with the input alongside its existing hint. */
+  error?: string | null | undefined;
+  /** The form focuses the first missing field on submit. */
+  inputRef?: Ref<HTMLInputElement> | undefined;
   /** Stable selector supplied by the calling setup step. */
   testId: string;
 }) {
@@ -36,6 +43,10 @@ export function SecretField(props: {
   // while the Debug API captures the window the value is never shown in clear.
   const locked = useCaptureLocked();
   const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy = [props.error ? errorId : null, props.hint === undefined ? null : hintId]
+    .filter(Boolean)
+    .join(" ");
   return (
     <div className="key-field">
       <label htmlFor={id}>{props.label}</label>
@@ -43,6 +54,7 @@ export function SecretField(props: {
         <input
           {...literalInputProps}
           id={id}
+          ref={inputRef}
           data-secret="true"
           data-testid={props.testId}
           type={shown && !locked ? "text" : "password"}
@@ -50,8 +62,8 @@ export function SecretField(props: {
           placeholder={props.placeholder}
           autoFocus={props.autoFocus}
           autoComplete={props.autoComplete ?? "off"}
-          aria-invalid={props.invalid === true ? true : undefined}
-          aria-describedby={props.hint === undefined ? undefined : hintId}
+          aria-invalid={props.invalid === true || props.error ? true : undefined}
+          aria-describedby={describedBy || undefined}
           onChange={(e) => {
             props.onChange(e.target.value);
           }}
@@ -69,6 +81,11 @@ export function SecretField(props: {
           {shown ? "Hide" : "Show"}
         </Button>
       </div>
+      {props.error && (
+        <p id={errorId} className="key-problem" role="alert">
+          {props.error}
+        </p>
+      )}
       {props.hint !== undefined && (
         <p id={hintId} className="key-field-hint" data-level={props.hintLevel}>
           {props.hint}
@@ -83,6 +100,8 @@ export function NewPasswordField(props: {
   value: string;
   onChange: (value: string) => void;
   testId: string;
+  error?: string | null;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   const hint = passwordHint(props.value);
   return (
@@ -94,6 +113,8 @@ export function NewPasswordField(props: {
       hint={hint.text}
       hintLevel={hint.level}
       autoComplete="new-password"
+      inputRef={props.inputRef}
+      error={props.error}
     />
   );
 }

@@ -24,6 +24,12 @@ pub struct ReadOptions {
     pub max_bytes: usize,
     /// A focused read: only the refs and text lines containing this.
     pub find: Option<String>,
+    /// Structured selector, mutually exclusive with text finding and continuation cursors.
+    pub selector: Option<crate::Selector>,
+    /// Rendered datasets for a chat-folder export.
+    pub extract: Option<crate::extraction::ExtractOptions>,
+    /// Read only the subtree of this retained ref in its document (including open shadow roots).
+    pub root_ref: Option<String>,
 }
 
 impl Default for ReadOptions {
@@ -35,7 +41,57 @@ impl Default for ReadOptions {
             choice_cursor: None,
             max_bytes: observe::READ_BUDGET,
             find: None,
+            selector: None,
+            extract: None,
+            root_ref: None,
         }
+    }
+}
+
+impl ReadOptions {
+    fn script(
+        &self,
+        page: &str,
+        limits: (usize, usize, usize),
+        node: Option<u64>,
+        priority_ref: Option<&str>,
+    ) -> String {
+        let (max_refs, max_text, offset) = limits;
+        if let Some(reference) = priority_ref {
+            scripts::observe_receipt(page, max_refs, max_text, reference)
+        } else if let Some(extract) = &self.extract {
+            scripts::observe_extraction(page, extract)
+        } else if let Some(selector) = &self.selector {
+            scripts::observe_selector(page, max_refs, max_text, selector)
+        } else {
+            scripts::observe_focused(page, max_refs, max_text, offset, self.find.as_deref(), node)
+        }
+    }
+
+    fn validate_selector(&self) -> Result<(), String> {
+        if let Some(reference) = &self.root_ref
+            && (!crate::model::is_ref(reference)
+                || self.selector.is_some()
+                || self.extract.is_some()
+                || self.find.is_some()
+                || self.choice_cursor.is_some()
+                || self.text_cursor.is_some())
+        {
+            return Err("A subtree needs an observed ref; omit selector, extract, find and continuation cursors.".into());
+        }
+        if let Some(extract) = &self.extract {
+            extract.validate()?;
+        }
+        if let Some(selector) = &self.selector {
+            selector.validate()?;
+            if self.find.is_some() || self.choice_cursor.is_some() || self.text_cursor.is_some() {
+                return Err(
+                    "A selector reads matching elements; omit find, choiceCursor and textCursor."
+                        .into(),
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -167,6 +223,7 @@ impl Browser {
         record: bool,
         priority_ref: Option<&str>,
     ) -> Result<(PageModel, guard::Verdict, String), String> {
+        options.validate_selector()?;
         let page = self.page(session_id).await?;
         let mount = self
             .service
@@ -177,26 +234,20 @@ impl Browser {
             .as_ref()
             .map_or(options.text_page.unwrap_or(0), |c| c.page)
             .saturating_mul(PAGE_CHARS);
-        let (max_refs, max_text, offset) = if options.find.is_some() || node.is_some() {
-            (crate::model::MAX_REFS, FIND_TEXT, offset)
+        let (max_refs, max_text, offset) =
+            if options.find.is_some() || options.selector.is_some() || node.is_some() {
+                (crate::model::MAX_REFS, FIND_TEXT, offset)
+            } else {
+                (
+                    options.max_refs.min(crate::model::MAX_REFS),
+                    PAGE_CHARS,
+                    offset,
+                )
+            };
+        let script = if let Some(reference) = &options.root_ref {
+            self.subtree_script(session_id, &page, reference, (max_refs, max_text, offset))?
         } else {
-            (
-                options.max_refs.min(crate::model::MAX_REFS),
-                PAGE_CHARS,
-                offset,
-            )
-        };
-        let script = if let Some(reference) = priority_ref {
-            scripts::observe_receipt(&page, max_refs, max_text, reference)
-        } else {
-            scripts::observe_focused(
-                &page,
-                max_refs,
-                max_text,
-                offset,
-                options.find.as_deref(),
-                node,
-            )
+            options.script(&page, (max_refs, max_text, offset), node, priority_ref)
         };
         let loads_before = self.service.load_state(session_id).map(|l| l.loads);
         let mut model: PageModel = match self
@@ -224,7 +275,17 @@ impl Browser {
         if self.service.page_mount(session_id).as_ref() != Some(&mount) {
             return Err(PAGE_CLOSED.to_owned());
         }
-        if pixels {
+        if model.selector_error.is_some() {
+            return Err("The selector syntax is invalid; correct the CSS or XPath expression and read again.".into());
+        }
+        if options.root_ref.is_some() && model.scope_matches != 1 {
+            return Err("The subtree ref changed or its frame could not be read; read the page again and use a current ref.".into());
+        }
+        if pixels
+            && options.selector.is_none()
+            && options.extract.is_none()
+            && options.root_ref.is_none()
+        {
             self.visual_refs(session_id, &mut model).await;
         }
         self.service
@@ -234,11 +295,21 @@ impl Browser {
         }
         // Keep the receipt's target first, then priority order (including page-covering consent dialogs), and reserve half the
         // slots for main-document candidates. Select before bound's absolute 200-ref cap too.
-        model.refs.sort_by_key(|item| {
-            std::cmp::Reverse((Some(item.id.as_str()) == priority_ref, item.priority))
-        });
+        if let Some(selector) = &options.selector {
+            if let Some(index) = selector.index {
+                model.refs = model.refs.get(index).cloned().into_iter().collect();
+            }
+        } else {
+            model.refs.sort_by_key(|item| {
+                std::cmp::Reverse((Some(item.id.as_str()) == priority_ref, item.priority))
+            });
+        }
         model.refs.retain(|item| crate::model::is_ref(&item.id));
-        reserve_main_refs(&mut model.refs, max_refs);
+        if options.selector.is_some() {
+            model.refs.truncate(max_refs);
+        } else {
+            reserve_main_refs(&mut model.refs, max_refs);
+        }
         crate::text_paging::select(&mut model, options.text_cursor.as_ref());
         model.bound(max_text);
         let verdict = observe::verdict(&model);

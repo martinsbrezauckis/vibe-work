@@ -73,12 +73,12 @@ export function registerTerminalRoute(app: App, terminals: Terminals): () => voi
         return { ...result, focusReason };
       }
       case "open":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
         await terminals.open(sessionId);
         return state();
       case "select":
         if (sessionId === null || typeof terminalId !== "string")
-          throw new UiControlError("invalidParams", "select needs a shown session and terminalId");
+          throw new UiControlError("invalidParams", "select needs a shown chat and terminalId");
         terminals.select(sessionId, terminalId);
         return state();
       default:

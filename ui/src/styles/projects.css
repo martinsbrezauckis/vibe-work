@@ -233,9 +233,7 @@
 }
 .pj-name:focus-visible,
 .pj-actions:focus-visible,
-.pj-x:focus-visible,
-.pj-chip:focus-visible,
-.pj-btn:focus-visible {
+.pj-x:focus-visible {
   outline: none;
 }
 .pj-summary {
@@ -248,14 +246,7 @@
   overflow: hidden;
 }
 .pj-tag {
-  font-size: var(--text-11);
-  color: var(--text-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-5);
-  padding: 0 5px;
   margin-left: 6px;
-  vertical-align: 2px;
-  font-weight: var(--weight-medium);
 }
 .pj-plan {
   display: grid;
@@ -317,16 +308,6 @@
   gap: 6px;
 }
 .pj-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-12);
-  padding: 3px 8px;
-  border-radius: var(--radius-7);
-  background: var(--raised);
-  border: 1px solid var(--line);
-  color: var(--text-2);
-  cursor: pointer;
   max-width: 100%;
 }
 .pj-chip .d {
@@ -338,7 +319,7 @@
 }
 .pj-chip[data-state="working"] .d {
   background: var(--green);
-  animation: pj-pulse 1.6s ease-in-out infinite;
+  animation: pj-pulse var(--t-busy-slow) var(--ease-pulse) infinite;
 }
 .pj-chip[data-state="waiting"] {
   color: var(--text);
@@ -576,5 +557,22 @@
   }
   .pj-filter input {
     width: 110px;
+  }
+}
+
+/* A missing-handbook action wraps within its project card. */
+.pj-nohb .pj-btn {
+  margin-left: auto;
+  flex: none;
+  max-width: 100%;
+  white-space: normal;
+  text-wrap: balance;
+  text-align: center;
+}
+@container (max-width: 480px) {
+  .pj-nohb .pj-btn {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    justify-self: start;
   }
 }

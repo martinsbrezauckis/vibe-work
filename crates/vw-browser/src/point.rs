@@ -17,7 +17,7 @@ impl Browser {
         point: vw_preview::NativeClickPoint,
         by: Actor,
         sent: Arc<AtomicBool>,
-    ) -> Result<(), ActError> {
+    ) -> Result<PageAnswer, ActError> {
         let seen = self
             .current_seen(session)
             .ok_or_else(|| refused("page closed"))?;
@@ -30,8 +30,11 @@ impl Browser {
             let current = model
                 .refs
                 .iter()
-                .find(|r| r.id == item.id)
-                .filter(|current| same_node(item, current))
+                .find(|current| {
+                    same_node(item, current)
+                        && current.name == item.name
+                        && (current.id == item.id || request["nativeKeyboard"] == true)
+                })
                 .ok_or_else(|| refused("node or frame changed during native click preparation"))?;
             let (x, y) = top_point(current, point)?;
             let mut consent = request
@@ -40,16 +43,18 @@ impl Browser {
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             consent["allowSend"] = request["allowSend"].clone();
-            self.click_point(
-                session,
-                &item.id,
-                ((x, y), action.click_options()),
-                by,
-                sent,
-                Some(&consent),
-            )
-            .await?;
-            return Ok(());
+            consent["keyboard"] = request["keyboard"].clone();
+            let answer = self
+                .click_point(
+                    session,
+                    &current.id,
+                    ((x, y), action.click_options()),
+                    by,
+                    sent,
+                    Some(&consent),
+                )
+                .await?;
+            return Ok(answer);
         }
         Err(refused("native click requires an isolated frame identity"))
     }
@@ -231,23 +236,7 @@ impl Browser {
             .model
             .viewport
             .ok_or_else(|| refused("viewport identity is unavailable"))?;
-        let (mut x, mut y) = (f64::from(point.0), f64::from(point.1));
-        let mut checks = Vec::new();
-        let mut ids = Vec::new();
-        for ancestor in &frame.ancestors {
-            checks.push(
-                json!({"document":ancestor.document,"node":ancestor.node,"bounds":ancestor.bounds,
-                "viewport":ancestor.viewport,"x":x,"y":y}),
-            );
-            ids.push(ancestor.id.clone());
-            x = (x - f64::from(ancestor.content.x)) * f64::from(ancestor.child_viewport.0)
-                / f64::from(ancestor.content.width);
-            y = (y - f64::from(ancestor.content.y)) * f64::from(ancestor.child_viewport.1)
-                / f64::from(ancestor.content.height);
-        }
-        checks.push(json!({"target":true,"document":frame.document,"node":item.node,"bounds":item.local_bounds,
-            "viewport":item.local_viewport,"x":x,"y":y}));
-        ids.push(frame.id.clone());
+        let (checks, ids) = frame_checks(item, frame, point);
         let page = self
             .service
             .page_accessor(session)
@@ -260,13 +249,16 @@ impl Browser {
             .iter()
             .map(|check| check["document"].clone())
             .collect();
-        let request = json!({"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,
+        let keyboard = consent
+            .and_then(|token| token.get("keyboard"))
+            .filter(|input| input.is_object());
+        let expected = expected_events(keyboard, options);
+        let request = json!({"keyboard":keyboard,"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,
             "allowSend":consent.is_none_or(|token|token["allowSend"]!=false),
-            "consent":consent.filter(|token|token.get("snapshot").is_some()),"nativeUser":by == Actor::User,"click":options,"expected":options.events()});
-        let script = crate::scripts::point_validation(&request);
-        let dispatch = crate::scripts::point_dispatch(&page, &receipt);
-        let validation = json!({"framePointValidation":true,"script":script,"dispatch":dispatch,"ids":ids,"documents":documents,"receipt":receipt,"click":options,"cssPoint":point}).to_string();
-        let input = self
+            "consent":consent.filter(|token|token.get("snapshot").is_some()),"nativeUser":by == Actor::User,"click":options,"expected":expected});
+        let validation = json!({"framePointValidation":true,"page":page,"script":crate::scripts::point_validation(&request),
+            "dispatch":crate::scripts::point_dispatch(&page, &receipt),"ids":ids,"documents":documents,"receipt":receipt,"keyboard":keyboard,"click":options,"cssPoint":point}).to_string();
+        let input = match self
             .service
             .native_click_on_mount(
                 &seen.mount,
@@ -281,19 +273,39 @@ impl Browser {
                 self.dispatch_permission_check(session, by),
             )
             .await
-            .map_err(|e| native_error(&e, &sent))?;
-        crate::point_receipt::confirm(&input, &page, &receipt, &frame.id, &frame.document, options)
-            .await?;
-        #[cfg(feature = "click-marker")]
+        {
+            Ok(input) => input,
+            Err(error) => {
+                return Err(crate::point_receipt::cancelled(
+                    &self.service,
+                    &seen.mount,
+                    (&page, &receipt),
+                    native_error(&error, &sent, keyboard.is_some()),
+                )
+                .await);
+            }
+        };
+        let confirmed = crate::point_receipt::confirm_events(
+            &input,
+            &page,
+            &receipt,
+            &frame.id,
+            &frame.document,
+            (options, &expected),
+        )
+        .await?;
         {
             // Release the input lease before the overlay takes the same mount lock. Drawing never changes
-            // the confirmed outcome; the feature-off path retains the original lease lifetime.
+            // the confirmed outcome.
             drop(input);
-            if by == Actor::Agent && options != vw_preview::ClickOptions::HOVER {
+            if by == Actor::Agent
+                && keyboard.is_none()
+                && options != vw_preview::ClickOptions::HOVER
+            {
                 self.mark_native_input(&seen, item, point).await;
             }
         }
-        serde_json::from_value(json!({"status":"done","url":frame.url}))
+        serde_json::from_value(json!({"status":"done","url":frame.url,"scroll":confirmed.scroll,"effect":confirmed.effect}))
             .map_err(|e| refused(e.to_string()))
     }
 }
@@ -341,17 +353,63 @@ fn top_point(
     Ok((x.round() as u32, y.round() as u32))
 }
 
-fn native_error(error: &vw_preview::PreviewError, sent: &AtomicBool) -> ActError {
+fn native_error(error: &vw_preview::PreviewError, sent: &AtomicBool, keyboard: bool) -> ActError {
     if sent.load(std::sync::atomic::Ordering::Acquire) {
         failed(format!(
-            "Native mouse input was sent but completion failed: {error}"
+            "Native input was sent but completion failed: {error}; read the page before another action"
         ))
     } else if matches!(
         error,
         vw_preview::PreviewError::Engine(vw_preview::EngineError::FocusRequired)
     ) {
-        refused(crate::native_focus::FOCUS_REQUEST)
+        refused(if keyboard {
+            "No keyboard input was sent because the browser window is not in front. Ask the user to bring the pane forward, then read the page before trying again."
+        } else {
+            crate::native_focus::FOCUS_REQUEST
+        })
     } else {
         refused(error.to_string())
+    }
+}
+
+fn frame_checks(
+    item: &crate::model::RefItem,
+    frame: &crate::frames::FrameRef,
+    point: (u32, u32),
+) -> (Vec<serde_json::Value>, Vec<String>) {
+    let (mut x, mut y) = (f64::from(point.0), f64::from(point.1));
+    let mut checks = Vec::new();
+    let mut ids = Vec::new();
+    for ancestor in &frame.ancestors {
+        checks.push(
+            json!({"document":ancestor.document,"node":ancestor.node,"bounds":ancestor.bounds,
+                "viewport":ancestor.viewport,"x":x,"y":y}),
+        );
+        ids.push(ancestor.id.clone());
+        x = (x - f64::from(ancestor.content.x)) * f64::from(ancestor.child_viewport.0)
+            / f64::from(ancestor.content.width);
+        y = (y - f64::from(ancestor.content.y)) * f64::from(ancestor.child_viewport.1)
+            / f64::from(ancestor.content.height);
+    }
+    checks.push(
+        json!({"target":true,"document":frame.document,"node":item.node,"bounds":item.local_bounds,
+            "viewport":item.local_viewport,"x":x,"y":y}),
+    );
+    ids.push(frame.id.clone());
+    (checks, ids)
+}
+
+fn expected_events(
+    keyboard: Option<&serde_json::Value>,
+    options: vw_preview::ClickOptions,
+) -> Vec<&'static str> {
+    if let Some(keyboard) = keyboard {
+        if keyboard.get("text").is_some() {
+            vec!["beforeinput", "input"]
+        } else {
+            vec!["keydown", "keyup"]
+        }
+    } else {
+        options.events()
     }
 }

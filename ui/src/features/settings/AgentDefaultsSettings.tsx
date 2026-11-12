@@ -34,11 +34,9 @@ export function AgentDefaultsSettings(): ReactElement | null {
   return (
     <>
       <section aria-labelledby="agent-defaults-title">
-        <h3 id="agent-defaults-title">New sessions and the agent</h3>
+        <h3 id="agent-defaults-title">New chats and the agent</h3>
         {via === null && (
-          <p className="key-line">
-            Needs a session: Vibe reads and saves these settings through one.
-          </p>
+          <p className="key-line">Needs a chat: Vibe reads and saves these settings through one.</p>
         )}
         {via !== null && view === null && error === null && (
           <p className="key-line">Reading the settings…</p>

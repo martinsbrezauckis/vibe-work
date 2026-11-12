@@ -113,7 +113,7 @@ export function LoopsStrip({
       </div>
       {open ? (
         <div id={listId} className="loops-body">
-          <ul className="loops-list" aria-label="Loops of this session">
+          <ul className="loops-list" aria-label="Loops of this chat">
             {rows.map((row) => (
               <li key={row.id} className="loops-item" data-loop-id={row.id}>
                 <span className="loops-prompt" title={row.prompt}>
@@ -141,13 +141,13 @@ export function LoopsStrip({
             ))}
           </ul>
           <p className="loops-help">
-            Each loop sends its prompt as a new turn of this session when it is due and the session
-            is idle.
+            Each loop sends its prompt as a new turn of this chat when it is due and the chat is
+            idle.
             {mode === null
-              ? " It uses the session's access mode."
+              ? " It uses the chat's access mode."
               : mode.id === "auto-approve"
                 ? ` ${mode.label} is on: those turns run without asking you.`
-                : ` It uses the session's access mode (${mode.label}), like a message you type.`}{" "}
+                : ` It uses the chat's access mode (${mode.label}), like a message you type.`}{" "}
             Loops run while Vibe Work has this chat open, including when you view another chat.
           </p>
           {rows.length > 1 ? (
@@ -156,8 +156,8 @@ export function LoopsStrip({
               type="button"
               shape="outlined"
               variant="danger"
-              title="Delete every loop of this session"
-              aria-label="Delete every loop of this session"
+              title="Delete every loop of this chat"
+              aria-label="Delete every loop of this chat"
               onClick={() => void actions?.clearLoops(sessionId)}
             >
               Delete all

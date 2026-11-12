@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use vw_preview::{HistoryStep, PreviewError, PreviewService, Shot};
+use vw_preview::{HistoryStep, PreviewError, PreviewService};
 
 use crate::act::Action;
 use crate::consent::ConsentConfirmer;
@@ -28,7 +28,7 @@ use crate::delegation::DelegationAuthorizer;
 use crate::observe;
 use crate::refs::PAGE_CLOSED;
 use crate::sessions::{Actor, Outcome, Seen, Sessions};
-use crate::{ReadOptions, guard, receipt, scripts};
+use crate::{guard, scripts};
 
 /// The receipt's outcome key. Answers are JSON objects with sorted keys and the agent's code parses them, so the outcome
 /// stays inside the JSON, under a key that sorts first (capital `O` before every lowercase key): the first thing a
@@ -46,12 +46,13 @@ pub trait Navigate: Send + Sync {
 }
 
 /// The text of a refused agent action after the user's Stop.
-pub const STOPPED: &str = "Not run: the person pressed Stop in Vibe Work's browser. Do not use the browser again in this turn; tell \
+pub const STOPPED: &str = "Not run: the user pressed Stop in Vibe Work's browser. Do not use the browser again in this turn; tell \
     them what you were doing and wait for their answer.";
 /// Nothing is open.
 pub const NOTHING_OPEN: &str =
     "the browser has no page open: use browser_act with action \"navigate\" and a url first";
 
+mod observation;
 mod page_input;
 const SETTLE_MAX: Duration = Duration::from_millis(1500);
 const SETTLE_QUIET: Duration = Duration::from_millis(300);
@@ -114,6 +115,7 @@ struct Baseline {
 /// The agent browser over the sessions' previews.
 #[derive(Clone)]
 pub struct Browser {
+    pub(crate) recordings: crate::recording::Recordings,
     pub(crate) service: PreviewService,
     pub(crate) sessions: Arc<Sessions>,
     captures: crate::capture::Captures,
@@ -134,6 +136,7 @@ impl Browser {
     #[must_use]
     pub fn new(service: PreviewService, sessions: Arc<Sessions>) -> Self {
         Self {
+            recordings: crate::recording::Recordings::default(),
             service,
             sessions,
             captures: crate::capture::Captures::default(),
@@ -175,7 +178,7 @@ impl Browser {
     }
 
     /// Host facts every answer starts with.
-    fn host(&self, session_id: &str) -> Value {
+    pub(crate) fn host(&self, session_id: &str) -> Value {
         let view = self.service.view(session_id);
         json!({
             "loading": view.as_ref().is_some_and(|v| v.loading),
@@ -189,118 +192,6 @@ impl Browser {
             // The mount's protection layers besides the navigation policy, by name (diagnostics, tests).
             "guardLayers": self.service.guard_layers(session_id),
         })
-    }
-
-    /// `browser_read`: the observation, and a screenshot when asked, under the current page authority.
-    ///
-    /// # Errors
-    /// A plain-text reason.
-    pub async fn read(
-        &self,
-        session_id: &str,
-        mut options: ReadOptions,
-        screenshot: bool,
-        by: Actor,
-    ) -> Result<(Value, Option<Shot>), String> {
-        if options.choice_cursor.is_some() {
-            if options.find.is_some()
-                || options.text_cursor.is_some()
-                || options.text_page.is_some()
-            {
-                return Err(
-                    "choiceCursor reads choices; omit find, textCursor and textPage".into(),
-                );
-            }
-            options.max_refs = 0;
-        }
-        if let Some(receipt) = self.dialog_receipt(session_id) {
-            return Ok((receipt, None));
-        }
-        let clamped =
-            options.max_bytes > observe::MAX_BUDGET || options.max_refs > observe::MAX_OUTPUT_REFS;
-        options.max_refs = options.max_refs.min(observe::MAX_OUTPUT_REFS);
-        let find = options.find.clone();
-        let (preview, budget) = (
-            options.text_page.is_none() && options.text_cursor.is_none(),
-            options
-                .max_bytes
-                .clamp(observe::MIN_BUDGET, observe::MAX_BUDGET),
-        );
-        // A page loading again (a front page refreshing itself, a released tab reloaded here) is read once loaded.
-        self.page(session_id).await?;
-        self.wait_loaded(session_id).await;
-        // The wait can outlast the page: the user may have navigated this tab meanwhile.
-
-        let bound = self.bind_read(session_id, by).await?;
-        let (mut model, verdict, snapshot) = bound.observe(session_id, options).await?;
-        let mut host = self.host(session_id);
-        if clamped {
-            host["outputLimit"] =
-                json!("Requested maxBytes/maxRefs clamped to inline limits: 4000 bytes, 32 refs.");
-        }
-        if screenshot {
-            Self::label_refs(&mut model);
-        }
-        let answer = match find.as_deref() {
-            Some(query) => observe::found(&model, query, &verdict, &snapshot, host, budget),
-            None => observe::answer(&model, &verdict, &snapshot, host, preview, budget),
-        };
-        #[cfg(feature = "e2e-script")]
-        self.before_image().await;
-        let shot = if screenshot {
-            Some(
-                self.service
-                    .screenshot(session_id)
-                    .await
-                    .map_err(|e| preview_text(&e))?,
-            )
-        } else {
-            None
-        };
-        // The image must show the observed page: the same mount and page class (the read binding), and the same
-        // document the refs came from (a navigation inside the mount during the shot).
-        bound.check_read_mount()?;
-        if screenshot {
-            self.ref_mount(session_id).map_err(|error| error.text)?;
-        }
-        // Labels go on the agent's copy only, after the image is known to show the observed page.
-        let shot = shot
-            .map(|shot| crate::labels::annotate(shot, &model, &answer))
-            .transpose()?;
-        Ok((answer, shot))
-    }
-
-    pub(crate) fn target_text(&self, session_id: &str, action: &Action) -> String {
-        if let Action::Navigate { url } = action {
-            return url.clone();
-        }
-        let seen = self.sessions.seen(session_id);
-        action.reference().map_or_else(String::new, |r| {
-            seen.and_then(|s| s.names.get(r).cloned())
-                .map_or_else(|| r.to_owned(), |(role, name)| format!("{role} '{name}'"))
-        })
-    }
-
-    pub(crate) fn log(
-        &self,
-        session_id: &str,
-        by: Actor,
-        action: &Action,
-        target: &str,
-        result: &Result<Value, ActError>,
-    ) {
-        let (outcome, detail) = match result {
-            Ok(receipt) => (
-                Outcome::Done,
-                receipt["change"]["summary"]
-                    .as_str()
-                    .unwrap_or("done")
-                    .to_owned(),
-            ),
-            Err(error) => (error.outcome, error.text.clone()),
-        };
-        self.sessions
-            .end(session_id, by, action.name(), target, outcome, &detail);
     }
 
     pub(crate) async fn perform_page(
@@ -326,16 +217,21 @@ impl Browser {
                 .navigate(session_id, url, nav, by)
                 .await
                 .map_err(refused)?,
-            Action::Back | Action::Forward | Action::Reload => {
+            Action::Back | Action::Forward | Action::Reload | Action::ReloadBypassCache => {
                 let step = match action {
                     Action::Back => HistoryStep::Back,
                     Action::Forward => HistoryStep::Forward,
+                    Action::ReloadBypassCache => HistoryStep::ReloadBypassCache,
                     _ => HistoryStep::Reload,
                 };
                 self.service
                     .history(session_id, step)
                     .await
                     .map_err(|e| failed(preview_text(&e)))?;
+                result["bypassCache"] = json!(matches!(action, Action::ReloadBypassCache));
+            }
+            Action::WaitCondition(request) => {
+                result = self.wait_condition(session_id, request).await?;
             }
             Action::Wait {
                 text,
@@ -352,13 +248,7 @@ impl Browser {
                         *timeout_ms,
                     )
                     .await
-                    .map_err(|text| {
-                        if text == PAGE_CLOSED {
-                            refused(text)
-                        } else {
-                            failed(text)
-                        }
-                    })?;
+                    .map_err(wait_error)?;
                 result["met"] = json!(met);
                 if !met {
                     result["note"] = json!(format!("not met within {timeout_ms} ms"));
@@ -385,13 +275,14 @@ impl Browser {
                 if let Some(effect) = answer.effect {
                     result["effect"] = json!(effect);
                 }
+                if let Some(scroll) = answer.scroll {
+                    result["scroll"] = scroll;
+                }
                 if let Some(y) = answer.scroll_y {
                     result["scrollY"] = json!(y);
                 }
                 if native_sent.load(std::sync::atomic::Ordering::Acquire) {
-                    result["nativeClick"] = json!(true);
-                    result["input"] =
-                        json!(vw_vocabulary::text("browserNativeClick").unwrap_or_default());
+                    native_result(&mut result, action);
                 }
             }
         }
@@ -408,114 +299,6 @@ impl Browser {
         // After the settle wait: what the page asked for during this act has been refused by now.
         self.act_notes(session_id, action.reference(), &marks, &mut receipt);
         observe::fit(&mut receipt, observe::ACT_BUDGET);
-        Ok(receipt)
-    }
-
-    /// Settles, observes again and builds the receipt of an action against `base` (the page before it).
-    async fn receipt(
-        &self,
-        session_id: &str,
-        action: &Action,
-        base: Baseline,
-        mut result: Value,
-        mut page_target: Value,
-    ) -> Result<Value, ActError> {
-        let Baseline {
-            before,
-            reference,
-            loads,
-            console: console0,
-            refused: refused0,
-        } = base;
-        let before = Self::receipt_baseline(before, reference.as_deref());
-        self.await_action_navigation(session_id, action, loads, refused0)
-            .await;
-        let dialogs = self.settle(session_id, loads, reference.as_deref()).await;
-        if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
-            return outcome;
-        }
-        self.prove_receipt(session_id, action, &mut result, &mut page_target)
-            .await?;
-        let after = self.observe_receipt(session_id, reference.as_deref()).await;
-        if let Some(outcome) = self.navigation_outcome(session_id, loads, refused0, &result) {
-            return outcome;
-        }
-        let mut receipt = self.host(session_id);
-        receipt["result"] = result;
-        let (after_model, verdict, snapshot) = after.map_err(failed)?;
-        let (facts, changed) = receipt::diff(before.as_ref(), &after_model);
-        receipt["change"] = facts;
-        let refused_now: Vec<Value> = self
-            .service
-            .refusals_since(session_id, refused0)
-            .into_iter()
-            .map(|(url, reason)| json!({"url": url, "reason": reason}))
-            .collect();
-        let errors: Vec<Value> = match console0 {
-            Some(mark) => self
-                .service
-                .console_since(session_id, mark)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|e| e.level == vw_preview::ConsoleLevel::Error)
-                .take(5)
-                .map(|e| json!(e.text.chars().take(300).collect::<String>()))
-                .collect(),
-            None => Vec::new(),
-        };
-        receipt["snapshot"] = json!(snapshot);
-        // The receipt is a delta (ShellX's shape): a first look at a page carries the compact observation (refs, text
-        // preview); later receipts carry what changed and only the refs that are new.
-        let first_look = before.is_none();
-        let mut content = if first_look {
-            observe::content(&after_model, true)
-        } else {
-            receipt::delta(before.as_ref(), &after_model)
-        };
-        content["outcomeText"] = json!(receipt::outcome_text(
-            &changed,
-            &after_model.title,
-            first_look
-        ));
-        content["target"] = page_target;
-        content["changed"] = changed;
-        if !refused_now.is_empty() {
-            content["refusedNavigations"] = json!(refused_now);
-        }
-        if !dialogs.is_empty() {
-            content["dialogsAnswered"] = json!(dialogs);
-        }
-        if !errors.is_empty() {
-            content["consoleErrorsSinceAction"] = json!(errors);
-        }
-        // Dialog messages and console errors are page-made text too: the guard looks at them.
-        let extra: Vec<(String, String)> = dialogs
-            .iter()
-            .filter_map(|d| {
-                d["message"]
-                    .as_str()
-                    .map(|m| ("dialog".to_owned(), m.to_owned()))
-            })
-            .chain(
-                errors
-                    .iter()
-                    .filter_map(|e| e.as_str().map(|t| ("console".to_owned(), t.to_owned()))),
-            )
-            .collect();
-        let verdict = if extra.is_empty() {
-            verdict
-        } else {
-            observe::verdict_with(&after_model, &extra)
-        };
-        receipt[HEADLINE_KEY] = json!(receipt::headline(&receipt["change"], first_look));
-        // A flag the agent's code can test (code compared `Outcome` with guessed words such as
-        // "Typed"); a refused or failed action is a tool error instead.
-        receipt["ok"] = json!(true);
-        receipt["untrustedPageContent"] = content;
-        receipt["promptGuard"] = observe::guard_json(&verdict);
-        receipt["note"] = json!(observe::UNTRUSTED_NOTE);
-        observe::fit(&mut receipt, observe::READ_BUDGET);
         Ok(receipt)
     }
 
@@ -663,5 +446,25 @@ impl Browser {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+    }
+}
+
+fn wait_error(text: String) -> ActError {
+    if text == PAGE_CLOSED {
+        refused(text)
+    } else {
+        failed(text)
+    }
+}
+
+fn native_result(result: &mut Value, action: &Action) {
+    if matches!(
+        action,
+        Action::Type { .. } | Action::Press { .. } | Action::Control(_)
+    ) {
+        result["nativeKeyboard"] = json!(true);
+    } else {
+        result["nativeClick"] = json!(true);
+        result["input"] = json!(vw_vocabulary::text("browserNativeClick").unwrap_or_default());
     }
 }

@@ -102,7 +102,7 @@ function inAnotherCard(frame: HTMLElement | null): boolean {
 function CoversLine({ parts }: { parts: readonly CoversPart[] }): ReactElement {
   return (
     <span className="perms">
-      Allow for this session covers{" "}
+      Allow for this chat covers{" "}
       {parts.map((part, i) =>
         part.code ? <code key={i}>{visibleText(part.text)}</code> : visibleText(part.text),
       )}

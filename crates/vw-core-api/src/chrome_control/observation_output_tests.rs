@@ -80,7 +80,8 @@ fn every_page_derived_field_stays_inside_the_prompt_boundary() {
     }
 }
 
-#[tokio::test]
+// Paused time: the 25 s batch budget must not depend on how fast a loaded machine runs 16 steps.
+#[tokio::test(start_paused = true)]
 async fn combined_observations_buffer_before_the_whole_result_guard() {
     let core = output_tests::core("chrome-observation-batch").await;
     let sample = receipts().remove(0);

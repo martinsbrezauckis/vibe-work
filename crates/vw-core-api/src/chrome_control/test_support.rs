@@ -26,7 +26,29 @@ pub(crate) fn answering(
 }
 
 /// Feed a complete helper status through the same observer used by the owner task.
-#[cfg(feature = "your-edge")]
 pub(crate) fn observe_status(shared: &Arc<Shared>, data: &Value) {
     super::owner::update_pairing(&Arc::downgrade(shared), &json!({"structuredContent":data}));
+}
+
+/// Hold the Firefox availability read while another task publishes a question; no timed filesystem fixture.
+#[cfg(feature = "your-firefox")]
+pub(crate) fn with_firefox_probe_held(shared: &Shared, held: impl FnOnce()) {
+    let _probe = shared.chrome_control.owner.firefox_pairing.lock().unwrap();
+    held();
+}
+
+/// Create a separate chat for multi-profile isolation tests.
+pub(super) fn chat(shared: &Shared, id: &str) {
+    let _ = shared
+        .store
+        .load(
+            json!({"session":{"id":id},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    shared.access.observe_request(
+        "session/agent/update",
+        id,
+        &json!({"agentName":"auto-approve"}),
+    );
 }

@@ -202,34 +202,3 @@ fn with_missing_defaults(original: &str) -> Option<String> {
     }
     changed.then(|| config.to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn own_entry_has_a_display_name_and_keeps_a_persons_label() {
-        assert!(FIRST_CONFIG.contains("display_name = \"Mistral Large 4\""));
-        for display in [None, Some("Large 4"), Some("large-4"), Some("My model")] {
-            let old = format!(
-                "[[models]]\nname = 'mistral-large-4'\nprovider = 'mistral'\nalias = 'large-4'\n{}",
-                display
-                    .map(|d| format!("display_name = '{d}' # my note\n"))
-                    .unwrap_or_default()
-            );
-            let updated = with_missing_defaults(&old).unwrap();
-            let config: toml::Table = updated.parse().unwrap();
-            assert_eq!(
-                config["models"][0]["display_name"].as_str(),
-                Some(if display == Some("My model") {
-                    "My model"
-                } else {
-                    "Mistral Large 4"
-                })
-            );
-            if display.is_some() {
-                assert!(updated.contains("# my note"));
-            }
-        }
-    }
-}

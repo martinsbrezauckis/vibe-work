@@ -1,5 +1,7 @@
 //! Keeps Tauri's native file/message commands without replacing web pages' synchronous alert/confirm globals.
 //! The app calls the plugin's typed commands; browser webviews use their engine's real page dialogs.
+//! Depends on: Tauri native dialog commands.
+//! Called by: app plugin registration.
 use tauri::{
     AppHandle, RunEvent, Webview, Window, Wry,
     ipc::Invoke,

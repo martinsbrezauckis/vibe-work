@@ -75,7 +75,9 @@ function transform(node: MdNode, budget: Budget): void {
   for (const child of children) {
     if (child.type === "text") {
       out.push(...splitText(child, budget));
-    } else if (child.type === "inlineCode") {
+      // A parser extension may use an inline literal for math with its own renderer. Its source
+      // can look like a path (a/b); do not resolve or turn that formula into a file action.
+    } else if (child.type === "inlineCode" && child.data?.hName === undefined) {
       const folder = budget.left > 0 ? repoFolderOfHref(child.value ?? "") : null;
       const ref = folder === null && budget.left > 0 ? pathOfCode(child.value ?? "") : null;
       if (folder !== null) {

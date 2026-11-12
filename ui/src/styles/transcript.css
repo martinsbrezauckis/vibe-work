@@ -69,13 +69,6 @@
   justify-content: flex-end;
   margin-bottom: 2px;
 }
-.u-tag {
-  font-size: var(--text-11);
-  color: var(--orange-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  padding: 0 6px;
-}
 .u-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -96,28 +89,16 @@
 }
 .img-chip,
 .ctx-chip {
-  display: inline-flex;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-12);
-  font-weight: var(--weight-regular);
-  color: var(--text-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-md);
-  padding: 2px 8px;
 }
 .ctx-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
-}
-button.ctx-chip {
-  background: none;
-  font-family: inherit;
-  cursor: pointer;
 }
 .u .acts2 {
   position: absolute;
@@ -250,7 +231,7 @@ button.ctx-chip {
 .caret {
   display: inline-block;
   font-weight: var(--weight-bold);
-  transition: transform 0.15s;
+  transition: transform var(--t-fade) var(--ease-native);
 }
 [aria-expanded="true"] > .caret {
   transform: rotate(90deg);
@@ -423,10 +404,10 @@ pre.out.plain {
   animation: pxstep 0.9s steps(2, jump-none) infinite;
 }
 .typing i:nth-child(2) {
-  animation-delay: 0.3s;
+  animation-delay: calc(1.5 * var(--t-ui));
 }
 .typing i:nth-child(3) {
-  animation-delay: 0.6s;
+  animation-delay: calc(3 * var(--t-ui));
 }
 @keyframes pxstep {
   0% {
@@ -438,7 +419,6 @@ pre.out.plain {
 }
 
 /* Pills, dividers, end of turn */
-.notice-pill,
 .turn-end,
 .other-row {
   display: flex;
@@ -448,11 +428,16 @@ pre.out.plain {
   color: var(--text-3);
   margin: 0 0 16px;
 }
+.notice-pill {
+  margin: 0 0 16px;
+}
 .notice-pill.warning {
   color: var(--orange-3);
 }
-.notice-pill.error,
 .turn-end.fail {
+  color: var(--red);
+}
+.notice-pill.error {
   color: var(--red);
 }
 .turn-end.int {

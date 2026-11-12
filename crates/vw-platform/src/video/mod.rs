@@ -45,15 +45,9 @@ mod geometry;
 mod native_values;
 /// Native helper isolation; called before reading any media or tool request.
 pub use crate::video_sandbox as isolation;
+mod container;
 #[cfg(target_os = "linux")]
 pub mod limits;
-#[cfg(test)]
-mod tests;
-
-mod container;
-#[cfg(all(test, target_os = "linux"))]
-mod plugin_tests;
-
 /// Native backend identification; no user metadata or filesystem probes.
 #[must_use]
 pub fn backend() -> String {

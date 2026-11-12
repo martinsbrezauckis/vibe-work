@@ -1,5 +1,7 @@
 //! Pauses the batch work deadline while its hook waits for a person's answer.
 //! Used only by batch execution and helper-discovered capability approval.
+//! Depends on: Tokio watch and the batch deadline.
+//! Called by: batch execution and discovered-capability approval.
 use std::{future::Future, time::Duration};
 use tokio::{sync::watch, time::Instant};
 

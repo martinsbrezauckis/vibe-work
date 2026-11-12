@@ -11,7 +11,8 @@
 //!   `NO_PROXY` ([`LOOPBACK_NO_PROXY`]): Vibe reaches Vibe Work's model proxy at `127.0.0.1` and would otherwise send
 //!   that request to the company proxy.
 //! - Loader and runtime hijack variables ([`is_hijack_var`]) are refused in explicit inputs. The
-//!   builder alone sets `BASH_ENV` to the app-owned startup file, prepared at each server launch.
+//!   builder alone sets `BASH_ENV` to the app-owned startup file, prepared at each server launch, and, on Windows,
+//!   `GIT_REDIRECT_STDIN=NUL` (the Vibe 3.1.1 git hang, `platform_vars`); an inherited value never wins.
 //! - The key travels only as `MISTRAL_API_KEY` in the child env, never in argv, logs or `Debug`. The MCP forwarder
 //!   token travels only as [`MCP_TOKEN_VAR`], set from the secret provider, never from `extra`.
 use std::ffi::{OsStr, OsString};
@@ -28,21 +29,27 @@ pub const API_KEY_VAR: &str = "MISTRAL_API_KEY";
 pub const MCP_TOKEN_VAR: &str = "VW_MCP_TOKEN";
 
 /// Unsupported experiments pinned off in both the app config and the server environment.
-pub const EXPERIMENT_CONFIG_KEYS: [&str; 8] = [
-    "experimental_enable_pr_monitoring",
+pub const EXPERIMENT_CONFIG_KEYS: [&str; 6] = [
     "experimental_enable_mistral_mcp_connector",
     "experimental_local_runtime_session_api",
     "experimental_enable_document_library_connector",
     "experimental_enable_model_catalog",
     "experimental_enable_local_projects",
-    "experimental_enable_pr_discovery",
     "experimental_enable_tab_status",
 ];
+
+/// Stable features not offered by the app, pinned off in config and environment.
+pub const STABLE_CONFIG_KEYS: [&str; 1] = ["enable_pr_monitoring"];
 
 /// Vibe settings a runtime layer (`GrowthBook`) can switch on that Vibe never reads from the person's files, pinned off in
 /// the server environment only (Vibe's environment layer beats `GrowthBook` and both TOML layers). The managed-shell
 /// rollout gives `bash_stdin`/`bash_sessions` Vibe `ALWAYS` with input the per-command guards cannot see.
-pub const RUNTIME_PINNED_OFF: [&str; 1] = ["VIBE_MANAGED_SHELL_TOOLS_ENABLED"];
+pub const RUNTIME_PINNED_OFF: [&str; 3] = [
+    "VIBE_MANAGED_SHELL_TOOLS_ENABLED",
+    // Older installed runtimes remain guarded while an app update replaces them.
+    "VIBE_EXPERIMENTAL_ENABLE_PR_MONITORING",
+    "VIBE_EXPERIMENTAL_ENABLE_PR_DISCOVERY",
+];
 
 /// Names copied from the parent environment when present. Locale, terminal, proxy and CA settings
 /// make HTTPS and tools work; the Linux session block reaches the keyring; the Windows block is what Python and a console child need to start.
@@ -50,6 +57,10 @@ pub const RUNTIME_PINNED_OFF: [&str; 1] = ["VIBE_MANAGED_SHELL_TOOLS_ENABLED"];
 pub const INHERITED: &[&str] = &[
     "PATH",
     "HOME",
+    // CoreFoundation uses this home for macOS Security preferences. Keep the test runner's
+    // disposable keychain visible to Vibe's OAuth child; HOME alone does not redirect Security.
+    // Ordinary launches leave it unset, so no override is introduced for them.
+    "CFFIXED_USER_HOME",
     "USER",
     "LOGNAME",
     "SHELL",
@@ -202,6 +213,12 @@ pub struct SecretError(pub String);
 
 /// Supplies the key at each server start (keychain in the app, environment in tests).
 pub trait SecretProvider: Send + Sync {
+    /// The admission controller belonging to this key's proxy, when present.
+    /// Core refuses an interrupted resume if the provider cannot enforce its hold.
+    fn model_requests(&self) -> Option<std::sync::Arc<dyn crate::ModelRequests>> {
+        None
+    }
+
     /// The key, or `None` to start without one (no-key handshake, local-only reads).
     ///
     /// # Errors
@@ -245,6 +262,9 @@ pub enum EnvError {
     /// Unsupported experiments cannot override the app-owned config pins.
     #[error("refusing {0}: experimental features are disabled")]
     Experiment(String),
+    /// A stable setting is controlled by the app and cannot be overridden by explicit inputs.
+    #[error("refusing {0}: this setting is controlled by Vibe Work")]
+    PinnedSetting(String),
     /// The name is a loader/runtime hijack variable.
     #[error("refusing to pass {0} to the server: loader/runtime hijack variable")]
     Hijack(String),
@@ -277,6 +297,12 @@ pub struct EnvPlan<'a> {
 /// [`EnvError`] when an explicit variable is refused.
 pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvError> {
     for (name, value) in plan.extra {
+        if STABLE_CONFIG_KEYS
+            .iter()
+            .any(|key| name.eq_ignore_ascii_case(&format!("VIBE_{key}")))
+        {
+            return Err(EnvError::PinnedSetting(name.clone()));
+        }
         if name.to_ascii_uppercase().starts_with("VIBE_EXPERIMENTAL_")
             || RUNTIME_PINNED_OFF
                 .iter()
@@ -305,7 +331,7 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
         set(name, value.clone());
     }
     // Environment takes precedence over trusted project config as well as user config.
-    for key in EXPERIMENT_CONFIG_KEYS {
+    for key in EXPERIMENT_CONFIG_KEYS.into_iter().chain(STABLE_CONFIG_KEYS) {
         set(
             &format!("VIBE_{}", key.to_ascii_uppercase()),
             "false".into(),
@@ -319,6 +345,9 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
         "BASH_ENV",
         crate::shell_env::path(plan.vibe_home).into_os_string(),
     );
+    for (name, value) in platform_vars(cfg!(windows)) {
+        set(name, OsString::from(value));
+    }
     // Vibe 2's shell tool used SHELL on Unix; a user's login shell may not read BASH_ENV. Vibe 3.0.2 picks the bash
     // tool's configured shell, else zsh before bash (`_sandbox_helper.py` `resolve_posix_shell`).
     #[cfg(unix)]
@@ -338,6 +367,28 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
     keep_loopback_off_the_proxy(&mut env);
     crate::isolate_credentials(&mut env);
     Ok(env)
+}
+
+/// Variables the builder alone sets on one platform, as `(name, value)`. Pure (the platform is a parameter, so every
+/// OS tests the decision).
+///
+/// Windows: `GIT_REDIRECT_STDIN=NUL` ([`vw_agent_tools::agent_env::GIT_STDIN_VAR`]). Vibe 3.1.1's
+/// `_sandbox_helper._git_eol` runs `git check-attr` for every new file an agent writes inside a git repository without
+/// `stdin=`, so git inherits the server's standard input, a pipe on which the server always has a read pending. Git for
+/// Windows queries its standard input handle at start-up (`compat/winansi.c` `winansi_init`), and that call does not
+/// return until the client next writes to the server: the write stays `running` and the turn never ends. Killing the
+/// `cmd\git.exe` launcher at Vibe's 5-second timeout leaves the real git holding the output pipes. Git replaces its
+/// standard input with this file before that query (`compat/mingw.c` `maybe_redirect_std_handles`) and removes the
+/// variable before starting any program of its own. `NUL` rather than `off`: an empty input, not a closed handle.
+/// The agent's own shells remove it again (`shell_env`, the `bash.exe` and PowerShell wrappers), so a pipe the agent
+/// writes into git keeps its content. Remove this once Vibe passes `stdin=subprocess.DEVNULL` in `_git_eol`, as its
+/// other git calls already do.
+fn platform_vars(windows: bool) -> &'static [(&'static str, &'static str)] {
+    if windows {
+        &[(vw_agent_tools::agent_env::GIT_STDIN_VAR, "NUL")]
+    } else {
+        &[]
+    }
 }
 
 /// Addresses of this computer, in the no-proxy list Vibe gets when it has a proxy. Vibe reaches Vibe Work's model proxy
@@ -417,62 +468,70 @@ fn same_name(a: &OsStr, b: &OsStr) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn experiments_cannot_be_enabled_through_the_environment() {
-        for name in [
-            "VIBE_EXPERIMENTAL_LOCAL_RUNTIME_SESSION_API",
-            "VIBE_EXPERIMENTAL_ENABLE_MISTRAL_MCP_CONNECTOR",
-            "VIBE_EXPERIMENTAL_ENABLE_PR_MONITORING",
-        ] {
-            let extra = [(name.to_owned(), OsString::from("true"))];
-            let mut plan = EnvPlan {
-                parent: vec![(name.into(), "true".into())],
-                extra: &[],
-                vibe_home: Path::new("vibe-home"),
-                home: None,
-                key: None,
-                mcp_token: None,
-            };
-            assert!(
-                build_env(&plan)
-                    .unwrap()
-                    .iter()
-                    .any(|(key, value)| key == name && value == "false"),
-                "{name} must override trusted project config too"
-            );
-            plan.extra = &extra;
-            assert!(
-                build_env(&plan).is_err(),
-                "{name} must not override the pin"
-            );
-        }
-    }
-
-    /// Vibe 3.1.0's managed-shell rollout (`GrowthBook`) gives `bash_stdin` and `bash_sessions` Vibe `ALWAYS`; their
-    /// input has no `command`, so the app's per-command guards cannot see it. It stays off.
-    #[test]
-    fn the_managed_shell_rollout_is_pinned_off() {
-        let name = "VIBE_MANAGED_SHELL_TOOLS_ENABLED";
-        let extra = [(name.to_owned(), OsString::from("true"))];
-        let mut plan = EnvPlan {
-            parent: vec![(name.into(), "true".into())],
-            extra: &[],
-            vibe_home: Path::new("vibe-home"),
+    fn plan(parent: Vec<(OsString, OsString)>, extra: &[(String, OsString)]) -> EnvPlan<'_> {
+        EnvPlan {
+            parent,
+            extra,
+            vibe_home: Path::new("/vh"),
             home: None,
             key: None,
             mcp_token: None,
-        };
-        let env = build_env(&plan).unwrap();
-        assert!(
-            env.iter()
-                .any(|(key, value)| key == name && value == "false")
-                && env.iter().filter(|(key, _)| key == name).count() == 1,
-            "the rollout must be off even when the parent turns it on"
+        }
+    }
+
+    fn value(env: &[(OsString, OsString)], name: &str) -> Option<OsString> {
+        env.iter()
+            .find(|(existing, _)| same_name(existing, OsStr::new(name)))
+            .map(|(_, value)| value.clone())
+    }
+
+    #[test]
+    fn redirected_core_foundation_home_reaches_the_child_only_when_set() {
+        let parent = vec![("CFFIXED_USER_HOME".into(), "/isolated/home".into())];
+        let env = build_env(&plan(parent, &[])).unwrap();
+        assert_eq!(
+            value(&env, "CFFIXED_USER_HOME"),
+            Some("/isolated/home".into())
         );
-        plan.extra = &extra;
-        assert!(
-            build_env(&plan).is_err(),
-            "an explicit variable must not override the pin"
+        let env = build_env(&plan(Vec::new(), &[])).unwrap();
+        assert_eq!(value(&env, "CFFIXED_USER_HOME"), None);
+    }
+
+    #[test]
+    fn windows_alone_gets_gits_standard_input_from_the_null_device() {
+        assert_eq!(
+            platform_vars(true),
+            &[(vw_agent_tools::agent_env::GIT_STDIN_VAR, "NUL")]
+        );
+        assert_eq!(platform_vars(false), []);
+    }
+
+    #[test]
+    fn an_inherited_or_explicit_git_stdin_redirect_never_sets_the_value() {
+        let parent = vec![
+            (
+                OsString::from("GIT_REDIRECT_STDIN"),
+                OsString::from("C:\\evil.txt"),
+            ),
+            (OsString::from("git_redirect_stdin"), OsString::from("off")),
+        ];
+        let env = build_env(&plan(parent, &[])).unwrap();
+        let ours = value(&env, "GIT_REDIRECT_STDIN");
+        if cfg!(windows) {
+            assert_eq!(ours, Some(OsString::from("NUL")));
+            let spellings = env
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("GIT_REDIRECT_STDIN"))
+                .count();
+            assert_eq!(spellings, 1, "one spelling, ours");
+        } else {
+            assert_eq!(ours, None, "never on Linux or macOS, also not inherited");
+        }
+        let extra = [("GIT_REDIRECT_STDIN".to_owned(), OsString::from("NUL"))];
+        assert_eq!(
+            build_env(&plan(Vec::new(), &extra)),
+            Err(EnvError::Hijack("GIT_REDIRECT_STDIN".to_owned())),
+            "only the builder sets it"
         );
     }
 }

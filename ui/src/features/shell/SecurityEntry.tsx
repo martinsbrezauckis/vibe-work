@@ -1,4 +1,5 @@
 /** Grouped guard decisions in the bell. Uses shared disclosure and links; opens the owning chat and step. */
+import { term } from "../../vocabulary";
 import { useState } from "react";
 import { LinkButton, RowDisclosure } from "../../components/Controls";
 import { Icon } from "../../components/Icon";
@@ -63,7 +64,7 @@ export function SecurityEntry({ toast, onNavigate }: { toast: Toast; onNavigate:
                     void open(line.stepId);
                   }}
                 >
-                  {line.stepId === null ? "Open chat" : "Open step"}
+                  {line.stepId === null ? term("workNames", "session").tooltip : "Open step"}
                 </LinkButton>
               </div>
             ))}
@@ -76,7 +77,7 @@ export function SecurityEntry({ toast, onNavigate }: { toast: Toast; onNavigate:
                   void open(null);
                 }}
               >
-                Open chat
+                {term("workNames", "session").tooltip}
               </LinkButton>
             </div>
           )}

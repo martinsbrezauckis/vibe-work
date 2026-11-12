@@ -15,7 +15,7 @@ export function SessionListSkeleton({ ready }: { ready: boolean }) {
   return (
     <>
       <div role="status">
-        <span className="sr">Loading your sessions…</span>
+        <span className="sr">Loading your chats…</span>
         <div aria-hidden="true">
           {[
             { header: "55%", rows: ["70%", "50%", "62%", "44%"] },
@@ -36,7 +36,7 @@ export function SessionListSkeleton({ ready }: { ready: boolean }) {
       </div>
       {slow && (
         <p className="col-note">
-          {ready ? "Still loading sessions from Vibe." : "Still loading. Vibe is starting."}
+          {ready ? "Still loading chats from Vibe." : "Still loading. Vibe is starting."}
         </p>
       )}
     </>

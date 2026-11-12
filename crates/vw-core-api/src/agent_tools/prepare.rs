@@ -90,6 +90,7 @@ async fn prepare_inner(
             source,
             call,
             args.clone(),
+            None,
         )
         .await
         .map(Some);
@@ -111,7 +112,7 @@ async fn prepare_inner(
     if tool == "chrome_execute"
         && ["auth.fill", "auth.basic"].contains(&args["action"].as_str().unwrap_or_default())
     {
-        return crate::chrome_control::login::prepare(shared, owner, args.clone())
+        return crate::chrome_control::login::prepare(shared, owner, args.clone(), None)
             .await
             .map(Some);
     }

@@ -2,7 +2,7 @@
 //! helper refresh and status; a receipt never authorizes arbitrary paths or another installation's host.
 use super::files;
 use super::{
-    ChromeControlConfig, HOST_NAME, Path, helper_name, home_of, host_manifest, manifest_path,
+    ChromeControlConfig, HOST_NAME, Path, helper_name, home_of, manifest_for, manifest_path,
     read_receipt, targets,
 };
 use crate::chrome_control::extension_registry::{self, Native};
@@ -22,7 +22,6 @@ pub(super) fn repair(
         return Ok(());
     }
     check_helper(config, state)?;
-    let expected = host_manifest(&helper, &config.extension_id);
     let home = home_of(config)?;
     let mut failure = None;
     for target in targets(&home, config) {
@@ -32,6 +31,7 @@ pub(super) fn repair(
         {
             continue;
         }
+        let expected = manifest_for(&helper, config, target.name);
         let result = (|| {
             let path = target.hosts.map_or_else(
                 || manifest_path(state, target.name),

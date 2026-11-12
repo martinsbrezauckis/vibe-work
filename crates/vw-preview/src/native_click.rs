@@ -7,6 +7,23 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::{EngineError, FrameAnswer, MountId, PersonInterval, PreviewError, PreviewService};
 
+/// Native submission must stay inside the document-start guard's 300 ms grace period. Start this clock before
+/// the validation evaluation: any document born after that evaluation may not have an armed receipt.
+/// The remaining 100 ms accommodates native delivery; queued events retain their creation timestamps.
+pub const POINT_DISPATCH_LIMIT: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Refuses a press whose validation/dispatch callbacks outlived the new-document capture window.
+///
+/// # Errors
+/// The input window expired; no new native press may be submitted with that receipt.
+pub fn validate_point_dispatch_age(started: std::time::Instant) -> Result<(), String> {
+    if started.elapsed() >= POINT_DISPATCH_LIMIT {
+        Err("the page moved: native input preparation took too long; read the page again".into())
+    } else {
+        Ok(())
+    }
+}
+
 /// A point in the top document's CSS viewport, after all ancestor-frame offsets.
 /// The native engine maps viewport fractions to its current widget pixels/points, including zoom and DPI.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -78,7 +95,7 @@ impl NativeClickLease<'_> {
         // Compare native metadata before applying read policy: even an unreadable new frame invalidates input.
         if frame_registry(&answers).ok().as_ref() != Some(&self.frames) {
             return Err(EngineError::Platform(
-                "native input was sent; the page changed while clicking, so earlier refs no longer match; read the page again"
+                "native input was sent; the page moved: the page changed while clicking, so earlier refs no longer match; read the page again"
                     .into(),
             )
             .into());

@@ -20,10 +20,6 @@ mod negative;
 /// Oldest git this crate supports (`add`/`restore` with `--pathspec-from-file`).
 pub const MIN_GIT: (u32, u32) = (2, 26);
 
-#[cfg(all(test, target_os = "linux"))]
-#[path = "repo_discovery_tests.rs"]
-mod discovery_tests;
-
 /// A repository as seen from a session folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {

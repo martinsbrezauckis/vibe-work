@@ -62,7 +62,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .rec-dot {
-    animation: recpulse 1.2s ease-in-out infinite;
+    animation: recpulse var(--t-busy-fast) var(--ease-pulse) infinite;
   }
 }
 @keyframes recpulse {
@@ -136,7 +136,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .vchat-listening {
-    animation: vchat-pulse 1.4s ease-in-out infinite;
+    animation: vchat-pulse var(--t-busy) var(--ease-pulse) infinite;
   }
 }
 @keyframes vchat-pulse {
@@ -145,8 +145,6 @@
   }
 }
 .vchat-tag {
-  font-weight: var(--weight-semibold);
-  color: var(--text);
   flex: none;
 }
 .vchat-note {
@@ -164,6 +162,6 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .vchat-row-listening {
-    animation: recpulse 1.2s ease-in-out infinite;
+    animation: recpulse var(--t-busy-fast) var(--ease-pulse) infinite;
   }
 }

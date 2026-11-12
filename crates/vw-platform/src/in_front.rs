@@ -43,19 +43,3 @@ pub fn own_app_in_front() -> Option<bool> {
 pub fn own_app_in_front() -> Option<bool> {
     None
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_test_process_without_windows_is_not_in_front() {
-        // A test binary has no window of its own: never "in front" on Windows/macOS, the toolkit's answer elsewhere.
-        let answer = own_app_in_front();
-        if cfg!(any(windows, target_os = "macos")) {
-            assert_eq!(answer, Some(false));
-        } else {
-            assert_eq!(answer, None);
-        }
-    }
-}

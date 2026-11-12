@@ -5,6 +5,7 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
+import type { BrowserPreferences } from "./browser";
 export type Requester = "agent" | "window" | "debugApi" | "core";
 
 export type Ask = {
@@ -231,7 +232,43 @@ tool: string,
  */
 pattern: string | null, };
 
-export type ChromeControlRequest = { "op": "read", } | { "op": "takeSelection",
+export type ChromeControlRequest = { "op": "read", } | { "op": "selectProfile",
+/**
+ * Owning chat or New chat draft.
+ */
+sessionId: string,
+/**
+ * Exact paired profile identity.
+ */
+profileId: string, } | { "op": "renameProfile",
+/**
+ * Exact paired identity.
+ */
+profileId: string,
+/**
+ * Person-owned display name.
+ */
+name: string, } | { "op": "setDefaultProfile",
+/**
+ * Exact paired identity.
+ */
+profileId: string, } | { "op": "setProfileEnabled",
+/**
+ * Exact paired identity.
+ */
+profileId: string,
+/**
+ * Whether the profile is available.
+ */
+enabled: boolean, } | { "op": "connectProfile",
+/**
+ * Exact paired identity.
+ */
+profileId: string, } | { "op": "removeProfile",
+/**
+ * Exact paired identity.
+ */
+profileId: string, } | { "op": "takeSelection",
 /**
  * The pending selection identity.
  */
@@ -255,7 +292,11 @@ enabled: boolean, } | { "op": "setEdgeEnabled",
 /**
  * Whether Edge tools are available.
  */
-enabled: boolean, } | { "op": "setLocalNetwork",
+enabled: boolean, } | { "op": "setFirefoxEnabled",
+/**
+ * Whether Firefox tools are available.
+ */
+enabled: boolean, } | { "op": "removeFirefox", } | { "op": "setLocalNetwork",
 /**
  * Ignored legacy value; browser address access is always enabled.
  */
@@ -279,6 +320,10 @@ enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", } | { "op": 
 
 export type ChromeControlView = {
 /**
+ * Composer visibility and built-in availability, independent of paired-profile Off.
+ */
+browserPreferences?: BrowserPreferences,
+/**
  * Whether Chrome tools are available.
  */
 enabled: boolean,
@@ -298,6 +343,14 @@ localNetworkApplied: boolean,
  * Recent chat work, bounded and independent of permissions.
  */
 work: Array<ChromeWorkView>,
+/**
+ * Individually paired identities, including retained offline profiles.
+ */
+pairedProfiles?: Array<BrowserProfile>,
+/**
+ * Fixed chat selections, including unconfirmed switches.
+ */
+chatProfiles?: Array<ChatBrowserProfile>,
 /**
  * Pending selected-text deliveries, claimed once by a composer.
  */
@@ -319,9 +372,75 @@ edge?: ChromeSetupView,
  */
 firefox?: ChromeSetupView,
 /**
+ * Firefox availability, independent of Chrome.
+ */
+firefoxEnabled?: boolean,
+/**
+ * The optional person-share add-on, independent of the owned window.
+ */
+firefoxSharing?: ChromeAddonView,
+/**
  * Safari is omitted while its optional module is off.
  */
 safari?: SafariView, };
+
+export type BrowserProfile = {
+/**
+ * Immutable helper identity, including the browser namespace.
+ */
+profileId: string,
+/**
+ * Browser namespace; adapters retain their actual profile capabilities.
+ */
+browser: string,
+/**
+ * Person-editable label, with a stable suffix when another profile has the same name.
+ */
+name: string,
+/**
+ * Short current connection state.
+ */
+state: ProfileState,
+/**
+ * This identity's own availability switch.
+ */
+enabled: boolean,
+/**
+ * Connected and available for a new binding.
+ */
+eligible: boolean,
+/**
+ * The person's default for new chats using this browser.
+ */
+isDefault: boolean,
+/**
+ * Short reason for an unavailable retained identity.
+ */
+reason?: string, };
+
+export type ChatBrowserProfile = {
+/**
+ * Chat or New chat draft owner.
+ */
+sessionId: string,
+/**
+ * Exact selected identity, or null when a legacy chat requires a choice.
+ */
+profileId: string | null,
+/**
+ * Readable browser and person-owned profile name.
+ */
+name: string,
+/**
+ * Selected, stopping, unconfirmed, or removed (the browser deleted this profile).
+ */
+state: string,
+/**
+ * Requested identity, present only during a handover.
+ */
+requestedProfileId?: string, };
+
+export type ProfileState = "connected" | "offline" | "extensionMissing" | "unavailable";
 
 export type SafariView = {
 /**
@@ -339,7 +458,11 @@ addon: ChromeAddonView,
 /**
  * The helper’s own pairing identity, only while a live Safari pairing event supplies it.
  */
-fingerprint: string | null, };
+fingerprint: string | null,
+/**
+ * Other registered installations containing the Safari extension; never changed by this app.
+ */
+otherAppCopies?: Array<string>, };
 
 export type ChromeWorkView = {
 /**
@@ -347,7 +470,7 @@ export type ChromeWorkView = {
  */
 sessionId: string,
 /**
- * Active, connecting, stopping, stopped or disconnected.
+ * Active, connecting, releasing, idle, stopping, stopped or disconnected.
  */
 state: string,
 /**
@@ -379,7 +502,13 @@ text: string,
 /**
  * The page content inside the browser's untrusted-content boundary.
  */
-modelText: string, };
+modelText: string,
+/**
+ * Menu context kind; absent for the original selected-text delivery.
+ */
+kind?: ChromeShareKind, };
+
+export type ChromeShareKind = "page" | "link" | "image";
 
 export type ChromeTab = {
 /**

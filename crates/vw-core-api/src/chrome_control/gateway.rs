@@ -88,10 +88,14 @@ pub(super) fn validate_session(
             .get(task)
             .cloned();
         if owner.as_deref() != Some(session) {
-            return Err(refusal(shared, session, task, owner.as_deref()).to_owned());
+            // Ask-mode consent, login and batch preparation return this refusal without `call`'s browser
+            // mapping, so name the session's own browser here (`text` is idempotent on already-named text).
+            let browser = agent_browser::selected(shared, session, tool, args);
+            return Err(browser.text(refusal(shared, session, task, owner.as_deref())));
         }
     } else if tool == "chrome_execute" {
-        return Err("Not run: open a Chrome session in this chat first.".to_owned());
+        let browser = agent_browser::selected(shared, session, tool, args);
+        return Err(browser.text("Not run: open a Chrome session in this chat first."));
     }
     Ok(())
 }
@@ -109,14 +113,23 @@ fn lease_refusal(
     live: bool,
     reason: String,
 ) -> Result<Value, String> {
-    if reason == OTHER {
+    // `validate_session` names the session's own browser, so match the ownership refusal in every browser's words.
+    if [
+        Browser::Chrome,
+        Browser::Edge,
+        Browser::Safari,
+        Browser::Firefox,
+    ]
+    .into_iter()
+    .any(|named| reason == named.text(OTHER))
+    {
         return Err(reason);
     }
     super::availability::refusal(shared, browser, live).ok_or(reason)
 }
 
 /// Why `task` is not this chat's live session, in the words the agent reads: this chat's own session that is not
-/// reopenable (`reopen`) says what ended it; a known session of another chat says so; any other id is unknown.
+/// retained after a turn says what ended it; a known session of another chat says so; any other id is unknown.
 fn refusal(shared: &Shared, session: &str, task: &str, owner: Option<&str>) -> &'static str {
     if owner.is_some() {
         return OTHER;
@@ -139,15 +152,6 @@ fn refusal(shared: &Shared, session: &str, task: &str, owner: Option<&str>) -> &
             "Not run: this Chrome session was stopped; open a new one with chrome_session."
         }
         Some((false, _)) => OTHER,
-        None if chrome
-            .turn_ended
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .any(|(chat, ids)| chat != session && ids.iter().any(|id| id == task)) =>
-        {
-            OTHER
-        }
         // After an app restart an opaque old ID has no browser binding. The browser that
         // happens to be connected or selected in this chat cannot name that missing session.
         None => "Not run: no browser session with this id; open one with chrome_session.",
@@ -160,6 +164,11 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
+    let browser = agent_browser::selected(shared, session, tool, &args);
+    if tool == "chrome_execute" {
+        super::reconnect::stopped(shared, session, browser)?;
+        shared.browser_dialogs.check()?;
+    }
     if matches!(tool, "chrome_status" | "chrome_execute")
         && let Some(action) = args["action"].as_str()
         && let Some(answer) = super::output_status::unknown_action(action)
@@ -170,7 +179,6 @@ pub(crate) async fn call(
         super::output::guard(&mut answer);
         return Ok(json!({"vwMcpResult":answer}));
     }
-    let browser = agent_browser::selected(shared, session, tool, &args);
     if tool == "chrome_status" {
         validate_public_args(&args)?;
         if let Some(actions) = super::status_actions::requested(&args)? {
@@ -181,6 +189,11 @@ pub(crate) async fn call(
                 args["profileId"].as_str(),
             )
             .await
+            .map(|mut answer| {
+                super::profile_agent::status(shared, session, &mut answer["vwMcpResult"]);
+                super::output::guard_status(&mut answer["vwMcpResult"]);
+                answer
+            })
             .inspect(|answer| super::connection_notice::refused(shared, session, browser, answer))
             .map_err(|reason| browser.text(&reason));
         }
@@ -208,8 +221,16 @@ pub(crate) async fn call(
                     requested_action.as_deref(),
                     &mut answer["vwMcpResult"],
                 );
+                super::profile_agent::status(shared, session, &mut answer["vwMcpResult"]);
                 super::output::guard_status(&mut answer["vwMcpResult"]);
             } else {
+                super::profile_agent::failed_connection(
+                    shared,
+                    session,
+                    tool,
+                    &output_request,
+                    &mut answer["vwMcpResult"],
+                );
                 if super::output_cache::observation(&answer["vwMcpResult"]) {
                     super::output_cache::bound(
                         shared,
@@ -249,16 +270,7 @@ pub(super) async fn call_selected(
     if tool == "chrome_execute" && super::output_cache::is_continuation(&args) {
         return call_one(shared, session, tool, args).await;
     }
-    // The card is checked in `call_one`, after the mode and lease checks (also for a reopened session's own open).
-    let (args, reopened) = match super::reopen::resolve(shared, session, tool, args).await? {
-        super::reopen::Resolved::Ready(args, reopened) => (args, reopened),
-        super::reopen::Resolved::Refused(answer) => return Ok(answer),
-    };
-    let mut answer = run(shared, session, tool, args).await?;
-    if let Some(reopened) = reopened {
-        super::reopen::note(&mut answer, &reopened);
-    }
-    Ok(answer)
+    run(shared, session, tool, args).await
 }
 
 async fn run(
@@ -294,6 +306,7 @@ async fn run(
                 .owner
                 .control(json!({"action":"cancel","sessionId":id}));
         },
+        super::batch_wait::Clock::default(),
     )
     .await)
 }
@@ -322,6 +335,7 @@ fn local_reply(
     if tool != "chrome_status" {
         super::reconnect::stopped(shared, session, browser)?;
     }
+    super::profile_agent::check(shared, session, tool, args)?;
     if let Some(refusal) = super::availability::refusal(shared, browser, true) {
         return Ok(Some(refusal));
     }
@@ -350,12 +364,36 @@ pub(super) async fn call_one(
     args: Value,
 ) -> Result<Value, String> {
     let request = args.clone();
-    let mut answer = call_one_inner(shared, session, tool, args, None).await?;
+    let mut answer = call_one_inner(shared, session, tool, args, None, None).await?;
     super::receipt::stamp(shared, tool, &request, &mut answer["vwMcpResult"]);
     if tool != "chrome_status" {
         super::output::guard(&mut answer["vwMcpResult"]);
     }
     Ok(answer)
+}
+
+async fn wait_for_browser(
+    shared: &Arc<Shared>,
+    session: &str,
+    tool: &str,
+    args: &Value,
+    browser: Browser,
+    consent: Option<&super::read_consent::Consent>,
+) -> Result<Option<Value>, String> {
+    let acts = tool != "chrome_status"
+        && !(tool == "chrome_session"
+            && matches!(args["action"].as_str(), Some("get" | "cancel" | "stop")));
+    if acts {
+        if let Some(reply) = super::browser_start::wait(shared, session, browser).await? {
+            return Ok(Some(reply));
+        }
+        if let Some(retry) = super::reconnect::wait(shared, session, browser).await? {
+            return Ok(Some(retry));
+        }
+        // Waiting for a native port grants no authority: mode and the person's Stop are checked again.
+        recheck(shared, session, browser, tool, args, consent)?;
+    }
+    Ok(None)
 }
 
 pub(super) async fn call_one_inner(
@@ -364,11 +402,32 @@ pub(super) async fn call_one_inner(
     tool: &str,
     args: Value,
     consent: Option<&super::read_consent::Consent>,
+    previous: Option<&str>,
 ) -> Result<Value, String> {
-    call_one_preflighted(shared, session, tool, args, consent, None).await
+    let opening = tool == "chrome_session" && args["action"] == "open";
+    let _binding = if opening {
+        Some(shared.chrome_control.binding_changes.lock().await)
+    } else {
+        None
+    };
+    if opening
+        && let Some(profile) = args["profileId"].as_str()
+        && ![
+            "chrome",
+            "edge",
+            "safari",
+            "firefox",
+            vw_vocabulary::texts::CHROME_NAME,
+            vw_vocabulary::texts::EDGE_NAME,
+        ]
+        .contains(&profile)
+    {
+        super::profile_bindings::check(&shared.chrome_control, session, profile)?;
+    }
+    call_prepared(shared, session, tool, args, consent, previous).await
 }
 
-pub(super) async fn call_one_preflighted(
+async fn call_prepared(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
@@ -376,23 +435,16 @@ pub(super) async fn call_one_preflighted(
     consent: Option<&super::read_consent::Consent>,
     previous: Option<&str>,
 ) -> Result<Value, String> {
+    let browser = agent_browser::selected(shared, session, tool, &args);
+    if tool == "chrome_execute" {
+        super::reconnect::stopped(shared, session, browser)?;
+        shared.browser_dialogs.check()?;
+    }
     if let Some(reply) = local_reply(shared, session, tool, &args, consent)? {
         return Ok(reply);
     }
-    let browser = agent_browser::selected(shared, session, tool, &args);
-    let acts = tool != "chrome_status"
-        && !(tool == "chrome_session"
-            && matches!(args["action"].as_str(), Some("get" | "cancel" | "stop")));
-    if acts {
-        if let Some(reply) = super::browser_start::wait(shared, session, browser).await? {
-            return Ok(reply);
-        }
-        if let Some(retry) = super::reconnect::wait(shared, session, browser).await? {
-            return Ok(retry);
-        }
-        // Waiting for a native port grants no authority: mode and the person's Stop are checked again.
-        super::reconnect::stopped(shared, session, browser)?;
-        super::check::authorize_read(shared, session, tool, &args, consent)?;
+    if let Some(reply) = wait_for_browser(shared, session, tool, &args, browser, consent).await? {
+        return Ok(reply);
     }
     let mut live = super::availability::live(shared, browser);
     if let Err(reason) = validate_session(shared, session, tool, &args) {
@@ -415,29 +467,32 @@ pub(super) async fn call_one_preflighted(
     }
     if tool == "chrome_execute" {
         super::observation_support::require(shared, &args).await?;
-        super::reconnect::stopped(shared, session, browser)?;
-        super::check::authorize_read(shared, session, tool, &args, consent)?;
+        recheck(shared, session, browser, tool, &args, consent)?;
         validate_session(shared, session, tool, &args)?;
     }
     let request = tool == "chrome_session" && args["action"] == "open";
     if request {
-        super::session_title::apply(shared, session, &mut args).await?;
-        super::reconnect::stopped(shared, session, browser)?;
-        super::check::authorize_read(shared, session, tool, &args, consent)?;
-        args["_clientSessionId"] = json!(session);
-        if let Ok(folders) = crate::agent_tools::session::folders(shared, session)
-            && let Some(folder) = folders.first()
-        {
-            args["_sessionFolder"] = json!(folder);
-        }
+        super::session_start::arguments(shared, session, browser, &mut args, consent).await?;
     }
     let pending = super::person_stop::PendingCall::new(shared, session, tool, &args);
     if super::output_file::requested(&args) {
         super::output_file::folder(shared, session)?;
     }
+    if tool == "chrome_execute"
+        && let Some(answer) = super::session_activity::before_execute(
+            shared, session, browser, &args, &pending, consent,
+        )
+        .await?
+    {
+        return Ok(answer);
+    }
     let clamped = super::output::clamp_request(tool, &mut args);
     let output_request = args.clone();
-    args.as_object_mut().map(|args| args.remove("saveTo"));
+    if let Some(args) = args.as_object_mut() {
+        for key in ["saveTo", "extract", "appendFrom", "deduplicate"] {
+            args.remove(key);
+        }
+    }
     if let Some(previous) = previous {
         args["_preflightOperationId"] = json!(previous);
     }
@@ -445,8 +500,15 @@ pub(super) async fn call_one_preflighted(
         .await
         .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;
     if request {
-        answer = super::reopen::fresh(shared, session, browser, &pending, &output_request, answer)
-            .await?;
+        answer = super::session_start::fresh(
+            shared,
+            session,
+            browser,
+            &pending,
+            &output_request,
+            answer,
+        )
+        .await?;
     }
     pending.finish(shared, session, browser, &answer)?;
     scope_result(
@@ -458,6 +520,9 @@ pub(super) async fn call_one_preflighted(
         &pending,
         &mut answer,
     )?;
+    if tool == "chrome_status" {
+        super::page_plan_catalog::decorate(answer.value_mut(), output_request["action"].as_str());
+    }
     super::check::annotate_modes(shared, session, tool, answer.value_mut());
     if let Some(reply) = super::availability::after_call(shared, browser, tool, request, &answer) {
         return Ok(reply);
@@ -470,6 +535,23 @@ pub(super) async fn call_one_preflighted(
         tool,
         clamped,
     ))
+}
+
+/// Waiting for the adapter or a dialog never preserves an old browser-action authorization.
+pub(super) fn recheck(
+    shared: &Shared,
+    session: &str,
+    browser: Browser,
+    tool: &str,
+    args: &Value,
+    consent: Option<&super::read_consent::Consent>,
+) -> Result<(), String> {
+    super::reconnect::stopped(shared, session, browser)?;
+    super::check::authorize_read(shared, session, tool, args, consent)?;
+    if tool == "chrome_execute" {
+        shared.browser_dialogs.check()?;
+    }
+    Ok(())
 }
 
 pub(super) fn scope_result(
@@ -486,11 +568,9 @@ pub(super) fn scope_result(
         .tasks
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    // Safari switch-off takes this same lease lock. Recheck while binding so an off/on cycle cannot
-    // leave a late open renewable after the earlier reply validation passed.
-    if browser == Browser::Safari {
-        pending.finish(shared, session, browser, answer)?;
-    }
+    // Profile Off takes this same lease lock. Recheck every browser at admission so an off/on cycle
+    // cannot grant a late open after the earlier reply validation passed.
+    pending.finish(shared, session, browser, answer)?;
     let result = answer.value_mut();
     if request
         && result["isError"] != true
@@ -498,11 +578,20 @@ pub(super) fn scope_result(
         && result["structuredContent"]["status"] != "unknown"
         && let Some(id) = result["structuredContent"]["sessionId"].as_str()
     {
+        let profile = result["structuredContent"]["profileId"].as_str().ok_or("The browser did not identify the opened profile. Reconnect the profile before opening a session.")?;
         let work = shared
             .chrome_control
             .work
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        if work
+            .profile_of(id)
+            .is_some_and(|old| !super::profile_ids::same(old, profile))
+            || work.chat_of(id).is_some_and(|old| old != session)
+        {
+            return Err("This browser session is already associated with another chat or profile. Reconnect this profile before opening a new session.".into());
+        }
+        super::profile_bindings::remember(&shared.chrome_control, session, profile, Some(id))?;
         tasks.retain(|id, owner| {
             owner != session
                 || work
@@ -532,14 +621,6 @@ pub(super) fn scope_result(
                     }),
                 pending.turn.as_deref(),
             );
-        if let Some(profile) = result["structuredContent"]["profileId"].as_str() {
-            shared
-                .chrome_control
-                .chat_profiles
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(session.to_owned(), profile.to_owned());
-        }
     }
     if tool == "chrome_status" && result["structuredContent"].get("profiles").is_some() {
         for key in ["sessions", "pending"] {

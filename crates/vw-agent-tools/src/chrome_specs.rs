@@ -41,7 +41,7 @@ fn chrome_status() -> Value {
 
 fn chrome_session() -> Value {
     json!({
-        "description": "Open or inspect this chat's own window in the selected browser, cancel its current work or stop its session. Use the exact profileId from chrome_status. When paired Chrome or Edge is closed, profileId chrome or edge lets Vibe Work open it and wait for its extension without a card in Ask; multiple connected profiles require an exact id. Omit tabId unless the person asked to use an existing tab. Stop and quitting Vibe Work leave the browser window open.",
+        "description": "Open or inspect this chat's own window in the selected browser, cancel its current work or stop its session. Use the exact profileId from chrome_status. When paired Chrome or Edge is closed, profileId chrome or edge lets Vibe Work open it and wait for its extension without a card in Ask; multiple connected profiles require an exact id. Omit tabId unless the user asked to use an existing tab. Completed turns release visible control while retaining the session ID for follow-ups. Stop, chat close, app exit or 30 minutes without browser work ends the session; Stop and idle expiry leave the browser window open.",
         "inputSchema": {
             "additionalProperties": false,
             "properties": {
@@ -82,7 +82,7 @@ fn chrome_session() -> Value {
 
 fn chrome_execute() -> Value {
     json!({
-        "description": "Run an action or up to 16 sequential steps in the selected browser session. Each step uses the current chat mode. A batch stops at the first refusal, failure, unknown outcome or 25-second deadline. Files land in the chat folder.",
+        "description": "Run an action or up to 16 sequential steps in the selected browser session. Each step uses the current chat mode. A batch stops at the first refusal, failure, unmet condition, unknown outcome or 25-second deadline. Files land in the chat folder.",
         "inputSchema": {
             "additionalProperties": false,
             "properties": {

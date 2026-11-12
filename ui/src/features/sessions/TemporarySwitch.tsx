@@ -41,7 +41,7 @@ export function TemporaryNote(): ReactElement {
   return (
     <p className="copy-reason temp-note" id="temp-chat-note" role="note">
       Temporary chat: deleted when you quit Vibe Work. Until then Vibe keeps it like any chat (the
-      Vibe CLI can list it while sessions are shared). Without a chosen folder it works in an empty
+      Vibe CLI can list it while chats are shared). Without a chosen folder it works in an empty
       folder of its own; changes to a chosen folder stay.
     </p>
   );

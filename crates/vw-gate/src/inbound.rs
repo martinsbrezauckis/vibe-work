@@ -24,7 +24,7 @@ pub enum InboundKind {
 pub fn classify_server_request(method: &str) -> InboundKind {
     match method {
         "callback/call" => InboundKind::CallbackCall,
-        "session/peer/restore" => InboundKind::Denied,
+        "tools/call" | "session/peer/restore" | "session/peer/markSeen" => InboundKind::Denied,
         m if m.starts_with("clientTool/") && vw_protocol::SERVER_REQUEST_METHODS.contains(&m) => {
             InboundKind::ClientTool
         }

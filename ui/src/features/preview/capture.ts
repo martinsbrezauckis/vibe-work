@@ -201,7 +201,7 @@ export function createCapture(core: CoreController) {
         return null;
       }
       if (store.get().busy[sessionId] !== undefined) {
-        set(sessionId, { error: "A capture is already running in this session." });
+        set(sessionId, { error: "A capture is already running in this chat." });
         return null;
       }
       set(sessionId, {

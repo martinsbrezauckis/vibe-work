@@ -123,7 +123,7 @@ async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
   const input = asObject(body);
   const sessionId =
     typeof input["sessionId"] === "string" ? input["sessionId"] : app.shell.store.get().selected;
-  if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+  if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
   const action = input["action"] ?? "state";
   switch (action) {
     case "state":

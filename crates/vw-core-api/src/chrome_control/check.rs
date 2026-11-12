@@ -15,6 +15,15 @@ pub(crate) fn mode(shared: &Shared, session: &str) -> Option<String> {
         })
     })
 }
+/// Cached browser replies recheck the same Full-only site-secret boundary at consumption time.
+pub(crate) fn check_full(
+    shared: &Shared,
+    session: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<(), String> {
+    super::mapping::check_full(mode(shared, session).as_deref(), tool, args)
+}
 /// A mode reduction revokes the helper lease, including already-installed request rules and emulation.
 pub(crate) fn mode_changed(shared: &Shared, session: &str, before: Option<&str>) {
     let old = before.and_then(Tier::from_mode);
@@ -65,6 +74,25 @@ fn authorize_mode(
     args: &Value,
     consent: Option<Tier>,
 ) -> Result<Tier, String> {
+    if tool == "chrome_execute" || tool == "chrome_session" && args["action"] == "open" {
+        if (tool != "chrome_execute"
+            || super::gateway::validate_session(shared, session, tool, args).is_ok())
+            && let Some(profile) = super::receipt::profile(shared, tool, args)
+            && ![
+                "chrome",
+                "edge",
+                "safari",
+                "firefox",
+                vw_vocabulary::texts::CHROME_NAME,
+                vw_vocabulary::texts::EDGE_NAME,
+            ]
+            .contains(&profile.as_str())
+        {
+            super::profiles::check(&shared.chrome_control, &profile)?;
+            super::profile_bindings::check(&shared.chrome_control, session, &profile)?;
+        }
+        crate::browser_handover::check(shared, session)?;
+    }
     let Some(view) = shared.store.view(session) else {
         return Err("Not run: this chat is not open.".into());
     };
@@ -80,14 +108,20 @@ fn authorize_mode(
         let browser = super::agent_browser::selected(shared, session, tool, args);
         return Err(super::availability::reason(&browser.addon(shared), browser));
     }
-    let mode = mode(shared, session)
-        .ok_or_else(|| "Not run: this chat's access mode is unavailable.".to_owned())?;
-    let tier =
-        Tier::from_mode(&mode).ok_or("Not run: Chrome is unavailable in this access mode.")?;
+    let mode = mode(shared, session).ok_or_else(|| {
+        "Not run: this chat's access mode is unavailable. Ask the user to choose an available chat mode, then try again.".to_owned()
+    })?;
+    let tier = Tier::from_mode(&mode).ok_or_else(|| {
+        mode_refusal(
+            super::agent_browser::selected(shared, session, tool, args).name(),
+            Tier::Ask,
+            &mode,
+        )
+    })?;
     super::mapping::check_full(Some(&mode), tool, args)?;
     let required = (if tier == Tier::Ask { super::mapping::ask_required(tool,args) } else { super::mapping::required(tool, args) }).ok_or_else(|| {
         match super::mapping::action(tool, args).as_str() {
-            "client.selection" => "Not run: selection is sent by the person from Chrome. Ask the person to use Ask Vibe Work in Chrome's context menu.",
+            "client.selection" => "Not run: selection is sent by the user from Chrome. Ask the user to use Ask Vibe Work in Chrome's context menu.",
             "page.dragdrop" => "Not run: page.dragdrop is a permission name. Use page.drag; ask chrome_status for its schema.",
             _ => "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
         }
@@ -106,10 +140,10 @@ fn authorize_mode(
 }
 
 /// One diagnosis and next step for local and helper-reported browser mode refusals.
-pub(super) fn mode_refusal(action: &str, required: Tier, mode: &str) -> String {
+pub(crate) fn mode_refusal(action: &str, required: Tier, mode: &str) -> String {
     let label = vw_vocabulary::label("accessModes", mode);
     format!(
-        "Not run: {action} needs {}; this chat is in {label}. Use an allowed action or ask the person to change the chat mode.",
+        "Not run: {action} needs {}; this chat is in {label}. Use an allowed action or ask the user to change the chat mode.",
         required.required_label()
     )
 }
@@ -130,6 +164,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     if tool != "chrome_status" {
         return;
     }
+    super::profile_agent::names(&shared.chrome_control, result);
     let selected_profile = shared
         .chrome_control
         .chat_profiles
@@ -367,8 +402,11 @@ mod tests {
                 );
             }
             if !script {
-                assert_eq!(row("raw.execute")["approvalRequired"], true);
-                assert!(row("raw.execute").get("needs").is_none());
+                assert_ne!(row("raw.execute")["approvalRequired"], true);
+                assert_eq!(
+                    row("raw.execute")["needs"],
+                    Tier::FullAccess.required_label()
+                );
             }
             assert!(row("page.read").get("needs").is_none());
             // W3 T11: page.key was marked not allowed in Ask, yet Tab and Escape ran there; the mark follows the
@@ -432,7 +470,7 @@ mod unsupported_tests {
             &json!({"agentName":"auto-approve"}),
         );
         for (action, reason, instruction) in [
-            ("client.selection", "person", "Ask Vibe Work"),
+            ("client.selection", "user", "Ask Vibe Work"),
             ("page.dragdrop", "permission", "page.drag"),
         ] {
             let error =

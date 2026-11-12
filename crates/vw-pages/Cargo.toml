@@ -16,24 +16,24 @@ workspace = true
 ts = ["dep:ts-rs"]
 
 [dependencies]
-vw-vocabulary = { path = "../vw-vocabulary" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-tokio = { version = "1.53", features = ["sync", "time", "macros", "rt", "net", "fs"] }
-tracing = "0.1"
-url = "2"
+vw-vocabulary = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "net", "fs"] }
+tracing = { workspace = true }
+url = { workspace = true }
 # Project keys for app-data files (same version as vw-preview and vw-changes).
-sha2 = "0.10.9"
+sha2 = { workspace = true }
 # Random comment ids and pick accessor names (same version as the other crates).
-getrandom = "0.3"
+getrandom = { workspace = true }
 # Constant-time comparison of the viewer's path capability. subtle 2.6.1 (BSD-3-Clause), already in the lockfile.
 subtle = "2.6.1"
 # The loopback page server: same axum as vw-debug-api (0.8.9, MIT), HTTP/1.1 only.
-axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+axum = { workspace = true, features = ["http1", "tokio"] }
 # Markdown pages, rendered read-only. pulldown-cmark 0.13.5 (MIT); raw
 # HTML events are turned into text before rendering, so a Markdown page can never carry markup or script.
-pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
+pulldown-cmark = { workspace = true, features = ["html"] }
 # Share a page as one file: images and fonts inlined as data: URLs. Same version as vw-core-api.
 base64 = "0.23"
 # Share a page as one file: the exported file leaves our sandbox, so it is
@@ -46,14 +46,14 @@ ammonia = "4.2.4"
 # capability rooted at the handbook folder (openat2 RESOLVE_BENEATH on Linux, per-component no-follow resolution
 # elsewhere), so a symlink swapped in during the export cannot reach outside it. cap-std 4.0.3
 # (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, Bytecode Alliance).
-cap-std = "4.0.3"
+cap-std = { workspace = true }
 # The preview engine seam: the page viewer is a second engine instance with its own hooks.
-vw-preview = { path = "../vw-preview" }
+vw-preview = { workspace = true }
 # User-only app-data files (comments, settings).
-vw-platform = { path = "../vw-platform" }
-ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+vw-platform = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 
 [target.'cfg(unix)'.dependencies]
 # The export opens files with O_NONBLOCK, so a FIFO in the handbook folder cannot block it (same version as
 # vw-platform).
-libc = "0.2"
+libc = { workspace = true }

@@ -1,5 +1,6 @@
 //! Person Stop from trusted helper session state. Uses the existing app interrupt and warning notice routes.
 //! Work binds each stop to its owning turn; a delayed observer or interrupt cannot stop a later turn.
+//! Invariant: the chat notice says "by you" only when the helper gives no connection-loss reason for the stop.
 use super::agent_browser::Browser;
 use crate::{Command, Core, Origin, core::Shared};
 use serde_json::{Value, json};
@@ -10,13 +11,44 @@ pub(super) struct Stopped {
     pub chat: String,
     pub browser: Browser,
     pub turn: Option<String>,
+    /// The helper ended the session because its browser connection or owned window ended
+    /// (`suspensionReason` `ADAPTER_DISCONNECTED` and the like), not on a person's Stop.
+    pub connection_ended: bool,
+}
+
+/// Helper `suspensionReason` values that end a session without anyone pressing Stop: the browser's adapter
+/// disconnected or its owned window closed (`ADAPTER_DISCONNECTED`), the browser session was replaced
+/// (`SESSION_CHANGED`), or the lease ran out (`LEASE_EXPIRED`). `STOP_REQUESTED`, an absent reason (older
+/// helpers) and unknown values keep the person attribution.
+pub(super) fn connection_ended(row: &Value) -> bool {
+    matches!(
+        row["suspensionReason"].as_str(),
+        Some("ADAPTER_DISCONNECTED" | "SESSION_CHANGED" | "LEASE_EXPIRED")
+    )
+}
+
+/// The chat's warning line for a stop the app did not ask for.
+pub(super) fn notice(stop: &Stopped) -> String {
+    if stop.connection_ended {
+        format!(
+            "Stopped in {}: the browser connection ended",
+            stop.browser.name()
+        )
+    } else {
+        format!("Stopped in {} by you", stop.browser.name())
+    }
 }
 
 pub(super) fn refusal(browser: Browser) -> String {
     format!(
-        "Not run: the person pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+        "Not run: the user pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
         browser.name()
     )
+}
+
+/// A completed turn cannot regain browser authority; every route gives the same next step.
+pub(super) fn ended(browser: Browser) -> String {
+    browser.words("Not run: this chat's {browser} work ended with this turn. Finish the reply; the browser can be used again in the next turn.")
 }
 
 pub(super) fn turn(shared: &Shared, chat: &str) -> Option<String> {
@@ -52,10 +84,13 @@ pub(super) fn received(shared: &Arc<Shared>, stopped: &[Stopped]) {
             if active_turn(&shared, &stop.chat) != stop.turn {
                 return;
             }
-            let _ = shared.store.apply(vw_session::Notification::new("warning", json!({
-                "sessionId":stop.chat, "turnId":stop.turn,
-                "warning":{"code":"browser_stopped", "message":format!("Stopped in {} by you", stop.browser.name())}
-            })));
+            let _ = shared.store.apply(vw_session::Notification::new(
+                "warning",
+                json!({
+                    "sessionId":stop.chat, "turnId":stop.turn,
+                    "warning":{"code":"browser_stopped", "message":notice(&stop)}
+                }),
+            ));
             let core = Core { shared };
             let command = Command::InterruptTurn {
                 session_id: stop.chat,
@@ -73,9 +108,11 @@ pub(super) struct PendingCall {
     pub turn: Option<String>,
     active: Option<String>,
     generation: u64,
-    browser_generations: [u64; 3],
+    binding_generation: u64,
+    browser_generations: [u64; 4],
     stop: Option<String>,
     open: bool,
+    profile: Option<(String, u64)>,
 }
 
 impl PendingCall {
@@ -96,14 +133,49 @@ impl PendingCall {
             turn: turn(shared, chat),
             active: active_turn(shared, chat),
             generation: crate::stops::generation(shared, chat),
-            browser_generations: [Browser::Chrome, Browser::Edge, Browser::Safari]
-                .map(|browser| shared.chrome_control.browser_generation(browser)),
+            binding_generation: super::profile_bindings::generation(&shared.chrome_control, chat),
+            browser_generations: [
+                Browser::Chrome,
+                Browser::Edge,
+                Browser::Safari,
+                Browser::Firefox,
+            ]
+            .map(|browser| shared.chrome_control.browser_generation(browser)),
             stop,
             open: tool == "chrome_session" && args["action"] == "open",
+            profile: super::receipt::profile(shared, tool, args).map(|id| {
+                let generation = shared
+                    .chrome_control
+                    .profiles
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .generation(&id);
+                (id, generation)
+            }),
         }
     }
 
     pub(super) fn refusal(&self, shared: &Shared, chat: &str, browser: Browser) -> Option<String> {
+        if self.binding_generation
+            != super::profile_bindings::generation(&shared.chrome_control, chat)
+        {
+            return Some("This chat changed browser profiles; the old result is unconfirmed. Check the selected profile before continuing.".into());
+        }
+        let revoked = self.profile.as_ref().filter(|(id, generation)| {
+            *generation
+                != shared
+                    .chrome_control
+                    .profiles
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .generation(id)
+        });
+        if let Some((id, _)) = revoked {
+            return Some(format!(
+                "{} was switched off; the result is unconfirmed. Check this profile before trying again.",
+                super::profiles::label(&shared.chrome_control, id)
+            ));
+        }
         if self.browser_disabled(shared, browser) {
             return Some(format!(
                 "{} work was stopped by its switch. Open a fresh {} session after it is enabled.",
@@ -119,7 +191,8 @@ impl PendingCall {
 
     fn browser_disabled(&self, shared: &Shared, browser: Browser) -> bool {
         let index = match browser {
-            Browser::Chrome | Browser::Firefox => 0,
+            Browser::Chrome => 0,
+            Browser::Firefox => 3,
             Browser::Edge => 1,
             Browser::Safari => 2,
         };
@@ -148,7 +221,7 @@ impl PendingCall {
             .chrome_control
             .stopped_by_person(chat, browser, self.turn.as_deref());
         if stopped
-            || self.browser_disabled(shared, browser)
+            || self.refusal(shared, chat, browser).is_some()
             || self.generation != crate::stops::generation(shared, chat)
             || self.active != active_turn(shared, chat)
             || shared.store.view(chat).is_none()
@@ -162,12 +235,12 @@ impl PendingCall {
                     .owner
                     .control(json!({"action":"stop","sessionId":id}));
             }
-            return Err(if self.browser_disabled(shared, browser) {
-                self.refusal(shared, chat, browser).unwrap_or_default()
+            return Err(if let Some(reason) = self.refusal(shared, chat, browser) {
+                reason
             } else if stopped {
                 refusal(browser)
             } else {
-                "Not run: this chat's Chrome work ended.".into()
+                ended(browser)
             });
         }
         Ok(())

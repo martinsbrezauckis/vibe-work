@@ -3,6 +3,7 @@ use crate::protocol::{Frame, Job, Reply};
 use vw_agent_tools::video::Output;
 use vw_platform::video::Decoder;
 use vw_preview::{PixelRect, Rgba};
+use vw_video_types::{Code, Error};
 /// Executes a validated request in a process whose sandbox and resource limits are already active.
 /// # Errors
 /// Unavailable media support, an incomplete decode or any exceeded limit.
@@ -10,7 +11,7 @@ use vw_preview::{PixelRect, Rgba};
     clippy::cast_possible_truncation,
     reason = "request count is at most 24 and each output axis is capped before arithmetic"
 )]
-pub fn extract(job: &Job) -> Result<Reply, String> {
+pub fn extract(job: &Job) -> Result<Reply, Error> {
     let mut times = job.request.times()?;
     let edge = job
         .request
@@ -18,7 +19,7 @@ pub fn extract(job: &Job) -> Result<Reply, String> {
         .unwrap_or(vw_preview::MAX_WIDTH)
         .min(vw_preview::MAX_WIDTH);
     if edge == 0 {
-        return Err("limit_exceeded: image edge".into());
+        return Err(Error::new(Code::ImageEdge, "image edge"));
     }
     let mut decoder = Decoder::open(std::path::Path::new(&job.request.path), edge)?;
     let meta = decoder.metadata()?;
@@ -62,7 +63,7 @@ fn compose(
     times: Vec<u64>,
     edge: u32,
     mut reply: Reply,
-) -> Result<Reply, String> {
+) -> Result<Reply, Error> {
     let cols = if job.request.output == Output::Frame {
         1
     } else {
@@ -127,7 +128,10 @@ fn compose(
         });
     }
     // Reuse the screenshot encoder and byte ceiling, including its bounded downscaling policy.
-    let shot = vw_preview::shape(&vw_preview::encode(&sheet)?)?;
+    let shot = vw_preview::shape(
+        &vw_preview::encode(&sheet).map_err(|e| Error::new(Code::OutputEncoding, e))?,
+    )
+    .map_err(|e| Error::new(Code::OutputEncoding, e))?;
     reply.image_count = 1;
     reply.image_size = [shot.width, shot.height];
     reply.columns = cols;

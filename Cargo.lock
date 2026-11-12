@@ -142,7 +142,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "dirs",
  "gtk",
@@ -192,9 +192,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
 dependencies = [
  "clipboard-win",
+ "image",
  "log",
  "objc2",
  "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
@@ -3743,7 +3746,7 @@ dependencies = [
 
 [[package]]
 name = "make-latest-json"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify 0.2.5",
@@ -4236,6 +4239,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.2",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -5536,9 +5540,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -7570,7 +7574,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibe-support-sign"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "minisign",
@@ -7598,21 +7602,24 @@ dependencies = [
 
 [[package]]
 name = "vw-agent-tools"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
+ "base64 0.22.1",
  "dunce",
  "getrandom 0.3.4",
+ "rustix",
  "serde",
  "serde_json",
  "subtle",
  "vw-gh-broker",
  "vw-platform",
+ "vw-video-types",
  "vw-vocabulary",
 ]
 
 [[package]]
 name = "vw-ask"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -7622,11 +7629,12 @@ dependencies = [
 
 [[package]]
 name = "vw-browser"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "cap-std",
  "futures-util",
+ "gif",
  "lopdf",
  "pdf-extract",
  "quick-xml 0.42.0",
@@ -7644,7 +7652,7 @@ dependencies = [
 
 [[package]]
 name = "vw-changes"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "notify",
  "serde",
@@ -7660,7 +7668,7 @@ dependencies = [
 
 [[package]]
 name = "vw-core-api"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.23.1",
  "blake3",
@@ -7718,18 +7726,20 @@ dependencies = [
  "vw-vault",
  "vw-vibe-install",
  "vw-video",
+ "vw-video-types",
  "vw-vocabulary",
  "vw-worktrees",
  "walkdir",
  "windows 0.62.2",
  "winreg 0.56.0",
  "zeroize",
+ "zip",
  "zxcvbn",
 ]
 
 [[package]]
 name = "vw-debug-api"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "axum",
  "futures-util",
@@ -7746,11 +7756,12 @@ dependencies = [
  "vw-preview",
  "vw-secrets",
  "vw-vault",
+ "vw-vocabulary",
 ]
 
 [[package]]
 name = "vw-documents"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "calamine",
  "flate2",
@@ -7763,7 +7774,7 @@ dependencies = [
 
 [[package]]
 name = "vw-gate"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -7783,7 +7794,7 @@ dependencies = [
 
 [[package]]
 name = "vw-gh-broker"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bstr",
  "clap",
@@ -7794,6 +7805,7 @@ dependencies = [
  "tempfile",
  "url",
  "vw-platform",
+ "vw-vocabulary",
  "widestring",
  "windows-permissions",
  "zeroize",
@@ -7801,7 +7813,7 @@ dependencies = [
 
 [[package]]
 name = "vw-git"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "rustix",
  "serde",
@@ -7816,7 +7828,7 @@ dependencies = [
 
 [[package]]
 name = "vw-host"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -7848,7 +7860,7 @@ dependencies = [
 
 [[package]]
 name = "vw-keyproxy"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "axum",
  "futures-util",
@@ -7869,7 +7881,7 @@ dependencies = [
 
 [[package]]
 name = "vw-keys"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.3.4",
@@ -7893,7 +7905,7 @@ dependencies = [
 
 [[package]]
 name = "vw-logscan"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "form_urlencoded",
@@ -7910,7 +7922,7 @@ dependencies = [
 
 [[package]]
 name = "vw-market"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.23.1",
  "flate2",
@@ -7930,7 +7942,7 @@ dependencies = [
 
 [[package]]
 name = "vw-mistral"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
@@ -7956,7 +7968,7 @@ dependencies = [
 
 [[package]]
 name = "vw-netguard"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.3.4",
@@ -7980,7 +7992,7 @@ dependencies = [
 
 [[package]]
 name = "vw-pages"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "ammonia",
  "axum",
@@ -8006,7 +8018,7 @@ dependencies = [
 
 [[package]]
 name = "vw-platform"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -8026,6 +8038,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-video",
  "gtk",
+ "image",
  "javascriptcore-rs",
  "keepawake",
  "libappindicator",
@@ -8043,23 +8056,28 @@ dependencies = [
  "png 0.18.1",
  "process-wrap",
  "rustix",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "url",
+ "vw-ask",
+ "vw-video-types",
  "webkit2gtk",
  "webview2-com",
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-registry",
+ "winreg 0.56.0",
+ "x11rb",
  "zbus",
  "zeroize",
 ]
 
 [[package]]
 name = "vw-preview"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -8085,7 +8103,7 @@ dependencies = [
 
 [[package]]
 name = "vw-procmon"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "listeners",
  "nix 0.31.3",
@@ -8101,7 +8119,7 @@ dependencies = [
 
 [[package]]
 name = "vw-projects"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -8114,7 +8132,7 @@ dependencies = [
 
 [[package]]
 name = "vw-proposals"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -8127,7 +8145,7 @@ dependencies = [
 
 [[package]]
 name = "vw-protocol"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -8183,7 +8201,7 @@ dependencies = [
 
 [[package]]
 name = "vw-rpc"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -8195,7 +8213,7 @@ dependencies = [
 
 [[package]]
 name = "vw-secrets"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "memchr",
@@ -8205,7 +8223,7 @@ dependencies = [
 
 [[package]]
 name = "vw-session"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -8213,7 +8231,7 @@ dependencies = [
 
 [[package]]
 name = "vw-skills"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -8224,11 +8242,12 @@ dependencies = [
 
 [[package]]
 name = "vw-supervisor"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "nix 0.31.3",
  "process-wrap",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -8241,7 +8260,7 @@ dependencies = [
 
 [[package]]
 name = "vw-terminal"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "nix 0.31.3",
  "portable-pty",
@@ -8255,7 +8274,7 @@ dependencies = [
 
 [[package]]
 name = "vw-vault"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -8277,7 +8296,7 @@ dependencies = [
 
 [[package]]
 name = "vw-vibe-install"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -8304,7 +8323,7 @@ dependencies = [
 
 [[package]]
 name = "vw-video"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64 0.22.1",
  "process-wrap",
@@ -8316,18 +8335,27 @@ dependencies = [
  "vw-agent-tools",
  "vw-platform",
  "vw-preview",
+ "vw-video-types",
+]
+
+[[package]]
+name = "vw-video-types"
+version = "0.1.10"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "vw-vocabulary"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "vw-webview"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "cairo-rs",
  "glib 0.18.5",
@@ -8349,7 +8377,7 @@ dependencies = [
 
 [[package]]
 name = "vw-worktrees"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "blake3",
  "cap-std",

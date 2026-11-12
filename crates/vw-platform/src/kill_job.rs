@@ -12,8 +12,13 @@
 //! The command line is passed on as written: only the program name is replaced by `program`, the rest of this
 //! process's own command line (quotes and all) stays byte for byte, so the program parses exactly what Vibe wrote.
 //!
-//! Depends on: the `windows` crate (job objects, process creation). Called by: `vw-agent-tools` (its `bash.exe` mode).
+//! The environment is this process's, except the names the caller leaves out (`vw-agent-tools` leaves out the server's
+//! `GIT_REDIRECT_STDIN`, so a pipe an agent command writes into git keeps its content).
+//!
+//! Depends on: the `windows` crate (job objects, process creation). Called by: `vw-agent-tools` (its `bash.exe` and
+//! PowerShell modes).
 
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -29,8 +34,9 @@ use windows::Win32::System::JobObjects::{
     SetInformationJobObject,
 };
 use windows::Win32::System::Threading::{
-    CREATE_SUSPENDED, CreateProcessW, GetExitCodeProcess, INFINITE, PROCESS_INFORMATION,
-    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetExitCodeProcess, INFINITE,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOW, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::core::{PCWSTR, PWSTR};
 
@@ -66,6 +72,39 @@ pub fn command_line(program: &Path, rest: &[u16]) -> Vec<u16> {
     line
 }
 
+/// The environment `vars` without the names in `leave_out` (compared case-insensitively, as Windows compares names), as
+/// a `CreateProcessW` Unicode block (`name=value` NUL-terminated each, then one more NUL), or `None` when no name in
+/// `leave_out` is present (the child then inherits the environment unchanged). Order and every other entry (also the
+/// hidden `=C:` drive folders) stay as given. Pure.
+#[must_use]
+pub fn environment_without(
+    vars: impl IntoIterator<Item = (OsString, OsString)>,
+    leave_out: &[&str],
+) -> Option<Vec<u16>> {
+    let left_out = |name: &OsStr| {
+        leave_out
+            .iter()
+            .any(|out| name.to_string_lossy().eq_ignore_ascii_case(out))
+    };
+    let vars: Vec<(OsString, OsString)> = vars.into_iter().collect();
+    if !vars.iter().any(|(name, _)| left_out(name)) {
+        return None;
+    }
+    let mut block: Vec<u16> = Vec::new();
+    for (name, value) in vars.iter().filter(|(name, _)| !left_out(name)) {
+        block.extend(name.encode_wide());
+        block.push(u16::from(b'='));
+        block.extend(value.encode_wide());
+        block.push(0);
+    }
+    if block.is_empty() {
+        // An empty block is two NULs.
+        block.push(0);
+    }
+    block.push(0);
+    Some(block)
+}
+
 /// Closes a handle when dropped.
 struct Owned(HANDLE);
 
@@ -77,13 +116,13 @@ impl Drop for Owned {
 }
 
 /// Runs `program` with the rest of this process's command line in a new kill-on-close job, with this process's
-/// standard handles, waits for it and returns its exit code. Everything the program started that is still running
+/// standard handles and environment without the names in `leave_out`, waits for it and returns its exit code. Everything the program started that is still running
 /// ends when it does (the job closes before this returns), and also when this process is ended while it waits.
 ///
 /// # Errors
 /// The job or the process could not be created, or the process could not be put in the job (it is ended then and
 /// never runs).
-pub fn run_in_kill_job(program: &Path) -> io::Result<u32> {
+pub fn run_in_kill_job(program: &Path, leave_out: &[&str]) -> io::Result<u32> {
     // SAFETY: GetCommandLineW returns this process's command line, valid and NUL-terminated for its whole life.
     let own = unsafe { GetCommandLineW() };
     // SAFETY: `own` is a valid NUL-terminated wide string (above).
@@ -123,10 +162,13 @@ pub fn run_in_kill_job(program: &Path) -> io::Result<u32> {
         startup.hStdError = GetStdHandle(STD_ERROR_HANDLE).unwrap_or_default();
     }
     let mut started = PROCESS_INFORMATION::default();
+    let environment = environment_without(std::env::vars_os(), leave_out);
     // Suspended until it is in the job, so nothing it starts can be outside it. Handles are inherited (the standard
-    // handles Vibe gave this process); the environment and the working folder are this process's.
+    // handles Vibe gave this process); the working folder is this process's, the environment too unless a name in
+    // `leave_out` is set (then the block above, without it).
     // SAFETY: `name` and `line` are NUL-terminated wide strings that outlive the call (`line` is mutable, as the call
-    // requires); `startup` and `started` are valid for writes.
+    // requires); `environment`, when present, is a complete Unicode block (double NUL) that outlives the call;
+    // `startup` and `started` are valid for writes.
     unsafe {
         CreateProcessW(
             PCWSTR(name.as_ptr()),
@@ -134,8 +176,14 @@ pub fn run_in_kill_job(program: &Path) -> io::Result<u32> {
             None,
             None,
             true,
-            CREATE_SUSPENDED,
-            None,
+            if environment.is_some() {
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT
+            } else {
+                CREATE_SUSPENDED
+            },
+            environment
+                .as_ref()
+                .map(|block| block.as_ptr().cast::<std::ffi::c_void>()),
             PCWSTR::null(),
             &raw const startup,
             &raw mut started,
@@ -200,6 +248,37 @@ mod tests {
                 vec![0]
             ]
             .concat()
+        );
+    }
+
+    #[test]
+    fn a_left_out_name_is_dropped_in_any_spelling_and_the_rest_stays_in_order() {
+        let vars = || {
+            [
+                ("=C:", r"C:\work"),
+                ("Path", r"C:\bin"),
+                ("git_redirect_stdin", "NUL"),
+                ("TEMP", r"C:\t"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        };
+        assert_eq!(
+            environment_without(vars(), &["GIT_REDIRECT_STDIN"]),
+            Some([wide("=C:=C:\\work\0Path=C:\\bin\0TEMP=C:\\t\0"), vec![0]].concat())
+        );
+        assert_eq!(
+            environment_without(vars(), &["NOT_SET"]),
+            None,
+            "nothing to leave out: inherited unchanged"
+        );
+        assert_eq!(
+            environment_without(
+                [(OsString::from("GIT_REDIRECT_STDIN"), OsString::from("NUL"))],
+                &["GIT_REDIRECT_STDIN"]
+            ),
+            Some(vec![0, 0]),
+            "an empty block is two NULs"
         );
     }
 }

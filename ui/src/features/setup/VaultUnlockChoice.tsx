@@ -1,4 +1,6 @@
-/** Two explicit unlock choices, shared by vault creation and settings. Uses the product vocabulary and native radios. */
+/** Two explicit unlock choices, shared by vault creation and settings. Uses the product vocabulary and native radios.
+ * Depends on: React, platform labels and vault unlock types. Called by: vault creation and unlock Settings.
+ */
 import { useId } from "react";
 import type { VaultUnlockMethod } from "../../protocol/core";
 import { detectMac } from "../../state/shortcuts";

@@ -1,5 +1,7 @@
 //! Chat-owned native browser windows, each containing one independently owned web page.
 //! Core checks agent authority; the service keeps windows out of panel layout and background suspension.
+//! Depends on: preview mount lifecycle and native window engines.
+//! Called by: core browser-window commands.
 use crate::{EngineError, PreviewError, PreviewService};
 use serde::Serialize;
 use std::sync::Arc;
@@ -11,8 +13,17 @@ pub enum PageWindowAction {
     Open,
     /// Bring this window to the foreground.
     Focus,
+    /// Bring the main window containing a checked panel page to the foreground.
+    FocusPanel,
     /// Close the empty window after its page has been unmounted.
     Close,
+    /// Set logical content size, then read the actual native dimensions.
+    Resize {
+        /// Requested logical width.
+        width: u32,
+        /// Requested logical height.
+        height: u32,
+    },
     /// Read native visibility, focus and logical content size.
     Inspect,
 }
@@ -35,6 +46,17 @@ pub struct PageWindowInfo {
 
 pub(crate) type CloseListener = Arc<dyn Fn(String) + Send + Sync>;
 
+pub(crate) fn focusable_id(state: &crate::state::State, page: &str) -> Option<String> {
+    state.page_owners.get(page)?;
+    Some(
+        state
+            .windows
+            .get(page)
+            .cloned()
+            .unwrap_or_else(|| format!("panel-{}", page.strip_prefix("web-page-").unwrap_or(page))),
+    )
+}
+
 impl PreviewService {
     /// Installs the person's native window-close route; core owns asynchronous tab cleanup.
     pub fn on_window_close(&self, handler: impl Fn(String) + Send + Sync + 'static) {
@@ -51,19 +73,22 @@ impl PreviewService {
         self.inner.lock().windows.get(page).cloned()
     }
 
+    /// A chat-scoped focus handle for a web page, including pages in the main Browser panel.
+    /// Panel handles select their own tab and never authorize closing the main window.
+    #[must_use]
+    pub fn focusable_window_id(&self, page: &str) -> Option<String> {
+        focusable_id(&self.inner.lock(), page)
+    }
+
     /// Resolves only a window belonging to the requested chat.
     #[must_use]
     pub fn window_page(&self, owner: &str, window: &str) -> Option<String> {
         let state = self.inner.lock();
         state
-            .windows
+            .page_owners
             .iter()
-            .find(|(page, id)| {
-                id.as_str() == window
-                    && state
-                        .page_owners
-                        .get(*page)
-                        .is_some_and(|found| found == owner)
+            .find(|(page, found)| {
+                *found == owner && focusable_id(&state, page).as_deref() == Some(window)
             })
             .map(|(page, _)| page.clone())
     }
@@ -112,7 +137,7 @@ impl PreviewService {
         Ok(info)
     }
 
-    /// Focuses an existing chat window without changing the main Browser panel's layout.
+    /// Focuses an existing chat window, selecting its tab when it belongs to the visible Browser panel.
     ///
     /// # Errors
     /// Unknown/foreign window or native focus failure.
@@ -124,13 +149,51 @@ impl PreviewService {
         let page = self.window_page(owner, window).ok_or_else(|| {
             PreviewError::InvalidTab("This window does not belong to this chat.".into())
         })?;
+        let action = if self.page_window_id(&page).is_some() {
+            PageWindowAction::Focus
+        } else {
+            if !self.front_tab_if_visible(owner, &page).await? {
+                return Err(PreviewError::InvalidTab(
+                    "This chat's Browser panel is hidden or covered. Ask the user to show this chat's Browser tab, then focus its windowId again.".into(),
+                ));
+            }
+            PageWindowAction::FocusPanel
+        };
         let _activity = self.session_lock(&page).await;
-        self.bounded(
-            "focus browser window",
-            self.engine.page_window(&page, PageWindowAction::Focus),
-        )
-        .await?
-        .ok_or_else(|| PreviewError::InvalidTab("This browser window is closed.".into()))
+        let mut info = self
+            .bounded(
+                "focus browser window",
+                self.engine.page_window(&page, action),
+            )
+            .await?
+            .ok_or_else(|| {
+                PreviewError::InvalidTab(
+                    "This browser window is closed. Use a current windowId from list_tabs.".into(),
+                )
+            })?;
+        window.clone_into(&mut info.window_id);
+        Ok(info)
+    }
+
+    /// Reads native facts for this chat's independent windows without selecting or focusing a page.
+    ///
+    /// # Errors
+    /// A native inspection failure or a window that closed while being inspected.
+    pub async fn inspect_page_windows(
+        &self,
+        owner: &str,
+    ) -> Result<Vec<PageWindowInfo>, PreviewError> {
+        let mut windows = Vec::new();
+        for page in self.web_tabs(owner) {
+            let _activity = self.session_lock(&page).await;
+            if self.owner_session_id(&page).as_deref() != Some(owner) {
+                continue;
+            }
+            if let Some(info) = self.native_window_info(&page).await? {
+                windows.push(info);
+            }
+        }
+        Ok(windows)
     }
 
     pub(crate) async fn native_window_info(

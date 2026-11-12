@@ -61,7 +61,8 @@ class PluginReads(unittest.TestCase):
 
     def invoke(self, kind, audit=False, extra="", folders=None):
         guard = SOURCE / "plugin_read_guard.py"
-        script = guard.read_text() if guard.exists() else ""
+        script = (REPO / "crates/vw-supervisor/src/vibe_plugin_enablement.py").read_text() + "\n"
+        script += guard.read_text() if guard.exists() else ""
         script += "\n" + (SOURCE / f"plugin_{kind}.py").read_text()
         if audit:
             script = AUDIT + script + "\nassert not writes, f'Listing attempted filesystem writes: {writes}'\n"

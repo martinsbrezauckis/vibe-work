@@ -29,19 +29,6 @@
 .instr-text:focus-visible {
   outline: none;
 }
-.tb-btn.primary,
-.set-cat-body .btn-primary {
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  border-color: transparent;
-}
-.tb-btn.primary:hover:where(:not(:disabled)),
-.set-cat-body .btn-primary:hover:where(:not(:disabled)) {
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  opacity: 0.9;
-  filter: none;
-}
 .diff-lines {
   margin: 0;
   padding: 8px 0;
@@ -78,4 +65,24 @@
   height: 8px;
   margin: 8px 0 0;
   accent-color: var(--orange);
+}
+
+/* Profile identity rows wrap actions within the Settings column at compact widths. */
+.browser-profile-name {
+  min-width: 0;
+  flex: 1 1 140px;
+}
+.browser-profile-name input {
+  width: 100%;
+  min-width: 0;
+}
+.browser-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+[data-setting="browser-profile"] {
+  flex-wrap: wrap;
+  gap: 10px;
 }

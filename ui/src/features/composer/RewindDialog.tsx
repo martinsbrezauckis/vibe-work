@@ -41,8 +41,8 @@ export function RewindDialog(): ReactElement | null {
         <section>
           <p className="rewind-msg">{dialog.text || "(this message)"}</p>
           <p className="d">
-            Everything after it leaves the session. Your message goes back into the composer so you
-            can change it and send it again.
+            Everything after it leaves the chat. Your message goes back into the composer so you can
+            change it and send it again.
           </p>
         </section>
         <section aria-live="polite">
@@ -81,14 +81,14 @@ export function RewindDialog(): ReactElement | null {
             type="button"
             shape="outlined"
             variant="danger"
-            title="Rewind into a new session and restore files"
-            aria-label="Rewind into a new session and restore files"
+            title="Rewind into a new chat and restore files"
+            aria-label="Rewind into a new chat and restore files"
             disabled={blocked}
             onClick={() => {
               void actions.confirmRewind(true);
             }}
           >
-            Rewind into a new session
+            Rewind into a new chat
           </Button>
           <Button
             data-testid="composer.rewind-dialog-confirm-rewind-2"

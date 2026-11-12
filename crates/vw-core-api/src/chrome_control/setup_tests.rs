@@ -446,14 +446,41 @@ mod scoped_remove_tests;
 
 #[cfg(feature = "your-firefox")]
 #[test]
-fn owned_firefox_never_registers_a_native_addon_host() {
-    let scratch = Scratch::new("owned-firefox");
+fn firefox_addon_setup_is_explicit_and_removal_preserves_chrome() {
+    let scratch = Scratch::new("firefox-sharing");
     let config = scratch.config();
-    assert!(
-        !targets(&scratch.root.join("home"), &config)
-            .iter()
-            .any(|t| t.name == "Mozilla Firefox")
-    );
+    install_for(
+        &config,
+        &scratch.state(),
+        &scratch.vibe_home(),
+        "Google Chrome",
+    )
+    .unwrap();
+    assert!(!registered(
+        &config,
+        Some(&scratch.state()),
+        "Mozilla Firefox"
+    ));
+    install_for(
+        &config,
+        &scratch.state(),
+        &scratch.vibe_home(),
+        "Mozilla Firefox",
+    )
+    .unwrap();
+    assert!(registered(
+        &config,
+        Some(&scratch.state()),
+        "Mozilla Firefox"
+    ));
+    assert!(registered(&config, Some(&scratch.state()), "Google Chrome"));
+    remove_browser(&config, &scratch.state(), "Mozilla Firefox", true).unwrap();
+    assert!(!registered(
+        &config,
+        Some(&scratch.state()),
+        "Mozilla Firefox"
+    ));
+    assert!(registered(&config, Some(&scratch.state()), "Google Chrome"));
 }
 
 #[cfg(unix)]

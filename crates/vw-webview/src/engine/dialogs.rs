@@ -1,5 +1,7 @@
 //! Connects the shared native dialog hub to preview mounts and their live ownership.
 //! All native continuations run on the UI thread; tool reads only copy bounded metadata.
+//! Depends on: the platform dialog hub and Tauri main-thread dispatch.
+//! Called by: preview engine dialog methods.
 use super::TauriEngine;
 use std::{sync::Arc, time::Duration};
 use vw_preview::{DialogAnswer, EngineError, MountId};

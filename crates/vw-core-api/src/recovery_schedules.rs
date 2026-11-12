@@ -1,5 +1,7 @@
 //! Discover saved schedules once at app startup, independently of any window or read command.
 //! Core starts this after deletion cleanup; inert listings wait for Vibe, then recovery rechecks each chat.
+//! Depends on: the supervisor, stored chat listings and recovery.
+//! Called by: core startup after deletion cleanup.
 use std::sync::Arc;
 
 use serde_json::{Value, json};

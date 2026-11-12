@@ -162,6 +162,8 @@ fn discovery_command(python: &Path, home: &Path, cwd: &Path, options: &Value) ->
         .arg("-B")
         .arg("-c")
         .arg(concat!(
+            include_str!("../../vw-supervisor/src/vibe_plugin_enablement.py"),
+            "\n",
             include_str!("plugin_read_guard.py"),
             "\n",
             include_str!("plugin_discovery.py")

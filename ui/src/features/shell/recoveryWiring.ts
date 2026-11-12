@@ -8,7 +8,6 @@ import type { App } from "./AppContext";
 import { registerControlRead } from "./controlRead";
 import { registerInputRoutes } from "./inputRoutes";
 import { feedbackFor } from "../../state/feedback";
-import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import { screenshotSecrets } from "./screenshotSecrets";
 import { UiControlError } from "../../state/uiControl";
 
@@ -19,24 +18,23 @@ export function startRecoveryWiring(app: App): () => void {
   try {
     stops.push(registerControlRead(app));
     stops.push(registerInputRoutes(app));
-    if (FEEDBACK_ENABLED)
-      stops.push(
-        app.uiControl.register(
-          "secrets",
-          (body) => {
-            if (typeof body !== "object" || body === null || Array.isArray(body))
-              throw new UiControlError("invalidParams", "the body must be a JSON object");
-            return screenshotSecrets((body as Record<string, unknown>)["lock"]);
-          },
-          () => true,
-        ),
-      );
+    stops.push(
+      app.uiControl.register(
+        "secrets",
+        (body) => {
+          if (typeof body !== "object" || body === null || Array.isArray(body))
+            throw new UiControlError("invalidParams", "the body must be a JSON object");
+          return screenshotSecrets((body as Record<string, unknown>)["lock"]);
+        },
+        () => true,
+      ),
+    );
     const core = app.core;
     if (core !== null) {
       const active = () =>
         core.client.kind !== "tauri" ||
         core.store.get().debugApi.enabled ||
-        (FEEDBACK_ENABLED && feedbackFor(core).store.get().capturing);
+        feedbackFor(core).store.get().capturing;
       void runUiControl(core.client.uiControl, app.uiControl, active, abort.signal).catch(
         console.error,
       );

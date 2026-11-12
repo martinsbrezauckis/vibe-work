@@ -4,7 +4,7 @@
  * Role: keeps files small and single-purpose. Depends on: lib_files.mjs, Node 20+.
  * Called by: scripts/public/check.sh (and runnable alone: `node scripts/public/check_size.mjs`).
  *
- * Scope: project files under crates/, app/, ui/src/, tools/public/, scripts/public/ and tests/ with a
+ * Scope: project files under crates/, app/, ui/src/, tools/, scripts/ and tests/ with a
  * source extension (rs, ts, tsx, js, mjs, cjs, css, sh, py).
  *
  * Grandfather list: scripts/public/size-grandfather.json maps a path to a no-regrowth ceiling
@@ -20,7 +20,7 @@ import { resolve } from "node:path";
 import { listProjectFiles, REPO_ROOT } from "./lib_files.mjs";
 
 const LIMIT = 800;
-const ROOTS = ["crates/", "app/", "ui/src/", "tools/public/", "scripts/public/", "tests/"];
+const ROOTS = ["crates/", "app/", "ui/src/", "tools/", "scripts/", "tests/"];
 const EXTENSIONS = new Set(["rs", "ts", "tsx", "js", "mjs", "cjs", "css", "sh", "py"]);
 const GRANDFATHER_FILE = "scripts/public/size-grandfather.json";
 

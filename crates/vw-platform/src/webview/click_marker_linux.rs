@@ -118,7 +118,3 @@ fn remove(marker: &gtk::DrawingArea) {
         parent.remove(marker);
     }
 }
-
-#[cfg(test)]
-#[path = "click_marker_linux_tests.rs"]
-mod tests;

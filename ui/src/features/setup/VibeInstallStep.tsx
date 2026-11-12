@@ -43,7 +43,7 @@ function failText(phase: Extract<InstallPhase, { state: "failed" }>): string {
     case "disk":
       return "Vibe Work could not write its install folder (disk space or permissions).";
     case "start":
-      return "Vibe was installed but did not start.";
+      return "Vibe was installed but did not start. Try again keeps the install and only starts Vibe again.";
     default:
       return `"${phase.step}" did not finish.`;
   }
@@ -163,13 +163,17 @@ export function VibeInstallStep() {
               your chats and settings stay.
             </p>
           )}
+          {/* Readers hear each step once: the seconds counter and the output lines change every second, so they sit
+              in aria-live="off" regions (still visible and readable on demand), not in the step announcement. */}
           <p role="status">
-            Step {phase.index} of {phase.total}: {phase.step} ({Math.round(phase.elapsedMs / 1000)}{" "}
-            s)
+            Step {phase.index} of {phase.total}: {phase.step}{" "}
+            <span aria-live="off">({Math.round(phase.elapsedMs / 1000)} s)</span>
           </p>
           <progress max={phase.total} value={phase.index - 1} />
           {phase.outputTail !== "" && (
-            <pre className="vibe-tail">{phase.outputTail.split("\n").slice(-12).join("\n")}</pre>
+            <pre className="vibe-tail" aria-live="off">
+              {phase.outputTail.split("\n").slice(-12).join("\n")}
+            </pre>
           )}
           <Button
             data-testid="setup.vibe-install-step-cancel-2"

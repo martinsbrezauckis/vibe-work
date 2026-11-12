@@ -158,18 +158,36 @@ fn edge_store_launch_reaps_its_child() {
 async fn process_detection_never_blocks_the_async_worker() {
     const CHILD: &str = "VW_BROWSER_SLOW_PROBE";
     if let Some(pid_file) = std::env::var_os(CHILD) {
-        let start = std::time::Instant::now();
         let _ = running(&ChromeControlConfig::default());
-        let elapsed = start.elapsed();
-        // Let the bounded background probe finish so its child cannot outlive this test process.
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        assert!(
-            elapsed < std::time::Duration::from_millis(200),
-            "status blocked the async worker for {elapsed:?}"
-        );
-        if let Ok(pid) = std::fs::read_to_string(pid_file) {
-            assert!(!PathBuf::from(format!("/proc/{}/stat", pid.trim())).exists());
+        let pid_file = PathBuf::from(pid_file);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_file)
+                && !pid.is_empty()
+            {
+                break pid;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "background probe never started"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        };
+        let process = PathBuf::from(format!("/proc/{}/stat", pid.trim()));
+        let held = process.exists();
+        // Only this async worker can release the helper; status must return while it is held.
+        std::fs::write(pid_file.with_extension("release"), b"release").unwrap();
+        while process.exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "released probe {pid} was not reaped"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
+        assert!(
+            held,
+            "status waited for the held helper instead of returning cached facts"
+        );
         return;
     }
     let dir = std::env::var_os("VW_TEST_ROOT")
@@ -179,7 +197,7 @@ async fn process_detection_never_blocks_the_async_worker() {
     let probe = dir.join("pgrep");
     std::fs::write(
         &probe,
-        "#!/bin/sh\nprintf '%s' \"$$\" > \"$VW_BROWSER_SLOW_PROBE\"\nexec /bin/sleep 2\n",
+        "#!/bin/sh\nprintf '%s' \"$$\" > \"$VW_BROWSER_SLOW_PROBE\"\nwhile [ ! -f \"$VW_BROWSER_SLOW_PROBE.release\" ]; do /bin/sleep 0.02; done\n",
     )
     .unwrap();
     std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o700)).unwrap();

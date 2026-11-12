@@ -235,9 +235,6 @@
   flex: none;
   white-space: nowrap;
   margin-top: 0;
-  min-height: 20px;
-  padding: 0 4px;
-  font-size: var(--text-11);
 }
 .toasts[data-docked] .ibtn {
   flex: none;
@@ -298,7 +295,7 @@
   font-size: var(--text-13);
   color: var(--text);
   font-family: var(--font-ui);
-  animation: tin 0.25s ease-out;
+  animation: tin var(--t-toast) var(--ease-native-out);
 }
 .toast > .ibtn {
   flex: none;

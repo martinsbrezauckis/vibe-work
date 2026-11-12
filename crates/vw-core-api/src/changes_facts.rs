@@ -268,29 +268,3 @@ pub fn path_key(path: &Path) -> PathBuf {
         path.to_path_buf()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::windows_key;
-
-    /// PREDICT (written before `windows_key` existed; Windows 11 showed effect paths `\\?\C:\...\a.txt` against
-    /// git's `C:/.../a.txt`): every spelling of one Windows path gives one key.
-    #[test]
-    fn windows_spellings_of_one_path_share_a_key() {
-        let key = windows_key(r"C:\Users\Me\repo\a.txt");
-        for same in [
-            r"\\?\C:\Users\Me\repo\a.txt",
-            "C:/Users/Me/repo/a.txt",
-            r"c:\users\me\REPO\a.txt",
-            r"C:/Users/Me/repo\a.txt",
-        ] {
-            assert_eq!(windows_key(same), key, "{same}");
-        }
-        assert_eq!(
-            windows_key(r"\\?\UNC\server\share\x"),
-            windows_key(r"\\server\share\x")
-        );
-        assert_ne!(windows_key(r"C:\repo\a.txt"), windows_key(r"D:\repo\a.txt"));
-        assert_ne!(windows_key(r"C:\repo\a.txt"), windows_key(r"C:\repo\b.txt"));
-    }
-}

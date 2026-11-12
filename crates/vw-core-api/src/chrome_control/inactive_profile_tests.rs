@@ -26,7 +26,14 @@ async fn inactive_profiles_are_not_choices_and_their_pairings_survive_reconnect(
     assert_eq!(listed.as_array().unwrap().len(), 1, "{reply}");
     assert_eq!(listed[0]["profileId"], "chrome:healthy");
     for inactive in ["chrome:deleted", "chrome:closed"] {
-        assert!(!reply.to_string().contains(inactive), "{reply}");
+        let historical = reply["vwMcpResult"]["structuredContent"]["profileChoices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["profileId"] == inactive)
+            .unwrap();
+        assert_eq!(historical["eligible"], false);
+        assert_eq!(historical["state"], "offline");
     }
     assert_eq!(std::fs::read(&record).unwrap(), original);
     let mut args = json!({"profileId":"chrome"});

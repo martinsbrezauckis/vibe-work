@@ -7,7 +7,7 @@ const GROUP_LIMIT: usize = 9000;
 const CONTINUATION: &str = "Continue page.read with textOffset=nextTextOffset for text or offset=nextOffset and limit for refs; keep filters. If offsets are absent or do not advance, narrow with find/ref/frameId. Narrow other reads with their schema; do not replay writes.";
 
 fn limit_note(limit: usize) -> String {
-    format!("Chrome output capped at {limit} bytes. {CONTINUATION}")
+    format!("Browser output capped at {limit} bytes. {CONTINUATION}")
 }
 
 #[cfg(test)]
@@ -198,6 +198,8 @@ fn protected(key: &str) -> bool {
         "operationId"
             | "sessionId"
             | "profileId"
+            | "profileName"
+            | "selectedProfile"
             | "status"
             | "effect"
             | "state"

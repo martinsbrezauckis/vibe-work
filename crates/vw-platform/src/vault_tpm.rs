@@ -1,6 +1,8 @@
 //! Per-user TPM wrapping for stored vault and Chrome-owner secrets. Used by vw-vault on Windows.
 //! No installer service, Hello enrollment or new sign-in is required. The private RSA key is non-exportable.
 //! This is device/user binding, NOT an app boundary: another process with the same user token can invoke CNG.
+//! Depends on: Windows CNG and device/user identity.
+//! Called by: vault stored-secret wrapping.
 use windows::Win32::Foundation::{
     NTE_BAD_KEYSET, NTE_DEVICE_NOT_FOUND, NTE_DEVICE_NOT_READY, NTE_NOT_SUPPORTED,
     TBS_E_TPM_NOT_FOUND,

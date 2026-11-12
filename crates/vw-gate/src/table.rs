@@ -20,7 +20,7 @@
 //! - Privileged (P1): changes config or persistent state; the handler pins the shape.
 //! - Confirmed (P2): installs or runs new code, adds a remote endpoint, changes where traffic
 //!   goes, sends the repo or project data off the machine, or is destructive beyond one session.
-//!   `projectLinks/*` and `vibeCode/*` are all P2, reads included.
+//!   `projectLinks/*` are P2, reads included; retired `vibeCode/*` methods are denied.
 //! - Denied: credentials, privacy-off telemetry, internal-only and dedicated-entry-point methods,
 //!   legacy-only methods (we run unified), methods that answer `method_not_found`,
 //!   and methods nobody exercised that move session state (`session/relocate`); worktree `prune` and
@@ -154,7 +154,6 @@ macro_rules! deny {
 /// Forwarded methods without `unified` in the bench report's `ok_on`, each with the evidence that
 /// justifies forwarding it anyway. A test fails if this list and the report disagree.
 pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
-    #[cfg(feature = "context-composition")]
     (
         "session/context/read",
         "real pinned unified-server context read through the core: unmeasured and measured sums, file content, unchanged history and no model request; the older bench predates this method",
@@ -217,9 +216,6 @@ static TABLE: &[Row] = &[
     deny!("artifacts/markViewed", NoUserInterface),
     deny!("artifacts/sync", NoUserInterface),
     deny!("artifacts/subscribe", NoUserInterface),
-    #[cfg(not(feature = "context-composition"))]
-    deny!("session/context/read", NoUserInterface),
-    #[cfg(feature = "context-composition")]
     fwd!("session/context/read", SessionContextRead),
     fwd!("account/read", AccountRead),
     p2!("agents/install", AgentsInstall),
@@ -279,15 +275,19 @@ static TABLE: &[Row] = &[
     fwd!("plugin/info", PluginInfo),
     // Only the core may reload: it holds the chat through the reopen and binds its host hooks again.
     deny!("plugin/reload", InternalOnly),
+    // Native switches bypass the app approval/revocation and refresh lifecycle.
+    // Inventory is projected by the core with its own trusted-folder policy.
+    deny!("plugins/local/list", InternalOnly),
+    deny!("plugins/local/setEnabled", InternalOnly),
     fwd!("plugins/read", PluginsRead),
     fwd!("plugin_catalog/read", PluginCatalogRead),
     deny!("providerAuth/read", Credential),
-    p2!("projectLinks/create", ProjectLinksCreate),
+    deny!("projectLinks/create", NotSupported),
     p2!("projectLinks/inspectRoot", ProjectLinksInspectRoot),
-    p2!("projectLinks/link", ProjectLinksLink),
+    deny!("projectLinks/link", NotSupported),
     p2!("projectLinks/list", ProjectLinksList),
-    p2!("projectLinks/picker/load", ProjectLinksPickerLoad),
-    p2!("projectLinks/picker/loadMore", ProjectLinksPickerLoadMore),
+    deny!("projectLinks/picker/load", NotSupported),
+    deny!("projectLinks/picker/loadMore", NotSupported),
     p2!("projectLinks/resolveRoot", ProjectLinksResolveRoot),
     p2!("projectLinks/save", ProjectLinksSave),
     p2!("projectLinks/unlink", ProjectLinksUnlink),
@@ -325,6 +325,8 @@ static TABLE: &[Row] = &[
     fwd!("session/ready/read", SessionReadyRead),
     fwd!("session/ready/wait", SessionReadyWait),
     deny!("session/relocate", NoEvidence),
+    // Moving chats requires Vibe's local-projects experiment, which stays off.
+    deny!("session/move", NoEvidence),
     fwd!("session/rename", SessionRename),
     fwd!("session/resume", SessionResume),
     fwd!("session/rewind", SessionRewind),
@@ -366,19 +368,16 @@ static TABLE: &[Row] = &[
     fwd!("turn/interrupt", TurnInterrupt),
     fwd!("turn/start", TurnStart),
     fwd!("turn/steer", TurnSteer),
-    p2!("vibeCode/projects/cancel", VibeCodeProjectsCancel),
-    p2!("vibeCode/projects/create", VibeCodeProjectsCreate),
-    p2!("vibeCode/projects/loadMore", VibeCodeProjectsLoadMore),
-    p2!("vibeCode/projects/open", VibeCodeProjectsOpen),
-    p2!("vibeCode/projects/recover", VibeCodeProjectsRecover),
-    p2!("vibeCode/projects/select", VibeCodeProjectsSelect),
-    p2!("vibeCode/projects/unlink", VibeCodeProjectsUnlink),
-    p2!("vibeCode/teleport/cancel", VibeCodeTeleportCancel),
-    p2!(
-        "vibeCode/teleport/push/respond",
-        VibeCodeTeleportPushRespond
-    ),
-    p2!("vibeCode/teleport/start", VibeCodeTeleportStart),
+    deny!("vibeCode/projects/cancel", NotSupported),
+    deny!("vibeCode/projects/create", NotSupported),
+    deny!("vibeCode/projects/loadMore", NotSupported),
+    deny!("vibeCode/projects/open", NotSupported),
+    deny!("vibeCode/projects/recover", NotSupported),
+    deny!("vibeCode/projects/select", NotSupported),
+    deny!("vibeCode/projects/unlink", NotSupported),
+    deny!("vibeCode/teleport/cancel", NotSupported),
+    deny!("vibeCode/teleport/push/respond", NotSupported),
+    deny!("vibeCode/teleport/start", NotSupported),
     fwd!("workspace/git/checkouts", WorkspaceGitCheckouts),
     p1!("workspace/git/worktrees/limit/update", WorktreeLimit),
     fwd!("workspace/git/worktrees/list", WorkspaceGitWorktreesList),
@@ -420,33 +419,4 @@ pub fn classified_methods() -> impl Iterator<Item = (&'static str, Class)> {
 #[must_use]
 pub fn forwarded_without_unified_evidence() -> &'static [(&'static str, &'static str)] {
     FORWARDED_WITHOUT_UNIFIED_EVIDENCE
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn subagent_usage_is_available_to_the_session_usage_screen() {
-        assert_eq!(classify("session/subagents/read"), Some(Class::Forwarded));
-    }
-
-    #[test]
-    fn every_generated_request_is_classified_once() {
-        for method in vw_protocol::REQUEST_METHODS {
-            assert_eq!(
-                TABLE.iter().filter(|row| row.method == *method).count(),
-                1,
-                "{method}"
-            );
-        }
-    }
-
-    #[test]
-    fn plugin_reload_can_only_run_inside_the_core_refresh() {
-        assert_eq!(
-            classify("plugin/reload"),
-            Some(Class::Denied(DenyReason::InternalOnly))
-        );
-    }
 }

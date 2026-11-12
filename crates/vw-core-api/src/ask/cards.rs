@@ -73,13 +73,23 @@ pub(crate) fn callback_opened_at(
     // The chat's Stop generation for this card: a Stop after it (a Stop before the answer also cancels the card)
     // cancels the held call (`stops.rs`).
     let generation = generation.unwrap_or_else(|| crate::stops::generation(shared, owner));
+    let before_publish = || {
+        if kind == "user_input" {
+            crate::browser_handover::opened(shared, session);
+        }
+    };
     let handle = shared.asks.open_callback(
         kind,
         Some(session.into()),
         offers,
         Some(format!("callback:{id}")),
         every_call,
+        Some(&before_publish),
     );
+    if kind == "user_input" && handle.opened {
+        // Availability can inspect browser profiles. The question and its handover are already visible.
+        crate::chrome_control::publish_handover(shared);
+    }
     if !super::tool_calls::local(id) || !handle.opened {
         return None;
     }
@@ -99,7 +109,7 @@ fn outcome_of(output: &Value, by: AnsweredBy) -> Outcome {
         Some("approve_for_session") => super::allowed(by, Scope::Session),
         Some("approve_permanently") => super::allowed(by, Scope::Level),
         _ if output["result"]["cancelled"] == true => Outcome::Cancelled {
-            reason: "the question was skipped".into(),
+            reason: "the user skipped this question".into(),
         },
         _ => super::allowed(by, Scope::Once),
     }

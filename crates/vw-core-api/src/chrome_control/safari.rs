@@ -4,9 +4,9 @@ use super::{AddonState, AddonView, agent_browser::Browser};
 use crate::{CommandResult, Core, CoreError, core::Shared};
 use serde_json::{Value, json};
 
-const PAGE_INSTRUCTION: &str = "Safari uses website permission for public and local URLs. Use tabs in this chat window or handed windows and supported actions. Tabs opened in handed windows stay open until closed; the close tools can close them when the task no longer needs them. Input is synthetic and untrusted; read the page to confirm its result.";
+const PAGE_INSTRUCTION: &str = "Safari needs website permission for the site and System Settings > Privacy & Security > Accessibility for native input. Use this chat's owned or handed tabs. Native clicks, keys and drags bring Safari forward and move the real cursor; form setters are untrusted. To confirm the result, read the page.";
 fn absent() -> String {
-    Browser::Safari.words("{yourBrowser} is unavailable in this build.")
+    super::browser_text::unavailable(Browser::Safari, "")
 }
 
 pub(super) enum ConnectionError {
@@ -46,6 +46,10 @@ pub struct SafariView {
     pub addon: AddonView,
     /// The helper’s own pairing identity, only while a live Safari pairing event supplies it.
     pub fingerprint: Option<String>,
+    /// Other registered installations containing the Safari extension; never changed by this app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub other_app_copies: Option<Vec<String>>,
 }
 
 pub(crate) fn enabled(shared: &Shared) -> bool {
@@ -80,7 +84,7 @@ fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
         AddonState::SwitchedOff
     } else if version.as_deref().is_some_and(|version| {
         !matches!(
-            vw_vibe_install::support::compare_versions(version, "0.1.8"),
+            vw_vibe_install::support::compare_versions(version, crate::version()),
             Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
         )
     }) {
@@ -92,22 +96,15 @@ fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
     };
     let mut addon = super::addon::view_for(state, "Unavailable", Browser::Safari);
     addon.extension_version = version;
-    if state == AddonState::Unavailable {
-        addon.instruction = format!(
-            "{} Ask the person to install a build with {}.",
-            absent(),
-            vw_vocabulary::texts::SAFARI_NAME
-        );
-    }
     if state == AddonState::Connected {
         addon.instruction.push(' ');
         addon.instruction.push_str(PAGE_INSTRUCTION);
     }
     if state == AddonState::NotPaired {
-        addon.instruction = Browser::Safari.words("Safari has no confirmed paired extension connection. Ask the person to click Open pairing page, enable {yourBrowser} in Safari Settings if asked, then pair after comparing its identity with Vibe Work.");
+        addon.instruction = Browser::Safari.words("Safari has no confirmed paired extension connection. Ask the user to click Open pairing page, enable {yourBrowser} in Safari Settings if asked, then pair after comparing its identity with Vibe Work.");
     }
     if state == AddonState::UpdateNeeded {
-        addon.instruction = "The connected Safari extension is older than this Vibe Work needs. Ask the person to update Vibe Work, then reconnect Safari.".into();
+        addon.instruction = "The connected Safari extension is older than this Vibe Work needs. Ask the user to update Vibe Work, then reconnect Safari.".into();
     }
     addon
 }
@@ -134,12 +131,14 @@ pub(super) fn view(shared: &Shared) -> Option<SafariView> {
         } else if enabled && let Some(error) = &*shared.chrome_control.owner.safari_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
             addon = super::addon::view_for(AddonState::HelperSetupRequired, "", Browser::Safari);
             addon.instruction = match error {
-                ConnectionError::Container => "Safari's shared container could not be prepared. Ask the person to click Set up again; if it still fails, reinstall Vibe Work.",
-                ConnectionError::Relay => "Safari's helper socket could not be created. Ask the person to click Set up again; if it still fails, restart Vibe Work.",
+                ConnectionError::Container => "Safari could not prepare its connection data. Ask the user to click Set up again. If it still fails, ask the user to reinstall Vibe Work.",
+                ConnectionError::Relay => "Safari could not start its connection. Ask the user to click Set up again. If it still fails, ask the user to restart Vibe Work.",
             }.into();
         }
         let fingerprint = matches!(addon.state, AddonState::NotPaired | AddonState::OtherOwner).then(|| pairing.1.clone()).flatten();
-        SafariView { enabled, package, addon, fingerprint }
+        let other_app_copies = shared.chrome_control.safari_copies.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        SafariView { enabled, package, addon, fingerprint, other_app_copies: (!other_app_copies.is_empty()).then_some(other_app_copies) }
     })
 }
 
@@ -188,61 +187,6 @@ pub(super) fn agent_fact(shared: &Shared) -> Option<Value> {
     })
 }
 
-/// Additional browser facts share repeated profile metadata only when the optional build exceeds its budget.
-/// The raw helper state remains authoritative; this changes only the model-facing status representation.
-pub(super) fn compact_overview(body: &mut Value) {
-    if !cfg!(feature = "your-safari") || super::output::fits(body, 6000) {
-        return;
-    }
-    let status = &mut body["untrustedPageContent"];
-    let Some(profiles) = status["profiles"]
-        .as_array_mut()
-        .filter(|rows| rows.len() > 1)
-    else {
-        return;
-    };
-    let mut defaults = serde_json::Map::new();
-    for key in [
-        "browser",
-        "connected",
-        "browserVersion",
-        "extensionVersion",
-        "route",
-        "features",
-        "extensionCapabilities",
-    ] {
-        if let Some(value) = profiles[0].get(key).cloned()
-            && profiles
-                .iter()
-                .all(|profile| profile.get(key) == Some(&value))
-        {
-            defaults.insert(key.into(), value);
-            for profile in profiles.iter_mut() {
-                profile.as_object_mut().map(|fields| fields.remove(key));
-            }
-        }
-    }
-    if defaults.is_empty() {
-        return;
-    }
-    status["profileDefaults"] = Value::Object(defaults);
-    if let Some(instruction) = status["capabilities"]["availability"].as_str() {
-        status["capabilities"]["availability"] = json!(instruction.replace(
-            "Profile feature lists define support.",
-            "Profiles inherit profileDefaults."
-        ));
-    }
-    // A missing store verdict is already unknown; do not repeat an explicit null in this crowded overview.
-    if status
-        .get("chromeExtensionStore")
-        .is_some_and(Value::is_null)
-    {
-        status
-            .as_object_mut()
-            .map(|fields| fields.remove("chromeExtensionStore"));
-    }
-}
-
 /// Intercepts Safari selection before Chrome reconnect/retargeting logic. Never silently switches browsers.
 pub(super) fn selected(shared: &Shared, session: &str, tool: &str, args: &Value) -> bool {
     if !cfg!(feature = "your-safari") {
@@ -273,6 +217,7 @@ pub(super) async fn disabled(shared: &std::sync::Arc<Shared>) {
     chrome
         .safari_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    chrome.owner.approvals.cancel_browser(Browser::Safari);
     super::switches::stop_work(shared, super::agent_browser::Browser::Safari);
     if !shared.chrome_control.any_enabled() {
         super::stop_owner(shared).await;
@@ -373,6 +318,7 @@ impl Core {
         }
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
+        super::safari_pairing::revoke(&self.shared).await?;
         self.safari_enabled_held(false).await?;
         #[cfg(target_os = "macos")]
         super::safari_package::registration(true)
@@ -417,98 +363,5 @@ impl Core {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(feature = "your-safari")]
-    #[tokio::test]
-    async fn safari_disable_saves_and_delivers_its_switch_without_stopping_other_browsers() {
-        let core = crate::offline_core::start_with("safari-switch-delivery", |config, dir| {
-            config.chrome_control.package = Some(dir.join("package"));
-        })
-        .await;
-        let chrome = &core.shared.chrome_control;
-        let dir = chrome.dir().unwrap();
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("safari-enabled.json"), b"true").unwrap();
-        let calls = chrome.owner.answering(|_, _| json!({"applied":true}));
-        core.safari_enabled_held(false).await.unwrap();
-        assert_eq!(
-            std::fs::read(dir.join("safari-enabled.json")).unwrap(),
-            b"false"
-        );
-        assert!(!enabled(&core.shared));
-        assert!(chrome.enabled() && chrome.edge_enabled());
-        assert!(chrome.owner.is_running());
-        assert!(calls.lock().unwrap().iter().any(|(method, params)| {
-            method == "owner.browserAvailability"
-                && params["safari"] == false
-                && params["chrome"] == true
-                && params["generation"] == 1
-        }));
-        core.shutdown().await;
-    }
-
-    #[cfg(feature = "your-safari")]
-    #[tokio::test]
-    async fn safari_pairing_start_does_not_require_chromes_switch() {
-        let core = crate::offline_core::start_with("safari-independent-switch", |config, dir| {
-            config.chrome_control.package = Some(dir.join("package"));
-        })
-        .await;
-        let chrome = &core.shared.chrome_control;
-        chrome.set_enabled(false).unwrap();
-        let dir = chrome.dir().unwrap();
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("safari-enabled.json"), b"true").unwrap();
-        // No test keyring: reaching that check proves independent start admission without launching a helper.
-        assert!(super::super::owner::start(&core.shared).await.is_err());
-        assert!(!chrome.enabled());
-        core.shutdown().await;
-    }
-
-    #[test]
-    fn safari_connection_labels_and_actions_match_the_shared_browser_model() {
-        for (on, version) in [
-            (false, None),
-            (true, None),
-            (true, Some("0.1.5")),
-            (true, Some("0.1.8")),
-        ] {
-            let actual = diagnose(true, on, version.map(str::to_owned));
-            let expected = super::super::addon::view_for(
-                actual.state,
-                "",
-                super::super::agent_browser::Browser::Safari,
-            );
-            assert_eq!(actual.label, expected.label);
-            assert_eq!(actual.action, expected.action);
-        }
-    }
-
-    #[test]
-    fn safari_has_a_separate_remove_command() {
-        let request = serde_json::from_value::<super::super::commands::ChromeControlRequest>(
-            json!({"op":"removeSafari"}),
-        );
-        assert!(
-            request.is_ok(),
-            "Safari removal cannot remove Chrome or Edge: {request:?}"
-        );
-    }
-
-    #[test]
-    fn missing_off_unpaired_outdated_and_paired_remain_distinct() {
-        assert_eq!(diagnose(false, true, None).state, AddonState::Unavailable);
-        assert_eq!(diagnose(true, false, None).state, AddonState::SwitchedOff);
-        assert_eq!(diagnose(true, true, None).state, AddonState::NotPaired);
-        assert_eq!(
-            diagnose(true, true, Some("0.1.5".into())).state,
-            AddonState::UpdateNeeded
-        );
-        let paired = diagnose(true, true, Some("0.1.8".into()));
-        assert_eq!(paired.state, AddonState::Connected);
-        assert!(paired.instruction.contains("website permission"));
-        assert!(paired.instruction.contains("read the page"));
-    }
-}
+#[path = "safari_unit_tests.rs"]
+mod tests;

@@ -1,5 +1,7 @@
 //! Native page dialog actions and interrupt receipts, independent of a blocked page's JavaScript.
 //! The driver uses this for reads/answers; HTTP Basic credentials enter only through the core's vault writer.
+//! Depends on: the browser driver and preview dialog service.
+//! Called by: browser action dispatch.
 use crate::{
     ActError, Actor, Browser,
     driver::{failed, refused},
@@ -112,7 +114,7 @@ impl Browser {
         let accept = request.action != "page.dialog.dismiss";
         if accept && dialog["type"] == "auth" {
             return Err(refused(
-                "HTTP sign-in requires auth.basic with a vault login; ask the person to save or choose that login.",
+                "HTTP sign-in requires auth.basic with a vault login; ask the user to save or choose that login.",
             ));
         }
         if accept && dialog["type"] == "prompt" && request.text.is_none() {

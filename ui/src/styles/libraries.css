@@ -130,9 +130,6 @@
   font-size: var(--text-12-5);
 }
 /* "Make library" is a real button next to the field (it read as plain text). */
-.lib-new .tb-btn {
-  border: 1px solid var(--line-2);
-}
 .lib-side .lib-new input {
   flex-basis: 100%;
 }

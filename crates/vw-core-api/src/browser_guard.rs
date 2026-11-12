@@ -15,6 +15,15 @@ impl GuardContext {
     }
 }
 impl PageContext for GuardContext {
+    fn connected(&self, key: &str, host: &str, port: u16, addresses: &[std::net::SocketAddr]) {
+        if let Some(shared) = self.shared.upgrade()
+            && let Some(hub) = &shared.preview
+        {
+            hub.service
+                .record_connected_addresses(key, host, port, addresses);
+        }
+    }
+
     fn browser_addresses(&self, key: &str) -> bool {
         self.shared
             .upgrade()

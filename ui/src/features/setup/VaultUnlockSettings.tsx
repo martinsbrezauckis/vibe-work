@@ -1,4 +1,6 @@
-/** Vault unlock policy settings. The controller saves after password verification; a rejected change stays pending. */
+/** Vault unlock policy settings. The controller saves after password verification; a rejected change stays pending.
+ * Depends on: the app controller, React and unlock choice controls. Called by: the vault Settings section.
+ */
 import { useState } from "react";
 import type { VaultUnlockMethod } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";

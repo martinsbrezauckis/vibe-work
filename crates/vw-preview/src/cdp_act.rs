@@ -30,8 +30,9 @@ impl CdpFrames {
     pub fn act_ready(&self) -> Result<(), String> {
         let state = self.state.borrow();
         let act = &state.act;
-        if act.generation != 0
-            && (!act.enabled || act.running || act.closed || act.failure.is_some())
+        if act.closed
+            || !state.pending_guards.is_empty()
+            || act.generation != 0 && (!act.enabled || act.running || act.failure.is_some())
         {
             Err(REFUSED.into())
         } else {
@@ -186,6 +187,7 @@ impl CdpFrames {
         let (generation, enabled, sessions) = {
             let mut state = self.state.borrow_mut();
             if state.act.generation == 0
+                || !state.pending_guards.is_empty()
                 || state.act.running
                 || !state.act.enabled && state.act.done.is_none()
             {
@@ -268,12 +270,7 @@ impl CdpFrames {
         let (method, params) = match step {
             0 => (PICKER, json!({"enabled": enabled})),
             1 => (FOCUS, json!({"enabled": enabled})),
-            2 => {
-                let mut params = auto_attach();
-                // A frame born during an act cannot run before its interception is acknowledged.
-                params["waitForDebuggerOnStart"] = json!(enabled);
-                ("Target.setAutoAttach", params)
-            }
+            2 => ("Target.setAutoAttach", auto_attach()),
             3 if !session.is_empty() => ("Runtime.runIfWaitingForDebugger", json!({})),
             _ => {
                 done(Ok(()));

@@ -17,7 +17,7 @@ function statusText(view: SecretScanView): string | null {
     case "idle":
       return null;
     case "checking":
-      return "Checking your session logs…";
+      return "Checking your chat logs…";
     case "locked":
       return "Waits for the Vault to be unlocked.";
     case "noSecrets":
@@ -25,7 +25,7 @@ function statusText(view: SecretScanView): string | null {
     case "error":
       return view.failedFiles > 0
         ? `Could not check ${count(view.failedFiles, "file")}. Checked the rest.`
-        : "Could not check your session logs. Try Check now again.";
+        : "Could not check your chat logs. Try Check now again.";
     case "checked": {
       if (view.failedFiles > 0)
         return `Could not check ${count(view.failedFiles, "file")}. Checked the rest.`;

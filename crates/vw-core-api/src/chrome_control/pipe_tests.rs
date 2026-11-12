@@ -67,6 +67,10 @@ async fn dispatch_write_cannot_block_the_supervisor() {
     } else {
         None
     };
+    assert!(
+        pipe.child.try_wait().unwrap().is_none(),
+        "requests finished while the helper still held stdin without reading it"
+    );
     // `cmd` runs ping as its child, which holds the same stdin: end the whole tree so the background write ends.
     if cfg!(windows)
         && let Some(pid) = pipe.child.id()
@@ -81,10 +85,6 @@ async fn dispatch_write_cannot_block_the_supervisor() {
     let _ = pipe.child.kill().await;
     if let Some((second, second_took)) = second {
         assert_eq!(first, Ok(Ok(1)), "the first request is accepted");
-        assert!(
-            first_took < Duration::from_millis(250),
-            "the first request must not wait for the helper: {first_took:?}"
-        );
         assert_eq!(
             second,
             Ok(Err(())),

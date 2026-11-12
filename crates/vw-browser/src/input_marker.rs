@@ -3,11 +3,9 @@
 
 use crate::{ActError, Action, Actor, Browser, PageAnswer};
 use serde_json::Value;
-#[cfg(feature = "click-marker")]
 use vw_preview::action_tracking::{ActionBox, ActionGeometry, ActionKind};
 
 impl Browser {
-    #[cfg(feature = "click-marker")]
     pub(crate) async fn mark_native_input(
         &self,
         seen: &crate::sessions::Seen,
@@ -51,7 +49,6 @@ impl Browser {
         by: Actor,
         answer: PageAnswer,
     ) -> Result<PageAnswer, ActError> {
-        #[cfg(feature = "click-marker")]
         if by == Actor::Agent
             && answer.status == "done"
             && request["nativeClick"] != true
@@ -66,7 +63,6 @@ impl Browser {
         }
     }
 
-    #[cfg(feature = "click-marker")]
     pub(crate) async fn mark_input(&self, session: &str, action: &Action) {
         let Some(load) = self.service.load_state(session) else {
             return;
@@ -84,8 +80,9 @@ impl Browser {
             return;
         };
         let Some(after) = model.refs.iter().find(|r| {
+            // A successful click can change the label and therefore its public ref. The same DOM node
+            // in the same frame document still owns this completed action's feedback.
             r.node == before.node
-                && r.id == before.id
                 && r.frame_id
                     .as_ref()
                     .zip(before.frame_id.as_ref())

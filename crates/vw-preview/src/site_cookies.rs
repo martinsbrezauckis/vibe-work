@@ -1,5 +1,7 @@
 //! Current-site cookie requests shared by browser tools and native engines.
 //! The service pins the mount and URL; engine implementations must recheck the URL before accessing its store.
+//! Depends on: the current preview mount and serde.
+//! Called by: browser cookie actions and native cookie engines.
 use serde::Deserialize;
 use serde_json::Value;
 use url::Url;

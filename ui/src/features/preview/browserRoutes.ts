@@ -50,7 +50,7 @@ export function registerBrowserRoute(
     const url = selectedPreview?.url ?? null;
     const targetTab = tabs.find((tab) => tab.pageKey === targetPageKey);
     if (targetPageKey !== sessionId && targetTab === undefined)
-      throw new UiControlError("invalidParams", "tabId is not a page of this session");
+      throw new UiControlError("invalidParams", "tabId is not a page of this chat");
     const targetPreview = targetTab?.kind === "web" ? targetTab.preview : appPreview;
     const visibilityReason = pickPreviewVisibilityReason(
       previewVisibility(app.shell.store.get(), browser, awayFromHome(app)),
@@ -111,7 +111,7 @@ export function registerBrowserRoute(
     const args = asObject(body);
     const sessionId =
       typeof args["sessionId"] === "string" ? args["sessionId"] : panelOwner(app.shell.store.get());
-    if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+    if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
     switch (args["action"] ?? "state") {
       case "saveToVault":
         if (app.core === null)

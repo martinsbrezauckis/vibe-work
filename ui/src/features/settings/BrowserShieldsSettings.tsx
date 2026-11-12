@@ -31,7 +31,10 @@ export function BrowserShieldsSettings({ onError }: { onError: (error: string | 
           setSettings(reply.result.settings);
       })
       .catch((thrown: unknown) => {
-        if (live) setError(toCallError(thrown).error.message);
+        if (live)
+          setError(
+            `Could not read ad blocking settings: ${toCallError(thrown).error.message.replace(/\.$/, "")}. Try again.`,
+          );
       });
     return () => {
       live = false;
@@ -56,7 +59,9 @@ export function BrowserShieldsSettings({ onError }: { onError: (error: string | 
         setSettings(reply.result.settings);
       })
       .catch((thrown: unknown) => {
-        setError(toCallError(thrown).error.message);
+        setError(
+          `Could not save ad blocking settings: ${toCallError(thrown).error.message.replace(/\.$/, "")}. Try again.`,
+        );
       })
       .finally(() => {
         setBusy(false);

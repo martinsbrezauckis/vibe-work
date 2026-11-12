@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 use vw_gate::{Confirmation, ConfirmationRequest};
@@ -90,6 +90,12 @@ fn ask_of(request: &ConfirmationRequest) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
+/// Registers only app-modal native windows; independent chat approvals do not block other chats.
+fn hold_modal<R: Runtime>(app: &AppHandle<R>, title: &str) -> Option<vw_core_api::BrowserDialog> {
+    let host = app.try_state::<vw_host::HostHandle>()?.try_get()?;
+    Some(host.core()?.browser_dialog(title))
+}
+
 /// Shows one confirmation dialog with `text` and the buttons `labels` (last = declining = default, see
 /// `vw_host::dialog_buttons`) and returns the pressed label; `None` when it was closed, declined without a button
 /// (Escape), failed, or there are not 1 to 3 labels. Dropping the future closes the window.
@@ -101,6 +107,7 @@ async fn show_dialog<R: Runtime>(
     modal: bool,
     ask: Option<&str>,
 ) -> Option<String> {
+    let _dialog = modal.then(|| hold_modal(app, &vw_host::dialog_heading(&text).0));
     let ask = ask.filter(|_| !modal);
     #[cfg(target_os = "linux")]
     return linux_confirmation::show_dialog(app, text, labels, modal, ask).await;
@@ -144,6 +151,11 @@ pub fn native_confirmer<R: Runtime>(app: AppHandle<R>) -> SharedConfirmer {
     SharedConfirmer::new(move |request: ConfirmationRequest| {
         let app = app.clone();
         async move {
+            vw_host::foreground_confirmation(&request, || {
+                if let Err(error) = crate::tray::reveal_main_window(&app) {
+                    tracing::warn!(%error, "pairing confirmation could not bring the app forward");
+                }
+            });
             let Some(text) = vw_host::dialog_text(&request) else {
                 if vw_host::full_pages(&request).is_some() {
                     return shortened(&app, &request).await;
@@ -170,6 +182,7 @@ const DOCUMENT_TYPES: &[&str] = &[
 /// Opens the native file picker for documents (several files allowed) and returns the chosen
 /// files; empty when cancelled. The webview supplies nothing.
 pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    let modal = hold_modal(app, "Choose documents to send with your message");
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -180,6 +193,7 @@ pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
         dialog = dialog.set_parent(&window);
     }
     dialog.pick_files(move |chosen| {
+        drop(modal);
         let paths = chosen
             .unwrap_or_default()
             .into_iter()
@@ -197,6 +211,7 @@ const CERTIFICATE_TYPES: &[&str] = &["pem", "crt", "cer", "cert"];
 /// Opens the native file picker for a company's certificate file (one file) and returns it; `None` when cancelled.
 /// The path is shown to the user and checked by the core when the setting is saved; the webview names no file.
 pub async fn pick_certificate<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let modal = hold_modal(app, "Choose your company's certificate file");
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -207,6 +222,7 @@ pub async fn pick_certificate<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf>
         dialog = dialog.set_parent(&window);
     }
     dialog.pick_file(move |chosen| {
+        drop(modal);
         let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
     });
     receive.await.ok().flatten()
@@ -215,6 +231,10 @@ pub async fn pick_certificate<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf>
 /// Opens the native file picker for a library upload (several files, any type Mistral's Libraries
 /// take) and returns the chosen files; empty when cancelled. The webview supplies nothing.
 pub async fn pick_library_files<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    let modal = hold_modal(
+        app,
+        "Choose files to add to the library (they are sent to Mistral)",
+    );
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -224,6 +244,7 @@ pub async fn pick_library_files<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> 
         dialog = dialog.set_parent(&window);
     }
     dialog.pick_files(move |chosen| {
+        drop(modal);
         let paths = chosen
             .unwrap_or_default()
             .into_iter()
@@ -236,6 +257,7 @@ pub async fn pick_library_files<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> 
 
 /// Opens the native folder picker and returns the chosen folder, or `None` when cancelled.
 pub async fn pick_folder<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let modal = hold_modal(app, "Choose the folder Vibe should work in");
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -245,6 +267,7 @@ pub async fn pick_folder<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
         dialog = dialog.set_parent(&window);
     }
     dialog.pick_folder(move |chosen| {
+        drop(modal);
         let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
     });
     receive.await.ok().flatten()
@@ -253,6 +276,7 @@ pub async fn pick_folder<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 /// Opens the native save dialog for a session exported as Markdown with `name` suggested; returns the
 /// chosen file, or `None` when cancelled. The webview never supplies the destination.
 pub async fn save_markdown<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<PathBuf> {
+    let modal = hold_modal(app, "Export the session as Markdown");
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -264,6 +288,7 @@ pub async fn save_markdown<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option
         dialog = dialog.set_parent(&window);
     }
     dialog.save_file(move |chosen| {
+        drop(modal);
         let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
     });
     receive.await.ok().flatten()
@@ -272,6 +297,7 @@ pub async fn save_markdown<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option
 /// Opens the native save dialog for an exported handbook page with `name` suggested and returns the chosen
 /// file, or `None` when cancelled. The webview supplies only the suggested name's page, never the destination.
 pub async fn save_page<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<PathBuf> {
+    let modal = hold_modal(app, "Save the page as one file");
     let (send, receive) = oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -283,6 +309,7 @@ pub async fn save_page<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<Pat
         dialog = dialog.set_parent(&window);
     }
     dialog.save_file(move |chosen| {
+        drop(modal);
         let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
     });
     receive.await.ok().flatten()

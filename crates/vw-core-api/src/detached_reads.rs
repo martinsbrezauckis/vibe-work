@@ -1,5 +1,7 @@
 //! Reads for a detached chat use stored state, plugin-free lobby config, or an empty runtime-only list.
 //! Called under dispatch's chat lock after gate admission; never opens a channel or runs old work.
+//! Depends on: the store, method gate and lobby transport.
+//! Called by: command forwarding under the chat lock.
 use serde_json::{Value, json};
 use vw_gate::{ConfirmationToken, Reply};
 

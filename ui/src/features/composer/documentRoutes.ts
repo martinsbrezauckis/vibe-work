@@ -66,7 +66,7 @@ async function handleDocuments(app: App, body: unknown): Promise<unknown> {
   const given = input["sessionId"];
   const sessionId =
     typeof given === "string" && given !== "" ? given : app.shell.store.get().selected;
-  if (sessionId === null) throw new UiControlError("invalidParams", "no session is selected");
+  if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");
   const actions = documents.debugApi;
   const action = input["action"] ?? "read";
   try {

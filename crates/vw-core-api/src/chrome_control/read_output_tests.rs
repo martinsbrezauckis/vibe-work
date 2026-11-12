@@ -160,7 +160,7 @@ fn chrome_catalog_advertises_the_app_save_option() {
         .unwrap();
     assert_eq!(
         execute["inputSchema"]["properties"]["saveTo"]["enum"],
-        json!(["inline", "file"])
+        json!(["inline", "file", "csv", "xlsx"])
     );
     let description = execute["description"].as_str().unwrap();
     assert!(

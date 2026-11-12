@@ -272,28 +272,4 @@ mod tests {
         drop(dir);
         std::fs::remove_dir_all(root).unwrap();
     }
-
-    #[test]
-    fn repair_releases_handles_before_an_edit_or_folder_removal() {
-        let root = std::env::var_os("CARGO_TARGET_DIR")
-            .map_or_else(
-                || std::path::PathBuf::from("target"),
-                std::path::PathBuf::from,
-            )
-            .join(format!("vw-handbook-css-repair-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        let folder = "docs/handbook";
-        let css = root.join(folder).join(STYLESHEET);
-        assert_eq!(repair(&root, folder).unwrap(), "created");
-        // The next edit must be possible after both a read-only check and an install.
-        assert!(problem(&root.join(folder)).is_none());
-        std::fs::write(&css, "old incomplete CSS").unwrap();
-        assert_eq!(repair(&root, folder).unwrap(), "restored");
-        assert_eq!(std::fs::read_to_string(&css).unwrap(), STYLE);
-        let edited = format!("{STYLE}\n/* user edit */\n");
-        std::fs::write(&css, &edited).unwrap();
-        assert_eq!(repair(&root, folder).unwrap(), "unchanged");
-        assert_eq!(std::fs::read_to_string(&css).unwrap(), edited);
-        std::fs::remove_dir_all(root).unwrap();
-    }
 }

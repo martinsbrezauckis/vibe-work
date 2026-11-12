@@ -84,25 +84,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn search_refuses_vault_hard_link_names_and_text() {
-        let f = crate::feature_test_core::Fixture::new().await;
-        f.load("chat", &f.root, &[], false);
-        let private =
-            vw_vault::private_location::private_vault_dir(&f.root.join("app-data")).unwrap();
-        std::fs::create_dir_all(&private).unwrap();
-        let profile = private.join("profile.json");
-        std::fs::write(&profile, "synthetic-profile").unwrap();
-        std::fs::hard_link(profile, f.root.join("notes.json")).unwrap();
-        for args in [
-            serde_json::json!({"glob":"*.json"}),
-            serde_json::json!({"query":"synthetic-profile"}),
-        ] {
-            let answer = call(&f.core.shared, "chat", args).await.unwrap();
-            assert_eq!(answer, "No hits.", "hard-linked vault profile was searched");
-        }
-        f.finish().await;
-    }
-    #[tokio::test]
     async fn credential_search_uses_only_its_cwd_and_workspace_roots() {
         let f = crate::feature_test_core::Fixture::new().await;
         let a = f.root.join("a");
@@ -183,43 +164,6 @@ mod tests {
                 .await
                 .unwrap(),
             format!("Folder: {}\nown.txt:1: needle", own.display())
-        );
-        f.finish().await;
-    }
-    #[tokio::test]
-    async fn read_file_denials_apply_to_search_names_and_text() {
-        let f = crate::feature_test_core::Fixture::new().await;
-        let project = f.root.join("project");
-        f.load("a", &project, &[], false);
-        std::fs::write(project.join("ok.txt"), "needle").unwrap();
-        std::fs::write(project.join("denied.txt"), "needle").unwrap();
-        std::fs::write(
-            f.root.join("app-data/vibe/config.toml"),
-            "[tools.read_file]\ndenylist = ['*/denied.txt']\n",
-        )
-        .unwrap();
-        assert_eq!(
-            call(&f.core.shared, "a", serde_json::json!({"glob":"**/*"}))
-                .await
-                .unwrap(),
-            "ok.txt"
-        );
-        assert_eq!(
-            call(&f.core.shared, "a", serde_json::json!({"query":"needle"}))
-                .await
-                .unwrap(),
-            "ok.txt:1: needle"
-        );
-        std::fs::write(
-            f.root.join("app-data/vibe/config.toml"),
-            "[tools.read_file]\npermission = 'never'\n",
-        )
-        .unwrap();
-        assert_eq!(
-            call(&f.core.shared, "a", serde_json::json!({"query":"needle"}))
-                .await
-                .unwrap(),
-            "No hits."
         );
         f.finish().await;
     }

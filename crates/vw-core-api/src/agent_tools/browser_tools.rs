@@ -16,6 +16,21 @@ use vw_browser::Actor;
 use crate::browser::{CoreNav, browser, read_options};
 use crate::core::Shared;
 
+fn searches_stored_secret(args: &Value) -> bool {
+    fn contains(value: &Value) -> bool {
+        match value {
+            Value::String(text) => vw_secrets::find(text.as_bytes()).is_some(),
+            Value::Array(items) => items.iter().any(contains),
+            Value::Object(fields) => fields.values().any(contains),
+            _ => false,
+        }
+    }
+    ["find", "selector", "extract"]
+        .iter()
+        .filter_map(|key| args.get(*key))
+        .any(contains)
+}
+
 fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
     if args["target"] == "chrome" && !chrome_available {
         return Err("This version works in Vibe Work's own browser.".to_owned());
@@ -30,7 +45,9 @@ fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
     }
 }
 
-pub(super) fn check_current(shared: &Shared, owner: &str, page: &str) -> Result<(), String> {
+pub(crate) fn check_current(shared: &Shared, owner: &str, page: &str) -> Result<(), String> {
+    check_agent(shared, owner)?;
+    shared.browser_dialogs.check()?;
     let hub = crate::previews::hub(shared).map_err(|error| error.message)?;
     if shared.store.view(owner).is_none()
         || agent_stopped(&hub.browser, &hub.service, owner)
@@ -39,6 +56,17 @@ pub(super) fn check_current(shared: &Shared, owner: &str, page: &str) -> Result<
         return Err("browser tab is no longer available to this agent".to_owned());
     }
     Ok(())
+}
+
+/// A named modal must not invite a retry after the person has stopped this browser.
+fn check_agent(shared: &Shared, owner: &str) -> Result<(), String> {
+    crate::browser_settings::check(shared)?;
+    if let Some(hub) = &shared.preview
+        && agent_stopped(&hub.browser, &hub.service, owner)
+    {
+        return Err(vw_browser::STOPPED.to_owned());
+    }
+    crate::browser_handover::check(shared, owner)
 }
 
 fn agent_stopped(
@@ -61,8 +89,18 @@ pub(super) async fn prepare(
     call: &str,
     args: &Value,
 ) -> Result<Option<crate::ask::tool_calls::receipts::Execution>, String> {
+    check_agent(shared, owner)?;
+    shared.browser_dialogs.check()?;
     vw_agent_tools::browser_input::validate(names::BROWSER_ACT, args)?;
+    if args["action"] == "form" {
+        vw_browser::parse_form(args)?;
+    }
     target(shared.chrome_control.config.available(), args)?;
+    if args.get("steps").is_some() {
+        return super::browser_batch::prepare(shared, owner, source, call, args)
+            .await
+            .map(Some);
+    }
     if matches!(
         args["action"].as_str(),
         Some(
@@ -132,7 +170,9 @@ pub(super) async fn prepare(
     let shared = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Ok(Some(Box::pin(async move {
-        let shared = shared.upgrade().ok_or("Browser closed.")?;
+        let shared = shared
+            .upgrade()
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?;
         let mut receipt = action.await?;
         check_current(&shared, &owner, &page)?;
         attach_tab(&shared, &page, &mut receipt);
@@ -142,7 +182,6 @@ pub(super) async fn prepare(
 }
 
 /// Runs one browser tool for `session_id`.
-#[allow(clippy::too_many_lines)]
 pub(crate) async fn call(
     shared: &Arc<Shared>,
     session_id: &str,
@@ -156,7 +195,6 @@ pub(crate) async fn call(
     call_with_sending(shared, session_id, tool, args, allow_send).await
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) async fn call_with_sending(
     shared: &Arc<Shared>,
     session_id: &str,
@@ -164,36 +202,7 @@ pub(super) async fn call_with_sending(
     args: Value,
     allow_send: bool,
 ) -> Result<Value, String> {
-    vw_agent_tools::browser_input::validate(tool, &args)?;
-    #[cfg(feature = "agent-vault")]
-    if tool == names::BROWSER_CAPTURE_SECRET {
-        return Err(
-            "This vault save needs its pre-tool hook decision; retry the tool through its hook."
-                .into(),
-        );
-    }
-    #[cfg(not(feature = "agent-vault"))]
-    if tool == names::BROWSER_CAPTURE_SECRET {
-        return Err("Not run: saving a key to the vault is the user's action. Ask the user to select the key in the browser panel, then choose Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection.".to_owned());
-    }
-    if tool == names::BROWSER_READ
-        && args
-            .get("find")
-            .and_then(Value::as_str)
-            .is_some_and(|query| vw_secrets::find(query.as_bytes()).is_some())
-    {
-        return Err(
-            "Not run: searching for a stored secret is not allowed. Use its label or capture ref instead."
-                .to_owned(),
-        );
-    }
-    target(shared.chrome_control.config.available(), &args)?;
-    if tool == names::BROWSER_ACT {
-        crate::chrome_control::builtin::check_full(
-            shared.access.remembered(session_id).as_deref(),
-            &args,
-        )?;
-    }
+    validate_call(shared, session_id, tool, &args)?;
     let tab = match args.get("tab") {
         None => None,
         Some(Value::String(tab)) if !tab.trim().is_empty() => Some(tab.as_str()),
@@ -233,131 +242,169 @@ pub(super) async fn call_with_sending(
     if tool == names::BROWSER_ACT
         && matches!(
             args["action"].as_str(),
-            Some("clipboard.read" | "clipboard.write")
+            Some(
+                "clipboard.read"
+                    | "clipboard.write"
+                    | "clipboard.read_rich"
+                    | "clipboard.write_rich"
+            )
         )
     {
-        check_current(shared, session_id, &page)?;
-        let mut canceled = driver.sessions().cancel_signal(&page);
-        let mut answer = tokio::select! {
-            biased;
-            _=canceled.changed()=>return Err("Clipboard action canceled; start a new browser action.".into()),
-            result=crate::browser_clipboard::run(shared,&args)=>result?,
-        };
-        check_current(shared, session_id, &page)?;
-        attach_tab(shared, &page, &mut answer);
-        return Ok(answer);
+        return clipboard_action(shared, session_id, &page, driver, &args).await;
+    }
+    if tool == names::BROWSER_READ
+        && (["extract", "saveTo", "appendFrom", "deduplicate"]
+            .iter()
+            .any(|key| args.get(*key).is_some()))
+    {
+        return crate::browser_data::read(shared, session_id, &page, &args, driver).await;
     }
     match tool {
-        names::BROWSER_READ => {
-            let mut options = read_options(
-                args.get("maxRefs").and_then(Value::as_u64),
-                args.get("textPage").and_then(Value::as_u64),
-                args.get("maxBytes").and_then(Value::as_u64),
-                args.get("find").and_then(Value::as_str),
-            );
-            if let Some(cursor) = args.get("textCursor") {
-                if options.find.is_some() || options.text_page.is_some() {
-                    return Err(
-                        "textCursor continues plain text; use it without find or textPage".into(),
-                    );
-                }
-                let cursor: vw_browser::TextCursor = serde_json::from_value(cursor.clone())
-                    .map_err(|_| "textCursor needs nonnegative page and offset integers")?;
-                if cursor.page > 10_000 || cursor.offset > vw_browser::model::MAX_ANSWER {
-                    return Err("textCursor exceeds the text paging limit".into());
-                }
-                options.text_cursor = Some(cursor);
-            }
-            if let Some(cursor) = args.get("choiceCursor") {
-                let cursor: vw_browser::ChoiceCursor = serde_json::from_value(cursor.clone())
-                    .map_err(|_| "choiceCursor needs nonnegative frame and offset integers")?;
-                if cursor.frame >= 64 || cursor.offset > vw_browser::model::MAX_REFS {
-                    return Err(
-                        "choiceCursor exceeds the observed choice limit; use find for a label"
-                            .into(),
-                    );
-                }
-                options.choice_cursor = Some(cursor);
-            }
-            let screenshot = args
-                .get("screenshot")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let mut canceled = driver.sessions().cancel_signal(&page);
-            let (mut observation, shot) = tokio::select! {
-                biased;
-                _ = canceled.changed() => return Err("browser tab action was canceled".to_owned()),
-                answer = driver.read(&page, options, screenshot, Actor::Agent) => answer?,
-            };
-            check_current(shared, session_id, &page)?;
-            attach_tab(shared, &page, &mut observation);
-            vw_browser::observe::fit(
-                &mut observation,
-                args.get("maxBytes")
-                    .and_then(Value::as_u64)
-                    .and_then(|n| usize::try_from(n).ok())
-                    .unwrap_or(vw_browser::observe::READ_BUDGET)
-                    .clamp(
-                        vw_browser::observe::MIN_BUDGET,
-                        vw_browser::observe::MAX_BUDGET,
-                    ),
-            );
-            if let Some(shot) = shot {
-                observation[wire::IMAGE_KEY] =
-                    json!({"data": shot.base64(), "mimeType": "image/png"});
-            }
-            Ok(observation)
-        }
+        names::BROWSER_READ => read_page(shared, session_id, &page, &args, driver).await,
         names::BROWSER_ACT => {
-            if args["action"] == "auth.basic" {
-                return Err("HTTP sign-in needs its vault decision before the tool starts; retry through the tool hook.".into());
-            }
-            let mut args = args;
-            if let Value::Object(map) = &mut args {
-                map.remove("target");
-                map.remove("tab");
-            }
-            let action =
-                crate::browser_upload::load(shared, session_id, vw_browser::parse(&args)?).await?;
-            let nav = CoreNav {
-                shared: shared.clone(),
-                strict: true,
-            };
-            let mut receipt = driver
-                .act_with_sending(&page, action, Actor::Agent, &nav, allow_send)
-                .await
-                .map_err(|e| e.text)?;
-            // The act already completed. Its own navigation may have stopped the page;
-            // preserve what happened instead of turning sent input into a refusal.
-            attach_tab(shared, &page, &mut receipt);
-            let image = receipt
-                .as_object_mut()
-                .and_then(|o| o.remove(wire::IMAGE_KEY));
-            vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
-            if let Some(image) = image {
-                receipt[wire::IMAGE_KEY] = image;
-            }
-            Ok(receipt)
+            act_on_page(shared, session_id, &page, driver, args, allow_send).await
         }
-        names::BROWSER_CAPTURE => {
-            let mut args = args;
-            if let Value::Object(map) = &mut args {
-                map.remove("target");
-                map.remove("tab");
-            }
-            let mut canceled = driver.sessions().cancel_signal(&page);
-            let mut capture = tokio::select! {
-                biased;
-                _ = canceled.changed() => return Err("browser tab action was canceled".to_owned()),
-                answer = crate::browser_capture::run(shared, &page, &args, Actor::Agent) =>
-                    answer.map_err(|error| error.text)?,
-            };
-            check_current(shared, session_id, &page)?;
-            attach_tab(shared, &page, &mut capture);
-            Ok(capture)
-        }
+        names::BROWSER_CAPTURE => capture_page(shared, session_id, &page, driver, args).await,
         _ => Err("unknown tool".to_owned()),
     }
+}
+
+fn validate_call(
+    shared: &Shared,
+    session_id: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<(), String> {
+    check_agent(shared, session_id)?;
+    vw_agent_tools::browser_input::validate(tool, args)?;
+    if tool == names::BROWSER_ACT {
+        shared.browser_dialogs.check()?;
+    }
+    if args.get("steps").is_some() {
+        return Err(
+            "This batch needs its pre-tool hook decisions; retry the call through its hook.".into(),
+        );
+    }
+    #[cfg(feature = "agent-vault")]
+    if tool == names::BROWSER_CAPTURE_SECRET {
+        return Err(
+            "This vault save needs its pre-tool hook decision; retry the tool through its hook."
+                .into(),
+        );
+    }
+    #[cfg(not(feature = "agent-vault"))]
+    if tool == names::BROWSER_CAPTURE_SECRET {
+        return Err("Not run: saving a key to the vault is the user's action. Ask the user to select the key in the browser panel, then choose Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection.".to_owned());
+    }
+    if tool == names::BROWSER_READ && searches_stored_secret(args) {
+        return Err(
+            "Not run: searching for a stored secret is not allowed. Use its label or capture ref instead."
+                .to_owned(),
+        );
+    }
+    target(shared.chrome_control.config.available(), args)?;
+    if tool == names::BROWSER_ACT {
+        crate::chrome_control::builtin::check_full(
+            shared.access.remembered(session_id).as_deref(),
+            args,
+        )?;
+    }
+    Ok(())
+}
+
+async fn clipboard_action(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    page: &str,
+    driver: &vw_browser::Browser,
+    args: &Value,
+) -> Result<Value, String> {
+    check_current(shared, session_id, page)?;
+    let mut canceled = driver.sessions().cancel_signal(page);
+    let mut answer = tokio::select! {
+        biased;
+        _=canceled.changed()=>return Err("Clipboard action canceled; start a new browser action.".into()),
+        result=crate::browser_clipboard::run(shared,args)=>result?,
+    };
+    check_current(shared, session_id, page)?;
+    attach_tab(shared, page, &mut answer);
+    Ok(answer)
+}
+
+async fn act_on_page(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    page: &str,
+    driver: &vw_browser::Browser,
+    args: Value,
+    allow_send: bool,
+) -> Result<Value, String> {
+    if args["action"] == "form" {
+        let nav = CoreNav {
+            shared: shared.clone(),
+            strict: true,
+        };
+        let mut receipt = driver
+            .fill_form(page, &args, Actor::Agent, &nav, allow_send)
+            .await?;
+        attach_tab(shared, page, &mut receipt);
+        return Ok(receipt);
+    }
+    if args["action"] == "auth.basic" {
+        return Err("HTTP sign-in needs its vault decision before the tool starts; retry through the tool hook.".into());
+    }
+    let mut args = args;
+    if let Value::Object(map) = &mut args {
+        map.remove("target");
+        map.remove("tab");
+    }
+    let action = crate::browser_upload::load(shared, session_id, vw_browser::parse(&args)?).await?;
+    let nav = CoreNav {
+        shared: shared.clone(),
+        strict: true,
+    };
+    check_agent(shared, session_id)?;
+    shared.browser_dialogs.check()?;
+    let mut receipt = driver
+        .act_with_sending(page, action, Actor::Agent, &nav, allow_send)
+        .await
+        .map_err(|e| e.text)?;
+    crate::browser_recording::save(shared, session_id, &mut receipt)?;
+    // The act already completed. Its own navigation may have stopped the page;
+    // preserve what happened instead of turning sent input into a refusal.
+    attach_tab(shared, page, &mut receipt);
+    let image = receipt
+        .as_object_mut()
+        .and_then(|o| o.remove(wire::IMAGE_KEY));
+    vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
+    if let Some(image) = image {
+        receipt[wire::IMAGE_KEY] = image;
+    }
+    Ok(receipt)
+}
+
+async fn capture_page(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    page: &str,
+    driver: &vw_browser::Browser,
+    args: Value,
+) -> Result<Value, String> {
+    let mut args = args;
+    if let Value::Object(map) = &mut args {
+        map.remove("target");
+        map.remove("tab");
+    }
+    let mut canceled = driver.sessions().cancel_signal(page);
+    let mut capture = tokio::select! {
+        biased;
+        _ = canceled.changed() => return Err("browser tab action was canceled".to_owned()),
+        answer = crate::browser_capture::run(shared, page, &args, Actor::Agent) =>
+            answer.map_err(|error| error.text)?,
+    };
+    check_current(shared, session_id, page)?;
+    attach_tab(shared, page, &mut capture);
+    Ok(capture)
 }
 
 pub(crate) fn attach_tab(shared: &Shared, page: &str, answer: &mut Value) {
@@ -389,9 +436,93 @@ pub(crate) fn attach_tab(shared: &Shared, page: &str, answer: &mut Value) {
     }
 }
 
+/// Reads one admitted page, retaining cancellation and the same observation/image budget.
+async fn read_page(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    page: &str,
+    args: &Value,
+    driver: &vw_browser::Browser,
+) -> Result<Value, String> {
+    let mut options = read_options(
+        args.get("maxRefs").and_then(Value::as_u64),
+        args.get("textPage").and_then(Value::as_u64),
+        args.get("maxBytes").and_then(Value::as_u64),
+        args.get("find").and_then(Value::as_str),
+    );
+    if let Some(selector) = args.get("selector") {
+        options.selector = Some(serde_json::from_value(selector.clone()).map_err(|_| "A selector needs kind (css, xpath, alt, title or testId), value and optional index.")?);
+    }
+    options.root_ref = args.get("ref").and_then(Value::as_str).map(str::to_owned);
+    if let Some(cursor) = args.get("textCursor") {
+        if options.find.is_some() || options.text_page.is_some() {
+            return Err("textCursor continues plain text; use it without find or textPage".into());
+        }
+        let cursor: vw_browser::TextCursor = serde_json::from_value(cursor.clone())
+            .map_err(|_| "textCursor needs nonnegative page and offset integers")?;
+        if cursor.page > 10_000 || cursor.offset > vw_browser::model::MAX_ANSWER {
+            return Err("textCursor exceeds the text paging limit".into());
+        }
+        options.text_cursor = Some(cursor);
+    }
+    if let Some(cursor) = args.get("choiceCursor") {
+        let cursor: vw_browser::ChoiceCursor = serde_json::from_value(cursor.clone())
+            .map_err(|_| "choiceCursor needs nonnegative frame and offset integers")?;
+        if cursor.frame >= 64 || cursor.offset > vw_browser::model::MAX_REFS {
+            return Err(
+                "choiceCursor exceeds the observed choice limit; use find for a label".into(),
+            );
+        }
+        options.choice_cursor = Some(cursor);
+    }
+    let screenshot = args
+        .get("screenshot")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut canceled = driver.sessions().cancel_signal(page);
+    let (mut observation, shot) = tokio::select! {
+        biased;
+        _ = canceled.changed() => return Err("browser tab action was canceled".to_owned()),
+        answer = driver.read(page, options, screenshot, Actor::Agent) => answer?,
+    };
+    check_current(shared, session_id, page)?;
+    attach_tab(shared, page, &mut observation);
+    vw_browser::observe::fit(
+        &mut observation,
+        args.get("maxBytes")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(vw_browser::observe::READ_BUDGET)
+            .clamp(
+                vw_browser::observe::MIN_BUDGET,
+                vw_browser::observe::MAX_BUDGET,
+            ),
+    );
+    if let Some(shot) = shot {
+        observation[wire::IMAGE_KEY] = json!({"data": shot.base64(), "mimeType": "image/png"});
+    }
+    Ok(observation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selectors_cannot_search_for_stored_values() {
+        let value = "SelectorPrivacyFixtureOnly12345";
+        vw_secrets::register(vw_secrets::SecretKind::VaultValue, value);
+        assert!(searches_stored_secret(
+            &json!({"selector":{"kind":"css","value":format!("input[value='{value}']")}})
+        ));
+        assert!(searches_stored_secret(&json!({"find":value})));
+        assert!(searches_stored_secret(
+            &json!({"extract":{"kind":"list","selector":format!("[data-value='{value}']")}})
+        ));
+        assert!(!searches_stored_secret(
+            &json!({"selector":{"kind":"testId","value":"password"}})
+        ));
+    }
 
     #[test]
     fn legacy_chrome_target_points_to_the_users_chrome_tools() {

@@ -205,6 +205,7 @@ async fn status_unpaired_switched_off_and_disallowed_modes_never_launch() {
                         chat: "a".into(),
                         browser: Browser::Chrome,
                         turn: None,
+                        connection_ended: false,
                     }]);
             }
             _ => {}
@@ -243,13 +244,14 @@ async fn stopping_while_the_extension_reconnects_prevents_session_open() {
                 chat: "a".into(),
                 browser: Browser::Chrome,
                 turn: None,
+                connection_ended: false,
             }]);
         json!({"structuredContent":{"profiles":[]}})
     });
     let reason = gateway::call(&core.shared, "a", "chrome_session", open(Browser::Chrome))
         .await
         .unwrap_err();
-    assert!(reason.contains("the person pressed Stop"), "{reason}");
+    assert!(reason.contains("the user pressed Stop"), "{reason}");
     assert!(
         seen.lock()
             .unwrap()
@@ -280,7 +282,7 @@ async fn three_chats_share_one_launch_then_open_their_own_sessions() {
                 json!({"structuredContent":{"profiles":[{"profileId":format!("{}:p", browser.id()),"connected":!recorded.lock().unwrap().is_empty()}]}})
             } else {
                 assert_eq!(tool, "chrome_session");
-                assert!(args.get("tabId").is_none(), "never borrow a person's tab");
+                assert!(args.get("tabId").is_none(), "never borrow the user's tab");
                 json!({"structuredContent":{"sessionId":format!("task-{}", args["_clientSessionId"].as_str().unwrap()),"profileId":args["profileId"],"state":"active"}})
             };
             owner::update_pairing(&weak, &result);
@@ -403,7 +405,7 @@ async fn ask_open_launches_a_paired_browser_without_a_card() {
 }
 
 #[tokio::test]
-async fn paired_profile_directory_requires_one_installed_profile_in_the_same_browser() {
+async fn installed_profile_counts_cannot_prove_a_launch_directory() {
     let core = fixture(
         "browser-launch-paired-profile",
         Browser::Chrome,
@@ -413,7 +415,7 @@ async fn paired_profile_directory_requires_one_installed_profile_in_the_same_bro
     let shared = &core.shared;
     assert_eq!(
         super::installation::paired_directory(shared, Browser::Chrome).as_deref(),
-        Some("Default")
+        None
     );
     assert!(super::installation::paired_directory(shared, Browser::Edge).is_none());
     let data = shared
@@ -440,8 +442,8 @@ async fn paired_profile_directory_requires_one_installed_profile_in_the_same_bro
     .unwrap();
     assert_eq!(
         super::installation::paired_directory(shared, Browser::Chrome).as_deref(),
-        Some("Default"),
-        "an unpaired disabled copy does not add a launch choice"
+        None,
+        "an unpaired disabled copy cannot identify the paired folder"
     );
     assert_eq!(
         Browser::Chrome.addon(shared).state,
@@ -455,7 +457,7 @@ async fn paired_profile_directory_requires_one_installed_profile_in_the_same_bro
     std::fs::remove_dir_all(data.join("Default")).unwrap();
     assert_eq!(
         super::installation::paired_directory(shared, Browser::Chrome).as_deref(),
-        Some("Profile 2"),
-        "a deleted pairing folder cannot strand the sole existing extension profile on the picker"
+        None,
+        "deleting one folder cannot authorize its replacement"
     );
 }

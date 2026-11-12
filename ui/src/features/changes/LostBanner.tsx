@@ -19,7 +19,7 @@ export function LostBanner(props: {
   return (
     <div className="key-problem" role="alert">
       <p>
-        The starting point for this session was lost ({view.reason ?? "unknown reason"}). Showing
+        The starting point for this chat was lost ({view.reason ?? "unknown reason"}). Showing
         changes against the last commit instead. Nothing here can be kept or reverted until you
         start reviewing from now.
       </p>

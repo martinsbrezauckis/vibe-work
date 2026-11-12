@@ -3,7 +3,7 @@ fn main() {
     match vw_gh_broker::entry::shim() {
         Ok(code) => std::process::exit(code),
         Err(error) => {
-            eprintln!("gh broker: {error}");
+            eprintln!("{error}");
             std::process::exit(1);
         }
     }

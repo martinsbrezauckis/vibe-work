@@ -12,6 +12,16 @@ use crate::core::Shared;
 
 use super::{PairingState, mapping, setup};
 
+#[path = "owner_observe.rs"]
+mod observation;
+#[cfg(test)]
+use observation::pairing_result;
+#[cfg(test)]
+pub(super) use observation::update_work_for_test;
+pub(super) use observation::{
+    observe, publish, publish_setup_if_changed, update_pairing, update_work,
+};
+
 #[path = "owner_pairing.rs"]
 mod pairing;
 
@@ -67,7 +77,7 @@ struct Running {
     task: JoinHandle<()>,
 }
 
-type SetupSnapshot = (setup::ChromeSetupView, Option<setup::ChromeSetupView>);
+type SetupSnapshot = super::ChromeControlView;
 
 #[derive(Default)]
 pub(super) struct Owner {
@@ -80,6 +90,7 @@ pub(super) struct Owner {
     pub(super) safari_seen: std::sync::atomic::AtomicU64,
     pub(super) safari_error: Mutex<Option<super::safari::ConnectionError>>,
     pub(super) firefox_pairing: Mutex<(PairingState, Option<String>)>,
+    pub(super) firefox_share_pairing: Mutex<(PairingState, Option<String>)>,
     pub(super) firefox_states: Mutex<Vec<String>>,
     pub(super) edge_pairing: Mutex<(PairingState, Option<String>)>,
     observed_setup: Mutex<Option<SetupSnapshot>>,
@@ -203,14 +214,7 @@ impl Owner {
             .clear();
         *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) =
             (PairingState::Disconnected, None);
-        *self
-            .firefox_pairing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
-        self.firefox_states
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.clear_firefox();
         *self
             .edge_pairing
             .lock()
@@ -351,7 +355,9 @@ async fn start_inner(shared: &Arc<Shared>, removing: bool) -> Result<(), String>
     let configured = setup::view(&chrome.config, Some(dir), &shared.instructions.own_home).state
         != setup::SetupState::NotSetUp
         || setup::registered(&chrome.config, Some(dir), "Microsoft Edge")
-        || (cfg!(feature = "your-firefox") && dir.join("firefox-window").is_file())
+        || (cfg!(feature = "your-firefox")
+            && (dir.join("firefox-window").is_file()
+                || setup::registered(&chrome.config, Some(dir), "Mozilla Firefox")))
         || super::safari::enabled(shared);
     if !configured {
         return Ok(());
@@ -406,230 +412,6 @@ async fn start_inner(shared: &Arc<Shared>, removing: bool) -> Result<(), String>
     Ok(())
 }
 
-pub(super) fn publish(shared: &Shared) {
-    shared.emit(crate::CoreEvent::ChromeControl {
-        view: super::commands::view(shared),
-    });
-}
-
-pub(super) fn observe(shared: &Weak<Shared>, message: &Value) -> Result<(), ()> {
-    let Some(shared) = shared.upgrade() else {
-        return Err(());
-    };
-    if message["method"] == "notifications/owner/safari"
-        && let Some(state) = message["params"]["state"].as_str()
-    {
-        super::safari::connection(&shared, state);
-    }
-    if message["method"] == "notifications/owner/pairingApproval" {
-        super::pairing_approval::observe(&shared, &message["params"]);
-    }
-    if message["method"] == "notifications/client/selection" {
-        let changed = shared
-            .chrome_control
-            .selections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .receive(&message["params"], |id| shared.store.view(id).is_some());
-        if changed {
-            publish(&shared);
-        }
-    }
-    if message["method"] == "notifications/owner/pairing"
-        && let Some(result) = pairing_result(&message["params"])
-    {
-        super::safari::observe(&shared, &message["params"]);
-        pairing::observe(&shared, &message["params"], result);
-    }
-    Ok(())
-}
-
-/// The helper's signed pairing state (protocol v6 `notifications/owner/pairing`) in the shape [`update_pairing`]
-/// already reads. `waiting` / `paired` carry this Vibe Work's own fingerprint, shown so the person can compare; for
-/// `mismatch` the fingerprint is the other identity Chrome holds, so it never replaces ours on screen. An unknown
-/// state is ignored (the helper validates and bounds these events; this only informs, it admits nothing).
-fn pairing_result(params: &Value) -> Option<Value> {
-    let fingerprint = params["fingerprint"].clone();
-    match params["state"].as_str()? {
-        "waiting" => Some(json!({"structuredContent":{
-            "error":{"code":"OWNER_APPROVAL_REQUIRED"},"ownerFingerprint":fingerprint}})),
-        "paired" => Some(json!({"structuredContent":{
-            "error":{"code":"OWNER_CONNECTING"},"ownerFingerprint":fingerprint}})),
-        "mismatch" => {
-            Some(json!({"structuredContent":{"error":{"code":"OWNER_IDENTITY_MISMATCH"}}}))
-        }
-        _ => None,
-    }
-}
-
-pub(super) fn update_pairing(shared: &Weak<Shared>, result: &Value) {
-    update_pairing_state(shared, result);
-    if let Some(shared) = shared.upgrade() {
-        shared.chrome_control.owner.starts.connected(&shared);
-        super::connection_notice::connected(&shared);
-    }
-}
-
-fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
-    let Some(shared) = shared.upgrade() else {
-        return;
-    };
-    let mut data = result["structuredContent"].clone();
-    if !super::remove::filter_observation(&shared, &mut data) {
-        return;
-    }
-    shared.chrome_control.owner.wake.observe(&data);
-    shared.chrome_control.owner.profile_ids.observe(&data);
-    // Keep all browsers' versions before the Chrome-only pairing view below filters them.
-    if data["profiles"].is_array() && data.get("profileId").is_none() {
-        shared
-            .chrome_control
-            .owner
-            .connected_profiles
-            .observe(&data);
-    }
-    if cfg!(any(feature = "your-edge", feature = "your-firefox")) {
-        super::edge_state::update(&shared, &data);
-    }
-    if data["profileId"]
-        .as_str()
-        .is_some_and(|id| !super::edge_state::chrome_profile(id))
-    {
-        return;
-    }
-    if let Some(profiles) = data.get_mut("profiles").and_then(Value::as_array_mut) {
-        profiles.retain(|profile| {
-            let id = profile["profileId"].as_str();
-            if cfg!(any(feature = "your-edge", feature = "your-firefox")) {
-                id.is_some_and(super::edge_state::chrome_profile)
-            } else {
-                // Chrome-only helpers historically used unscoped labels; foreign scopes remain foreign.
-                id.is_none_or(|id| !id.contains(':') || id.starts_with("chrome:"))
-            }
-        });
-    }
-    let data = &data;
-    let code = data["error"]["code"].as_str().unwrap_or_default();
-    let connected = data["profiles"]
-        .as_array()
-        .is_some_and(|p| p.iter().any(|p| p["connected"] == true));
-    // Only a status answer (its profiles) or the helper's own pairing/owner report says what is connected. An
-    // action's failure (a closed tab, an unknown profile, an older extension) says nothing about the connection:
-    // taking it as "Not connected" flipped the card for two seconds and replaced the action's own error.
-    if data.get("profiles").is_none() && !code.starts_with("OWNER_") {
-        return;
-    }
-    // Every helper status answer names our own fingerprint, with or without a waiting extension: only the helper's
-    // waiting report is the pairing step (`addon`), else nothing is connected.
-    let waiting = shared
-        .chrome_control
-        .owner
-        .enroll
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .waiting_reported();
-    let state = PairingState::observe(code, connected, waiting);
-    // A status poll has no registered profile while an enabled extension holds another identity.
-    // Keep its signed mismatch until a pairing report, live connection or helper reset replaces it.
-    if !connected
-        && code.is_empty()
-        && shared
-            .chrome_control
-            .owner
-            .pairing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .0
-            == PairingState::OtherOwner
-    {
-        return;
-    }
-    let mut current = shared
-        .chrome_control
-        .owner
-        .pairing
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    // Removal clears this same lock after deleting the registration. A shared status
-    // poll may still name the owner's fingerprint, even with no Chrome profiles left.
-    if super::remove::is_removed(&shared, super::agent_browser::Browser::Chrome) {
-        return;
-    }
-    if connected {
-        shared.chrome_control.mark_paired();
-        shared
-            .chrome_control
-            .owner
-            .enroll
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .connected();
-    }
-    let fingerprint = data["ownerFingerprint"]
-        .as_str()
-        .map(|fingerprint| fingerprint.chars().take(16).collect())
-        .or_else(|| current.1.clone());
-    let next = (state, fingerprint);
-    let changed = *current != next;
-    *current = next;
-    drop(current);
-    publish_setup_if_changed(&shared, changed);
-}
-
-/// A regular status poll also discovers either browser's extension directory appearing after pairing.
-pub(super) fn publish_setup_if_changed(shared: &Shared, changed: bool) {
-    let view = super::commands::view(shared);
-    let next = (view.setup.clone(), view.edge.as_deref().cloned());
-    let mut previous = shared
-        .chrome_control
-        .owner
-        .observed_setup
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    if changed || previous.as_ref() != Some(&next) {
-        *previous = Some(next);
-        drop(previous);
-        shared.emit(crate::CoreEvent::ChromeControl { view });
-    }
-}
-
-#[cfg(test)]
-pub(super) fn update_work_for_test(shared: &Arc<Shared>, result: &Value) {
-    update_work(&Arc::downgrade(shared), result, tokio::time::Instant::now());
-}
-
-pub(super) fn update_work(shared: &Weak<Shared>, result: &Value, started: tokio::time::Instant) {
-    let Some(shared) = shared.upgrade() else {
-        return;
-    };
-    let Some(rows) = result["structuredContent"]["sessions"].as_array() else {
-        return;
-    };
-    let mut tasks = shared
-        .chrome_control
-        .tasks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let mut work = shared
-        .chrome_control
-        .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    // A live session the helper reports stopped without Vibe Work asking: the person's Stop in Chrome.
-    let stopped = work.stopped_unasked(rows, started);
-    let changed = work.observe(rows, &mut tasks, started);
-    drop(work);
-    drop(tasks);
-    super::person_stop::received(&shared, &stopped);
-    if changed {
-        publish(&shared);
-    }
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "one connection loop: launch, synchronize, serve calls and polls, then report why it ended"
-)]
 async fn supervise(
     shared: Weak<Shared>,
     package: setup::ChromeControlConfig,
@@ -657,79 +439,13 @@ async fn supervise(
                     .unwrap_or_else(PoisonError::into_inner)
                     .clear();
             }
-            'connection: {
-                let mut sent_policy = Value::Null;
-                let synchronized = tokio::select! {
-                    _ = stop.changed() => false,
-                    result = synchronize(&shared, &mut pipe, &mut sent_policy) => result.is_ok(),
-                };
-                if !synchronized {
-                    // Failed startup needs the same disconnect, queue rejection and backoff as a lost pipe.
-                    break 'connection;
-                }
-                // A new helper connection has acknowledged no switch value yet: send the current one (retried
-                // until acknowledged).
-                if let Some(core) = shared.upgrade() {
-                    core.chrome_control.forget_local_network_ack();
-                    tokio::spawn(async move { super::send_local_network(&core).await });
-                }
-                let mut pending = std::collections::HashMap::<
-                    u64,
-                    (Option<oneshot::Sender<Answer>>, tokio::time::Instant),
-                >::new();
-                let mut poll = tokio::time::interval(Duration::from_secs(2));
-                let mut expiry = tokio::time::interval(Duration::from_millis(100));
-                // Diagnostics: why this connection ended (a fixed word; no helper or page text).
-                let mut ended = "stopped";
-                loop {
-                    tokio::select! {
-                        biased;
-                        _ = stop.changed() => { break; }
-                        reply = pipe.next() => {
-                            let Ok((id, result)) = reply else { ended = "helper pipe closed"; break };
-                            let Some((reply, started)) = pending.remove(&id) else { ended = "unexpected reply"; break };
-                            update_pairing(&shared, &result);
-                            update_work(&shared, &result, started);
-                            if let Some(reply) = reply { let _ = reply.send(Answer::Helper(result)); }
-                        }
-                        call = requests.recv() => {
-                            let Some(call) = call else { ended = "requests closed"; break };
-                            if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
-                            if pending.len() >= 32 && call.name != "chrome_session" {
-                                let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
-                                continue;
-                            }
-                            let begun = if call.rpc {
-                                pipe.begin_tolerant(&call.name, call.args).await
-                            } else {
-                                pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
-                            };
-                            if let Ok(id) = begun {
-                                pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
-                            } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
-                        }
-                        _ = poll.tick(), if !pending.values().any(|(reply, _)| reply.is_none()) => {
-                            if let Ok(id) = pipe.begin("tools/call", json!({"name":"chrome_status","arguments":{}})).await {
-                                pending.insert(id, (None, tokio::time::Instant::now()));
-                            } else { ended = "status poll send failed"; break }
-                        }
-                        _ = expiry.tick() => {
-                            if pending.values().any(|(_, start)| start.elapsed() >= Duration::from_secs(35)) { ended = "a call outlived 35 s"; break; }
-                        }
-                    }
-                }
-                tracing::warn!(reason = ended, "Chrome Control connection ended");
-                for (_, (reply, _)) in pending {
-                    if let Some(reply) = reply {
-                        let _ = reply.send(own(UNKNOWN, "TRANSPORT_LOST"));
-                    }
-                }
-            }
+            serve_connection(&shared, &mut pipe, &mut requests, &mut stop).await;
 
             pipe.abort().await;
         }
         if let Some(core) = shared.upgrade() {
             core.chrome_control.owner.clear_connection();
+            super::profiles::disconnected(&core.chrome_control);
             core.chrome_control
                 .work
                 .lock()
@@ -758,6 +474,90 @@ async fn supervise(
             }
         }
         backoff = (backoff * 2).min(5000);
+    }
+}
+
+/// Synchronizes and serves one pipe; every pending caller is settled before the owner disconnects it.
+async fn serve_connection(
+    shared: &Weak<Shared>,
+    pipe: &mut super::pipe::Pipe,
+    requests: &mut mpsc::Receiver<Call>,
+    stop: &mut watch::Receiver<bool>,
+) {
+    let mut sent_policy = Value::Null;
+    let synchronized = tokio::select! {
+        _ = stop.changed() => false,
+        result = synchronize(shared, pipe, &mut sent_policy) => result.is_ok(),
+    };
+    if !synchronized {
+        // Failed startup needs the same disconnect, queue rejection and backoff as a lost pipe.
+        return;
+    }
+    // A new helper connection has acknowledged no switch value yet: send the current one (retried
+    // until acknowledged).
+    if let Some(core) = shared.upgrade() {
+        core.chrome_control.forget_local_network_ack();
+        tokio::spawn(async move { super::send_local_network(&core).await });
+    }
+    let mut pending = std::collections::HashMap::<
+        u64,
+        (Option<oneshot::Sender<Answer>>, tokio::time::Instant),
+    >::new();
+    let mut poll = tokio::time::interval(Duration::from_secs(2));
+    // Diagnostics: why this connection ended (a fixed word; no helper or page text).
+    let mut ended = "stopped";
+    loop {
+        let expiry = pending
+            .values()
+            .map(|(_, start)| *start + Duration::from_secs(35))
+            .min();
+        tokio::select! {
+            biased;
+            _ = stop.changed() => { break; }
+            reply = pipe.next() => {
+                let Ok((id, result)) = reply else { ended = "helper pipe closed"; break };
+                let Some((reply, started)) = pending.remove(&id) else { ended = "unexpected reply"; break };
+                update_pairing(shared, &result);
+                update_work(shared, &result, started);
+                if let Some(reply) = reply { let _ = reply.send(Answer::Helper(result)); }
+            }
+            call = requests.recv() => {
+                let Some(call) = call else { ended = "requests closed"; break };
+                if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
+                if pending.len() >= 32 && call.name != "chrome_session" {
+                    let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
+                    continue;
+                }
+                let begun = if call.rpc {
+                    pipe.begin_tolerant(&call.name, call.args).await
+                } else {
+                    pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
+                };
+                if let Ok(id) = begun {
+                    pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));
+                } else { let _ = call.reply.send(own(UNKNOWN, "TRANSPORT_LOST")); ended = "send failed"; break; }
+            }
+            _ = poll.tick(), if !pending.values().any(|(reply, _)| reply.is_none()) => {
+                if let Ok(id) = pipe.begin("tools/call", json!({"name":"chrome_status","arguments":{}})).await {
+                    pending.insert(id, (None, tokio::time::Instant::now()));
+                } else { ended = "status poll send failed"; break }
+            }
+            () = async {
+                if let Some(deadline) = expiry {
+                    tokio::time::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                ended = "a call outlived 35 s"; break;
+            }
+        }
+    }
+    tracing::warn!(reason = ended, "Chrome Control connection ended");
+    for (_, (reply, _)) in pending {
+        if let Some(reply) = reply {
+            let _ = reply.send(own(UNKNOWN, "TRANSPORT_LOST"));
+        }
     }
 }
 

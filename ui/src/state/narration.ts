@@ -402,7 +402,7 @@ export function createNarration(deps: {
     async narrateLast(sessionId: string): Promise<void> {
       const turns = completedTurns(core.store.get().sessions[sessionId]?.state);
       const turnId = turns[turns.length - 1];
-      if (turnId === undefined) throw new Error("this session has no finished turn yet");
+      if (turnId === undefined) throw new Error("this chat has no finished turn yet");
       try {
         await narrate({ sessionId, turnId });
       } finally {

@@ -1,5 +1,7 @@
 //! Continuation within a merged text window, after final inline byte trimming.
 //! Used by reads and their serializer; offsets count UTF-16 units, never bytes or control refs.
+//! Depends on: the merged page model and serde.
+//! Called by: browser read result fitting.
 use crate::{model::PageModel, observe::PAGE_CHARS};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

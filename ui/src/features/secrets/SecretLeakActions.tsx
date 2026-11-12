@@ -1,4 +1,5 @@
 /** Existing bell action buttons for Rust-owned findings. Depends on scan state; navigation opens existing surfaces. */
+import { term } from "../../vocabulary";
 import { Button } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
 import { useApp } from "../shell/AppContext";
@@ -56,7 +57,7 @@ function Actions({
           app.toasts.close();
         }}
       >
-        Open chat
+        {term("workNames", "session").tooltip}
       </Button>
       {logins.map((id) => (
         <Button

@@ -27,7 +27,7 @@ import { closeBrowserOverlaysAndWait } from "./browserOverlays";
 /** Short window labels use typed reasons; detailed guidance stays in the capture result. */
 const BLOCK_LABELS: Record<CaptureBlock, string> = {
   windowHidden: "Window hidden",
-  anotherSession: "Another session",
+  anotherSession: "Another chat",
   anotherPage: "Another page",
   noChatSelected: "No chat selected",
   browserPanelClosed: "Browser panel closed",
@@ -121,7 +121,7 @@ export function CaptureMenu({
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={busy !== undefined}
-          title="Save the page's design system, structure, media or the whole page into this session's folder"
+          title="Save the page's design system, structure, media or the whole page into this chat's folder"
           onClick={() => {
             setOpen((o) => !o);
           }}
@@ -226,7 +226,7 @@ export function CaptureMenu({
             </Fragment>
           ))}
           <p className="preview-capture-note">
-            Saved in this session&apos;s folder under capture/. Captured logos, images and fonts are
+            Saved in this chat&apos;s folder under capture/. Captured logos, images and fonts are
             for reference: the site&apos;s licence applies.
           </p>
         </div>

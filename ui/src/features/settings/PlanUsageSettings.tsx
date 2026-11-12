@@ -35,9 +35,7 @@ export function PlanUsageSettings() {
     <section aria-labelledby="plan-usage-title" data-setting="plan-usage">
       <h3 id="plan-usage-title">This month</h3>
       <KeyNotice inSettings />
-      {!blocked && via === null && (
-        <p className="key-line">Open a session to read your plan usage.</p>
-      )}
+      {!blocked && via === null && <p className="key-line">Open a chat to read your plan usage.</p>}
       {!blocked && via !== null && (
         <>
           {(value === null || value.kind === "loading") && (

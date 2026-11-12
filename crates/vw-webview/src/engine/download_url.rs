@@ -1,5 +1,7 @@
 //! Bounded URL downloads shared by all native engines, using the selected webview's cookie manager internally.
 //! No cookie values enter tool receipts. Each redirect gets only its own cookies; native click downloads use Wry.
+//! Depends on: bounded HTTP transfers and native cookie managers.
+//! Called by: preview engine URL-download requests.
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{Webview, Wry};
@@ -51,10 +53,11 @@ async fn transfer(
         }
         let view = webview.clone();
         let address = url.clone();
-        let cookies = tokio::task::spawn_blocking(move || view.cookies_for_url(address))
-            .await
-            .map_err(|_| "Cookie store unavailable.")?
-            .map_err(|_| "Cookie store unavailable.")?;
+        let cookies =
+            tokio::task::spawn_blocking(move || super::url_cookies::read(&view, &address))
+                .await
+                .map_err(|_| "Cookie store unavailable.")?
+                .map_err(|_| "Cookie store unavailable.")?;
         let header = cookies
             .iter()
             .map(|c| format!("{}={}", c.name(), c.value()))

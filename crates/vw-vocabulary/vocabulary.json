@@ -22,7 +22,7 @@
     },
     "plan": {
       "name": "Plan first",
-      "description": "Retired in Vibe 3. Saved sessions reopen in Ask; use Plan on a page to plan.",
+      "description": "Retired in Vibe 3. Saved chats reopen in Ask; use Plan on a page to plan.",
       "tooltip": "Plan first was retired in Vibe 3"
     },
     "vw-plan": {
@@ -100,38 +100,38 @@
   "locks": {
     "agentPause": {
       "name": "Pause agent access to secrets",
-      "description": "Agent access to secrets is paused. Sessions keep working.",
-      "tooltip": "Pause the agent's access to secrets. Sessions keep working."
+      "description": "Agent access to secrets is paused. Chats keep working.",
+      "tooltip": "Pause the agent's access to secrets. Chats keep working."
     },
     "agentResume": {
       "name": "Resume agent access to secrets",
-      "description": "Agent access to secrets is available. Sessions keep working.",
-      "tooltip": "Resume the agent's access to secrets. Sessions keep working."
+      "description": "Agent access to secrets is available. Chats keep working.",
+      "tooltip": "Resume the agent's access to secrets. Chats keep working."
     },
     "vaultLock": {
       "name": "Lock vault",
-      "description": "The vault is locked. Sessions stop until you unlock.",
-      "tooltip": "Lock the vault. Sessions stop until you unlock."
+      "description": "The vault is locked. Chats stop until you unlock.",
+      "tooltip": "Lock the vault. Chats stop until you unlock."
     },
     "vaultUnlock": {
       "name": "Unlock vault",
-      "description": "The vault is unlocked. Sessions can work again.",
-      "tooltip": "Unlock the vault. Sessions can work again."
+      "description": "The vault is unlocked. Chats can work again.",
+      "tooltip": "Unlock the vault. Chats can work again."
     }
   },
   "texts": {
-    "untitledSession": "Untitled session",
+    "untitledSession": "Untitled chat",
     "testProfileNotice": "Test profile: this window uses a separate test folder, not your normal data.",
     "accessMode": "Access mode",
     "accessUnknown": "Access",
     "accessChoose": "Choose access mode: {name}",
     "accessUse": "Use {name} access mode",
-    "accessDefaultDescription": "Applies to new sessions.",
+    "accessDefaultDescription": "Applies to new chats.",
     "accessDefaultFallback": "Vibe's default",
     "customAccessDescription": "A profile from your Vibe configuration.",
     "model": "Model",
     "defaultModel": "Default model",
-    "defaultModelDescription": "The model new sessions start with.",
+    "defaultModelDescription": "The model new chats start with.",
     "modelDescription": "A model from your Vibe configuration.",
     "modelUse": "Use {name} model",
     "modelChoose": "Choose model: {name}",
@@ -155,9 +155,14 @@
     "vaultGeneric": "vault",
     "vaultRailTooltip": "Vault: keys, passwords and logins",
     "vaultChoiceEmpty": "No existing vault was found on this computer. Create a Vibe Work vault to continue.",
-    "agentPausedNotice": "Agent access to secrets is paused. Sessions keep working.",
+    "agentPausedNotice": "Agent access to secrets is paused. Chats keep working.",
     "agentPausedRefusal": "Not run: agent access to secrets is paused. There is no access to secrets until the user resumes it.",
-    "vaultLockedNotice": "The vault is locked. Sessions stop until you unlock.",
+    "agentToolsUnavailable": "Tools unavailable. Try again in a moment; if it repeats, tell the user.",
+    "agentPromptUnavailable": "Permission prompt unavailable. Try again in a moment; if it repeats, tell the user.",
+    "agentPromptLimit": "Too many open permission prompts. Wait for the open prompts to finish, then try again.",
+    "agentVaultMissing": "No vault is connected; ask the user to set up the vault.",
+    "agentVaultLocked": "Not run: the vault is locked. Ask the user to unlock it in Vibe Work, then try again.",
+    "vaultLockedNotice": "The vault is locked. Chats stop until you unlock.",
     "agentUnavailableStatus": "Agent secrets: unavailable",
     "agentPausedStatus": "Agent secrets: paused",
     "agentAvailableStatus": "Agent secrets: available",
@@ -178,8 +183,8 @@
     "answersCount": "{questions} · {answered} answered",
     "answersShow": "Show answers",
     "answersHide": "Hide answers",
-    "thisSession": "This session",
-    "findInSession": "Find in this session",
+    "thisSession": "This chat",
+    "findInSession": "Find in this chat",
     "askSending": "Sending your answer…",
     "askNativeWaiting": "Waiting for your answer in the Vibe Work confirmation window…",
     "askNativeCancelled": "Not changed. Choose an answer on this card.",
@@ -190,9 +195,9 @@
     "askWaitingMany": "{count} prompts are waiting · {shortcut}",
     "askArrived": "Vibe asks you in “{session}”: {question} {summary}. Press {shortcut} to go there.",
     "askKeysHint": "Press {keys}, or Tab to the buttons.",
-    "mentionMenu": "Files and sessions",
-    "mentionSessionLabel": "Session · {title}",
-    "mentionSessionText": "The session \"{title}\" in this project (session id {id}).",
+    "mentionMenu": "Files and chats",
+    "mentionSessionLabel": "Chat · {title}",
+    "mentionSessionText": "The chat \"{title}\" in this project (chat id {id}).",
     "editPreviewCut": "Preview shortened: {lines} lines and {chars} characters not shown.",
     "editPreviewWhole": "Show the whole change",
     "configProblem": "{file}: {message}",
@@ -236,8 +241,6 @@
     "edgeAddExtension": "Add the Vibe Work extension in Edge",
     "browserRemoveQuestion": "Remove Your {browser}?",
     "browserRemoveEffect": "Removes the {browser} connection from Vibe Work. Remove the Vibe Work extension in {browser} too.",
-    "browsersRemoveQuestion": "Remove Your Chrome and Your Edge?",
-    "browsersRemoveEffect": "Removes the setup for Chrome and Edge. Remove the Vibe Work extension in each browser too.",
     "addBrowserTab": "Add a browser tab…",
     "chromeName": "Your Chrome",
     "chromeUnavailable": "Your Chrome is not in this version of Vibe Work.",
@@ -278,7 +281,7 @@
     "trayNoticeMac": "Open it from the menu bar or the Dock.",
     "captureWindowClosed": "The Vibe Work window is closed to the tray or minimized, so {label} cannot be captured. Ask the user to open the window, or check without a screenshot (browser_read text).",
     "captureWindowClosedMac": "The Vibe Work window is closed to the menu bar or minimized, so {label} cannot be captured. Ask the user to open the window, or check without a screenshot (browser_read text).",
-    "vaultUnlockLabel": "Unlock the vault:",
+    "vaultUnlockLabel": "Unlock the vault",
     "vaultUnlockWindows": "With my Windows sign-in",
     "vaultUnlockMac": "With my Mac login",
     "vaultUnlockLinux": "With my login keyring",
@@ -301,9 +304,9 @@
       "tooltip": "Open handbook page"
     },
     "session": {
-      "name": "Session",
-      "description": "Existing work with its messages, history and settings, saved in the session list.",
-      "tooltip": "Open session"
+      "name": "Chat",
+      "description": "Existing work with its messages, history and settings, saved in the chat list.",
+      "tooltip": "Open chat"
     },
     "chat": {
       "name": "chat",
@@ -348,6 +351,11 @@
       "name": "Create a plugin",
       "description": "Helps Vibe build a plugin with skills, tools and other features.",
       "tooltip": "Helps Vibe build a plugin with skills, tools and other features."
+    },
+    "vibe:import": {
+      "name": "Import agent settings",
+      "description": "Brings settings from other coding agents into Vibe.",
+      "tooltip": "Brings settings from other coding agents into Vibe."
     },
     "vibe:skill-creator": {
       "name": "Create a skill",

@@ -22,10 +22,11 @@ async fn extraction_requires_the_real_sandbox() {
             "linux",
             "denial expectation is only for constrained Linux CI"
         );
+        let error = result.unwrap_err();
+        assert_eq!(error.code, vw_video_types::Code::WorkerFailed);
         assert!(
-            result
-                .unwrap_err()
-                .contains("backend_unavailable: Linux sandbox")
+            error.detail.contains("namespace") || error.detail.contains("Operation not permitted"),
+            "{error}"
         );
     } else {
         let reply = result.unwrap();
@@ -47,7 +48,7 @@ async fn extraction_requires_the_real_sandbox() {
 async fn sandboxed(
     file: &str,
     selection: serde_json::Value,
-) -> Result<vw_video::protocol::Reply, String> {
+) -> Result<vw_video::protocol::Reply, vw_video_types::Error> {
     let root = std::env::var_os("VW_VIDEO_CORPUS").expect("verified corpus");
     let path = std::path::Path::new(&root)
         .join(file)
@@ -94,7 +95,7 @@ async fn oversized_extraction_is_a_named_timeout_not_a_worker_failure() {
         .collect();
     let selection = json!({"kind":"timestamps","times_ms":order});
     let reason = sandboxed("h264-4k20s.mp4", selection).await.unwrap_err();
-    assert!(reason.starts_with("timeout:"), "{reason}");
+    assert_eq!(reason.code, vw_video_types::Code::Timeout);
 }
 #[cfg(windows)]
 #[tokio::test]

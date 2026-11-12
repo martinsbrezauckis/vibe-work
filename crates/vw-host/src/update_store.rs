@@ -110,15 +110,14 @@ impl UpdateStore {
             sha256: hex_sha256(package),
             size: package.len() as u64,
         };
-        let temp = self.dir.join("pending.json.tmp");
-        std::fs::write(
-            &temp,
-            serde_json::to_vec_pretty(&pending)
+        vw_platform::atomic_file::replace_file(
+            &self.record(),
+            &serde_json::to_vec_pretty(&pending)
                 .map_err(std::io::Error::other)
                 .map_err(io)?,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
         )
         .map_err(io)?;
-        std::fs::rename(&temp, self.record()).map_err(io)?;
         Ok(pending)
     }
 

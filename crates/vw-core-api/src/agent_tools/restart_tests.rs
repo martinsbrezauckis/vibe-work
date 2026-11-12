@@ -72,6 +72,7 @@ async fn restart_card_shows_and_retains_the_launch_command_folder_and_port() {
     assert!(
         receipts::take(shared, "s", "process_restart", &mut args)
             .unwrap()
+            .execution
             .is_none()
     );
     let retained: Launch = serde_json::from_value(args["_vwRestart"].clone()).unwrap();

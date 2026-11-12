@@ -31,13 +31,13 @@ pub enum TestCallError {
     )]
     Forbidden,
     /// HTTP 429.
-    #[error("Mistral is rate-limiting this key right now (429). Try again in a minute.")]
+    #[error("{}", crate::status_text::RATE_LIMITED)]
     RateLimited,
     /// HTTP 5xx.
-    #[error("Mistral's API had a problem ({0}). Try again later.")]
+    #[error("{}", crate::status_text::service_problem(*.0, "Mistral's API"))]
     Server(u16),
     /// Any other status.
-    #[error("Mistral answered with an unexpected status ({0}).")]
+    #[error("{}", crate::status_text::unexpected(*.0))]
     Unexpected(u16),
     /// No answer (DNS, TLS, proxy, timeout).
     #[error("Could not reach Mistral: {0}. Check the network or proxy settings.")]

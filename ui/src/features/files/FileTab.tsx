@@ -424,6 +424,6 @@ export function FileTab({ files }: { files: Files }): ReactElement {
   const sessionId = useShellState(
     (s) => s.selected ?? (s.newFolder ? `files-workspace:${s.newFolder}` : null),
   );
-  if (sessionId === null) return <div className="empty">Choose a session first.</div>;
+  if (sessionId === null) return <div className="empty">Choose a chat first.</div>;
   return <EditorWorkspace key={sessionId} files={files} sessionId={sessionId} />;
 }

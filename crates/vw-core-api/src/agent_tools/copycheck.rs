@@ -30,6 +30,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::core::Shared;
+use vw_agent_tools::folders::diagnostics::Failure;
+
+fn report(failure: Failure, detail: impl std::fmt::Display) -> String {
+    tracing::warn!(?failure, %detail, "folder access check failed");
+    failure.text().to_owned()
+}
 
 /// Copy folder -> the session that last took it.
 #[derive(Default)]
@@ -60,8 +66,10 @@ pub(crate) fn active(state: &Value) -> bool {
 }
 
 fn key(path: &Path) -> Result<PathBuf, String> {
-    vw_agent_tools::folders::resolve(path)
-        .map_err(|e| format!("the folder guard could not resolve a session folder: {e}"))
+    vw_agent_tools::folders::resolve(path).map_err(|error| {
+        tracing::warn!(%error, "chat folder resolution failed");
+        vw_agent_tools::folders::diagnostics::folder_resolution(&error)
+    })
 }
 
 /// The sessions our store shows using `copy`, with whether each is active.
@@ -111,7 +119,7 @@ fn recorded_owner(shared: &Shared, copy: &Path) -> Result<Option<String>, String
     let records = shared
         .worktrees
         .records()
-        .map_err(|e| format!("the copy records could not be opened: {e}"))?;
+        .map_err(|e| report(Failure::RecordsOpen, e))?;
     let Some(name) = copy.file_name().and_then(|n| n.to_str()) else {
         return Ok(None);
     };
@@ -124,7 +132,7 @@ fn recorded_owner(shared: &Shared, copy: &Path) -> Result<Option<String>, String
     };
     let all = records
         .all_for_guard()
-        .map_err(|e| format!("the copy records could not be read: {e}"))?;
+        .map_err(|e| report(Failure::RecordsRead, e))?;
     Ok(all
         .into_iter()
         .find(|r| {
@@ -163,12 +171,12 @@ pub(super) fn decide(
         }
     }
     if users.is_empty() {
-        return Err("Vibe Work cannot tell which session uses this copy".to_owned());
+        return Err(report(Failure::CopyOwner, copy.display()));
     }
     if let Some((busy, _)) = users.iter().find(|(id, on)| *on && id != caller) {
         let title = shared.names.display_title(&shared.store, busy);
         return Err(format!(
-            "this copy is in use by the session \"{}\"; it can be used once that session is idle or closed",
+            "This copy is in use by the chat \"{}\". Wait until that chat is idle or closed, then try again.",
             vw_gate::dialog_value(&title, 80)
         ));
     }
@@ -179,17 +187,21 @@ pub(super) fn decide(
 /// Answers one `copy_check`.
 pub(crate) async fn check(shared: &Arc<Shared>, args: Value) -> Result<Value, String> {
     let question: Question =
-        serde_json::from_value(args).map_err(|_| "bad copy_check request".to_owned())?;
+        serde_json::from_value(args).map_err(|e| report(Failure::CopyRequest, e))?;
     let caller = question
         .parent_session_id
         .clone()
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| question.session_id.clone());
     if caller.is_empty() || question.copy.is_empty() {
-        return Ok(json!({"decision": "deny", "reason": "no session or copy named"}));
+        return Ok(
+            json!({"decision": "deny", "reason": report(Failure::CopyRequest, "no session or copy named")}),
+        );
     }
     let Some(tools) = shared.agent_tools.clone() else {
-        return Ok(json!({"decision": "deny", "reason": "the agent tools are off"}));
+        return Ok(
+            json!({"decision": "deny", "reason": report(Failure::ToolsUnavailable, "agent tools are off")}),
+        );
     };
     let worker = shared.clone();
     let copy = match key(Path::new(&question.copy)) {
@@ -203,7 +215,7 @@ pub(crate) async fn check(shared: &Arc<Shared>, args: Value) -> Result<Value, St
         verdict
     })
     .await
-    .map_err(|e| format!("copy_check failed: {e}"))?;
+    .map_err(|e| report(Failure::CopyTask, e))?;
     Ok(match answer {
         Ok(()) => json!({"decision": "allow"}),
         Err(reason) => json!({"decision": "deny", "reason": reason}),

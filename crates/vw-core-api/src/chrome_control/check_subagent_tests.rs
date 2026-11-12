@@ -70,8 +70,28 @@ async fn a_main_chat_without_a_mode_is_not_mislabeled_as_a_subagent() {
             &json!({"action":"page.read"})
         )
         .unwrap_err(),
-        "Not run: this chat's access mode is unavailable."
+        "Not run: this chat's access mode is unavailable. Ask the user to choose an available chat mode, then try again."
     );
+    for mode in ["vw-plan", "explore"] {
+        shared
+            .access
+            .observe_request("session/agent/update", "main", &json!({"agentName":mode}));
+        let reason = authorize(
+            shared,
+            "main",
+            "chrome_execute",
+            &json!({"action":"page.read"}),
+        )
+        .unwrap_err();
+        assert!(
+            reason.contains(vw_vocabulary::label("accessModes", mode)),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("ask the user to change the chat mode"),
+            "{reason}"
+        );
+    }
     fixture.finish().await;
 }
 

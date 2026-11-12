@@ -164,6 +164,9 @@ fn browser_state(shared: &Shared, owner: &str) -> Result<vw_browser::BrowserStat
     let hub = hub(shared)?;
     let current = hub.service.agent_page(owner);
     let mut state = hub.browser.sessions().state(owner);
+    state.window_id = current
+        .as_deref()
+        .and_then(|page| hub.service.focusable_window_id(page));
     for page in hub.service.web_tabs(owner) {
         let part = hub.browser.sessions().state(&page);
         state.agent_active |= part.agent_active;
@@ -259,6 +262,7 @@ pub(crate) fn read_options(
 
 /// The user's next message lifts the Stop of that session.
 pub(crate) fn turn_started(shared: &Shared, session_id: &str) {
+    shared.asks.clear_question_holds(Some(session_id));
     if let Some(hub) = &shared.preview {
         hub.browser.sessions().cancel_actions(session_id);
         hub.service.browser_turn_started(session_id);
@@ -266,6 +270,16 @@ pub(crate) fn turn_started(shared: &Shared, session_id: &str) {
         for key in hub.service.web_tabs(session_id) {
             hub.browser.sessions().cancel_actions(&key);
             hub.browser.sessions().resume(&key);
+        }
+    }
+}
+
+/// Chat Stop also fences built-in browser work and releases its activity without closing the document.
+pub(crate) fn stop_for_chat(shared: &Shared, session_id: &str) {
+    if let Some(hub) = &shared.preview {
+        for page in std::iter::once(session_id.to_owned()).chain(hub.service.web_tabs(session_id)) {
+            hub.browser.sessions().stop(&page);
+            hub.browser.sessions().cancel_confirmations(&page);
         }
     }
 }
@@ -311,6 +325,9 @@ impl Core {
         request: BrowserRequest,
     ) -> Result<CommandResult, CoreError> {
         let shared = &self.shared;
+        if let Some(result) = crate::browser_settings::run(shared, &request) {
+            return result.map(|result| CommandResult::Browser { result });
+        }
         if let Some(result) = crate::browser_accounts::run(shared, &request).await {
             return result.map(|result| CommandResult::Browser { result });
         }
@@ -321,6 +338,16 @@ impl Core {
         let driver = browser(shared)?;
         let denied = |text: String| CoreError::new(ErrorCode::Denied, text);
         let result = match request {
+            BrowserRequest::Share { page_key } => {
+                if crate::command_origin::debug_api_acts(shared, origin) {
+                    return Err(denied(
+                        "Sharing a page requires the user. Ask the user to use the Browser pane's share action."
+                            .into(),
+                    ));
+                }
+                crate::chrome_control::builtin_share::queue(shared, &page_key, false).await?;
+                BrowserResult::Done {}
+            }
             BrowserRequest::Permissions {} => crate::browser_delegation::settings(shared, None)?,
             BrowserRequest::SetPermissions { permissions } => {
                 // Legacy compatibility request: returns empty permissions without writing a settings file.
@@ -337,7 +364,10 @@ impl Core {
             BrowserRequest::EnginePool {} | BrowserRequest::SetEnginePool { .. } => {
                 pool_result(shared, &request).await?
             }
-            BrowserRequest::Accounts {}
+            BrowserRequest::Preferences {}
+            | BrowserRequest::SetComposerBrowser { .. }
+            | BrowserRequest::SetBuiltinEnabled { .. }
+            | BrowserRequest::Accounts {}
             | BrowserRequest::SignIn { .. }
             | BrowserRequest::SignOut { .. }
             | BrowserRequest::AccountsLayout { .. }
@@ -352,6 +382,7 @@ impl Core {
                 tab_id,
                 args,
             } => {
+                shared.browser_dialogs.check().map_err(denied)?;
                 if !crate::new_chat::known_owner(shared, &session_id) {
                     return Err(CoreError::not_loaded(&session_id));
                 }
@@ -535,7 +566,7 @@ async fn act_receipt(
     }
     if matches!(
         args["action"].as_str(),
-        Some("clipboard.read" | "clipboard.write")
+        Some("clipboard.read" | "clipboard.write" | "clipboard.read_rich" | "clipboard.write_rich")
     ) {
         let receipt = crate::browser_clipboard::run(shared, args)
             .await
@@ -560,6 +591,8 @@ async fn act_receipt(
         .act(session_id, action, actor(shared, origin), &nav)
         .await
         .map_err(|error| act_error(&error))?;
+    crate::browser_recording::save(shared, &owner, &mut receipt)
+        .map_err(|message| CoreError::new(ErrorCode::Internal, message))?;
     crate::agent_tools::attach_tab(shared, session_id, &mut receipt);
     vw_browser::observe::fit(&mut receipt, vw_browser::observe::READ_BUDGET);
     Ok(BrowserResult::Receipt { receipt })

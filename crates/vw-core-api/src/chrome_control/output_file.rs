@@ -4,54 +4,55 @@ use crate::core::Shared;
 use cap_std::fs::{Dir, OpenOptions};
 use serde_json::{Value, json};
 use std::io::Write;
-use vw_ask::chrome::Tier;
 
 pub(super) fn requested(request: &Value) -> bool {
-    request["saveTo"] == "file"
+    request["saveTo"] == "file" || crate::browser_data::requested(request)
 }
 
 pub(super) fn validate(request: &Value) -> Result<(), String> {
     if let Some(option) = request.get("saveTo")
-        && (!matches!(option.as_str(), Some("inline" | "file"))
+        && (!matches!(option.as_str(), Some("inline" | "file" | "csv" | "xlsx"))
             || request["action"] != "page.read"
             || !request["args"].is_object()
             || request.get("steps").is_some())
     {
-        return Err("Not run: saveTo takes inline or file for a single page.read. Omit it for other actions or batches.".into());
+        return Err("Not run: saveTo takes inline, file, csv or xlsx for a single page.read. Omit it for other actions or batches.".into());
+    }
+    if crate::browser_data::requested(request) {
+        crate::browser_data::options(request, true)?;
+    } else if ["extract", "appendFrom", "deduplicate"]
+        .iter()
+        .any(|key| request.get(*key).is_some())
+    {
+        return Err(
+            "Extraction options need saveTo:csv or xlsx; choose the export format or omit them."
+                .into(),
+        );
     }
     Ok(())
 }
 
 pub(super) fn folder(shared: &Shared, chat: &str) -> Result<Dir, String> {
-    if super::check::mode(shared, chat)
-        .as_deref()
-        .and_then(Tier::from_mode)
-        .is_none()
-    {
-        return Err(format!(
-            "Not saved: saving a file needs {}; omit saveTo for an inline read or ask the person to change this chat's mode.",
-            Tier::Ask.required_label()
-        ));
-    }
-    let folders = crate::agent_tools::session::folders(shared, chat).map_err(|reason| {
-        format!(
-            "Not saved: {reason}. Choose a folder for this chat or omit saveTo for an inline read."
-        )
-    })?;
-    let path = folders.first().ok_or(
-        "Not saved: this chat has no folder. Choose a folder or omit saveTo for an inline read.",
-    )?;
-    Dir::open_ambient_dir(path, cap_std::ambient_authority()).map_err(|_| {
-        "Not saved: the chat folder cannot be opened. Choose an accessible folder or omit saveTo for an inline read.".into()
-    })
+    crate::browser_data::folder(shared, chat)
 }
 
-pub(super) fn save(shared: &Shared, chat: &str, body: &Value) -> Result<Value, String> {
+pub(super) fn save(
+    shared: &Shared,
+    chat: &str,
+    request: &Value,
+    body: &Value,
+) -> Result<Value, String> {
     if body["status"] != "completed"
         || !body["error"].is_null()
         || !body["untrustedPageContent"]["error"].is_null()
     {
         return Err("Not saved: this read failed or has no completed outcome; omit saveTo to read its diagnostic inline.".into());
+    }
+    if crate::browser_data::requested(request) {
+        let receipt = crate::browser_data::connected(shared, chat, request, body)?;
+        let mut result = json!({"isError":false,"structuredContent":receipt});
+        super::output::sync_text(&mut result);
+        return Ok(json!({"vwMcpResult":result}));
     }
     let directory = folder(shared, chat)?;
     let bytes = serde_json::to_vec(body)
@@ -98,7 +99,7 @@ pub(super) fn save(shared: &Shared, chat: &str, body: &Value) -> Result<Value, S
     Ok(json!({"vwMcpResult":result}))
 }
 
-fn write(directory: &Dir, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(super) fn write(directory: &Dir, name: &str, bytes: &[u8]) -> std::io::Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

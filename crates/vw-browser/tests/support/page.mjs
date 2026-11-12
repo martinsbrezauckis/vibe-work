@@ -4,13 +4,16 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import { createServer } from "node:net";
+import { installPointGuard } from "./point_guard.mjs";
+import { devtoolsTargets } from "./devtools_targets.mjs";
 
 const { chromium } = createRequire(process.env.VW_BROWSER_UI_PACKAGE)("playwright-core");
 // A raw DevTools connection to the page target (as WebView2's own protocol channel, with flat child sessions),
 // used only when the Rust engine evaluates frames through the production isolated-world registry.
 const debugPort = await new Promise(resolve => { const s = createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 // Site isolation as WebView2 ships it: cross-site frames run in processes (DevTools sessions) of their own.
-const browser = await chromium.launch({ args: [`--remote-debugging-port=${debugPort}`, "--site-per-process"] });
+// Exercise the Windows-default middle-button behavior even when this fixture runs on Linux.
+const browser = await chromium.launch({ args: [`--remote-debugging-port=${debugPort}`, "--site-per-process", "--enable-blink-features=MiddleClickAutoscroll"] });
 let captureDeviceScale = false;
 const page = await browser.newPage({ viewport: { width: 300, height: 200 } });
 let raw = null;
@@ -20,7 +23,7 @@ let rawNext = 0;
 const rawConnect = async () => {
   if (raw) return raw;
   // The fixture's only page (Playwright opens no startup window).
-  const pages = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).filter(t => t.type === "page");
+  const pages = (await devtoolsTargets(debugPort)).filter(t => t.type === "page");
   const target = pages.length === 1 ? pages[0] : null;
   if (!target) throw new Error("page target not found");
   raw = new WebSocket(target.webSocketDebuggerUrl);
@@ -38,6 +41,11 @@ const rawConnect = async () => {
 };
 await page.addInitScript(readFileSync(new URL("../../../vw-platform/src/webview/frame_origin.js", import.meta.url), "utf8"));
 const cdp = await page.context().newCDPSession(page);
+await cdp.send("Page.enable");
+const pointGuard = readFileSync(new URL("../../../vw-preview/src/js/point_guard.js", import.meta.url), "utf8");
+const guardWorld = process.env.VW_TEST_CDP_FRAMES === "1" ? "vibe-work-agent"
+  : process.env.VW_BROWSER_ISOLATED === "1" ? "checked-input-fixture" : null;
+const guardConnection = await installPointGuard(debugPort, pointGuard, guardWorld);
 const frameIds = new Map();
 let nextFrameId = 0;
 let generation = 0;
@@ -68,6 +76,11 @@ await page.route("**/*", (route) => route.fulfill({
     <p>We and our partners use cookies to support independent journalism.</p>
     <button id="accept">Accept all</button><button id="reject">Reject optional cookies</button>
     <button id="manage">Manage choices</button></div>`
+    : route.request().url().includes("nested.example.test/new-guard") ? `<form><button style="position:fixed;inset:0;width:100%;height:100%">Send</button></form>
+      <script>document.body.dataset.guardEffects='[]';
+      const record=type=>{const effects=JSON.parse(document.body.dataset.guardEffects);effects.push(type);document.body.dataset.guardEffects=JSON.stringify(effects)};
+      for(const type of ['pointerdown','mousedown','mouseup','click','auxclick','dblclick','contextmenu'])window.addEventListener(type,()=>record(type),true);
+      document.querySelector('form').onsubmit=e=>{e.preventDefault();record('submit')};</script>`
     : route.request().url().includes("nested.example.test") ? '<button id="nested">Nested button</button>'
     : (route.request().url().includes("frame.example.test") || route.request().url().endsWith("/same-frame")) ? frameFixture : fixture,
   contentType: "text/html",
@@ -150,7 +163,7 @@ try {
         value = { events: rawEvents.splice(0), result: answer.result ?? null, error: answer.error?.message ?? null };
       } else if (request.op === "framesPageWorld") {
         // Page script of every frame (what a hostile page can run), never the agent's world.
-        await Promise.all(page.frames().map(frame => frame.evaluate(request.script).catch(() => null)));
+        value = await Promise.all(page.frames().map(frame => frame.evaluate(request.script).catch(() => null)));
       } else if (request.op === "frameCoverReady") {
         await page.waitForFunction("window.coverReady === true");
       } else if (request.op === "framesReady") {
@@ -166,6 +179,19 @@ try {
         // The CDP session that owns the emulated metrics captures the same device pixels as a native view.
         value = captureDeviceScale ? (await cdp.send("Page.captureScreenshot", { format: "png" })).data :
           (await page.screenshot()).toString("base64");
+      } else if (request.op === "keyboard") {
+        const input = request.input;
+        if (typeof input.text === "string") await cdp.send("Input.insertText", {text:input.text});
+        else {
+          const key = input.key === "Space" ? " " : input.key;
+          const modifiers = ["Alt", "Control", "Meta", "Shift"].reduce((bits, name, index) => bits | (input.modifiers?.includes(name) ? 1 << index : 0), 0);
+          const codes = {Backspace:8,Tab:9,Enter:13,Shift:16,Control:17,Alt:18,Escape:27,Space:32,PageUp:33,PageDown:34,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,Insert:45,Delete:46,Meta:91};
+          const windowsVirtualKeyCode = codes[input.key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+          const text = key.length === 1 && (modifiers & 7) === 0 ? key : key === "Enter" ? "\r" : "";
+          const code = /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^\d$/.test(key) ? `Digit${key}` : ["Control","Shift","Alt","Meta"].includes(key) ? `${key}Left` : input.key;
+          await cdp.send("Input.dispatchKeyEvent", {type:"keyDown",key,code,modifiers,windowsVirtualKeyCode,text});
+          await cdp.send("Input.dispatchKeyEvent", {type:"keyUp",key,code,modifiers,windowsVirtualKeyCode});
+        }
       } else if (request.op === "click") {
         const options = request.options || { button: 0, count: 1, modifiers: 0 };
         const keys = ["Alt", "Control", "Meta", "Shift"].filter((_, i) => options.modifiers & (1 << i));
@@ -175,6 +201,21 @@ try {
         } finally {
           for (const key of keys.reverse()) await page.keyboard.up(key);
         }
+      } else if (request.op === "pointerSequence") {
+        // Match WebView2's windows_sequence.rs exactly: no preparatory mouse move or implicit button state.
+        const options = request.options;
+        for (let clickCount = 1; clickCount <= options.count; clickCount++) {
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await cdp.send("Input.dispatchMouseEvent", {
+              type, x: request.x, y: request.y, button: ["left", "middle", "right"][options.button],
+              clickCount, modifiers: options.modifiers,
+            });
+          }
+        }
+      } else if (request.op === "wheel") {
+        await cdp.send("Input.dispatchMouseEvent", {type:"mouseWheel", x:request.x, y:request.y, deltaX:request.delta[0], deltaY:request.delta[1]});
+      } else if (request.op === "pages") {
+        value = page.context().pages().length;
       } else if (request.op === "hover") {
         await page.mouse.move(request.x, request.y);
       }
@@ -184,5 +225,6 @@ try {
     }
   }
 } finally {
+  guardConnection.close();
   await browser.close();
 }

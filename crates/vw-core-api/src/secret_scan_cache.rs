@@ -73,12 +73,11 @@ impl Cache {
         if let Some(parent) = path.parent() {
             vw_platform::ensure_private_dir(parent).map_err(std::io::Error::other)?;
         }
-        let temp = path.with_extension("json.tmp");
-        std::fs::write(
-            &temp,
-            serde_json::to_vec(self).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(temp, path)
+        vw_platform::atomic_file::replace_file(
+            path,
+            &serde_json::to_vec(self).map_err(std::io::Error::other)?,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
     }
     pub fn changed(&self, path: &Path, stamp: &Stamp, fingerprint: &str) -> bool {
         self.files

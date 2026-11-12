@@ -28,6 +28,7 @@ async fn closed_cards_give_their_room_back_and_open_ones_never_do() {
             vec![Choice::Once, Choice::No],
             Some(format!("callback:vw-tool-{n}")),
             false,
+            None,
         );
     }
     let open = make_room(shared, &mut records);

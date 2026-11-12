@@ -4,7 +4,7 @@
  * over them to copy never picks an option; a click, a number key, the arrow keys or an accessibility press does.
  * Depends on: the callbacks model. Called by: QuestionField (rows) and QuestionAsk (number keys, `optionKey`).
  * Invariant: each option's accessible name is its visible label then its number key ("Red 1", see the input), its
- * description the accessible description, the key also `aria-keyshortcuts`.
+ * description includes its question and option detail, the key also `aria-keyshortcuts`.
  */
 import { visibleText } from "./visibleText";
 import { type KeyboardEvent, type MouseEvent, type ReactElement, useId } from "react";
@@ -47,12 +47,14 @@ function selectingText(event: MouseEvent<HTMLElement>): boolean {
 /** Renders the option rows of one question. */
 export function AnswerOptions({
   question,
+  questionId,
   name,
   picked,
   disabled,
   onChange,
 }: {
   question: Question;
+  questionId: string;
   name: string;
   picked: Picked;
   disabled: boolean;
@@ -90,7 +92,9 @@ export function AnswerOptions({
               // exactly like. So the label's words ("Click Red") and the painted digit ("Click 2", the route for
               // long labels Voice Control does not take whole) stay in the tree, and the name starts with the label.
               aria-labelledby={key === undefined ? labelId : `${labelId} ${labelId}-k`}
-              aria-describedby={descId}
+              // WebKitGTK exposes the fieldset as a panel. Orca can focus an option directly without
+              // announcing that panel's name, so the focused control must carry its own question context.
+              aria-describedby={descId === undefined ? questionId : `${questionId} ${descId}`}
               aria-keyshortcuts={key}
               checked={checked}
               disabled={disabled}

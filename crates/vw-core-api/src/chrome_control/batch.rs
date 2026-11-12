@@ -29,16 +29,7 @@ pub(super) fn steps(args: &Value) -> Result<Vec<Value>, String> {
     Ok(steps.clone())
 }
 
-pub(super) async fn run<F, Fut, C>(steps: Vec<Value>, execute: F, cancel: C) -> Value
-where
-    F: FnMut(Value) -> Fut,
-    Fut: Future<Output = Result<Value, String>>,
-    C: FnOnce(),
-{
-    run_clocked(steps, execute, cancel, super::batch_wait::Clock::default()).await
-}
-
-async fn run_clocked<F, Fut, C>(
+pub(super) async fn run<F, Fut, C>(
     steps: Vec<Value>,
     mut execute: F,
     cancel: C,
@@ -134,12 +125,6 @@ pub(crate) async fn prepare(
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
     super::gateway::validate_public_args(&args)?;
-    let (args, reopened) = match super::reopen::resolve(shared, chat, "chrome_execute", args)
-        .await?
-    {
-        super::reopen::Resolved::Ready(args, reopened) => (args, reopened),
-        super::reopen::Resolved::Refused(answer) => return Ok(Box::pin(async move { Ok(answer) })),
-    };
     super::gateway::validate_session(shared, chat, "chrome_execute", &args)?;
     let mode = super::check::mode(shared, chat);
     let current = mode.as_deref().and_then(vw_ask::chrome::Tier::from_mode);
@@ -171,7 +156,7 @@ pub(crate) async fn prepare(
         let id = args["sessionId"].clone();
         let clock = super::batch_wait::Clock::default();
         let action_clock = clock.clone();
-        let mut answer = run_clocked(
+        let mut answer = run(
             steps(&args)?,
             |mut step| {
                 step["sessionId"] = id.clone();
@@ -186,7 +171,7 @@ pub(crate) async fn prepare(
                         None => {
                             if let Some(consent) = consent {
                                 if super::interaction_consent::checks(&step) {
-                                    super::interaction_consent::run_clocked(
+                                    super::interaction_consent::run(
                                         shared,
                                         chat,
                                         source,
@@ -215,9 +200,6 @@ pub(crate) async fn prepare(
             clock,
         )
         .await;
-        if let Some(reopened) = reopened {
-            super::reopen::note(&mut answer, &reopened);
-        }
         if super::output_cache::observation(&answer["vwMcpResult"]) {
             super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
         }
@@ -242,7 +224,7 @@ async fn prepare_logins(
         step["sessionId"] = args["sessionId"].clone();
         prepared.push_back(
             if ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default()) {
-                Some(super::login::prepare_consented(shared, chat, step, consent).await?)
+                Some(super::login::prepare(shared, chat, step, consent).await?)
             } else {
                 None
             },
@@ -273,7 +255,7 @@ mod tests {
             let result=run(vec![json!(1),json!(2),json!(3)], |_| {
                 calls+=1;
                 std::future::ready(Ok(json!({"vwMcpResult":{"structuredContent":{"status":if calls==1{"completed"}else{stop}}}})))
-            }, ||panic!("no timeout")).await;
+            }, ||panic!("no timeout"), super::super::batch_wait::Clock::default()).await;
             assert_eq!(calls, 2);
             assert_eq!(
                 result["vwMcpResult"]["structuredContent"]["steps"]
@@ -321,6 +303,7 @@ mod tests {
                 )
             },
             || panic!("not timed out"),
+            super::super::batch_wait::Clock::default(),
         )
         .await;
         assert_eq!(calls, 2);
@@ -340,7 +323,7 @@ mod tests {
         let result = run(vec![json!({});3], |_| {
             calls += 1;
             std::future::ready(Ok(json!({"vwMcpResult":{"structuredContent":{"status":"completed","operationId":calls,"data":"x".repeat(250_000)}}})))
-        }, ||panic!("no timeout")).await;
+        }, ||panic!("no timeout"), super::super::batch_wait::Clock::default()).await;
         assert_eq!(calls, 2);
         let steps = &result["vwMcpResult"]["structuredContent"]["steps"];
         assert_eq!(steps[1]["result"]["status"], "completed");
@@ -364,6 +347,7 @@ mod tests {
                 }
             },
             || panic!("a predictable batch tail must not fence a dispatched click"),
+            super::super::batch_wait::Clock::default(),
         ).await;
         let body = &result["vwMcpResult"]["structuredContent"];
         assert_eq!(body["status"], "stopped");
@@ -389,6 +373,7 @@ mod tests {
                 Ok(Value::Null)
             },
             || cancelled.store(true, Ordering::SeqCst),
+            super::super::batch_wait::Clock::default(),
         )
         .await;
         assert!(cancelled.load(Ordering::SeqCst));

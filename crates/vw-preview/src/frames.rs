@@ -128,10 +128,12 @@ pub fn validate_frame_point(
                 "visual viewport changed",
                 "point outside frame",
                 "node or frame under point changed",
+                "the page moved; read the page again",
                 "target geometry changed",
                 "target is not actionable",
                 "transformed target",
                 "authorization changed",
+                "keyboard target cannot keep focus; read the page and choose its current ref",
                 "native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text",
             ];
             return Err(if known.contains(&reason) {

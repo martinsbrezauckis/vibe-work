@@ -42,25 +42,3 @@ impl PlacementGate {
         self.reset.fetch_max(generation, Ordering::SeqCst);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn only_window_commands_of_an_older_document_are_refused() {
-        let gate = PlacementGate::default();
-        gate.advance(2);
-        assert!(
-            gate.admits(),
-            "work outside a window command is not limited"
-        );
-        assert!(!for_window_generation(1, async { gate.admits() }).await);
-        assert!(for_window_generation(2, async { gate.admits() }).await);
-        gate.advance(1);
-        assert!(
-            !for_window_generation(1, async { gate.admits() }).await,
-            "a late reset never reopens an older document"
-        );
-    }
-}

@@ -1,5 +1,7 @@
 //! Versioned TPM envelope for Windows credential-store values. Uses vault-core's AEAD and the platform CNG edge.
 //! Called only by `OsDeviceStore`. The account is authenticated; lost keys and corrupt envelopes fail closed.
+//! Depends on: vault-core authenticated encryption and platform CNG.
+//! Called by: the vault OS device store.
 use crate::{SecretString, VaultError};
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use serde::{Deserialize, Serialize};

@@ -7,6 +7,20 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+// Block every temporary filename, independent of the atomic writer's randomized naming scheme.
+fn block_record_directory(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    }
+    #[cfg(not(unix))]
+    panic!(
+        "record-directory write fault is Unix-only: {}",
+        dir.display()
+    );
+}
+
 fn write(path: &Path, value: &Value) {
     std::fs::write(path, value.to_string()).unwrap();
 }
@@ -177,7 +191,7 @@ impl Drop for ChangedPath {
         }
     }
 }
-fn block_read(sid: &str, delay: u64, plan: &Path) -> std::process::Child {
+fn block_read(sid: &str, rule: &Value, plan: &Path) -> std::process::Child {
     let home = PathBuf::from(std::env::var_os("VIBE_HOME").unwrap());
     let root = std::env::var_os("VIBE_SESSION_LOGGING__SAVE_DIR")
         .map_or_else(|| home.join("logs").join("session"), PathBuf::from);
@@ -192,10 +206,16 @@ fn block_read(sid: &str, delay: u64, plan: &Path) -> std::process::Child {
     let python = std::env::var_os("VW_FAULT_PYTHON")
         .map(PathBuf::from)
         .expect("fault plan supplies the pinned Python");
-    let mut child = Command::new(python)
+    let mut command = Command::new(python);
+    // A test-controlled release still has a cleanup deadline if its caller fails before releasing.
+    command
         .arg(script)
         .arg(manifest)
-        .arg(delay.to_string())
+        .arg(rule["readDelayMs"].as_u64().unwrap_or(120_000).to_string());
+    if let Some(release) = rule["readUntil"].as_str() {
+        command.arg(release);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -353,13 +373,13 @@ fn main() {
             }
             if let Ok(frame) = serde_json::from_slice::<Value>(&line) {
                 let message = frame.get("message").unwrap_or(&frame);
-                if let (Some(dir), Some(sid)) = (
+                if let (Some(dir), Some(_)) = (
                     &block_record,
                     message
                         .pointer("/result/state/session/id")
                         .and_then(Value::as_str),
                 ) {
-                    std::fs::create_dir_all(dir.join(format!("{sid}.json.tmp"))).unwrap();
+                    block_record_directory(dir);
                 }
                 let mut guard = output_pending.lock().unwrap();
                 if guard
@@ -432,12 +452,12 @@ fn main() {
                             rule["persistent"].as_bool() == Some(true),
                         ));
                     }
-                    if let Some(ms) = rule["readDelayMs"].as_u64() {
+                    if rule["readDelayMs"].is_number() || rule["readUntil"].is_string() {
                         reads.push((
                             frame["channelId"].clone(),
                             block_read(
                                 message["params"]["sessionId"].as_str().unwrap(),
-                                ms,
+                                rule,
                                 &plan_path,
                             ),
                         ));

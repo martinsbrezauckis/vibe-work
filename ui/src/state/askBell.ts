@@ -12,7 +12,7 @@
  */
 import type { Ask, AskRecord, Origin } from "../protocol/core";
 import { approvalQuestion, approvalSummary } from "../features/ask/model";
-import { approvalEffect } from "../features/transcript/model/callbacks";
+import { approvalEffect, questionsOf } from "../features/transcript/model/callbacks";
 import { type Obj, inProgress, obj, statusOf } from "../features/transcript/model/entries";
 import type { CoreState } from "./coreModel";
 import { sessionTitle } from "./sessionSummary";
@@ -98,7 +98,16 @@ export function askWordsFor(
     };
   }
   if (ask.kind === "user_input")
-    return { session, question: "Vibe asks", summary: "Vibe's question" };
+    return {
+      session,
+      question: "Question",
+      summary:
+        entry === null
+          ? "Your answer is needed"
+          : questionsOf(entry)
+              .questions.map((q) => q.question)
+              .join(" ") || "Your answer is needed",
+    };
   if (ask.kind === "protected_change")
     return {
       session,

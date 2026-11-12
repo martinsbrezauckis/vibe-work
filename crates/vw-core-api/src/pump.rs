@@ -44,6 +44,10 @@ pub(crate) use resync::refresh;
 #[path = "pump_resync_tests.rs"]
 mod resync_tests;
 
+#[cfg(test)]
+#[path = "pump_browser_tests.rs"]
+mod browser_tests;
+
 /// The `callback/call` handler: registers the callback with the gate, tells subscribers, and acks
 /// `{callbackId, accepted: true}` (the answer itself comes later as
 /// `callback/result`). A callback the gate cannot register, or one that arrives on a channel other
@@ -117,12 +121,15 @@ pub(crate) fn callback_handler(
                         json!({"callbackId":callback_id,"accepted":true}),
                     ));
                 }
-                crate::ask::callback_opened(&shared, &entry, kind.as_str(), &owner);
                 let handle = tokio::runtime::Handle::try_current().ok();
                 // Only with a runtime to answer on (the guard answer is consumed by the check).
                 let carried = handle
                     .as_ref()
                     .and_then(|_| carried_for(&shared, &session_id, &entry, kind.as_str()));
+                // Shipped reference reads are app policy, not a prompt: do not emit an AskOpened flash.
+                if !matches!(carried, Some(Carried::OwnSkillRead)) {
+                    crate::ask::callback_opened(&shared, &entry, kind.as_str(), &owner);
+                }
                 if let (Some(handle), Some(carried)) = (handle, carried) {
                     handle.spawn(carry_answer(
                         shared.clone(),
@@ -176,6 +183,9 @@ fn carried_for(
     {
         return Some(Carried::Grant(grant.id));
     }
+    if crate::own_skill_reads::approve(&shared.market.builtin_roots, entry) {
+        return Some(Carried::OwnSkillRead);
+    }
     if shared.agent_tools.is_some() && crate::read_aloud::approve_without_dialog(entry) {
         return Some(Carried::ReadAloud);
     }
@@ -194,6 +204,8 @@ enum Carried {
     GuardAnswer,
     /// The sound-only read-aloud tool (`read_aloud`).
     ReadAloud,
+    /// Reading the app's own shipped Markdown reference.
+    OwnSkillRead,
     /// A call that only turns tools on for the chat (`on_demand`): it does nothing itself.
     OnDemand,
     /// A session grant Vibe Work keeps ("Allow for this session" earlier, same tool and permissions); its id.
@@ -205,6 +217,7 @@ impl Carried {
         match self {
             Self::GuardAnswer => "user's guard answer",
             Self::ReadAloud => "read-aloud playback policy",
+            Self::OwnSkillRead => "reading a shipped skill reference",
             Self::OnDemand => "turning tools on for the chat",
             Self::Grant(_) => "session grant",
         }
@@ -216,7 +229,7 @@ impl Carried {
             Self::Grant(_) => {
                 crate::ask::allowed(vw_ask::AnsweredBy::Grant, vw_ask::Scope::Session)
             }
-            Self::GuardAnswer | Self::ReadAloud | Self::OnDemand => {
+            Self::GuardAnswer | Self::ReadAloud | Self::OwnSkillRead | Self::OnDemand => {
                 crate::ask::allowed(vw_ask::AnsweredBy::Core, vw_ask::Scope::Once)
             }
         }
@@ -234,14 +247,19 @@ async fn carry_answer(
 ) {
     let source = carried.source();
     shared.ask_grants.forget_callback(&callback_id);
-    let Some(delivery) = shared.asks.reserve(
-        &format!("callback:{callback_id}"),
-        match &carried {
-            Carried::Grant(_) => vw_ask::AnsweredBy::Grant,
-            _ => vw_ask::AnsweredBy::Core,
-        },
-    ) else {
-        return;
+    let delivery = if matches!(carried, Carried::OwnSkillRead) {
+        None
+    } else {
+        let Some(delivery) = shared.asks.reserve(
+            &format!("callback:{callback_id}"),
+            match &carried {
+                Carried::Grant(_) => vw_ask::AnsweredBy::Grant,
+                _ => vw_ask::AnsweredBy::Core,
+            },
+        ) else {
+            return;
+        };
+        Some(delivery)
     };
     match shared
         .gate
@@ -254,7 +272,9 @@ async fn carry_answer(
                 callback_id: callback_id.clone(),
                 origin: crate::command::Origin::Ui,
             });
-            delivery.confirmed(carried.outcome());
+            if let Some(delivery) = delivery {
+                delivery.confirmed(carried.outcome());
+            }
             tracing::info!(
                 session = %session_id,
                 callback = %callback_id,
@@ -444,6 +464,12 @@ impl Pump {
                 if n.method == "session/lease/updated" && item.key.is_none() {
                     crate::session_holder::lease_updated(&shared, session);
                 }
+                crate::resume_models::notification(&shared, &n.method, &n.params);
+                if matches!(n.method.as_str(), "turn/started" | "turn/completed")
+                    && let Some(sid) = session
+                {
+                    shared.interrupted_send.turn_event(sid, &n.params["turn"]);
+                }
                 if n.method == "runtime/updated" {
                     shared.gate.observe_runtime(&n.params);
                     // Not while the core restores the session's profile: right after a resume Vibe
@@ -571,18 +597,13 @@ impl Pump {
     /// Keeps browser protection in step with turn events and replacement snapshots.
     fn browser_changed(&mut self, shared: &Arc<Shared>, change: &Change) {
         if let Change::TurnUpserted { session_id, turn } = change
-            && matches!(
-                turn["status"].as_str(),
-                Some("completed" | "failed" | "interrupted")
-            )
+            && finished_turn(turn)
         {
             crate::chrome_control::end_turn(shared, session_id);
         }
         if let Change::Replaced { session_id } = change
             && let Some(view) = shared.store.view(session_id)
-            && !view.state["turns"]
-                .as_array()
-                .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
+            && finished_snapshot(&view.state)
         {
             crate::chrome_control::end_turn(shared, session_id);
         }
@@ -595,7 +616,9 @@ impl Pump {
                 .is_some_and(|turns| turns.iter().any(|turn| turn["status"] == "in_progress"))
             {
                 hub.service.browser_turn_active(session_id);
-            } else if let Some(epoch) = hub.service.browser_turn_epoch(session_id) {
+            } else if finished_snapshot(&view.state)
+                && let Some(epoch) = hub.service.browser_turn_epoch(session_id)
+            {
                 let (shared, session_id) = (shared.clone(), session_id.clone());
                 self.browser_releases.spawn(async move {
                     crate::browser::turn_ended(&shared, &session_id, epoch).await;
@@ -615,10 +638,7 @@ impl Pump {
             hub.service.browser_turn_active(session_id);
         }
         if let Change::TurnUpserted { session_id, turn } = change
-            && matches!(
-                turn["status"].as_str(),
-                Some("completed" | "failed" | "interrupted")
-            )
+            && finished_turn(turn)
             && let Some(epoch) = shared
                 .preview
                 .as_ref()
@@ -648,6 +668,7 @@ impl Pump {
             crate::on_demand::observe(shared, change);
             crate::queue_return::observe(shared, change);
             crate::stops::observe(shared, change);
+            crate::resume_models::observe(shared, change);
             if let Change::CallbacksChanged {
                 session_id,
                 open_callback_ids,
@@ -705,6 +726,21 @@ impl Pump {
             }
         }
     }
+}
+
+fn finished_turn(turn: &Value) -> bool {
+    matches!(
+        turn["status"].as_str(),
+        Some("completed" | "failed" | "interrupted")
+    )
+}
+
+fn finished_snapshot(state: &Value) -> bool {
+    // A queued session/start snapshot has no completed turn. If it arrives after a browser action,
+    // treating mere idleness as completion would release that newer work in every browser.
+    state["turns"].as_array().is_some_and(|turns| {
+        turns.iter().any(finished_turn) && !turns.iter().any(|turn| turn["status"] == "in_progress")
+    })
 }
 
 /// How long a delayed re-read waits (the safety net after a read that could not settle a held event).

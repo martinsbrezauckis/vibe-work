@@ -8,7 +8,6 @@
  * unknown commands reach the model like in the CLI. `/loop` is ours only in its strict forms
  * (`model/loopArgs.ts`); its model-driven forms ("every weekday at 9 ...") are text for Vibe too.
  */
-import { FEEDBACK_ENABLED } from "../../../state/feedbackEnabled";
 
 /** GUI commands (Vibe's pass-through commands that make sense in a window). */
 const ALL_COMMANDS = [
@@ -40,9 +39,7 @@ const ALL_COMMANDS = [
   "data-retention",
 ] as const;
 
-export const CLIENT_COMMANDS = ALL_COMMANDS.filter(
-  (name) => name !== "feedback" || FEEDBACK_ENABLED,
-);
+export const CLIENT_COMMANDS = ALL_COMMANDS;
 
 /** One GUI command name. */
 export type ClientCommand = (typeof CLIENT_COMMANDS)[number];

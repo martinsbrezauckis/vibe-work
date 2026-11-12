@@ -10,6 +10,9 @@ pub(crate) const SEND_ACTION: &str = "page.commit";
 /// does not describe (for example site-secret reads) are still classified by the mapping table (CD-01) rather than dropped.
 fn action(args: &Value) -> &str {
     let name = args["action"].as_str().unwrap_or_default();
+    if name == "uncheck" {
+        return "page.uncheck";
+    }
     vw_agent_tools::browser_input::actions()
         .get(name)
         .map_or(name, String::as_str)
@@ -39,12 +42,8 @@ pub(crate) fn package_actions(tier: Tier) -> Option<Vec<&'static str>> {
 
 fn native_required(args: &Value) -> Option<Tier> {
     match args["action"].as_str().unwrap_or_default() {
-        "select"
-        | "check"
-        | "uncheck"
-        | "page.dialogs"
+        "page.dialogs"
         | "window.open"
-        | "window.close"
         | "window.focus"
         | "page.dialog.dismiss"
         | "files.list_downloads"
@@ -63,10 +62,12 @@ fn native_required(args: &Value) -> Option<Tier> {
 }
 
 pub(crate) fn required(args: &Value) -> Option<Tier> {
-    native_required(args).or_else(|| {
-        let action = action(args);
-        super::mapping::required("chrome_execute", &json!({"action":action,"args":args}))
-    })
+    form_required(args, false)
+        .or_else(|| native_required(args))
+        .or_else(|| {
+            let action = action(args);
+            super::mapping::required("chrome_execute", &json!({"action":action,"args":args}))
+        })
 }
 
 pub(crate) fn accepts_edits(args: &Value) -> bool {
@@ -74,13 +75,21 @@ pub(crate) fn accepts_edits(args: &Value) -> bool {
 }
 
 pub(crate) fn ask_required(args: &Value) -> Option<Tier> {
-    native_required(args).or_else(|| {
-        let action = action(args);
-        super::mapping::ask_required("chrome_execute", &json!({"action":action,"args":args}))
-    })
+    form_required(args, true)
+        .or_else(|| native_required(args))
+        .or_else(|| {
+            let action = action(args);
+            super::mapping::ask_required("chrome_execute", &json!({"action":action,"args":args}))
+        })
 }
 
 pub(crate) fn check_full(mode: Option<&str>, args: &Value) -> Result<(), String> {
+    if let Some(steps) = args["steps"].as_array() {
+        for step in steps {
+            check_full(mode, step)?;
+        }
+        return Ok(());
+    }
     super::mapping::check_full(
         mode,
         "chrome_execute",
@@ -89,6 +98,11 @@ pub(crate) fn check_full(mode: Option<&str>, args: &Value) -> Result<(), String>
 }
 
 pub(crate) fn approval_tier(mode: Option<&str>, args: &Value) -> Option<Tier> {
+    if args["action"] == "form" {
+        let tier = mode.and_then(Tier::from_mode)?;
+        let needed = form_required(args, tier == Tier::Ask)?;
+        return (needed > tier).then_some(needed);
+    }
     if let Some(required) = native_required(args) {
         return (required > mode.and_then(Tier::from_mode)?).then_some(required);
     }
@@ -97,4 +111,29 @@ pub(crate) fn approval_tier(mode: Option<&str>, args: &Value) -> Option<Tier> {
         "chrome_execute",
         &json!({"action":action(args),"args":args}),
     )
+}
+
+fn form_required(args: &Value, ask: bool) -> Option<Tier> {
+    if args["action"] != "form" {
+        return None;
+    }
+    let Some(fields) = args["fields"].as_array() else {
+        return Some(Tier::AcceptEdits);
+    };
+    let classify = if ask {
+        super::mapping::ask_required
+    } else {
+        super::mapping::required
+    };
+    fields
+        .iter()
+        .map(|field| {
+            classify(
+                "chrome_execute",
+                &json!({"action":action(field),"args":field}),
+            )
+        })
+        .collect::<Option<Vec<_>>>()
+        .and_then(|tiers| tiers.into_iter().max())
+        .or(Some(Tier::AcceptEdits))
 }

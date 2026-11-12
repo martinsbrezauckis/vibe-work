@@ -12,21 +12,22 @@ publish = false
 workspace = true
 
 [dependencies]
-vw-platform = { path = "../vw-platform" }
-vw-agent-tools = { path = "../vw-agent-tools" }
+vw-platform = { workspace = true }
+vw-agent-tools = { workspace = true }
 # stored secret values register here so the Debug API never returns them.
-vw-secrets = { path = "../vw-secrets" }
-vw-rpc = { path = "../vw-rpc" }
-vw-protocol = { path = "../vw-protocol" }
-serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
-thiserror = "2"
-tokio = { version = "1.53", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
-tracing = "0.1"
+vw-secrets = { workspace = true }
+vw-rpc = { workspace = true }
+vw-protocol = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] } # exact float parsing (durationMs etc.)
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+tracing = { workspace = true }
 # Process groups (Unix) and kill-on-close job objects created suspended + assigned by handle
 # (Windows), without unsafe code in our crates. 10.0.1, MIT OR Apache-2.0.
-process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+process-wrap = { workspace = true, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
 
 [target.'cfg(unix)'.dependencies]
 # The synchronous last-resort stop at quit (`Supervisor::kill_now`): SIGKILL by id when the async runtime cannot
 # run the normal stop. Same version and features as vw-terminal's.
-nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process"] }

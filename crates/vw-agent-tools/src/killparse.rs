@@ -91,6 +91,14 @@ pub(crate) fn command_name(word: &str) -> String {
 #[must_use]
 pub fn scan(command: &str) -> KillScan {
     let mut out = KillScan::default();
+    scan_into(command, &mut out, 0);
+    out
+}
+
+/// Windows shells nest at most this deep (`cmd /c pwsh -Command …`); deeper text is not read.
+const MAX_SHELL_DEPTH: u8 = 3;
+
+fn scan_into(command: &str, out: &mut KillScan, depth: u8) {
     // Preserve conservative quoting checks while keeping redirections out of process arguments.
     let literal = crate::killparse_shell::segments(command)
         .into_iter()
@@ -113,19 +121,35 @@ pub fn scan(command: &str) -> KillScan {
     {
         for segment in &reading {
             let segment: Vec<&str> = segment.iter().map(String::as_str).collect();
-            scan_segment(&segment, &mut out);
+            scan_segment(&segment, out, depth);
         }
     }
-    out
 }
 
-fn scan_segment(segment: &[&str], out: &mut KillScan) {
+fn scan_segment(segment: &[&str], out: &mut KillScan, depth: u8) {
     let words = crate::command_segments::command_words(segment);
     let Some(program) = words.first() else {
         return;
     };
     let args = &words[1..];
-    match command_name(program).as_str() {
+    let name = command_name(program);
+    // `cmd /c …` (Git Bash: `cmd //c`) and `pwsh|powershell -Command …` run their text: the natural Windows forms.
+    let scripts = crate::gitparse::windows_shell_script(&name, args);
+    if !scripts.is_empty() {
+        for script in scripts {
+            if depth < MAX_SHELL_DEPTH {
+                scan_into(&script, out, depth + 1);
+            } else if script.to_ascii_lowercase().contains("kill")
+                || script.to_ascii_lowercase().contains("stop-process")
+            {
+                // Too deep to read: ask instead of letting a possible stop through.
+                out.mentions = true;
+                out.reason("a process stop is nested in too many shells to read");
+            }
+        }
+        return;
+    }
+    match name.as_str() {
         "kill" => cmds::kill(args, out),
         "pkill" => cmds::pkill(args, out),
         "killall" => cmds::killall(args, out),

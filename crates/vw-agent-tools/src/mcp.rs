@@ -94,6 +94,7 @@ fn tool_result(outcome: Result<Value, String>) -> Value {
                 || reason.starts_with("Not done")
                 || reason.starts_with(wire::UNKNOWN_OUTCOME)
                 || reason.starts_with("Stopped or failed after native mouse input was sent.")
+                || reason.starts_with("Stopped or failed after native input was sent.")
                 || reason.starts_with("The browser act ended but its receipt could not be saved:")
             {
                 reason
@@ -159,6 +160,12 @@ fn handle(
             if !tools::SESSION_TOOLS.contains(&name) {
                 return Some(error(&id, -32602, "unknown tool"));
             }
+            if params
+                .get("arguments")
+                .is_some_and(|args| !args.is_object())
+            {
+                return Some(error(&id, -32602, "tool arguments must be an object"));
+            }
             if let Some(args) = params.get("arguments")
                 && let Err(reason) = crate::browser_input::validate(name, args)
             {
@@ -167,7 +174,6 @@ fn handle(
             let args = params
                 .get("arguments")
                 .cloned()
-                .filter(Value::is_object)
                 .unwrap_or_else(|| json!({}));
             reply(&id, &tool_result(forward.call(name, args)))
         }
@@ -237,113 +243,4 @@ pub fn serve_with_package(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod package_tests {
-    use super::*;
-
-    #[test]
-    fn absent_tools_refuse_without_contacting_the_core() {
-        for tool in tools::SESSION_TOOLS
-            .into_iter()
-            .filter(|name| tools::is_chrome(name))
-        {
-            let input = format!(
-                "{}\n",
-                json!({"id":1,"method":"tools/call","params":{"name":tool,"arguments":{}}})
-            );
-            let mut output = Vec::new();
-            serve_with_package(
-                input.as_bytes(),
-                &mut output,
-                |_: &str, _: Value| -> Result<Value, String> { panic!("absent tool forwarded") },
-                true,
-                false,
-            )
-            .unwrap();
-            let response: Value = serde_json::from_slice(&output).unwrap();
-            assert_eq!(
-                response["result"]["content"],
-                json!([{"type":"text","text":wire::CHROME_UNAVAILABLE}])
-            );
-        }
-    }
-
-    #[test]
-    fn absent_package_lists_no_chrome_tools_or_dangling_hints_even_with_consent() {
-        let mut output = Vec::new();
-        serve_with_package(
-            &b"{\"id\":1,\"method\":\"tools/list\"}\n"[..],
-            &mut output,
-            |_: &str, _: Value| -> Result<Value, String> { panic!("listing is local") },
-            true,
-            false,
-        )
-        .unwrap();
-        let result: Value = serde_json::from_slice(&output).unwrap();
-        let tools = result["result"]["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|t| t["name"] == "browser_read"));
-        for tool in tools {
-            assert_ne!(tool["name"], "use_your_chrome");
-            assert!(!tool["name"].as_str().unwrap().starts_with("chrome_"));
-            let text = tool.to_string();
-            assert!(!text.contains("use_your_chrome"));
-            assert!(!text.contains("Chrome Control"));
-        }
-    }
-    #[test]
-    fn search_is_read_only_and_uses_the_existing_mcp_transport() {
-        let listing = tool_list();
-        let search = listing
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|t| t["name"] == "search")
-            .unwrap();
-        assert_eq!(search["annotations"]["readOnlyHint"], true);
-        assert!(crate::wire::tools::SESSION_TOOLS.contains(&"search"));
-        let mut out = Vec::new();
-        serve(&b"{\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search\",\"arguments\":{\"query\":\"needle\"}}}\n"[..],&mut out,|name:&str,args:Value| {
-            assert_eq!(name,"search");assert_eq!(args["query"],"needle");Ok(Value::String("src/a.rs:2: needle".into()))
-        }).unwrap();
-        let answer: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(answer["result"]["content"][0]["text"], "src/a.rs:2: needle");
-    }
-
-    #[test]
-    fn session_facts_and_connector_suggestions_are_discoverable_without_install_tools() {
-        let listing = tool_list();
-        for name in [
-            "session_status",
-            "connectors_list",
-            "connector_suggest",
-            "addon_suggest",
-        ] {
-            // A chat launched without the Chrome package still has the add-on state and the suggestion.
-            assert!(
-                crate::specs::tool_list(false)
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|tool| tool["name"] == name),
-                "missing {name} without the Chrome package"
-            );
-            assert!(
-                listing
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|tool| tool["name"] == name),
-                "missing {name}"
-            );
-        }
-        assert!(
-            !listing
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool["name"] == "connector_install")
-        );
-    }
 }

@@ -44,6 +44,8 @@ pub(crate) fn run(
     runtime: &tokio::runtime::Handle,
     receiver: std::sync::mpsc::Receiver<Job>,
 ) {
+    // Read activity timestamps on the scheduler's clock, including on this native worker thread.
+    let _runtime_context = runtime.enter();
     if vw_platform::lower_thread_priority().is_err() {
         if let Some(shared) = shared.upgrade() {
             secret_scan::status(&shared, SecretScanStatus::Error);

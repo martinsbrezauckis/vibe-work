@@ -212,7 +212,7 @@ export function Servers({
         <p className="empty">
           {beforeChat
             ? "No server is running here yet. Start one in the Terminal; its ports are "
-            : "No server of this session is running. Ask Vibe to start one; its ports are "}
+            : "No server of this chat is running. Ask Vibe to start one; its ports are "}
           {free.map((t) => t.port).join(", ") || "not leased yet"}.
         </p>
       ) : null}

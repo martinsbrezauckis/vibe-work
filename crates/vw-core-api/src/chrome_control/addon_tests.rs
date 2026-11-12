@@ -195,7 +195,7 @@ fn labels_states() {
             None,
         ),
         (
-            "external, turned off by the person on chrome://extensions",
+            "external, turned off by the user on chrome://extensions",
             Facts {
                 install_state: Some("external".into()),
                 ..ready()
@@ -342,8 +342,9 @@ fn every_instruction_gives_the_reason_and_the_step() {
         let text = view(s, "x").instruction;
         assert!(
             (s == S::ChromeClosed && text.contains("Call chrome_session"))
-                || text.contains("Ask the person")
-                || text.contains("Tell the person"),
+                || text.contains("Ask the user")
+                || text.contains("ask the user")
+                || text.contains("Tell the user"),
             "{s:?}: {text}"
         );
         assert!(text.len() <= 300, "{s:?}: one line");
@@ -369,7 +370,7 @@ fn real_preferences_tell_a_new_external_install_from_one_the_person_turned_off()
             AddonState::EnableInChrome,
         ),
         (
-            "turned off by the person",
+            "turned off by the user",
             turned_off,
             AddonState::TurnedOffInChrome,
         ),
@@ -600,7 +601,7 @@ fn a_lost_connection_retries_before_asking_for_a_browser_restart() {
         reconnecting_for(&mut view, true, browser);
         assert_eq!(
             view.instruction,
-            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the person to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.")
+            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.")
         );
     }
 }

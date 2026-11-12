@@ -123,7 +123,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
   }, [changes, sessionId]);
 
   let body: ReactElement;
-  if (sessionId === null) body = <div className="empty">Choose a session to see its changes.</div>;
+  if (sessionId === null) body = <div className="empty">Choose a chat to see its changes.</div>;
   else if (view === undefined)
     // a first read that failed shows its error above and a way to read again, not a
     // "Reading changes…" that never ends.
@@ -167,7 +167,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
   else
     body = (
       <EmptyState glyph="check" className="empty">
-        {completionText(completion) ?? "No file changes in this session yet."}
+        {completionText(completion) ?? "No file changes in this chat yet."}
       </EmptyState>
     );
   return (

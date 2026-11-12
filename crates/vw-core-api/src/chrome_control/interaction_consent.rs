@@ -1,5 +1,7 @@
 //! Settles helper-discovered write capabilities in the authenticated hook. A checked result is consumed once.
 //! Only no-effect receipts can be retried, bound by the helper to the same operation/document/revision.
+//! Depends on: browser consent and one-use tool receipts.
+//! Called by: the authenticated Chrome execution hook.
 use super::read_consent::Consent;
 use crate::{ask::tool_calls, core::Shared};
 use serde_json::{Value, json};
@@ -31,47 +33,16 @@ pub(crate) async fn prepare(
     source: &str,
     call: &str,
     args: Value,
-) -> Result<tool_calls::receipts::Execution, String> {
-    prepare_consented(shared, owner, source, call, args, None).await
-}
-
-pub(super) async fn prepare_consented(
-    shared: &Arc<Shared>,
-    owner: &str,
-    source: &str,
-    call: &str,
-    args: Value,
     consent: Option<Consent>,
 ) -> Result<tool_calls::receipts::Execution, String> {
     super::gateway::validate_execute_args(&args)?;
-    let (args, reopened) =
-        match super::reopen::resolve(shared, owner, "chrome_execute", args).await? {
-            super::reopen::Resolved::Ready(args, reopened) => (args, reopened),
-            super::reopen::Resolved::Refused(answer) => {
-                return Ok(Box::pin(std::future::ready(Ok(answer))));
-            }
-        };
-    let mut answer = run(shared, owner, source, call, args.clone(), consent).await?;
+    let mut answer = run(shared, owner, source, call, args.clone(), consent, None).await?;
     super::receipt::stamp(shared, "chrome_execute", &args, &mut answer["vwMcpResult"]);
     super::output::guard(&mut answer["vwMcpResult"]);
-    if let Some(reopened) = reopened {
-        super::reopen::note(&mut answer, &reopened);
-    }
     Ok(Box::pin(std::future::ready(Ok(answer))))
 }
 
 pub(super) async fn run(
-    shared: &Arc<Shared>,
-    owner: &str,
-    source: &str,
-    call: &str,
-    args: Value,
-    consent: Option<Consent>,
-) -> Result<Value, String> {
-    run_clocked(shared, owner, source, call, args, consent, None).await
-}
-
-pub(super) async fn run_clocked(
     shared: &Arc<Shared>,
     owner: &str,
     source: &str,
@@ -83,7 +54,7 @@ pub(super) async fn run_clocked(
     let mut previous = None;
     let generation = crate::stops::generation(shared, owner);
     loop {
-        let answer = super::gateway::call_one_preflighted(
+        let answer = super::gateway::call_one_inner(
             shared,
             owner,
             "chrome_execute",

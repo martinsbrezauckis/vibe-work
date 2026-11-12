@@ -42,7 +42,10 @@ pub fn new_placeholder() -> Result<Zeroizing<String>, SecretError> {
 
 /// The current token. `None` until the first server start.
 #[derive(Default)]
-pub struct TokenSlot(Mutex<Option<Zeroizing<String>>>);
+pub struct TokenSlot {
+    token: Mutex<Option<Zeroizing<String>>>,
+    pub(crate) requests: std::sync::Arc<crate::resume::ResumeRequests>,
+}
 
 impl TokenSlot {
     /// Replaces the token with a new one and returns it (for the child's environment only).
@@ -51,14 +54,15 @@ impl TokenSlot {
     /// [`SecretError`] when the random source fails (the old token stays valid then).
     pub fn rotate(&self) -> Result<Zeroizing<String>, SecretError> {
         let token = new_placeholder()?;
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(token.clone());
+        *self.token.lock().unwrap_or_else(PoisonError::into_inner) = Some(token.clone());
+        self.requests.reset();
         Ok(token)
     }
 
     /// True when `presented` is the current token (constant-time on equal lengths).
     #[must_use]
     pub fn accepts(&self, presented: &str) -> bool {
-        let guard = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let guard = self.token.lock().unwrap_or_else(PoisonError::into_inner);
         guard.as_ref().is_some_and(|current| {
             current.len() == presented.len()
                 && bool::from(current.as_bytes().ct_eq(presented.as_bytes()))
@@ -68,7 +72,7 @@ impl TokenSlot {
     /// The current token, if any (the same value goes to the server as the MCP forwarder token).
     #[must_use]
     pub fn current(&self) -> Option<Zeroizing<String>> {
-        self.0
+        self.token
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -76,7 +80,7 @@ impl TokenSlot {
 
     /// Clears the token: nothing is accepted until the next rotation.
     pub fn clear(&self) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.token.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 }
 
@@ -96,6 +100,10 @@ impl ProxySecretProvider {
 }
 
 impl SecretProvider for ProxySecretProvider {
+    fn model_requests(&self) -> Option<std::sync::Arc<dyn vw_supervisor::ModelRequests>> {
+        Some(self.slot.requests.clone())
+    }
+
     fn mistral_api_key(&self) -> Result<Option<ApiKey>, SecretError> {
         let token = self.slot.rotate()?;
         Ok(Some(ApiKey::new(token.as_str())))

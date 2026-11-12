@@ -135,6 +135,8 @@ pub enum HistoryStep {
     Forward,
     /// Reload the page.
     Reload,
+    /// Reload the page while bypassing the HTTP cache for this navigation.
+    ReloadBypassCache,
 }
 
 /// Page lifecycle events an engine reports.
@@ -142,7 +144,7 @@ pub enum HistoryStep {
 pub enum PageEvent {
     /// Check a completed URL's navigation policy before reading its document, without changing load state.
     Probe(Url),
-    /// A load started.
+    /// The main document committed (native page-load Started); child frames never report this.
     Started(Url),
     /// A load finished.
     Finished(Url),
@@ -288,6 +290,26 @@ pub trait PreviewHooks: Send + Sync {
 
 /// The native engine.
 pub trait PreviewEngine: Send + Sync {
+    /// Changes one view's native color preference; `None` restores inherited appearance.
+    fn color_scheme(&self, id: &MountId, dark: Option<bool>) -> EngineFuture<'_, ()> {
+        let _ = id;
+        Box::pin(async move {
+            if dark.is_none() {
+                Ok(())
+            } else {
+                Err(EngineError::Unsupported("This engine cannot override one page's native color preference; use its system appearance.".into()))
+            }
+        })
+    }
+
+    /// Bounded native request metadata; no response bodies are captured.
+    fn network_records(&self, id: &MountId) -> EngineFuture<'_, serde_json::Value> {
+        let _ = id;
+        Box::pin(async {
+            Err(EngineError::Unsupported("Native request observation is unavailable on this engine; use page.errors for page/resource failures.".into()))
+        })
+    }
+
     /// Creates, focuses, inspects or closes a chat-owned native window.
     fn page_window(
         &self,
@@ -372,6 +394,13 @@ pub trait PreviewEngine: Send + Sync {
             crate::frames::main_answer(answers).map(|answer| answer.value)
         })
     }
+    /// Read or set native mute on this exact mounted tab, returning actual mute/audible state.
+    fn tab_audio(&self, id: &MountId, muted: Option<bool>) -> EngineFuture<'_, serde_json::Value> {
+        let _ = (id, muted);
+        Box::pin(async {
+            Err(EngineError::Unsupported("Native tab audio state is unavailable in this engine; use media.read and media.mute for individual elements.".into()))
+        })
+    }
     /// Silence every current tab and prevent new audible mounts until the returned lease is dropped.
     fn quiet_audio(&self) -> EngineFuture<'_, crate::AudioQuiet> {
         Box::pin(async {
@@ -424,7 +453,6 @@ pub trait PreviewEngine: Send + Sync {
 
     /// Draws short input feedback in the person's native view, never in the document or its captures.
     /// Optional for headless engines; failure must not turn an already completed input into a failed action.
-    #[cfg(feature = "click-marker")]
     fn show_input_marker(
         &self,
         id: &MountId,

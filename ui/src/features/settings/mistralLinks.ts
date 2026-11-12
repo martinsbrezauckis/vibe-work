@@ -124,7 +124,7 @@ export const MISTRAL_LINKS: readonly MistralLink[] = [
     id: "link-vibe-training",
     category: "privacy",
     label: "Training opt-out for Vibe",
-    note: "Whether your Vibe sessions may train Mistral's models. Separate from the API opt-out below.",
+    note: "Whether your Vibe chats may train Mistral's models. Separate from the API opt-out below.",
     url: `${ADMIN}/vibe/privacy`,
     keywords: "training opt out train models data",
   },

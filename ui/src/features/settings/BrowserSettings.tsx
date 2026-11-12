@@ -1,6 +1,7 @@
 /** Browser Settings category: groups the Vibe Work browser, Your Chrome, Your Edge, Your Safari, optional Your Firefox and settings shared by all browsers. Uses the sections' confirmed state and errors; called by SettingsPage. */
 import { useCoreState } from "../shell/hooks";
 import { useState } from "react";
+import { BrowserComposerSettings } from "./BrowserComposerSettings";
 import { BrowserShieldsSettings } from "./BrowserShieldsSettings";
 import { BrowserPoolSettings } from "./BrowserPoolSettings";
 import { BrowserDelegationSettings } from "./BrowserDelegationSettings";
@@ -24,6 +25,7 @@ export function BrowserSettings() {
       )}
       <section aria-labelledby="vibe-work-browser-title">
         <h3 id="vibe-work-browser-title">Vibe Work browser</h3>
+        <BrowserComposerSettings browser="Builtin" />
         <BrowserPoolSettings onError={setPoolError} />
         <BrowserShieldsSettings onError={setShieldsError} />
       </section>

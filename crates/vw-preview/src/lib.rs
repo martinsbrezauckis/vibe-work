@@ -19,7 +19,6 @@ pub mod accounts;
 mod audio;
 pub use audio::AudioQuiet;
 mod act_refusals;
-#[cfg(feature = "click-marker")]
 mod action_overlay;
 pub mod action_tracking;
 mod browse;
@@ -44,6 +43,7 @@ mod frames;
 mod hooks;
 mod ids;
 mod layout;
+mod load_addresses;
 mod names;
 mod native_click;
 mod navigation;
@@ -60,6 +60,7 @@ mod shot;
 mod state;
 mod tabs;
 mod url_rules;
+mod viewport;
 mod visibility;
 
 pub use browse::{LoadState, LoopbackGate, SHOTS_BLOCKED, shots_protected};
@@ -87,8 +88,14 @@ pub use names::{
     CACHE_CAP, LOOKUP_LIMIT, MAX_LOOKUPS, MAX_QUEUED, MAX_WAITERS, NameResolver, NameStats,
     NameVerdict, RETRY_AFTER, TTL, UI_WAIT, system_resolver,
 };
-pub use native_click::{NativeClickGuard, NativeClickLease, NativeClickPoint};
+pub use native_click::{
+    NativeClickGuard, NativeClickLease, NativeClickPoint, POINT_DISPATCH_LIMIT,
+    validate_point_dispatch_age,
+};
 pub use page_init::{MENU_TOKENS, page_accessor, page_init_script, page_init_script_themed};
+
+/// Document-start capture boundary for marked native presses, installed only in the isolated world.
+pub const POINT_GUARD: &str = include_str!("js/point_guard.js");
 pub use person_pointer::{PERSON_BUSY, PERSON_CLICKED, PersonInterval, PersonPointer};
 pub use placement_gate::{PlacementGate, for_window_generation};
 
@@ -104,7 +111,9 @@ pub use state::{PreviewServerState, PreviewState, PreviewView};
 pub use tabs::{PageTab, PageTabKind, PageTabOwner};
 pub use visibility::VisibilityReport;
 mod capture_block;
+mod local_files;
 pub use capture_block::{CaptureBlock, CaptureRefusal};
+pub use local_files::same_local_document;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics
 /// can assert which crate they are looking at.
@@ -115,3 +124,7 @@ pub const CRATE_ROLE: &str = "preview pane model: per-session previews, URL poli
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+mod window_resize;
+
+mod page_script;

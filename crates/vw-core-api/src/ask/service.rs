@@ -60,14 +60,16 @@ impl AskClock for SystemAskClock {
 }
 /// How [`Service::open_with`] treats an `external_id` that is already open, and the ask's `every_call` flag.
 #[derive(Clone, Copy)]
-struct How {
+struct How<'a> {
     join: bool,
     every_call: bool,
+    before_publish: Option<&'a dyn Fn()>,
 }
-impl How {
+impl How<'_> {
     const JOIN: Self = Self {
         join: true,
         every_call: false,
+        before_publish: None,
     };
 }
 struct Entry {
@@ -79,6 +81,7 @@ struct State {
     next: u64,
     open: BTreeMap<String, Entry>,
     records: VecDeque<AskRecord>,
+    questions: BTreeMap<String, String>,
 }
 pub(crate) struct Service {
     state: Mutex<State>,
@@ -92,6 +95,7 @@ impl Service {
                 next: 0,
                 open: BTreeMap::new(),
                 records: VecDeque::new(),
+                questions: BTreeMap::new(),
             }),
             clock,
             events,
@@ -124,6 +128,8 @@ impl Service {
     }
     /// [`Self::open`] for a Vibe approval whose "Allow for this session" would cover every call of its tool
     /// (`every_call`, shown on the card before the click).
+    /// `before_publish` runs once under the registry lock, after the question hold is registered;
+    /// it must be quick and must not reenter this registry.
     pub(crate) fn open_callback(
         self: &Arc<Self>,
         kind: &str,
@@ -131,6 +137,7 @@ impl Service {
         offers: Vec<Choice>,
         external_id: Option<String>,
         every_call: bool,
+        before_publish: Option<&dyn Fn()>,
     ) -> Handle {
         self.open_with(
             kind,
@@ -141,6 +148,7 @@ impl Service {
             How {
                 join: true,
                 every_call,
+                before_publish,
             },
         )
     }
@@ -164,6 +172,7 @@ impl Service {
             How {
                 join: false,
                 every_call: false,
+                before_publish: None,
             },
         )
     }
@@ -174,9 +183,13 @@ impl Service {
         requester: vw_ask::Requester,
         offers: Vec<Choice>,
         external_id: Option<String>,
-        how: How,
+        how: How<'_>,
     ) -> Handle {
-        let How { join, every_call } = how;
+        let How {
+            join,
+            every_call,
+            before_publish,
+        } = how;
         let mut state = self.lock();
         if let Some(id) = &external_id
             && let Some(entry) = state.open.get(id)
@@ -212,6 +225,14 @@ impl Service {
             always_setting: policy.and_then(|p| p.always_setting).map(str::to_owned),
         };
         let (send, reply) = watch::channel(None);
+        if kind == "user_input"
+            && let Some(session) = &ask.session
+        {
+            state.questions.insert(ask.id.clone(), session.clone());
+        }
+        if let Some(prepare) = before_publish {
+            prepare();
+        }
         state.open.insert(
             ask.id.clone(),
             Entry {
@@ -268,6 +289,32 @@ impl Service {
     pub(crate) fn list(&self) -> Vec<Ask> {
         self.lock().open.values().map(|e| e.ask.clone()).collect()
     }
+    /// Browser work waits for an answered question; Skip leaves it handed back until a new message.
+    pub(crate) fn question_hold(&self, session: &str) -> Option<&'static str> {
+        let state = self.lock();
+        let held: Vec<_> = state
+            .questions
+            .iter()
+            .filter(|(_, owner)| *owner == session)
+            .collect();
+        if held.is_empty() {
+            None
+        } else if held.iter().any(|(id, _)| state.open.contains_key(*id)) {
+            Some(
+                "Not run: this chat's browser is waiting for the person's answer. Let the person finish in the browser and answer the open question before continuing.",
+            )
+        } else {
+            Some(
+                "Not run: the browser remains handed back because the question was not answered. Wait for a new message from the person before using this chat's browser again.",
+            )
+        }
+    }
+    /// A new user turn or closed chat ends unanswered-question holds for that chat only.
+    pub(crate) fn clear_question_holds(&self, session: Option<&str>) {
+        self.lock()
+            .questions
+            .retain(|_, owner| session.is_some_and(|session| owner != session));
+    }
     pub(crate) fn records(&self) -> Vec<AskRecord> {
         self.lock().records.iter().cloned().collect()
     }
@@ -299,6 +346,9 @@ impl Service {
         let Some(entry) = state.open.remove(id) else {
             return false;
         };
+        if matches!(outcome, Outcome::Allowed { .. }) {
+            state.questions.remove(id);
+        }
         let now = self.clock.now_ms();
         let record = AskRecord {
             ask: entry.ask,
@@ -327,6 +377,7 @@ impl Service {
                 },
             );
         }
+        self.clear_question_holds(session);
     }
     pub(crate) fn replay(&self) -> Vec<CoreEvent> {
         let state = self.lock();
@@ -372,7 +423,7 @@ impl Drop for Handle {
     fn drop(&mut self) {
         if self.cancel_on_drop {
             self.finish(Outcome::Cancelled {
-                reason: "the caller disconnected".into(),
+                reason: "the request ended".into(),
             });
         }
     }

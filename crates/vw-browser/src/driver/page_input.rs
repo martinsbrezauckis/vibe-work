@@ -51,12 +51,142 @@ impl Browser {
         } else {
             self.page(session_id).await.map_err(refused)?
         };
+        let mut request = self.input_request(session_id, action, consent, by, &page)?;
+        let mut script = scripts::act(&request);
+        let allowed = self.dispatch_permission_check(session_id, by);
+        let start = tokio::time::Instant::now();
+        loop {
+            let answer: PageAnswer = self
+                .run_act(
+                    session_id,
+                    script.clone(),
+                    mount.as_ref(),
+                    allowed.clone(),
+                    // Keyboard preparation focuses its exact frame under the ordinary act restrictions;
+                    // the separate native dispatch supplies text/key events and their trusted receipt.
+                    request["nativeClick"] != true && action.is_input(),
+                )
+                .await
+                .map_err(|text| {
+                    if text == PAGE_CLOSED || text.starts_with("Not run:") {
+                        refused(text)
+                    } else {
+                        failed(text)
+                    }
+                })?;
+            // Bound to the authorized document.
+            self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
+                .map_err(refused)?;
+            let transient = crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY;
+            if transient || answer.status == "focusPending" {
+                if request["nativeKeyboard"] == true {
+                    request["nativePrepared"] = json!(true);
+                    script = scripts::act(&request);
+                }
+                await_retry(start, &mut request, &mut script).await;
+                continue;
+            }
+            // A controlled control may accept the change asynchronously; prove it after settling, without retrying input.
+            let mut answer = if answer.status == "unmet"
+                && matches!(
+                    action,
+                    Action::Control(_)
+                        | Action::Check { .. }
+                        | Action::Select { .. }
+                        | Action::Type { .. }
+                ) {
+                answer
+            } else {
+                self.interpret_ref_answer(session_id, answer, action)?
+            };
+            if request["nativeClick"] == true
+                || request["nativeKeyboard"] == true && answer.native_point.is_some()
+            {
+                let focused;
+                let action = if let Action::Press {
+                    key,
+                    reference: None,
+                } = action
+                {
+                    focused = Action::Press {
+                        key: key.clone(),
+                        reference: answer.reference.clone(),
+                    };
+                    request["ref"] = json!(answer.reference);
+                    &focused
+                } else {
+                    action
+                };
+                if let Some(point) = answer.native_point {
+                    let native = self
+                        .native_ref_click(
+                            session_id,
+                            action,
+                            &request,
+                            point,
+                            by,
+                            native_sent.clone(),
+                        )
+                        .await?;
+                    answer.scroll = native.scroll;
+                    answer.effect = native.effect;
+                    // The ensuing receipt proves a native check's post-input state after settling.
+                    answer.checked = None;
+                } else if !matches!(action, Action::Check { .. }) {
+                    return Err(refused(
+                        "Not run: the page did not provide native click geometry",
+                    ));
+                }
+            }
+            return self
+                .finish_input(session_id, action, &request, by, answer)
+                .await;
+        }
+    }
+    fn input_request(
+        &self,
+        session_id: &str,
+        action: &Action,
+        consent: Option<&Value>,
+        by: Actor,
+        page: &str,
+    ) -> Result<Value, ActError> {
         let mut request = action
-            .page_request(&page)
+            .page_request(page)
             .ok_or_else(|| failed("this action does not run in the page"))?;
         self.bind_ref_request(session_id, &mut request);
         // Submission is a separate authorized Enter after the settled field proves the requested text.
         request["submit"] = json!(false);
+        request["nativeKeyboard"] = json!(
+            matches!(action, Action::Type { .. } | Action::Press { .. })
+                || matches!(action, Action::Control(control) if control.name() == "insert_text")
+        );
+        request["keyboardAttempt"] = json!(crate::point_receipt::next_token());
+        if let Action::Press { key, .. } = action {
+            let (key, modifiers) = vw_ask::chrome::keys::canonical(key, &[]).map_err(refused)?;
+            let args = json!({"key":key,"modifiers":modifiers});
+            if vw_ask::chrome::keys::clipboard_operation(&args)
+                .map_err(refused)?
+                .is_some()
+            {
+                return Err(refused(
+                    "Native clipboard shortcuts bypass the app's protected clipboard. Use clipboard.read or clipboard.write, then insert_text for text entry.",
+                ));
+            }
+            request["keyboard"] = json!({"key":key,"modifiers":modifiers,"writes":key.chars().count() == 1 || matches!(key.as_str(), "Backspace" | "Delete" | "Space"),"editor":vw_ask::chrome::keys::requires_editor(&args).map_err(refused)?});
+        } else if let Action::Type { text, .. } = action {
+            request["keyboard"] = if text.is_empty() {
+                json!({"key":"Backspace","modifiers":[],"replace":true,"editor":true})
+            } else {
+                json!({"text":text,"replace":true,"editor":true})
+            };
+        }
+        if let Action::Control(control) = action
+            && control.name() == "insert_text"
+        {
+            request["keyboard"] =
+                json!({"text":control.args()["text"],"insert":true,"editor":true});
+        }
         request["nativeUser"] = json!(by == Actor::User);
         request["allowSend"] = json!(consent.is_none_or(|token| token["allowSend"] != false));
         request["nativeClick"] = json!(
@@ -79,68 +209,7 @@ impl Browser {
         {
             request["testConsentOrigin"] = json!(origin);
         }
-        let mut script = scripts::act(&request);
-        let allowed = self.dispatch_permission_check(session_id, by);
-        let start = tokio::time::Instant::now();
-        loop {
-            let answer: PageAnswer = self
-                .run_act(
-                    session_id,
-                    script.clone(),
-                    mount.as_ref(),
-                    allowed.clone(),
-                    // A native click brings its own real input; other input acts run as the person's gesture.
-                    request["nativeClick"] != true && action.is_input(),
-                )
-                .await
-                .map_err(|text| {
-                    if text == PAGE_CLOSED || text.starts_with("Not run:") {
-                        refused(text)
-                    } else {
-                        failed(text)
-                    }
-                })?;
-            // Bound to the authorized document.
-            self.reading_ref_allowed(session_id, &page, &answer.url, action.reference())
-                .map_err(refused)?;
-            let transient = crate::answers::transient(&answer) && start.elapsed() < ACT_RETRY;
-            if transient || answer.status == "focusPending" {
-                await_retry(start, &mut request, &mut script).await;
-                continue;
-            }
-            // A controlled control may accept the change asynchronously; prove it after settling, without retrying input.
-            let mut answer = if answer.status == "unmet"
-                && matches!(
-                    action,
-                    Action::Check { .. } | Action::Select { .. } | Action::Type { .. }
-                ) {
-                answer
-            } else {
-                self.interpret_ref_answer(session_id, answer, action)?
-            };
-            if request["nativeClick"] == true {
-                if let Some(point) = answer.native_point {
-                    self.native_ref_click(
-                        session_id,
-                        action,
-                        &request,
-                        point,
-                        by,
-                        native_sent.clone(),
-                    )
-                    .await?;
-                    // The ensuing receipt proves a native check's post-input state after settling.
-                    answer.checked = None;
-                } else if !matches!(action, Action::Check { .. }) {
-                    return Err(refused(
-                        "Not run: the page did not provide native click geometry",
-                    ));
-                }
-            }
-            return self
-                .finish_input(session_id, action, &request, by, answer)
-                .await;
-        }
+        Ok(request)
     }
 }
 /// Waits one poll before an act runs again while [`ACT_RETRY`] lasts. A datepicker field is typed only after the

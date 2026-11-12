@@ -27,7 +27,9 @@ pub(super) fn requested(args: &Value) -> Result<Option<Vec<String>>, String> {
     for row in rows {
         let action = row
             .as_str()
-            .filter(|a| a.len() <= 128 && super::mapping::action_names().any(|known| known == *a))
+            .filter(|a| {
+                a.len() <= 128 && super::mapping::external_action_names().any(|known| known == *a)
+            })
             .ok_or_else(invalid)?;
         if result.iter().any(|a| a == action) {
             return Err(invalid());

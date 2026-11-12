@@ -5,8 +5,8 @@
 // fingerprint), DOM traversal (bounded traversal of documents, same-origin frames and open shadow
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
-/* global REQ, formControl, nearbyLabel, labelledToggle -- Supplied by the Rust script assembler and its shared prelude. */
-/* exported authorizationPage, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
+/* global REQ, formControl, nearbyLabel, labelledToggle, labelledSubmit, renderedLabelText -- Supplied by the Rust script assembler and its shared prelude. */
+/* exported authorizationPage, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, privateField, privateLabel, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
@@ -19,12 +19,12 @@ const MAX_ROOTS = 32, MAX_NODES = 12000, MAX_FRAME_DEPTH = 4, MAX_SHADOW_DEPTH =
 const INTERACTIVE =
   "a[href],button,input:not([type=hidden]),textarea,select,summary,iframe,frame," +
   "[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem]," +
-  "[role=option],[role=combobox],[role=textbox],[role=searchbox],[role=slider],[contenteditable=''],[contenteditable=true]," +
+  "[role=option],[role=combobox],[role=textbox],[role=searchbox],[role=slider],[contenteditable=''],[contenteditable=true],[contenteditable=plaintext-only]," +
   "[tabindex]:not([tabindex='-1']),[onclick],[ondblclick],[oncontextmenu],[onauxclick]";
 // Some site footers install a click listener on a plain span/div and expose only a pointer cursor. Give a
 // small, visibly labelled target a ref so normal hit testing can decide whether to act.
 const customClickable = (el) => {
-  if (labelledToggle(el) && !visible(el.control)) return visible(el);
+  if ((labelledToggle(el) || labelledSubmit(el)) && !visible(el.control)) return visible(el);
   if (matches(el, INTERACTIVE) || !["a", "span", "div", "p", "li", "label"].includes(el.localName)) return false;
   if (el.closest(INTERACTIVE)) return false;
   if (!visible(el) || !enabled(el)) return false;
@@ -40,7 +40,7 @@ const roleOf = (el) => {
   const tag = String(el.localName || "").toLowerCase();
   const explicit = el.getAttribute && el.getAttribute("role");
   if (explicit) return clip(explicit, 30);
-  if (labelledToggle(el) && !visible(el.control)) return roleOf(el.control);
+  if ((labelledToggle(el) || labelledSubmit(el)) && !visible(el.control)) return roleOf(el.control);
   if (customClickable(el)) return "button";
   if (tag === "a") return "link";
   if (tag === "button" || tag === "summary") return "button";
@@ -127,7 +127,7 @@ const refOf = (el) => {
     .filter(([, v]) => v)
     .map(([n, v]) => `${n}=${v}`)
     .join("~");
-  const text = stable ? "" : clip(el.innerText || el.textContent, 160);
+  const text = stable || privateField(el) ? "" : clip(el.innerText || el.textContent, 160);
   return "e" + fnv([...(frameScope ? [frameScope] : []), el.localName, roleOf(el), attr("type"), stable, text, domPath(el)].join("|"));
 };
 // The ref describes markup and can be shared by duplicate controls. Bind a held native answer to the actual node
@@ -158,14 +158,22 @@ const frameDoc = (frame) => {
   }
 };
 // Every element of the page, its same-origin frames and open shadow roots (bounded); `truncated` when cut.
-const collect = () => {
+const collect = (prioritize = true) => {
   const elements = [], priorityElements = [];
-  const queue = [{ root: document, frame: 0, shadow: 0 }];
+  const queue = [{ root: document, frame: 0, shadow: 0, order: 0 }];
+  const elementOrder = new WeakMap();
+  let nextRoot = 1;
+  const enqueue = ctx => {
+    ctx.order = nextRoot++;
+    ctx.form = Boolean(ctx.root.querySelector('input:not([type=hidden]),textarea,select,[role=combobox],[role=textbox],[role=checkbox],[role=radio],[contenteditable=true],[contenteditable=plaintext-only]'));
+    const before = ctx.form ? queue.findIndex(item => !item.form) : -1;
+    if (before < 0) queue.push(ctx); else queue.splice(before, 0, ctx);
+  };
   const seen = new WeakSet(), seenElements = new WeakSet();
   let roots = 0, truncated = false, crossOriginFrames = 0;
   const priorityLimit = Math.min(512, MAX_NODES);
   const priority = (el) => {
-    if (priorityElements.length >= priorityLimit || seenElements.has(el) || !actionableCandidate(el)) return;
+    if (!prioritize || priorityElements.length >= priorityLimit || seenElements.has(el) || !actionableCandidate(el)) return;
     const state = visibilityState(el);
     if (!state.visible && !state.animating) return;
     seenElements.add(el);
@@ -242,20 +250,23 @@ const collect = () => {
         seenElements.add(el);
         elements.push(el);
       }
+      elementOrder.set(el, ctx.order);
       if (el.shadowRoot) {
-        if (ctx.shadow < MAX_SHADOW_DEPTH) queue.push({ root: el.shadowRoot, frame: ctx.frame, shadow: ctx.shadow + 1 });
+        if (ctx.shadow < MAX_SHADOW_DEPTH) enqueue({ root: el.shadowRoot, frame: ctx.frame, shadow: ctx.shadow + 1 });
         else truncated = true;
       }
       const tag = el.localName;
       if (tag === "iframe" || tag === "frame") {
         const inner = frameDoc(el);
         if (!inner) crossOriginFrames += 1;
-        else if (!REQ.singleFrame && ctx.frame < MAX_FRAME_DEPTH) queue.push({ root: inner, frame: ctx.frame + 1, shadow: ctx.shadow });
+        else if (!REQ.singleFrame && ctx.frame < MAX_FRAME_DEPTH) enqueue({ root: inner, frame: ctx.frame + 1, shadow: ctx.shadow });
         else if (!REQ.singleFrame) truncated = true;
       }
     }
   }
   if (queue.length > 0) truncated = true;
+  // Prioritize discovery, then restore root encounter order for indexed selector/extraction results.
+  if (!prioritize) elements.sort((a, b) => elementOrder.get(a) - elementOrder.get(b));
   return { elements: [...priorityElements, ...elements].slice(0, MAX_NODES), truncated, crossOriginFrames };
 };
 const matches = (el, selector) => {
@@ -328,7 +339,7 @@ const visibilityState = (el) => {
 };
 const visible = (el) => visibilityState(el).visible;
 const enabled = (el) => {
-  if (labelledToggle(el) && !enabled(el.control)) return false;
+  if ((labelledToggle(el) || labelledSubmit(el)) && !enabled(el.control)) return false;
   if (el.disabled || (el.getAttribute && el.getAttribute("aria-disabled") === "true")) return false;
   for (let cur = el, depth = 0; cur && depth < 256; cur = composedParent(cur), depth += 1) {
     if (cur.inert || matches(cur, "fieldset[disabled]")) return false;
@@ -379,6 +390,21 @@ const secretKind = (el) => {
     if (holdsCardNumber(el.form)) return "card";
   }
   return null;
+};
+// A protected editor also owns its descendants, including a subtree observed without its parent.
+// Values do not participate in ref hashes, selector predicates, labels or surrounding page text.
+const privateField = el => {
+  for (let up = el; up; up = up.parentElement || up.getRootNode()?.host) {
+    const kind = vaultFilled(up) ? "vault" : secretKind(up);
+    if (kind || up.type === "hidden") return { element: up, kind: kind || "hidden" };
+  }
+  return null;
+};
+const privateLabel = el => {
+  const field = privateField(el);
+  if (field && (field.element !== el || el.isContentEditable &&
+    !["aria-label", "aria-labelledby", "placeholder", "title"].some(name => el.hasAttribute(name)) && !el.labels?.length)) return "Private field";
+  return labelOf(el);
 };
 // The text of a field's own <label> elements and aria-labelledby targets, lower case and bounded (no layout read).
 function fieldLabelText(el) {
@@ -496,13 +522,14 @@ const labelOf = (el) => {
       .split(/\s+/)
       .map((id) => {
         const target = root.getElementById ? root.getElementById(id) : document.getElementById(id);
-        return target ? target.innerText || target.textContent : "";
+        return target ? renderedLabelText(target) : "";
       })
       .join(" ");
     if (text.trim()) return clip(text, 160);
   }
-  if (el.labels && el.labels.length) return clip(Array.from(el.labels).map((l) => l.innerText || l.textContent).join(" "), 160);
+  if (el.labels && el.labels.length) return clip(Array.from(el.labels).map(renderedLabelText).join(" "), 160);
   const tag = el.localName;
+  if (tag === "input" && el.type === "image" && attr("alt")) return clip(attr("alt"), 160);
   if (tag === "input" || tag === "textarea" || tag === "select") {
     return clip(attr("title") || attr("placeholder") || nearbyLabel(el) || attr("name") || "", 160);
   }
@@ -539,7 +566,7 @@ const actionRef = (ref, regions = false) => {
   return { found, target: onScreen.length === 1 ? onScreen[0]
     : shown.length === 1 ? shown[0] : entering.length === 1 ? entering[0] : null };
 };
-const describe = (el) => (el ? { role: roleOf(el), name: labelOf(el) } : null);
+const describe = (el) => (el ? { role: roleOf(el), name: privateLabel(el) } : null);
 // The host normalizes hidden format controls and caps names by Unicode characters (model.rs/text.rs).
 // Compare that same displayed label, so an unchanged soft hyphen or zero-width character cannot revoke a ref.
 const observedTarget = (el, node, name) => {
@@ -547,7 +574,7 @@ const observedTarget = (el, node, name) => {
   if (name === undefined) return true;
   // eslint-disable-next-line no-control-regex, no-misleading-character-class -- These control/format code points are deliberately removed, matching text.rs.
   const hidden = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u{e0000}-\u{e007f}]/gu;
-  const shown = Array.from(hideKeys(labelOf(el), el).replace(hidden, '')).slice(0, 160).join('');
+  const shown = Array.from(hideKeys(privateLabel(el), el).replace(hidden, '')).slice(0, 160).join('');
   return shown === name;
 };
 // Text that looks like an API key or token: hidden from every read the agent gets. Known prefixes,

@@ -2,7 +2,7 @@
 //! launcher, exactly as the app calls it. Point `VW_VIDEO_HELPER` at an installed or extracted package helper (for
 //! an `AppImage`: `squashfs-root/usr/bin/vw-video-helper`, which selects its launcher and the system media runtime).
 //! `VW_VIDEO_FORMATS` names the folder; `VW_VIDEO_FORMATS_EXPECT` optionally pins each outcome as
-//! `file=ok` or `file=<error prefix>` entries separated by `;`, and the test fails on any difference.
+//! `file=ok` or `file=<error code>` entries separated by `;`, and the test fails on any difference.
 #![cfg(feature = "helper")]
 use serde_json::json;
 #[tokio::test]
@@ -64,14 +64,17 @@ async fn every_video_in_the_folder_reports_its_outcome() {
             }
             Err(error) => {
                 println!("FORMAT | {name} | ERR | {error}");
-                error
+                serde_json::to_value(error.code).unwrap()["code"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
             }
         };
         if let Some((_, wanted)) = expect.iter().find(|(f, _)| *f == name) {
             let matched = if wanted == "ok" {
                 outcome == "ok"
             } else {
-                outcome != "ok" && outcome.starts_with(wanted.as_str())
+                outcome == *wanted
             };
             if !matched {
                 mismatches.push(format!("{name}: expected {wanted}, got {outcome}"));

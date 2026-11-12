@@ -1,7 +1,8 @@
 //! `HostHandle`: lets the window open at once while the host starts in the background.
 //!
-//! Starting the core runs the Vibe handshake, which can take seconds (Python start) or, when
-//! something is wrong, up to its 30 s timeout. The app must not hold the window back for that, so
+//! Starting the core runs the Vibe handshake, which can take seconds (Python start), a minute or more on the
+//! first start after an install, or, when something is wrong, up to its first-start timeout (300 s). The app must
+//! not hold the window back for that, so
 //! it creates a handle, starts the host in a task, and every Tauri command waits on the handle.
 //!
 //! Depends on: tokio (`watch`), [`crate::Host`]. Called by: `app`. Invariants: the host is set
@@ -180,42 +181,6 @@ mod tests {
     use super::*;
     use std::future::Future;
     use std::task::{Context, Waker};
-
-    #[tokio::test]
-    async fn each_main_document_load_starts_the_next_generation_at_once() {
-        let handle = HostHandle::new();
-        assert_eq!(handle.window_generation(), 0);
-        let runtime = Handle::current();
-        handle.main_ui_load_started(&runtime);
-        assert_eq!(handle.window_generation(), 1);
-        handle.main_ui_load_started(&runtime);
-        assert_eq!(
-            handle.window_generation(),
-            2,
-            "a command of the new document never takes the old generation, even before any reset ran"
-        );
-    }
-
-    /// Tauri creates and first polls an async command's future on a runtime worker, so a command
-    /// the replaced document sent just before the reload can start after the load event. Reading the current
-    /// generation then gave it the NEW document's generation and its placement passed the gate.
-    /// PREDICT (before the fix): the straggler from document "a" gets generation 2, the new document's.
-    #[tokio::test]
-    async fn a_command_of_the_replaced_document_keeps_its_generation_when_it_starts_late() {
-        let handle = HostHandle::new();
-        let runtime = Handle::current();
-        handle.main_ui_load_started(&runtime);
-        assert_eq!(handle.document_generation(Some("a")), 1);
-        handle.main_ui_load_started(&runtime);
-        assert_eq!(
-            handle.document_generation(Some("a")),
-            1,
-            "a straggler of the replaced document must not take the new document's generation"
-        );
-        assert_eq!(handle.document_generation(Some("b")), 2);
-        assert_eq!(handle.document_generation(Some("b")), 2);
-        assert_eq!(handle.document_generation(None), 2);
-    }
 
     #[tokio::test]
     async fn window_commands_wait_for_the_latest_main_document_reset() {

@@ -62,7 +62,7 @@ export function registerSearchRoutes(app: App): () => void {
     const action = input["action"] ?? "results";
     const selected = () => {
       const id = optionalText(input["sessionId"], "sessionId") ?? app.shell.store.get().selected;
-      if (id === null) throw new UiControlError("invalidParams", "no session is open");
+      if (id === null) throw new UiControlError("invalidParams", "no chat is open");
       return id;
     };
     const count = (scope: "conversation" | "file") => lastCounts.get(app)?.[scope] ?? 0;

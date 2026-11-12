@@ -101,10 +101,6 @@
   width: 100%;
   min-width: 0;
   text-align: left;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
 }
 .fx-version-subject {
   max-width: 100%;

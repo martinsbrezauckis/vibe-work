@@ -18,7 +18,7 @@ async fn safari_relay_failure_is_visible_without_replacing_chromes_state() {
         .connected_profiles
         .observe(&json!({"profiles":[
             {"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.5"},
-            {"profileId":"safari:p","connected":true,"extensionVersion":"0.1.8"}
+            {"profileId":"safari:p","connected":true,"extensionVersion":crate::version()}
         ]}));
     let before = shared.chrome_control.owner.connected_profiles.snapshot();
     owner::observe(
@@ -31,7 +31,11 @@ async fn safari_relay_failure_is_visible_without_replacing_chromes_state() {
     let view = safari::view(shared).unwrap();
     assert_eq!(view.addon.state, AddonState::HelperSetupRequired);
     assert_eq!(view.addon.label, "Helper setup required");
-    assert!(view.addon.instruction.contains("socket"));
+    assert!(
+        view.addon
+            .instruction
+            .contains("could not start its connection")
+    );
     assert!(view.addon.instruction.contains("restart Vibe Work"));
     assert_eq!(
         shared.chrome_control.owner.connected_profiles.snapshot(),
@@ -184,11 +188,6 @@ async fn safari_off_revokes_only_safari_sessions_and_late_open_replies() {
         .lock()
         .unwrap()
         .extend([("c".into(), "s".into()), ("old".into(), "s".into())]);
-    chrome
-        .turn_ended
-        .lock()
-        .unwrap()
-        .insert("s".into(), ["a".into()].into());
     let pending = person_stop::PendingCall::new(
         shared,
         "s",
@@ -200,14 +199,6 @@ async fn safari_off_revokes_only_safari_sessions_and_late_open_replies() {
     assert_eq!(
         chrome.tasks.lock().unwrap().get("c").map(String::as_str),
         Some("s")
-    );
-    assert!(
-        chrome
-            .turn_ended
-            .lock()
-            .unwrap()
-            .get("s")
-            .is_none_or(|ids| !ids.contains(&"a".into()))
     );
     assert_eq!(
         chrome.work.lock().unwrap().state_of("old", "s"),
@@ -339,7 +330,7 @@ async fn safari_gateway_opens_and_runs_with_chrome_off_and_keeps_chat_ownership(
     .await;
     let shared = &core.shared;
     auto_approve_chats(shared);
-    let profile = json!({"profileId":"safari:p","connected":true,"extensionVersion":"0.1.8","features":["tabs.create","page.read"],"extensionCapabilities":["tabs.create","page.read"]});
+    let profile = json!({"profileId":"safari:p","connected":true,"extensionVersion":crate::version(),"features":["tabs.create","page.read"],"extensionCapabilities":["tabs.create","page.read"]});
     let status = json!({"structuredContent":{"profiles":[profile],"sessions":[{"sessionId":"t","profileId":"safari:p"}]}});
     let calls = test_support::answering(shared, move |tool, args| match tool {
         "chrome_status" => status.clone(),

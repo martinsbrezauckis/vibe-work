@@ -292,13 +292,6 @@ fieldset.key-offer {
 .vibe-install details[open] > summary {
   margin-bottom: 6px;
 }
-.vibe-install .tb-btn {
-  border: 1px solid var(--line-2);
-  height: var(--control-height-search);
-  padding: 0 12px;
-  font-size: var(--text-13);
-  color: var(--text);
-}
 .vibe-existing > li {
   display: grid;
   gap: 6px;

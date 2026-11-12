@@ -1,5 +1,6 @@
 //! Linux helper resource and syscall limits, installed before any untrusted media parsing.
 //! Bubblewrap supplies filesystem, PID and network namespaces; these caps also deny child process escapes.
+use vw_video_types::{Code, Error};
 /// Applies hard address-space, CPU, file and syscall limits to the current helper.
 /// # Errors
 /// An unsupported kernel or a denied limit installation; decoding must not start.
@@ -9,7 +10,7 @@
     clippy::cast_sign_loss,
     reason = "Linux x86_64 syscall and errno constants are nonnegative 32-bit BPF values"
 )]
-pub fn restrict() -> Result<(), String> {
+pub fn restrict() -> Result<(), Error> {
     use rustix::process::{Resource, Rlimit, setrlimit};
     for (resource, cap) in [
         // System decoder libraries and 4K reference frames need more than 512 MiB of address space.
@@ -27,7 +28,7 @@ pub fn restrict() -> Result<(), String> {
                 maximum: Some(cap),
             },
         )
-        .map_err(|_| "backend_unavailable: helper resource limits")?;
+        .map_err(|error| Error::at(Code::WorkerIsolation, "helper resource limits", error))?;
     }
     #[cfg(target_arch = "x86_64")]
     {
@@ -75,7 +76,8 @@ pub fn restrict() -> Result<(), String> {
             instruction(0x06, 0, 0, 0x7fff_0000),
         ]);
         let program = sock_fprog {
-            len: u16::try_from(filter.len()).map_err(|_| "backend_unavailable: seccomp size")?,
+            len: u16::try_from(filter.len())
+                .map_err(|error| Error::at(Code::WorkerIsolation, "seccomp size", error))?,
             filter: filter.as_mut_ptr(),
         };
         // SAFETY: the kernel reads a valid BPF array for the duration of prctl, copying it before return.
@@ -88,10 +90,13 @@ pub fn restrict() -> Result<(), String> {
                 )
             } != 0
         {
-            return Err("backend_unavailable: helper syscall sandbox".into());
+            return Err(Error::new(Code::WorkerIsolation, "helper syscall sandbox"));
         }
         Ok(())
     }
     #[cfg(not(target_arch = "x86_64"))]
-    Err("backend_unavailable: helper syscall sandbox architecture".into())
+    Err(Error::new(
+        Code::WorkerIsolation,
+        "helper syscall sandbox architecture",
+    ))
 }

@@ -1,5 +1,7 @@
 //! Per-listener ingress capabilities. Used by guard/serve, independent of upstream proxy sign-in.
 //! OS randomness is mandatory; credentials are never logged or included in Debug output.
+//! Depends on: OS randomness and base64.
+//! Called by: guard listener creation and proxy admission.
 
 use base64::Engine as _;
 use std::fmt::Write as _;

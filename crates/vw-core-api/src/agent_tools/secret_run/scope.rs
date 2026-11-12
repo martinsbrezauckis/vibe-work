@@ -1,5 +1,7 @@
 //! Debug bearer scope at command admission and value release, using the current chat mode.
 //! The command and capture brokers share identity resolution; no vault permission or process is changed here.
+//! Depends on: secret-run bindings and live agent access.
+//! Called by: secret command admission and output capture.
 use super::{Bound, Job, Shared};
 
 pub(super) fn check_bound(shared: &Shared, session: &str, bound: &[Bound]) -> Result<(), String> {

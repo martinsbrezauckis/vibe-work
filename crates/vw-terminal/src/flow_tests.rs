@@ -46,11 +46,19 @@ fn a_trailing_key_echo_flushes_without_another_read() {
     let (_, rx) = attach(&output);
     output.push(b"a");
     assert_eq!(rx.try_recv().unwrap(), b"a");
-    let started = Instant::now();
     output.push(b"b");
     assert_eq!(rx.recv_timeout(WAIT).unwrap(), b"b");
-    // The deadline is 8 ms; allow scheduling tolerance on loaded build/test machines.
-    assert!(started.elapsed() < Duration::from_millis(250));
+    // Assert the exact scheduled deadline without making OS thread scheduling part of it.
+    let (tx, fixed_rx) = mpsc::channel();
+    let mut viewer = Viewer::new(1, Box::new(move |bytes| tx.send(bytes.to_vec()).is_ok()));
+    let now = Instant::now();
+    assert!(viewer.push(b"a", now));
+    assert_eq!(fixed_rx.try_recv().unwrap(), b"a");
+    assert!(viewer.push(b"b", now));
+    assert_eq!(viewer.deadline, Some(now + WINDOW));
+    assert!(fixed_rx.try_recv().is_err());
+    assert!(viewer.flush(now + WINDOW));
+    assert_eq!(fixed_rx.try_recv().unwrap(), b"b");
     thread::sleep(2 * WINDOW);
     output.push(b"c");
     assert_eq!(rx.try_recv().unwrap(), b"c", "echo after idle is immediate");

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 pub(super) fn header(body: &Value, limit: usize) -> Value {
     let mut header = json!({"note":vw_browser::observe::UNTRUSTED_NOTE,
-        "outputLimit":format!("Chrome output capped at {limit} bytes. Frozen receipt: concatenate details.text in offset order (UTF-16 units), then parse the original JSON before using fields or helper continuations. Do not replay writes.")});
+        "outputLimit":format!("Browser output capped at {limit} bytes. Frozen receipt: concatenate details.text in offset order (UTF-16 units), then parse the original JSON before using fields or browser continuations. Do not replay writes.")});
     for key in [
         "operationId",
         "sessionId",

@@ -69,21 +69,7 @@ impl Browser {
         action: &Action,
         by: Actor,
     ) -> Result<Option<Value>, ActError> {
-        if matches!(
-            action,
-            Action::Dialog(_)
-                | Action::Storage(_)
-                | Action::Screenshot(_)
-                | Action::Downloads(_)
-                | Action::Cookies(_)
-                | Action::Navigate { .. }
-                | Action::Back
-                | Action::Forward
-                | Action::Reload
-                | Action::Wait { .. }
-                | Action::Hover { .. }
-                | Action::Scroll { .. }
-        ) {
+        if skips_consent(action) {
             return Ok(None);
         }
         let mount = self.check_ref(session_id, action)?;
@@ -225,4 +211,28 @@ impl Browser {
         };
         url.origin().ascii_serialization() == configured && url.path().starts_with("/o/oauth2/")
     }
+}
+
+fn skips_consent(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::Dialog(_)
+            | Action::Diagnostics(_)
+            | Action::Inspect(_)
+            | Action::Viewport(_)
+            | Action::PageScript(_)
+            | Action::Network(_)
+            | Action::Storage(_)
+            | Action::Screenshot(_)
+            | Action::Downloads(_)
+            | Action::Cookies(_)
+            | Action::Navigate { .. }
+            | Action::Back
+            | Action::Forward
+            | Action::Reload
+            | Action::ReloadBypassCache
+            | Action::Wait { .. }
+            | Action::Hover { .. }
+            | Action::Scroll { .. }
+    )
 }

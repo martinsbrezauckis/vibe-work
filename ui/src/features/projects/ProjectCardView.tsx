@@ -66,7 +66,7 @@ export function SessionChip({
       presentation="project-session"
       as="button"
       data-state={session.state}
-      title="Open this session"
+      title="Open this chat"
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         open(session.id);

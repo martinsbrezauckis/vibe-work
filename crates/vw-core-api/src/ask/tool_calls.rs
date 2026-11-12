@@ -8,6 +8,7 @@ use vw_agent_tools::wire::tools as names;
 use vw_ask::{AnsweredBy, Outcome, Scope};
 
 const PREFIX: &str = "vw-tool-";
+mod browser_requests;
 mod read_rules;
 pub(crate) mod receipts;
 #[cfg(feature = "agent-vault")]
@@ -20,6 +21,7 @@ struct Call {
 pub(crate) struct Calls {
     records: Mutex<VecDeque<Call>>,
     transports: Mutex<VecDeque<receipts::Receipt>>,
+    pub(crate) browser_requests: Arc<browser_requests::Ledger>,
 }
 fn calls(shared: &Shared) -> Option<&Calls> {
     shared.agent_tools.as_ref().map(|t| &t.tool_asks)
@@ -101,9 +103,20 @@ pub(crate) async fn permission(
     if tool == "video_frames" && !vw_agent_tools::video::ENABLED {
         return Ok(());
     }
+    if matches!(
+        tool,
+        names::BROWSER_ACT | names::BROWSER_READ | names::BROWSER_CAPTURE
+    ) {
+        crate::browser_handover::check(shared, owner)?;
+    }
     let mode = shared.access.remembered(owner);
     if tool == names::BROWSER_ACT {
+        vw_agent_tools::browser_input::validate(tool, args)?;
         crate::chrome_control::builtin::check_full(mode.as_deref(), args)?;
+        // The authenticated hook settles the ordinary policy separately for every step.
+        if args.get("steps").is_some() {
+            return Ok(());
+        }
     }
     let ask = mode.as_deref() == Some("ask");
     let browser_tier = (tool == names::BROWSER_ACT)
@@ -147,10 +160,16 @@ pub(crate) async fn permission(
     }
     #[cfg(feature = "video")]
     let detail = if tool == "video_frames" {
-        let request: vw_agent_tools::video::Request =
-            serde_json::from_value(args.clone()).map_err(|e| format!("Invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
+        let request: vw_agent_tools::video::Request = serde_json::from_value(args.clone())
+            .map_err(|e| {
+                crate::video_projection::failure(&vw_video_types::Error::new(
+                    vw_video_types::Code::InvalidRequest,
+                    e,
+                ))
+                .1
+            })?;
         let mut detail = detail;
-        detail["effect"]["display"] = json!({"summary":request.preflight()?});
+        detail["effect"]["display"] = json!({"summary":request.preflight().map_err(|e| crate::video_projection::failure(&e).1)?});
         detail
     } else {
         detail
@@ -193,7 +212,7 @@ pub(crate) async fn approve(
     }
     let stop = crate::stops::generation(shared, session);
     {
-        let mut records = lock(calls(shared).ok_or("Tools unavailable.")?);
+        let mut records = lock(calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?);
         make_room(shared, &mut records)?;
         records.push_back(Call {
             session: session.into(),
@@ -201,7 +220,7 @@ pub(crate) async fn approve(
         });
     }
     let mut handle = super::callback_opened_at(shared, &entry, "approval", session, Some(stop))
-        .ok_or("Permission prompt unavailable.")?;
+        .ok_or(vw_vocabulary::texts::AGENT_PROMPT_UNAVAILABLE)?;
     handle.cancel_on_drop = true;
     shared.emit(CoreEvent::CallbackOpened {
         session_id: session.into(),
@@ -217,6 +236,9 @@ pub(crate) async fn approve(
     }
     if crate::stops::generation(shared, session) != stop {
         return Err(crate::stops::APPROVAL_ENDED.into());
+    }
+    if let Some(ledger) = crate::one_ask::of(shared) {
+        ledger.note_allowed(&[source, session], call);
     }
     carry_over(shared, session, &id, &entry);
     Ok(())
@@ -241,7 +263,7 @@ pub(crate) fn dispatch_transport(shared: &Arc<Shared>, entry: &Value, owner: &st
         return false;
     }
     let result = calls(shared)
-        .ok_or("Tools unavailable.".to_owned())
+        .ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE.to_owned())
         .and_then(|calls| {
             receipts::verify(
                 calls,
@@ -413,49 +435,14 @@ fn make_room(shared: &Shared, records: &mut VecDeque<Call>) -> Result<(), String
                     ))
                     .is_none()
             })
-            .ok_or("Too many open permission prompts.")?;
+            .ok_or(vw_vocabulary::texts::AGENT_PROMPT_LIMIT)?;
         records.remove(index);
     }
     Ok(())
 }
 #[cfg(test)]
-mod transport_tests {
-    use super::*;
-
-    #[test]
-    fn tools_with_their_own_policy_never_get_a_generic_card() {
-        for name in [
-            names::DOCUMENT_READ,
-            names::SECRET_RUN,
-            names::SECRET_RUN_STATUS,
-            names::PROPOSE_PROTECTED_CHANGE,
-            names::PROTECTED_CHANGE_STATUS,
-            names::BROWSER_CAPTURE_SECRET,
-            names::CHROME_TOOL_LIST,
-            "chrome_status",
-            "chrome_session",
-            "chrome_execute",
-        ] {
-            assert!(asks_inside(name, &json!({})), "{name}");
-        }
-        for action in ["fill", "close_tab"] {
-            assert!(asks_inside(names::BROWSER_ACT, &json!({"action":action})));
-        }
-        for name in [names::READ_ALOUD, names::USE_HEADLESS_BROWSER] {
-            let card = json!({"detail":{"kind":"approval","effect":{"toolName":format!("mcp_vw.{name}")}}});
-            assert!(
-                crate::read_aloud::approve_without_dialog(&card)
-                    || crate::on_demand::approve_without_dialog(&card),
-                "{name}"
-            );
-        }
-        assert!(!asks_inside(
-            names::PROCESS_START,
-            &json!({"command":"echo hello"})
-        ));
-        assert!(!asks_inside(names::BROWSER_ACT, &json!({"action":"click"})));
-    }
-}
+#[path = "tool_calls_transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 #[path = "tool_calls_cap_tests.rs"]
@@ -466,42 +453,70 @@ mod cap_tests;
 mod read_tests;
 
 #[cfg(test)]
-mod suggestion_tests {
-    use super::*;
-    #[tokio::test]
-    async fn addon_cards_need_no_approval_in_any_access_mode() {
-        let core = crate::offline_core::start("addon-card-permission").await;
-        for mode in [
-            "ask",
-            "accept-edits",
-            "smart-approve",
-            "auto-approve",
-            "vw-plan",
-            "plan",
-            "explore",
-        ] {
-            core.shared.access.observe_request(
-                "session/agent/update",
-                "s",
-                &json!({"agentName":mode}),
-            );
-            for tool in [names::CONNECTOR_SUGGEST, names::ADDON_SUGGEST] {
-                let answer = tokio::time::timeout(
-                    std::time::Duration::from_millis(100),
-                    permission(
-                        &core.shared,
-                        "s",
-                        "s",
-                        "call",
-                        tool,
-                        &json!({"addon":"chrome","reason":"Read a page"}),
-                    ),
-                )
-                .await;
-                assert!(matches!(answer, Ok(Ok(()))), "{mode} {tool}: {answer:?}");
-                assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
-            }
-        }
-        core.shutdown().await;
+#[path = "tool_calls_suggestion_tests.rs"]
+mod suggestion_tests;
+
+/// Cancel only cards bound to the exact browser identity the person disabled or removed.
+pub(crate) fn cancel_browser_profile(shared: &Shared, profile: &str) {
+    let Some(calls) = calls(shared) else { return };
+    let entries: Vec<_> = lock(calls)
+        .iter()
+        .filter(|call| call.entry["vwBrowserProfileId"] == profile)
+        .filter_map(|call| call.entry["id"].as_str().map(str::to_owned))
+        .collect();
+    for id in entries {
+        shared.asks.settle(&format!("callback:{id}"), Outcome::Cancelled {
+            reason: "This browser profile was disconnected. Select a connected profile before trying again.".into(),
+        });
+        shared.ask_grants.forget_callback(&id);
+    }
+}
+
+/// An open card still waits on this exact browser identity (a removed profile keeps its Settings row until then).
+pub(crate) fn browser_profile_waiting(shared: &Shared, profile: &str) -> bool {
+    let Some(calls) = calls(shared) else {
+        return false;
+    };
+    lock(calls).iter().any(|call| {
+        call.entry["vwBrowserProfileId"]
+            .as_str()
+            .is_some_and(|id| crate::chrome_control::same_profile(id, profile))
+            && call.entry["id"]
+                .as_str()
+                .is_some_and(|id| shared.asks.get(&format!("callback:{id}")).is_some())
+    })
+}
+
+/// Test-only: an open browser card bound to `profile`; dropping the returned handle settles it.
+#[cfg(all(test, feature = "your-edge"))]
+pub(crate) fn open_browser_card_for_test(
+    shared: &Arc<Shared>,
+    session: &str,
+    profile: &str,
+) -> Option<super::service::Handle> {
+    let id = format!("{PREFIX}presence-test");
+    let entry = json!({"id": id, "sessionId": session, "toolName": "mcp_vw.chrome_click", "vwBrowserProfileId": profile});
+    lock(calls(shared)?).push_back(Call {
+        session: session.into(),
+        entry: entry.clone(),
+    });
+    let mut handle = super::callback_opened_at(shared, &entry, "approval", session, None)?;
+    handle.cancel_on_drop = true;
+    Some(handle)
+}
+
+/// A person changes this chat's profile; cancel only its browser cards, leaving sibling chats alone.
+pub(crate) fn cancel_browser_chat(shared: &Shared, chat: &str) {
+    let Some(calls) = calls(shared) else { return };
+    let entries: Vec<_> = lock(calls)
+        .iter()
+        .filter(|call| call.session == chat && call.entry["vwBrowserProfileId"].is_string())
+        .filter_map(|call| call.entry["id"].as_str().map(str::to_owned))
+        .collect();
+    for id in entries {
+        shared.asks.settle(&format!("callback:{id}"), Outcome::Cancelled {
+            reason: "The person changed this chat's browser profile. Open a fresh session in the selected profile.".into(),
+        });
+        shared.ask_grants.forget_callback(&id);
     }
 }

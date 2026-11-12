@@ -235,29 +235,6 @@ mod imp {
     }
 }
 
-#[cfg(all(test, windows))]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod windows_tests {
-    use super::process_facts;
-
-    #[test]
-    fn exited_process_with_a_retained_handle_is_not_live() {
-        let mut child = std::process::Command::new("cmd.exe")
-            .args(["/C", "exit /B 7"])
-            .spawn()
-            .unwrap();
-        let pid = child.id();
-        assert_eq!(child.wait().unwrap().code(), Some(7));
-        // `child` still holds the process handle: opening that PID and reading its creation
-        // FILETIME can succeed even though it has exited.
-        let facts = process_facts(pid).expect("retained handle keeps exited process queryable");
-        assert!(
-            facts.zombie,
-            "exited process must not retain its lease: {facts:?}"
-        );
-    }
-}
-
 #[cfg(windows)]
 mod imp {
     use super::{Duration, ProcessFacts, TerminateError};

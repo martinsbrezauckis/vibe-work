@@ -66,13 +66,17 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
                 ? { op: "removeSafari" }
                 : request
             : browser === "Firefox"
-              ? request.op === "offerSetup"
-                ? { op: "offerFirefoxSetup" }
-                : request.op === "setup"
-                  ? { op: "setupFirefox", offerId: request.offerId }
-                  : request.op === "openStore"
-                    ? { op: "openFirefoxStore" }
-                    : request
+              ? request.op === "setEnabled"
+                ? { op: "setFirefoxEnabled", enabled: request.enabled }
+                : request.op === "remove"
+                  ? { op: "removeFirefox" }
+                  : request.op === "offerSetup"
+                    ? { op: "offerFirefoxSetup" }
+                    : request.op === "setup"
+                      ? { op: "setupFirefox", offerId: request.offerId }
+                      : request.op === "openStore"
+                        ? { op: "openFirefoxStore" }
+                        : request
               : browser === "Edge"
                 ? request.op === "remove"
                   ? { op: "removeEdge" }
@@ -119,6 +123,29 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
           });
         if (current?.safari?.addon.action !== "turnOn")
           await core.run({ type: "chromeControl", request: { op: "openSafariSetup" } });
+        return;
+      }
+      if (browser === "Firefox") {
+        const state = current?.firefoxSharing?.state;
+        if (state === "switchedOff") {
+          await core.run({
+            type: "chromeControl",
+            request: { op: "setFirefoxEnabled", enabled: true },
+          });
+        } else if (state === "notSetUp" || state === "helperSetupRequired") {
+          const offer = await core.run({
+            type: "chromeControl",
+            request: { op: "offerFirefoxSetup" },
+          });
+          if (offer.type !== "chromeControl" || offer.offer === null)
+            throw new Error("Firefox setup unavailable");
+          await core.run({
+            type: "chromeControl",
+            request: { op: "setupFirefox", offerId: offer.offer.offerId },
+          });
+        } else {
+          await core.run({ type: "chromeControl", request: { op: "openFirefoxStore" } });
+        }
         return;
       }
       const setup = browser === "Edge" ? current?.edge : current?.setup;
@@ -168,12 +195,7 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
       (setupState === "notSetUp" && !pendingRemoval)
     )
       return;
-    const timer = setInterval(() => {
-      void core.run({ type: "chromeControl", request: { op: "read" } }).catch(() => undefined);
-    }, 3000);
-    return () => {
-      clearInterval(timer);
-    };
+    return core.watchBrowserSetup();
   }, [core, setupState, pendingRemoval]);
 
   const liveStatus =

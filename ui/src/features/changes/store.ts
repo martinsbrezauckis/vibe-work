@@ -89,7 +89,7 @@ export function createChanges(core: CoreController, rewind: RewindDestination) {
       request.op !== "readRepo" &&
       request.op !== "read"
     )
-      throw new Error("Keep and Revert are available in the session's review.");
+      throw new Error("Keep and Revert are available in the chat's review.");
     const result = await core.run({ type: "changes", request });
     if (result.type !== "changes") throw new Error(`unexpected ${result.type} result`);
     return result.result;

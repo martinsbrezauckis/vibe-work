@@ -65,7 +65,7 @@ async fn page(html: &str) -> Rig {
         .await
         .unwrap();
     rig.engine
-        .eval(&format!(
+        .eval_frames(&format!(
             "document.body.innerHTML = {}; scrollTo(0,0)",
             json!(html)
         ))
@@ -197,7 +197,6 @@ async fn catalogue_page_lists_at_least_as_many_refs_as_before() {
 #[tokio::test(flavor = "multi_thread")]
 async fn frame_ref_carries_its_origin_and_stays_actionable() {
     let rig = page("<button>Main button</button><iframe style=\"position:fixed;left:12px;top:40px;width:280px;height:180px\" src=\"https://frame.example.test/login\"></iframe>").await;
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     let answer = agent_read(&rig).await;
     let main = refs(&answer)
         .iter()

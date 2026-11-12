@@ -15,12 +15,15 @@ impl vw_browser::Navigate for NoNavigation {
     }
 }
 
-const BUSY: &str = "the person is using the browser right now; try again in a moment";
-const PERSON: &str = "the person clicked in the browser at the same time, so earlier refs may no longer match; read the page again";
+const BUSY: &str = "the user is using the browser right now; try again in a moment";
+const PERSON: &str = "the user clicked in the browser at the same time, so earlier refs may no longer match; read the page again";
 
 async fn prepared() -> (Rig, vw_browser::Action) {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
+    // These cases exercise existing documents; new-document input expiry has separate coverage.
+    rig.engine
+        .eval("new Promise(resolve=>setTimeout(resolve,Math.max(0,350-performance.now())))")
+        .await;
     rig.engine.eval(r#"document.body.innerHTML = '<button id="target" style="position:fixed;left:20px;top:20px;width:100px;height:40px">A</button>';
       scrollTo(0,0);window.presses=[];
       window.addEventListener('mousedown',e=>{if(e.isTrusted)window.presses.push(e.target.id||e.target.tagName)},true)"#).await;
@@ -55,7 +58,7 @@ fn refused_before_input(rig: &Rig, result: &Result<serde_json::Value, vw_browser
     );
     let error = result
         .as_ref()
-        .expect_err("checked input ran while the person was clicking");
+        .expect_err("checked input ran while the user was clicking");
     assert_eq!(error.outcome, Outcome::Refused, "{error:?}");
     assert!(error.text.contains(BUSY), "{error:?}");
     assert!(!error.text.contains("native input was sent"), "{error:?}");
@@ -69,7 +72,7 @@ fn not_confirmed(rig: &Rig, result: &Result<serde_json::Value, vw_browser::ActEr
     );
     let error = result
         .as_ref()
-        .expect_err("the person's click confirmed the agent's input");
+        .expect_err("the user's click confirmed the agent's input");
     assert_eq!(error.outcome, Outcome::Failed, "{error:?}");
     assert!(error.text.contains(PERSON), "{error:?}");
     assert!(error.text.contains("native input was sent"), "{error:?}");
@@ -141,7 +144,7 @@ async fn person_click_making_an_unregistered_frame_cannot_confirm_input() {
     let result = act(&rig, action).await;
     assert!(
         result.is_err(),
-        "the person's click confirmed input in a new frame: {result:?}"
+        "the user's click confirmed input in a new frame: {result:?}"
     );
     let presses = rig.engine.eval("window.presses").await;
     assert_eq!(presses[0], "target", "{presses}");

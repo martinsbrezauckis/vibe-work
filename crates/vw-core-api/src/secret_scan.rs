@@ -13,11 +13,12 @@ use std::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     sync::{Notify, oneshot},
     task::JoinHandle,
+    time::Instant,
 };
 
 pub(crate) const START_IDLE: Duration = Duration::from_secs(30);

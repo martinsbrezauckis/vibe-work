@@ -107,7 +107,7 @@ export function toolText(tool: string, text: string, literal: string | null = nu
 }
 
 const APP_ACTIONS: Readonly<Record<string, string>> = {
-  session_status: "Read this session's access mode",
+  session_status: "Read this chat's access mode",
   connectors_list: "List available connectors",
   connector_suggest: "Offer a connector",
   addon_suggest: "Offer an add-on",
@@ -116,7 +116,7 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   protected_change_status: "Read the change outcome",
   read_aloud: "Read aloud",
   processes_list: "List running programs",
-  port_lease: "Read this session's ports",
+  port_lease: "Read this chat's ports",
   process_start: "Start a background command",
   process_stop: "Stop a program",
   process_restart: "Restart a program",
@@ -125,7 +125,7 @@ const APP_ACTIONS: Readonly<Record<string, string>> = {
   secret_run: "Run a command with secrets",
   secret_run_status: "Read the command outcome",
   panel_read: "Read an open editor",
-  preview_list: "List this session's servers",
+  preview_list: "List this chat's servers",
   preview_open: "Open a preview",
   preview_screenshot: "Capture a preview",
   preview_console: "Read the preview console",

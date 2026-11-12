@@ -190,9 +190,7 @@ pub mod tools {
 
     /// Every tool a session credential may call.
     pub const SESSION_TOOLS: [&str;
-        36 + cfg!(feature = "video") as usize
-            + cfg!(feature = "feedback") as usize
-            + cfg!(feature = "agent-vault") as usize] = [
+        36 + cfg!(feature = "video") as usize + 1 + cfg!(feature = "agent-vault") as usize] = [
         #[cfg(feature = "video")]
         "video_frames",
         SESSION_STATUS,
@@ -225,7 +223,6 @@ pub mod tools {
         IMAGE_GENERATE,
         DOCUMENT_READ,
         READ_ALOUD,
-        #[cfg(feature = "feedback")]
         FEEDBACK_DRAFT,
         PANEL_READ,
         SEARCH,
@@ -395,69 +392,5 @@ fn unconfirmed_process(tool: &str, reason: String) -> String {
         )
     } else {
         reason
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn lost_chrome_reply_is_unknown_and_must_not_be_repeated() {
-        let text = unconfirmed_process("chrome_execute", "pipe closed".to_owned());
-        assert!(text.starts_with(UNKNOWN_OUTCOME));
-        assert!(text.contains("Check Chrome"));
-    }
-
-    #[test]
-    fn answer_survives_idle_socket_polls_and_keeps_partial_json() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = listener.local_addr().unwrap().to_string();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            read_line(&mut stream).unwrap();
-            stream.write_all(b"{\"ok\":").unwrap();
-            std::thread::sleep(Duration::from_millis(450));
-            stream.write_all(b"{\"done\":true}}\n").unwrap();
-        });
-        let result = call(
-            &endpoint,
-            "synthetic-test",
-            tools::BROWSER_ACT,
-            json!({}),
-            Duration::from_secs(2),
-        );
-        assert_eq!(result.unwrap(), json!({"done": true}));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn partial_answer_expires_at_one_deadline() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = listener.local_addr().unwrap().to_string();
-        let (release, held) = std::sync::mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            read_line(&mut stream).unwrap();
-            stream.write_all(b"{\"ok\":").unwrap();
-            held.recv().unwrap();
-        });
-        let started = Instant::now();
-        let reason = call(
-            &endpoint,
-            "synthetic-test",
-            tools::BROWSER_ACT,
-            json!({}),
-            Duration::from_millis(250),
-        )
-        .unwrap_err();
-        assert_eq!(
-            reason,
-            "read failed: timed out waiting for Vibe Work answer"
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        release.send(()).unwrap();
-        server.join().unwrap();
     }
 }

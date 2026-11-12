@@ -3,30 +3,40 @@
 use std::path::{Path, PathBuf};
 use vw_procmon::{ProcessInfo, Snapshot};
 
-fn runs_program(args: &[String], program: &Path) -> bool {
+fn runs_program(args: &[String], program: &Path, adapter: &Path) -> bool {
     // Vibe 3 sets its process title before serving. setproctitle replaces argv on Unix,
     // leaving empty padding arguments. The caller also checks the executable and exact
     // launcher ancestry, so a title alone never establishes ownership.
     args.iter().take(2).any(|arg| Path::new(arg) == program)
         || (args.first().is_some_and(|arg| arg == "vibe-app-server")
             && args.iter().skip(1).all(String::is_empty))
-        || runs_adapter(args, program)
+        || runs_adapter(args, program, adapter)
 }
 
-/// The supervisor's child-Stop launch of `program`: `<python> -P -c <exactly our adapter> <program> ...`. On Windows
+/// The supervisor's isolated, unbuffered launch with the exact verifier, private file and compiled-in digest. On Windows
 /// the title is not visible in the command line, and the environment's `python.exe` starts the base Python with
 /// this same command line, so this is how both processes name the server.
-fn runs_adapter(args: &[String], program: &Path) -> bool {
-    matches!(args, [_, isolate, dash_c, code, server, ..]
-        if isolate == "-P"
+fn runs_adapter(args: &[String], program: &Path, adapter: &Path) -> bool {
+    matches!(args, [_, isolate, unbuffered, dash_c, code, file, digest, server, mode, ..]
+        if isolate == "-I"
+            && unbuffered == "-u"
             && dash_c == "-c"
-            && code == vw_supervisor::CHILD_STOP_ADAPTER
-            && Path::new(server) == program)
+            && code == vw_supervisor::ADAPTER_BOOTSTRAP
+            && Path::new(file) == adapter
+            && digest == vw_supervisor::adapter_digest()
+            && Path::new(server) == program
+            && mode == "--multiplex")
 }
 
 /// `launchers`: the executables of the supervisor's configured launcher argv
 /// ([`vw_supervisor::Supervisor::launcher_programs`]); empty when it spawns the server itself.
-pub(crate) fn is_server(pid: u32, leader: u32, program: &Path, launchers: &[PathBuf]) -> bool {
+pub(crate) fn is_server(
+    pid: u32,
+    leader: u32,
+    program: &Path,
+    launchers: &[PathBuf],
+    adapter: &Path,
+) -> bool {
     if pid == leader {
         return true;
     }
@@ -44,6 +54,7 @@ pub(crate) fn is_server(pid: u32, leader: u32, program: &Path, launchers: &[Path
         program,
         launchers,
         &launcher_images(program),
+        adapter,
     )
 }
 
@@ -57,9 +68,10 @@ fn owns(
     program: &Path,
     launchers: &[PathBuf],
     images: &[PathBuf],
+    adapter: &Path,
 ) -> bool {
     if launchers.is_empty() {
-        return matches_chain(snapshot, &chain, leader, program, images);
+        return matches_chain(snapshot, &chain, leader, program, images, adapter);
     }
     let is_launcher = |pid: u32| {
         snapshot.alive(pid).is_some_and(|process| {
@@ -79,7 +91,7 @@ fn owns(
         && wrappers <= launchers.len()
         && chain
             .last()
-            .is_some_and(|&top| matches_chain(snapshot, &chain, top, program, images))
+            .is_some_and(|&top| matches_chain(snapshot, &chain, top, program, images, adapter))
 }
 
 fn same_file(exe: &Path, image: &Path) -> bool {
@@ -207,6 +219,7 @@ fn matches_chain(
     leader: u32,
     program: &Path,
     images: &[PathBuf],
+    adapter: &Path,
 ) -> bool {
     // No arbitrary named descendant counts as a launcher. The chain must reach the spawned process,
     // then follow the actual image order: entry point, environment Python, optional base Python.
@@ -216,13 +229,13 @@ fn matches_chain(
     chain.iter().rev().zip(images).all(|(pid, image)| {
         snapshot
             .alive(*pid)
-            .is_some_and(|process| matches_image(process, image, program))
+            .is_some_and(|process| matches_image(process, image, program, adapter))
     })
 }
 
-fn matches_image(process: &ProcessInfo, image: &Path, program: &Path) -> bool {
+fn matches_image(process: &ProcessInfo, image: &Path, program: &Path, adapter: &Path) -> bool {
     process.same_user == Some(true)
-        && runs_program(&process.cmdline, program)
+        && runs_program(&process.cmdline, program, adapter)
         && process
             .exe
             .as_deref()

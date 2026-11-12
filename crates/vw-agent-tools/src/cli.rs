@@ -4,6 +4,7 @@
 //! Modes:
 //! - Named `gh`: credential-free client for the app's GitHub read broker.
 //! - Named `bash` (Windows): the real Git Bash in a kill-on-close job, so Stop ends everything it started (`git_bash`).
+//! - Named `pwsh` or `powershell` (Windows): the same for the real PowerShell (`powershell`).
 //! - `gh-broker <real gh>`: trusted app-only mode, token over stdin and endpoint over stdout.
 //! - `mcp`: the per-session stdio MCP server (`agentConfig.mcpServers`, name `vw`). Reads the core endpoint and
 //!   the session credential from `VW_AGENT_ENDPOINT` / `VW_AGENT_CREDENTIAL` (set by the core, never in argv).
@@ -24,6 +25,11 @@ use std::process::ExitCode;
 use crate::{hook, mcp, wire};
 
 fn mcp_mode(chrome: bool, package: bool) -> ExitCode {
+    // This process holds its chat's tool credential (environment and memory). On Linux another
+    // same-user program, such as another chat's Full-access agent, could read it from /proc and act as this chat
+    // (and so under this chat's project vault permissions). Non-dumpable, like the core, closes those reads.
+    #[cfg(target_os = "linux")]
+    let _ = rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable);
     let endpoint = std::env::var(wire::ENV_ENDPOINT).ok();
     let credential = std::env::var(wire::ENV_CREDENTIAL).ok();
     let forward = move |tool: &str, args: serde_json::Value| match (&endpoint, &credential) {
@@ -90,13 +96,19 @@ pub fn run(args: &[String]) -> ExitCode {
     {
         return crate::git_bash::run();
     }
+    if name
+        .as_ref()
+        .is_some_and(|name| crate::powershell::is_mode_name(name))
+    {
+        return crate::powershell::run();
+    }
     if name.is_some_and(|name| name.eq_ignore_ascii_case("gh")) {
         return match vw_gh_broker::entry::shim() {
             Ok(code) => {
                 std::process::exit(code);
             }
             Err(error) => {
-                eprintln!("gh broker: {error}");
+                eprintln!("{error}");
                 ExitCode::from(1)
             }
         };

@@ -87,7 +87,7 @@ export function registerGitRoute(app: App, git: Git): () => void {
       params["sessionId"] === undefined
         ? app.shell.store.get().selected
         : text(params["sessionId"], "sessionId");
-    if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+    if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
     const action = params["action"] ?? "state";
     if (git.store.get().status[sessionId] === undefined) await git.load(sessionId);
     if (params["repo"] !== undefined) {

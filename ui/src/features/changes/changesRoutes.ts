@@ -86,11 +86,11 @@ export function registerChangesRoute(
       case "state":
         return state();
       case "reload":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
         await changes.load(sessionId);
         return state();
       case "select":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
         if (typeof path !== "string" || path === "")
           throw new UiControlError("invalidParams", "path must be a non-empty string");
         changes.select(sessionId, path);
@@ -103,7 +103,7 @@ export function registerChangesRoute(
       case "comment":
       case "removeComment":
       case "sendComments":
-        if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+        if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
         await comments.load(sessionId);
         await commentAction(String(action), asObject(body), { changes, comments, sessionId });
         return state();

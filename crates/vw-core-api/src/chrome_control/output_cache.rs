@@ -67,7 +67,6 @@ pub(super) fn for_model(
     tool: &str,
     clamped: bool,
 ) -> Value {
-    #[cfg(feature = "click-marker")]
     if tool == "chrome_execute"
         && let super::owner::Answer::Helper(result) = &answer
     {
@@ -84,7 +83,7 @@ pub(super) fn for_model(
         && result["isError"] != true
         && result["structuredContent"]["error"].is_null()
     {
-        return save(shared, chat, &result["structuredContent"]);
+        return save(shared, chat, request, &result["structuredContent"]);
     }
     if tool != "chrome_execute" || !observation(&result) {
         return super::output::finish(result, tool, clamped);
@@ -121,10 +120,7 @@ pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut V
         return;
     }
     let id = format!("{:032x}", u128::from_be_bytes(random));
-    let mut request = request.clone();
-    if let Some(session) = body["sessionReopened"]["sessionId"].as_str() {
-        request["sessionId"] = json!(session);
-    }
+    let request = request.clone();
     let entry = Entry {
         id,
         chat: chat.to_owned(),
@@ -207,7 +203,7 @@ pub(super) fn resume(
             }
             let original: Value = serde_json::from_str(&entry.encoded).map_err(|_| invalid)?;
             drop(cache);
-            return super::output_file::save(shared, chat, &original);
+            return super::output_file::save(shared, chat, request, &original);
         }
         let mut result = json!({"isError":entry.is_error,"structuredContent":page(entry, offset)});
         super::output::sync_text(&mut result);
@@ -215,8 +211,8 @@ pub(super) fn resume(
     })())
 }
 
-fn save(shared: &Shared, chat: &str, body: &Value) -> Value {
-    super::output_file::save(shared, chat, body).unwrap_or_else(
+fn save(shared: &Shared, chat: &str, request: &Value, body: &Value) -> Value {
+    super::output_file::save(shared, chat, request, body).unwrap_or_else(
         |reason| json!({"vwMcpResult":super::owner::failure(&reason, "SAVE_FAILED")}),
     )
 }
@@ -224,7 +220,7 @@ fn save(shared: &Shared, chat: &str, body: &Value) -> Value {
 fn page(entry: &Entry, offset: usize) -> Value {
     super::output_fragment::page(&entry.header, &entry.encoded, offset, |next| {
         json!({"action":"page.read","args":{"cursor":format!("{PREFIX}{}:{next}", entry.id)},
-            "reason":"App receipt buffer; finish it before the preserved helper continuation."})
+            "reason":"Additional saved browser output; finish it before following the preserved continuation."})
     })
 }
 

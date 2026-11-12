@@ -21,13 +21,13 @@ import { useCoreState, useShellState } from "../shell/hooks";
 const SETTERS: Record<string, string> = {
   environment: "Vibe Work for this run",
   admin: "your administrator",
-  overrides: "a setting of this session",
+  overrides: "a setting of this chat",
   "project-toml": TEXT.setByProjectSettings,
 };
 
 /** Shown under a setting that was saved for new chats only. */
 const NEW_CHATS_NOTE =
-  "Saved for new chats. Sessions you already have open keep the setting they started with.";
+  "Saved for new chats. Chats you already have open keep the setting they started with.";
 
 export const LEFTOVER_TEXT =
   "The change was saved, but a helper chat that Vibe Work used for it could not be deleted. " +

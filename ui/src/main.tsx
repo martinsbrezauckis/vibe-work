@@ -48,6 +48,8 @@ import "./styles/projects.css";
 import "./styles/connectors.css";
 import "./styles/market.css";
 import "./styles/libraries.css";
+import "./styles/feedback.css";
+import "./styles/skills.css";
 import "./styles/worktrees.css";
 import "./styles/git.css";
 import "./styles/git-browser.css";

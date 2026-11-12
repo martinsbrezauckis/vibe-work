@@ -33,7 +33,7 @@ export function accessValue(input: {
   error: string | null;
 }): string {
   if (!input.running) return "Vibe is not running, so this cannot be read now.";
-  if (input.via === null) return "Needs a session.";
+  if (input.via === null) return "Needs a chat.";
   if (input.error !== null) return input.error;
   if (input.mode === undefined) return "Reading…";
   return accessLine(input.mode);
@@ -49,7 +49,7 @@ export function levelRows(
   return [
     {
       id: "access",
-      label: "New sessions start in",
+      label: "New chats start in",
       value: access,
       link: "Change in Models and agent",
     },

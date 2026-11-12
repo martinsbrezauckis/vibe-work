@@ -16,20 +16,20 @@ workspace = true
 ts = ["dep:ts-rs"]
 
 [dependencies]
-vw-platform = { path = "../vw-platform" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-tracing = "0.1"
+vw-platform = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
 # File watcher for live refresh. 8.2.0 is the newest stable (9.0 is rc.5), CC0-1.0,
 # MSRV 1.77; inotify on Linux, ReadDirectoryChangesW on Windows, FSEvents on macOS.
-notify = "8.2.0"
+notify = { workspace = true }
 # Line diff for hunks (git may not diff the working tree: its diff drivers and filters would run). Checked
 # 3.2.0 (Apache-2.0, MSRV 1.85), Myers with a deadline, default features only.
-similar = "3.2.0"
+similar = { workspace = true }
 # Verifying every object we read from the repository against its id (integrity check: the agent can
 # rewrite `.git/objects`). sha1 0.10.7 / sha2 0.10.9 (RustCrypto, MIT OR Apache-2.0); sha2 0.10 is already in
 # the lockfile..
 sha1 = "0.10.7"
-sha2 = "0.10.9"
-ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+sha2 = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }

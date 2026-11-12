@@ -8,7 +8,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { ContextComposition } from "../context/ContextComposition";
-import { contextCompositionEnabled } from "../../state/contextComposition";
 import { PathText } from "../../components/PathText";
 import { contextReadout, rateLimitWarning, usageOf } from "../../state/account";
 import { useKeyUi } from "../setup/useKeys";
@@ -68,11 +67,10 @@ function Server() {
 /**
  * The open session's context readout (a short usage tracker): `Context 42%` and nothing
  * else (no token count, no bar). Shown only while the switch in Settings › Appearance is on and the numbers exist;
- * hovering explains it, a click opens Settings › Usage and plan at "This conversation".
+ * hovering explains it; a click opens the context breakdown.
  * (The per-minute rate-limit warning joins here when the key proxy reports headroom,.)
  */
 function UsageReadout() {
-  const { shell } = useApp();
   const show = useShellState((s) => s.showUsage);
   const selected = useShellState((s) => s.selected);
   const session = useCoreState((s) =>
@@ -87,24 +85,7 @@ function UsageReadout() {
   const readout = contextReadout(usageOf(session, runtime), runtime);
   if (readout === null) return null;
   const { percent } = readout;
-  // The direct build flag lets an OFF production bundle drop the optional panel.
-  if (import.meta.env.VITE_CONTEXT_COMPOSITION === "1" && contextCompositionEnabled())
-    return <CompositionReadout key={selected} sessionId={selected} percent={percent} />;
-  const explain = `${readout.explain} Click for Usage and plan.`;
-  return (
-    <button
-      type="button"
-      className="sb-usage"
-      data-testid="shell.statusbar-usage"
-      title={explain}
-      aria-label={`Context ${String(percent)}%: ${explain}`}
-      onClick={() => {
-        shell.actions.openSettings("usage", "session-usage");
-      }}
-    >
-      Context {percent}%
-    </button>
-  );
+  return <CompositionReadout key={selected} sessionId={selected} percent={percent} />;
 }
 
 /** Meter entry, remounted by session identity so changing chats closes its panel. */

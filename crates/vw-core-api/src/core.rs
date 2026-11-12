@@ -6,9 +6,12 @@
 //! - The pump subscribes to the first connection before `start` returns, so no session notification is missed.
 //! - `Core` is an Arc handle. Drop kills the supervisor/terminal trees; `shutdown` stops terminals first.
 
+#[path = "core_start.rs"]
+mod start;
+
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::access::Access;
@@ -18,21 +21,23 @@ pub use crate::core_config::CoreConfig;
 pub use crate::error::CoreStartError;
 use crate::event::CoreEvent;
 use crate::names::Names;
-use crate::pump;
 use crate::subscription::CoreSubscription;
 use crate::transport::SupervisedTransport;
 use crate::view::{
     ChannelView, ChannelsReport, CoreStatus, DebugApiFlag, ServerReport, ServerStatus, duration_ms,
 };
+
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::info;
-use vw_gate::{Confirmer, Gate, GateError};
+use vw_gate::{Gate, GateError};
 use vw_session::{Applied, SessionStore};
-use vw_supervisor::{SecretProvider, Supervisor, SupervisorConfig, SupervisorError};
+use vw_supervisor::Supervisor;
 use vw_terminal::TerminalManager;
 /// State shared by every handle, the pump and the server-request handler.
 pub(crate) struct Shared {
+    pub(crate) browser_settings: crate::browser_settings::Settings,
+    pub(crate) browser_dialogs: Arc<crate::browser_dialogs::Dialogs>,
     pub(crate) feedback: crate::feedback::Feedback,
     pub(crate) deletes: Arc<crate::session_delete::Deletes>,
     pub(crate) guard_asks: crate::ask::guards::Calls,
@@ -77,6 +82,7 @@ pub(crate) struct Shared {
     pub(crate) model_choices: crate::model_choices::Choices,
     pub(crate) plugin_refresh: crate::plugin_refresh::Refresh,
     pub(crate) interrupted_send: crate::interrupted_send::State,
+    pub(crate) model_requests: Option<Arc<dyn vw_supervisor::ModelRequests>>,
     /// Per-chat Stop generation: a continuation scheduled before a Stop is never sent (`stops.rs`).
     pub(crate) stops: crate::stops::Stops,
     pub(crate) queue_returns: crate::queue_return::Returns,
@@ -208,154 +214,10 @@ impl Drop for Shared {
     }
 }
 
-/// The supervisor: started with its server, or waiting with no server (nothing spawned) when Vibe is
-/// not installed yet; the install's `on_ready` hook launches it later ([`connect_vibe_install`]).
-async fn start_supervisor(
-    mut supervisor: SupervisorConfig,
-    secrets: Arc<dyn SecretProvider>,
-    config: &CoreConfig,
-) -> Result<Arc<Supervisor>, SupervisorError> {
-    crate::mcp_keys::prepare_config(&supervisor.vibe_home, config.keys.as_ref()); // Use this run's port.
-    if !config.start_vibe {
-        // Local startup recovery and plugin admission still belong to the core even when a test needs no server.
-        if let Some(check) = &supervisor.before_launch {
-            check(&supervisor.program).map_err(SupervisorError::BeforeLaunch)?;
-        }
-        return Ok(Arc::new(Supervisor::start_pending(
-            supervisor,
-            secrets,
-            "This core runs without a Vibe server".to_owned(),
-        )));
-    }
-    if let Some(installer) = config.vibe_install.as_ref() {
-        installer.check_saved_existing().await;
-        if let Some(server) = installer.server() {
-            supervisor.program = server;
-        }
-    }
-    Ok(match config.vibe_install.as_ref() {
-        Some(installer) if installer.server().is_none() => Arc::new(Supervisor::start_pending(
-            supervisor,
-            secrets,
-            "Vibe is not installed yet: install it on the setup screen".to_owned(),
-        )),
-        _ => Arc::new(Supervisor::start(supervisor, secrets).await?),
-    })
-}
-
-/// lets the installer start the first server when Vibe is installed (or an existing install is
-/// chosen), and re-emits its view changes as `vibeInstall` events until the core goes away (and a `chromeControl`
-/// event when the accepted manifest's Chrome store state changed).
-fn connect_vibe_install(shared: &Arc<Shared>) {
-    let Some(installer) = shared.config.vibe_install.clone() else {
-        return;
-    };
-    let weak = Arc::downgrade(shared);
-    installer.set_on_ready(Arc::new(move |server| {
-        let weak = weak.clone();
-        Box::pin(async move {
-            let Some(shared) = weak.upgrade() else {
-                return Err("Vibe Work is closing".to_owned());
-            };
-            match shared.supervisor.launch_installed(&server).await {
-                Ok(()) => {
-                    crate::processes::record_server(&shared).await;
-                    Ok(())
-                }
-                // A supervisor started with a server (the normal case) has nothing to launch.
-                Err(vw_supervisor::SupervisorError::Unsupported(_))
-                    if shared.supervisor.current().is_some() =>
-                {
-                    Ok(())
-                }
-                Err(error) => Err(format!("Vibe did not start: {error}")),
-            }
-        })
-    }));
-    let mut views = installer.subscribe();
-    if let Err(error) = installer.upgrade_previous_private() {
-        tracing::warn!(%error, "could not prepare the updated app's Vibe install");
-    }
-    let weak = Arc::downgrade(shared);
-    // A check that changes the Chrome store state also refreshes Your Chrome (no restart).
-    let mut extension = installer.extension_store();
-    let task = tokio::spawn(async move {
-        while views.changed().await.is_ok() {
-            let view = views.borrow_and_update().clone();
-            let Some(shared) = weak.upgrade() else {
-                return;
-            };
-            shared.emit(CoreEvent::VibeInstall { view });
-            let now = shared
-                .config
-                .vibe_install
-                .as_ref()
-                .and_then(vw_vibe_install::VibeInstaller::extension_store);
-            if now != extension {
-                extension = now;
-                shared.emit(CoreEvent::ChromeControl {
-                    view: crate::chrome_control::commands::view(&shared),
-                });
-            }
-        }
-    });
-    *shared
-        .vibe_events
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
-}
-
-/// Starts the owned task that re-emits the key service's events (when the core has a key service).
-fn spawn_key_forwarder(shared: &Arc<Shared>) {
-    if let Some(keys) = &shared.config.keys {
-        let forwarder = tokio::spawn(crate::key_events::forward(
-            Arc::downgrade(shared),
-            keys.subscribe(),
-        ));
-        *shared
-            .key_events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(forwarder);
-    }
-}
-
-/// Wires the core's owned services and starts their background work (stopped on shutdown or core drop).
-/// Registers Vibe config credentials before a session can echo them, then starts agent tools, preview events,
-/// browser popups, pages, files, plan profiles, Changes refresh, process monitoring and session-holder polling.
-fn spawn_owned_tasks(shared: &Arc<Shared>) {
-    crate::mcp_keys::at_start(shared);
-    crate::agent_tools::start_server(shared);
-    crate::previews::start_events(shared);
-    crate::browser_popups::install(shared);
-    crate::pages::start_events(shared);
-    crate::files::start_events(shared);
-    crate::plan_profile::start(shared);
-    shared.changes.spawn(shared);
-    *shared
-        .procmon_tick
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(crate::processes::spawn_tick(shared));
-    crate::session_holder::start_poll(shared);
-}
-
 /// Handle to the running core. Clone it freely.
 #[derive(Clone)]
 pub struct Core {
     pub(crate) shared: Arc<Shared>,
-}
-
-/// Makes the core the `callback/call` handler of `supervisor` (any existing one is replaced: the core owns
-/// callbacks); the returned slot is filled with the core once it exists.
-fn own_callbacks(supervisor: &mut SupervisorConfig) -> Arc<OnceLock<Weak<Shared>>> {
-    let slot: Arc<OnceLock<Weak<Shared>>> = Arc::new(OnceLock::new());
-    supervisor
-        .handlers
-        .retain(|(method, _)| method != "callback/call");
-    supervisor.handlers.push((
-        "callback/call".to_owned(),
-        Arc::new(pump::callback_handler(slot.clone())),
-    ));
-    slot
 }
 
 impl Core {
@@ -367,238 +229,6 @@ impl Core {
             .preview
             .as_ref()
             .and_then(|hub| hub.guard.clone())
-    }
-
-    /// Starts the server under supervision, builds the store and the gate, and starts the pump.
-    ///
-    /// `confirmer` shows the native dialogs for calls that need a confirmation; it must fail
-    /// closed. The `callback/call` handler is added to `supervisor` (any existing one for that
-    /// method is replaced: the core owns callbacks).
-    ///
-    /// The process monitor is created first; with a ledger folder configured, the startup sweep then stops
-    /// what an earlier crashed instance left of its own (`owned`) processes and re-attaches the agent's
-    /// (`agent`) ones (`Core::startup_sweep`).
-    ///
-    /// # Errors
-    /// [`CoreStartError::Supervisor`] when the first server start fails; [`CoreStartError::Procmon`] when
-    /// the ledger folder cannot be prepared; [`CoreStartError::Marketplace`] when an interrupted plugin update
-    /// cannot be recovered.
-    #[allow(clippy::too_many_lines)]
-    pub async fn start(
-        mut supervisor: SupervisorConfig,
-        secrets: Arc<dyn SecretProvider>,
-        confirmer: impl Confirmer + 'static,
-        config: CoreConfig,
-    ) -> Result<Self, CoreStartError> {
-        let mut config = crate::secrets::configure_clipboard(config)?;
-        crate::agent_tools::secret_env::inherit_path(&supervisor, &mut config)?;
-        let github_reads = crate::github_reads::Reader::new(&config, &supervisor.vibe_home);
-        crate::github_reads::prepare(&github_reads, &mut supervisor, &mut config);
-        let procmon = vw_procmon::ProcMon::new(config.procmon.clone())?;
-        let sweep = crate::processes::startup_sweep(&procmon).await;
-        let vibe_processes =
-            crate::vibe_processes::VibeProcesses::start(&mut supervisor, &procmon).await?;
-        let instructions = crate::instructions::InstructionsPaths {
-            own_home: supervisor.vibe_home.clone(),
-            cli_home: config.instructions.cli_home.clone(),
-        };
-        let leases = Arc::new(
-            crate::session_lease::Leases::new(
-                &instructions.own_home,
-                config.sessions_dir.as_deref(),
-            )
-            .map_err(|error| CoreStartError::SessionOwnership(error.to_string()))?,
-        );
-        vw_market::Store::new(&instructions.own_home).recover_updates()?;
-        let plugin_approvals = Arc::new(
-            crate::plugin_approvals::PluginApprovals::configured(&supervisor, &config)
-                .map_err(|e| CoreStartError::PluginApprovals(e.to_string()))?,
-        );
-        let approvals = plugin_approvals.clone();
-        supervisor.before_launch = Some(Arc::new(move |program| {
-            let _held = approvals.mutations.try_lock().map_err(|e| e.to_string())?;
-            approvals.before_launch(program).map_err(|e| e.to_string())
-        }));
-        let plugin_roots = crate::market_discovery::builtin_roots(&supervisor);
-        let chrome_control = crate::chrome_control::ChromeControl::new(
-            &supervisor.vibe_home,
-            config.chrome_control.clone(),
-        );
-        let deletes = Arc::new(crate::session_delete::Deletes::configure(
-            &mut supervisor,
-            config.sessions_dir.as_deref(),
-        ));
-        let slot = own_callbacks(&mut supervisor);
-        let app_context = crate::app_context::Context::new(&supervisor, &config);
-        let supervisor = start_supervisor(supervisor, secrets, &config).await?;
-        let first = supervisor.current().map(|conn| conn.subscribe());
-        let (feeds, feeds_rx) = mpsc::unbounded_channel();
-        let agent_tools = crate::agent_tools::open(
-            config.agent_tools.clone(),
-            &procmon,
-            config.chrome_control.available(),
-        );
-        let store = SessionStore::new();
-        let history_loading = Arc::new(crate::history_loading::HistoryLoading::new(store.clone()));
-        let channels = Arc::new(Channels::new(
-            supervisor.clone(),
-            config.connection_wait,
-            feeds,
-            agent_tools.clone(),
-            leases.clone(),
-            plugin_approvals.clone(),
-            history_loading.clone(),
-        ));
-        let transport = SupervisedTransport {
-            channels: channels.clone(),
-        };
-        let names = Arc::new(Names::default());
-        let (events, _) = broadcast::channel(config.event_capacity.max(1));
-        let asks = crate::ask::Service::new(config.ask_clock.clone(), events.clone());
-        let confirmer = DynConfirmer::new(confirmer, names.clone(), store.clone(), asks.clone());
-        let gate = Gate::new(transport, confirmer.clone(), config.gate.clone());
-        let terminals = crate::terminals::manager(&config, &procmon, &events);
-        let (loads, loads_rx) = mpsc::channel(256);
-        let (preview, pages, files) = crate::core_viewers::open(&config);
-        let plan_profile = crate::plan_profile::PlanProfile::new(instructions.own_home.clone());
-        let shared = Arc::new(Shared {
-            vibe_processes,
-            deletes,
-            app_context,
-            asks,
-            ask_grants: crate::ask::grants::Grants::default(),
-            chrome_control,
-            install_offers: crate::install_offers::Offers::default(),
-            guard_asks: crate::ask::guards::Calls::default(),
-            identity_asks: crate::git_identity_ask::IdentityAsks::new(
-                config.git_global_config.clone(),
-            ),
-            guard_refusals: crate::guard_refusals::Refusals::default(),
-            feedback: crate::feedback::Feedback::new(&config),
-            edit_previews: crate::edit_preview::Previews::default(),
-            protected_changes: crate::protected_changes::Hub::of(&config),
-            github_reads,
-            keep_awake: crate::keep_awake::from_config(&config),
-            new_chat: crate::new_chat::Draft::new(config.sessions_dir.as_deref()),
-            skills_lock: tokio::sync::Mutex::new(()),
-            queue_returns: crate::queue_return::Returns::default(),
-            vibe_rules_lock: tokio::sync::Mutex::new(()),
-            network_notice: std::sync::atomic::AtomicBool::new(config.network_settings_rejected),
-            secret_scan: crate::secret_scan::ScanState::new(config.secret_scan_data.as_deref()),
-            agent_access_locked: std::sync::atomic::AtomicBool::new(false),
-            window_drive: std::sync::OnceLock::new(),
-            supervisor,
-            store,
-            history_loading,
-            entry_projects: crate::entry_projects::EntryProjects::default(),
-            names,
-            channels,
-            access: Access::load(config.sessions_dir.clone()),
-            model_choices: crate::model_choices::Choices::load(config.sessions_dir.as_deref()),
-            plugin_refresh: crate::plugin_refresh::Refresh::default(),
-            interrupted_send: crate::interrupted_send::State::default(),
-            stops: crate::stops::Stops::default(),
-            stuck: crate::stuck::StuckSessions::default(),
-            resync_reads: AtomicU64::new(0),
-            gate,
-            // Built before `events` and `config` move into the struct (fields evaluate in this order).
-            dictations: crate::dictation::Dictations::new(events.clone(), config.speech.clone()),
-            voice_prompts: crate::voice_prompts::Prompts::default(),
-            readings: crate::read_aloud::Pending::default(),
-            panel_reads: crate::panel_read::Pending::default(),
-            changes: crate::changes::Hub::from_config(&config),
-            worktrees: crate::worktrees::WorktreesState::of(&config, &instructions),
-            git_browser: crate::git_browser_watch::BrowserWatches::default(),
-            git: crate::git_cmd::GitHub::new(config.changes_dir.as_deref()),
-            projects: crate::projects_filing::ProjectsState::new(config.projects_dir.clone()),
-            market: crate::market::MarketState::new(&config.market, plugin_roots),
-            plugin_approvals,
-            // Only metadata from this app run is retained for the Settings use log.
-            secret_uses: crate::secret_uses::SecretUses::default(),
-            work: crate::work::WorkState::open(&config.work),
-            temporary: Arc::new(crate::temporary::TemporarySessions::load(
-                config.sessions_dir.clone(),
-            )),
-            search: crate::search_index::MessageIndex::default(),
-            holders: crate::session_holder::Holders::default(),
-            child_listings: crate::session_listing::ChildListings::default(),
-            leases,
-            events,
-            config,
-            loads,
-            procmon,
-            sweep: Mutex::new(sweep),
-            ends: crate::session_end::Ends::default(),
-            procmon_tick: Mutex::new(None),
-            ledger_server_pid: std::sync::atomic::AtomicU32::new(0),
-            terminals,
-            instructions,
-            documents: vw_documents::DocumentStore::default(),
-            saved_documents: crate::saved_documents::SavedDocuments::default(),
-            connectors: crate::connectors::ConnectorsState::default(),
-            agent_tools,
-            preview,
-            pages,
-            files,
-            plan_profile,
-            dialog_texts: confirmer.texts(),
-            confirmer,
-            started: Instant::now(),
-            debug_api: watch::Sender::new(DebugApiFlag {
-                enabled: false,
-                reason: "off".to_owned(),
-            }),
-            pump: Mutex::new(None),
-            key_events: Mutex::new(None),
-            vibe_events: Mutex::new(None),
-            title_events: Mutex::new(None),
-            titles: crate::title_guard::TitleGuard::default(),
-        });
-        let _ = slot.set(Arc::downgrade(&shared));
-        // Before any notification is applied: an open vault's values withhold titles from the first listing on.
-        crate::title_guard::refresh(&shared).await;
-        let watcher = tokio::spawn(crate::title_guard::watch(
-            Arc::downgrade(&shared),
-            shared.events.subscribe(),
-        ));
-        *shared
-            .title_events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(watcher);
-        let task = tokio::spawn(pump::run(
-            Arc::downgrade(&shared),
-            first,
-            loads_rx,
-            feeds_rx,
-        ));
-        *shared.pump.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
-        spawn_key_forwarder(&shared);
-        connect_vibe_install(&shared);
-        crate::processes::note_vibe_server(&shared);
-        crate::processes::record_server(&shared).await;
-        // Session-list clients cannot run until startup returns after both cleanup sweeps.
-        spawn_owned_tasks(&shared);
-        Box::pin(
-            Core {
-                shared: shared.clone(),
-            }
-            .delete_temporary_all(true),
-        )
-        .await;
-        Box::pin(crate::session_delete::sweep(&Core {
-            shared: shared.clone(),
-        }))
-        .await;
-        crate::recovery_schedules::start(&shared);
-        crate::github_reads::watch(&shared);
-        crate::keep_awake::publish(&shared);
-        crate::secret_scan::start(&shared);
-        // Repair app-owned browser packages in the background; startup does not wait.
-        let refreshing = shared.clone();
-        tokio::spawn(async move { crate::chrome_control::startup(&refreshing).await });
-        crate::chrome_control::start_owner(&shared).await;
-        info!("core started");
-        Ok(Self { shared })
     }
 
     /// Subscribes to every session (`None`) or one session: the first items are snapshots, then
@@ -724,6 +354,9 @@ impl Core {
     /// Stops the pump and owned processes, returns leases, then shuts the server down cleanly.
     /// Agent processes stay in the ledger; stdin closes before the grace period and kill.
     pub async fn shutdown(&self) {
+        if let Some(requests) = &self.shared.model_requests {
+            requests.shutdown();
+        }
         self.shared.history_loading.stop_all();
         self.shared.asks.cancel_session(None, "Vibe Work closed");
         self.shared.changes.shutdown().await;

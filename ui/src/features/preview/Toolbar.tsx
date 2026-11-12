@@ -41,6 +41,7 @@ export function Toolbar({
   busy,
   error = null,
   openExternal,
+  share,
   point,
   address,
   activity,
@@ -58,6 +59,7 @@ export function Toolbar({
   busy: boolean;
   error?: string | null;
   openExternal: (url: string) => void;
+  share?: () => void;
   point: (() => void) | null;
   address: ReactNode;
   activity: ReactNode;
@@ -302,6 +304,15 @@ export function Toolbar({
                 aria-label={collapsed ? undefined : "Browser options"}
                 onKeyDown={keys}
               >
+                {share &&
+                  item(
+                    "preview.share-page",
+                    "Share page to chat",
+                    share,
+                    busy || !open,
+                    "Share page to chat",
+                    true,
+                  )}
                 {capture}
                 {annotate !== null && (
                   <>
@@ -406,9 +417,7 @@ export function Toolbar({
               <IconButton
                 data-testid="preview.toolbar-close-3"
                 icon="x"
-                label={
-                  panel === "actions" ? "Close browser actions" : "Close this session's servers"
-                }
+                label={panel === "actions" ? "Close browser actions" : "Close this chat's servers"}
                 onClick={() => {
                   close();
                   trigger.current?.focus();

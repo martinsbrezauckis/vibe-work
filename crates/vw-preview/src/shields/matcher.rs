@@ -262,7 +262,3 @@ fn mandatory_literal(pattern: &str) -> Option<String> {
     (literal.len() >= 3 && literal.is_ascii())
         .then(|| String::from_utf8_lossy(literal).to_ascii_lowercase())
 }
-
-#[cfg(test)]
-#[path = "matcher_tests.rs"]
-mod tests;

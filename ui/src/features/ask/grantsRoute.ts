@@ -64,7 +64,7 @@ export async function grantsAction(
         throw new UiControlError("invalidParams", "id must be a non-empty string");
       const listed = grantsState(app, sessionId)["rows"] as { id: string }[];
       if (!listed.some((row) => row.id === id))
-        throw new UiControlError("notFound", `no grant ${id} in this session's list`);
+        throw new UiControlError("notFound", `no grant ${id} in this chat's list`);
       const ok = await app.transcript.revokeGrant(sessionId, id);
       return { ok, ...grantsState(app, sessionId) };
     }

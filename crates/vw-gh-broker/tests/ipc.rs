@@ -70,7 +70,7 @@ fn malformed_and_environment_override_requests_do_not_run_gh() {
             assert_eq!(reply.exit_code, 1);
             assert_eq!(
                 reply.stderr,
-                b"gh broker: invalid request; expected argv and cwd\n"
+                b"The GitHub request was not understood. Check the command arguments and try again.\n"
             );
         });
     }

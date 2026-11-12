@@ -35,12 +35,11 @@ pub fn write_app_settings(path: &Path, update: Map<String, Value>) -> std::io::R
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let temp = path.with_extension("json.tmp");
-    std::fs::write(
-        &temp,
-        serde_json::to_vec_pretty(&settings).map_err(std::io::Error::other)?,
-    )?;
-    std::fs::rename(temp, path)
+    vw_platform::atomic_file::replace_file(
+        path,
+        &serde_json::to_vec_pretty(&settings).map_err(std::io::Error::other)?,
+        vw_platform::atomic_file::MetadataPolicy::NewFile,
+    )
 }
 
 pub(crate) fn scan_settings(path: &Path) -> SecretScanSettings {

@@ -41,13 +41,20 @@ pub const DECLINED: &str =
 pub fn agent_text(outcome: &Outcome, what: &str) -> String {
     match outcome {
         Outcome::AnswerNotConfirmed { .. } => {
-            format!("Vibe did not confirm the answer to {what}. The agent may still be waiting.")
+            format!(
+                "The answer to {what} could not be confirmed. Ask the user again if it is still needed."
+            )
         }
         Outcome::Allowed { .. } => String::new(),
         Outcome::Refused { .. } => DECLINED.to_owned(),
-        Outcome::Cancelled { reason } => format!("Not done: {reason} before the user answered."),
+        Outcome::Cancelled { reason } => {
+            format!("Not done: {reason}. Do not run this action unless the user asks again.")
+        }
         Outcome::Never => {
-            format!("Not done: the user set {what} to Never in Vibe Work Settings.")
+            format!(
+                "Not done: {what} is {} in Vibe Work Settings. Ask the user to do this action.",
+                vw_vocabulary::label("vaultPermissions", "never")
+            )
         }
     }
 }

@@ -20,7 +20,8 @@
           "alias": null
         },
         "enabled": true,
-        "locked": false
+        "locked": false,
+        "active": true
       },
       {
         "name": "vibe",
@@ -31,7 +32,8 @@
         "scope": "builtin",
         "registry": null,
         "enabled": true,
-        "locked": true
+        "locked": true,
+        "active": true
       },
       {
         "name": "plugin:notes",
@@ -42,7 +44,8 @@
         "scope": "global",
         "registry": null,
         "enabled": true,
-        "locked": true
+        "locked": true,
+        "active": true
       }
     ]
   }

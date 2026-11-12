@@ -22,4 +22,3 @@ does not belong in this folder. Public scripts never import, run or name the pri
 | `link_ui_test_modules.mjs` | Links the public UI tests to the installed UI dependencies. |
 | `lint_public_ui_tests.mjs` | Runs strict lint over the public UI tests. |
 | `release_sidecar.mjs` | Builds the tool sidecar with the app’s release features. |
-| `release_ui_env.mjs` | Builds the UI environment for release feature selection. |

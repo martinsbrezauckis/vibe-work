@@ -13,7 +13,7 @@ code style; `README.md` (Develop) has the full setup.
 
 ## Done means checked
 
-- `scripts/public/check.sh` is the check every pull request must pass: formatting, a production UI build, Clippy
+- `scripts/public/check.sh` is the check every change must pass: formatting, a production UI build, Clippy
   with warnings as errors, Rust and UI tests, UI lint, type check and format, generated-code and vocabulary drift
   checks, and size, colour and public-paths guards. It runs every step, then ends with `check.sh PASSED in <n>s` or
   the list of failed steps. A cold run takes many minutes: give it a long timeout (or run it in the background) and
@@ -41,4 +41,4 @@ code style; `README.md` (Develop) has the full setup.
 ## Git
 
 - Work on your own branch. Do not rewrite commits that are already pushed; fix them with a new commit.
-- When a check fails on a pull request, read its log first and fix what it names.
+- When a check fails, read its log first and fix what it names.

@@ -1,7 +1,7 @@
 /* Browser page tabs and paused native-page snapshot, adapted from ShellX's browser. */
 .browser-page-tabbar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   min-width: 0;
   height: 36px;
   flex: none;
@@ -9,7 +9,7 @@
 }
 .browser-page-tabs {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -17,16 +17,12 @@
 }
 .browser-page-tab {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   flex: 0 1 192px;
   min-width: 100px;
   max-width: 220px;
   margin-right: 2px;
-  border: 1px solid var(--line);
-  border-bottom: 0;
-  border-radius: var(--radius-7) var(--radius-7) 0 0;
-  background: var(--raised);
-  color: var(--text-2);
+  border-radius: var(--radius-md);
 }
 .browser-page-tab[data-kind="appPreview"] {
   flex: 0 0 124px;
@@ -35,30 +31,13 @@
   left: 0;
   z-index: var(--z-content);
 }
-.browser-page-tab:has([aria-selected="true"]) {
-  background: var(--active);
-  color: var(--text);
-  border-color: var(--line-3);
-}
 .browser-page-tab[data-dragging="true"] {
   opacity: 0.55;
 }
 .browser-page-tab-select {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   flex: 1;
   min-width: 0;
-  padding: 0 7px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: var(--text-12);
-  cursor: pointer;
 }
-.browser-page-tab-select:focus-visible,
-.browser-page-tab-close:focus-visible,
 .browser-page-new:focus-visible {
   outline: 2px solid var(--line-3);
   outline-offset: -2px;
@@ -92,7 +71,6 @@
 .browser-page-tab-paused {
   font-size: var(--text-11-5);
 }
-.browser-page-tab-close,
 .browser-page-new {
   flex: none;
   border: 0;
@@ -101,14 +79,12 @@
   cursor: pointer;
 }
 .browser-page-tab-close {
-  width: 26px;
-  font-size: var(--text-17);
+  flex: none;
 }
 .browser-page-new {
   width: 36px;
   font-size: var(--text-22);
 }
-.browser-page-tab-close:hover:where(:not(:disabled)),
 .browser-page-new:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
@@ -172,8 +148,10 @@
     flex-basis: 116px;
     min-width: 116px;
   }
-  .browser-page-tab-close,
   .browser-page-new {
+    width: 44px;
+  }
+  .browser-page-tab-close {
     width: 44px;
   }
   .browser-paused-message {

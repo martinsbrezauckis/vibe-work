@@ -8,12 +8,11 @@
  */
 import { FilePanelTabs } from "./FilePanelTabs";
 import { Tabs, Tab, TabClose } from "../../components/Tabs";
-import { type KeyboardEvent, type PointerEvent, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, useLayoutEffect, useRef } from "react";
 
 import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/Controls";
-import type { FileWorkspace } from "../../state/fileWorkspace";
-import { createStore, useStore } from "../../state/createStore";
+import { useStore } from "../../state/createStore";
 import { formatKeys } from "../../state/shortcuts";
 import { CHAT_MIN, PANEL_MIN, RAIL_W } from "../../state/panelLayout";
 import { TAB_KINDS, TAB_META, panelOf } from "../../state/shellState";
@@ -23,16 +22,11 @@ import { TAB_ICON } from "./tabIcons";
 import { useLayout, useShellState } from "./hooks";
 
 const KEY_STEP = 24;
-const NO_DOCUMENTS = createStore<Readonly<Record<string, FileWorkspace>>>({});
 
 /** The side panel. `onDragging` tells the grid to drop its transition while the grip moves. */
 export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => void }) {
   const { shell, panelTabs, files } = useApp();
   const sessionId = useShellState((s) => s.selected);
-  const selectedFile = useStore(
-    files?.workspace.store ?? NO_DOCUMENTS,
-    (s) => s[sessionId ?? ""]?.active ?? null,
-  );
   const separate = useShellState((s) => s.openFilesIn === "tabs");
   const panel = useShellState(panelOf);
   const layout = useLayout();
@@ -80,20 +74,6 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
   // component, never in the body function itself (see state/panelTabs.ts).
   const body = active === null ? null : (panelTabs.body(active)?.() ?? null);
   const tabStrip = useRef<HTMLDivElement>(null);
-  const [pill, setPill] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  useLayoutEffect(() => {
-    const on = tabStrip.current?.querySelector<HTMLElement>('.ptab-group[data-selected="true"]');
-    // The pill covers the selected tab where the bar centres it (the bar is as tall as the chat header).
-    const next =
-      on === null || on === undefined
-        ? null
-        : { x: on.offsetLeft, y: on.offsetTop, w: on.offsetWidth, h: on.offsetHeight };
-    setPill((prev) =>
-      prev?.x === next?.x && prev?.y === next?.y && prev?.w === next?.w && prev?.h === next?.h
-        ? prev
-        : next,
-    );
-  }, [active, panel.tabs, layout.panelWidth, selectedFile]);
   useLayoutEffect(() => {
     const element = tabStrip.current;
     if (!element || !files || sessionId === null) return;
@@ -101,10 +81,13 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
       const fixed = [
         ...element.querySelectorAll<HTMLElement>(".ptab-group:not(.file-panel-tab), .end"),
       ].reduce((sum, e) => sum + e.offsetWidth + 2, 0);
+      const style = getComputedStyle(element);
+      const padding =
+        (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
       // A file tab shrinks to 92 px (short name, full path on hover); the +N button needs 44 px.
       files.workspace.capacity(
         sessionId,
-        Math.max(1, Math.floor((element.clientWidth - fixed - 44) / 92)),
+        Math.max(1, Math.floor((element.clientWidth - padding - fixed - 44) / 92)),
       );
     };
     fit();
@@ -148,18 +131,6 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
           aria-label="Side panel tabs"
           ref={tabStrip}
         >
-          {/* the selected tab's pill slides to the new tab (200 ms) instead of jumping. */}
-          {pill !== null && (
-            <span
-              className="ptab-pill"
-              aria-hidden="true"
-              style={{
-                width: pill.w,
-                height: pill.h,
-                transform: `translate(${String(pill.x)}px, ${String(pill.y)}px)`,
-              }}
-            />
-          )}
           {[...panel.tabs]
             .sort((a, b) => (a === "git" ? -1 : b === "git" ? 1 : 0))
             .filter((k) => k !== "file" || !separate || files === null || sessionId === null)

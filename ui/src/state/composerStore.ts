@@ -89,7 +89,8 @@ export interface RewindDialog {
 /** The visible Chrome tab picker, bound to the composer that opened it. */
 export interface ChromePicker {
   /** Browser explicitly chosen by the person; omitted for the original Chrome picker. */
-  browser?: "Edge" | "Safari" | "Firefox";
+  browser?: "Edge" | "Safari" | "Firefox" | "Vibe Work";
+  builtinRows?: readonly import("../protocol/core").PageTab[];
   sessionId: string;
   rows: readonly ChromeTab[];
   loading: boolean;
@@ -131,7 +132,7 @@ export interface ComposerState {
   rewind: RewindDialog | null;
   chromePicker: ChromePicker | null;
   /** Last browser shown by each composer, retained when the picker closes. */
-  tabBrowser: Readonly<Record<string, "Chrome" | "Edge" | "Safari" | "Firefox">>;
+  tabBrowser: Readonly<Record<string, "Chrome" | "Edge" | "Safari" | "Firefox" | "Vibe Work">>;
   /** Sessions whose draft the app put back (a rewound message): sent as text until the user edits it. */
   literal: Readonly<Record<string, true>>;
   /** Sessions whose draft text a Debug API client wrote (until the user edits it). */
@@ -596,14 +597,18 @@ export function createComposerStore(persist: boolean) {
       store.set((s) => ({ ...s, editing }));
     },
     /** Keeps an edit whose queued message has gone, alongside any message already being typed. */
-    restoreQueueEdit(sessionId: string, text: string): void {
+    restoreQueueEdit(sessionId: string, text: string, queueItemId?: string): void {
       store.set((s) => {
         const draft = s.drafts[sessionId] ?? "";
         return {
           ...s,
           drafts: withDraft(s.drafts, sessionId, draft === "" ? text : `${draft}\n\n${text}`),
           literal: setIn(s.literal, sessionId, true),
-          editing: null,
+          editing:
+            queueItemId === undefined ||
+            (s.editing?.sessionId === sessionId && s.editing.queueItemId === queueItemId)
+              ? null
+              : s.editing,
         };
       });
     },
@@ -619,7 +624,7 @@ export function createComposerStore(persist: boolean) {
       store.set((s) => ({
         ...s,
         newChat: NO_PICKS,
-        tabBrowser: setIn<"Chrome" | "Edge" | "Safari" | "Firefox">(
+        tabBrowser: setIn<"Chrome" | "Edge" | "Safari" | "Firefox" | "Vibe Work">(
           setIn(s.tabBrowser, sessionId, s.tabBrowser[NEW_CHAT]),
           NEW_CHAT,
           undefined,

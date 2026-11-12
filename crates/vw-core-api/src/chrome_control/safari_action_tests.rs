@@ -7,7 +7,7 @@ async fn safari_core(label: &str) -> crate::Core {
     let core = output_tests::core(label).await;
     let shared = &core.shared;
     shared.chrome_control.owner.connected_profiles.observe(
-        &json!({"profiles":[{"profileId":"safari:p","connected":true,"extensionVersion":"0.1.8"}]}),
+        &json!({"profiles":[{"profileId":"safari:p","connected":true,"extensionVersion":crate::version()}]}),
     );
     std::fs::write(
         shared
@@ -235,4 +235,134 @@ fn safari_capture_discovery_keeps_the_helpers_subset_when_chrome_is_also_connect
             assert_eq!(schema["properties"]["saveTo"]["enum"], json!(["inline"]));
         }
     }
+}
+
+#[tokio::test]
+async fn safari_passive_export_uses_typed_read_chunks_and_saves_observed_bytes() {
+    let core = safari_core("safari-passive-export").await;
+    core.shared
+        .access
+        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    let folder = core
+        .shared
+        .instructions
+        .own_home
+        .parent()
+        .unwrap()
+        .join("capture-chat");
+    std::fs::create_dir_all(&folder).unwrap();
+    let _ = core
+        .shared
+        .store
+        .load(
+            json!({"session":{"id":"s","cwd":folder},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    let calls = test_support::answering(&core.shared, |tool, args| {
+        if tool == "chrome_status" {
+            return output_tests::mcp(
+                json!({"profiles":[{"profileId":"safari:p","connected":true,"extensionCapabilities":["safari.page.v1"],"features":["capture.page"]}],"sessions":[{"sessionId":"t","profileId":"safari:p"}]}),
+            );
+        }
+        assert_eq!(tool, "chrome_execute", "No arbitrary script transport");
+        assert_eq!(args["action"], "capture.page");
+        assert!(
+            !args["_approvedCapabilities"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("raw.execute"))
+        );
+        let next = args["args"].get("cursor").is_some();
+        output_tests::mcp(
+            json!({"status":"completed","action":"capture.page","data":{"cursor":"snapshot","format":"text","url":"https://example.test/","title":"Page","length":12,"chunk":if next {" world"} else {"Hello "},"nextOffset":if next {json!(null)}else{json!(6)},"cut":false}}),
+        )
+    });
+    let request =
+        json!({"sessionId":"t","action":"capture.page","args":{"tabId":7,"format":"text"}});
+    let answer =
+        super::read_consent::send(&core.shared, "s", "chrome_execute", request.clone(), None)
+            .await
+            .unwrap();
+    let data = &answer.value()["structuredContent"]["data"];
+    let saved =
+        std::fs::read_to_string(folder.join(data["file"]["path"].as_str().unwrap())).unwrap();
+    assert!(saved.contains("Hello  world"));
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(tool, _)| tool == "chrome_execute")
+            .count(),
+        2
+    );
+    let mut injected = request;
+    injected["args"]["resource"] = json!("https://example.test/private");
+    assert!(
+        super::read_consent::send(&core.shared, "s", "chrome_execute", injected, None)
+            .await
+            .is_err()
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn safari_loaded_media_saves_sanitized_files_and_per_item_outcomes() {
+    let core = safari_core("safari-loaded-media").await;
+    core.shared
+        .access
+        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    let folder = core
+        .shared
+        .instructions
+        .own_home
+        .parent()
+        .unwrap()
+        .join("media-chat");
+    std::fs::create_dir_all(&folder).unwrap();
+    let _ = core
+        .shared
+        .store
+        .load(
+            json!({"session":{"id":"s","cwd":folder},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    test_support::answering(&core.shared, |tool, args| {
+        if tool == "chrome_status" {
+            return output_tests::mcp(
+                json!({"profiles":[{"profileId":"safari:p","connected":true,"extensionCapabilities":["safari.page.v1"],"features":["capture.media"]}],"sessions":[{"sessionId":"t","profileId":"safari:p"}]}),
+            );
+        }
+        assert_eq!(tool, "chrome_execute");
+        assert_eq!(args["action"], "capture.media");
+        let data=json!({"url":"https://example.test/","title":"Assets","items":[{"kind":"svg","svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><path d=\"M0 0L10 10\"/></svg>","loaded":true},{"kind":"image","url":"https://example.test/lazy.png","loaded":false}]}).to_string();
+        output_tests::mcp(
+            json!({"status":"completed","data":{"cursor":"media-snapshot","format":"media","length":data.encode_utf16().count(),"chunk":data,"nextOffset":null}}),
+        )
+    });
+    let answer = super::read_consent::send(
+        &core.shared,
+        "s",
+        "chrome_execute",
+        json!({"sessionId":"t","action":"capture.media","args":{"tabId":7}}),
+        None,
+    )
+    .await
+    .unwrap();
+    let data = &answer.value()["structuredContent"]["data"];
+    assert_eq!(data["items"][0]["status"], "saved");
+    assert_eq!(data["items"][1]["status"], "notLoaded");
+    assert!(
+        folder
+            .join(data["manifest"]["path"].as_str().unwrap())
+            .is_file()
+    );
+    assert!(
+        folder
+            .join(data["items"][0]["file"]["path"].as_str().unwrap())
+            .is_file()
+    );
+    core.shutdown().await;
 }

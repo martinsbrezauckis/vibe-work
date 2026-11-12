@@ -2,14 +2,14 @@
 // Depends on the observation's rendered choice groups and common redaction helpers; never interprets offers.
 /* global hideKeys, visible, viewOf */
 /* exported choiceContextFor, overlayChoiceRoots */
-const choiceRenderedText = (root, max) => {
+const choiceRenderedText = (root, max, privateNode) => {
   const parts = [];
   let length = 0, count = 0, complete = true;
   const walker = root.ownerDocument.createTreeWalker(root, 4);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (++count > 12000) { complete = false; break; }
     const parent = node.parentElement;
-    if (!parent || parent.closest("script,style,noscript,template") || !visible(parent)) continue;
+    if (!parent || privateNode?.(parent) || parent.closest("script,style,noscript,template") || !visible(parent)) continue;
     const text = hideKeys(String(node.textContent || "").trim(), parent);
     if (!text) continue;
     const separator = Number(parts.length > 0), room = Math.max(0, max - length - separator);
@@ -23,13 +23,13 @@ const choiceRenderedText = (root, max) => {
   return { text: parts.join("\n"), complete };
 };
 
-const choiceContextFor = root => {
+const choiceContextFor = (root, privateNode) => {
   const headings = [];
-  const body = choiceRenderedText(root, 1000);
+  const body = choiceRenderedText(root, 1000, privateNode);
   let complete = body.complete;
   for (const heading of root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')) {
     if (!visible(heading)) continue;
-    const rendered = choiceRenderedText(heading, 180);
+    const rendered = choiceRenderedText(heading, 180, privateNode);
     if (!rendered.text) continue;
     if (headings.length === 8) { complete = false; break; }
     headings.push(rendered.text);

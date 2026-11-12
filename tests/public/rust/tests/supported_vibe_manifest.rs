@@ -322,7 +322,7 @@ fn other_schemas_and_malformed_entries_are_refused() {
     assert!(check(&manifest(5, None, vec![entry("2.26.2", "0.1.0", None)])).is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_companion_check_runs_with_each_update_check_only() {
     let rig = common::update_rig::Rig::new("support-s12");
     let calls = Arc::new(AtomicU32::new(0));
@@ -333,8 +333,15 @@ async fn the_companion_check_runs_with_each_update_check_only() {
             counted.fetch_add(1, Ordering::SeqCst);
         })
     }));
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    assert_eq!(calls.load(Ordering::SeqCst), 0, "never on its own");
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(24 * 60 * 60)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "a day of idle time must never check the companion"
+    );
+    tokio::time::resume();
     rig.manager.check().await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     rig.manager.check().await.unwrap();

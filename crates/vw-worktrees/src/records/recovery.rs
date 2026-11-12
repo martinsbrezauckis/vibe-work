@@ -67,11 +67,12 @@ impl Records {
                 std::io::Error::other(error),
             )
         })?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes)
-            .map_err(|error| WorktreeError::io("write recovery record", &tmp, error))?;
-        std::fs::rename(&tmp, &path)
-            .map_err(|error| WorktreeError::io("replace recovery record", &path, error))?;
+        vw_platform::atomic_file::replace_file(
+            &path,
+            &bytes,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|error| WorktreeError::io("replace recovery record", &path, error))?;
         // Durable records are read from disk so another handle's archive/keep/handoff remains visible.
         self.recovery
             .lock()

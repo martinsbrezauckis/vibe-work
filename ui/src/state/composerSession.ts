@@ -399,7 +399,7 @@ export function createSessionControls(deps: {
               sessionId,
               groups.length === 0
                 ? `${TEXT.thisSession} runs no plugins.`
-                : `Plugins in this session: ${groups.map(([name, n]) => `${name} (${String(n)})`).join(", ")}.`,
+                : `Plugins in this chat: ${groups.map(([name, n]) => `${name} (${String(n)})`).join(", ")}.`,
             );
             return done();
           }

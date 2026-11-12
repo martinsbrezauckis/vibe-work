@@ -126,9 +126,11 @@ pub(crate) fn project(shared: &Shared, value: &mut Value) {
             | "mcp_vw.chrome_status"
     ) {
         let input = &effect["input"];
-        let browser = super::receipt::profile(shared, tool.trim_start_matches("mcp_vw."), input)
-            .as_deref()
-            .map(Browser::from_profile);
+        let profile = super::receipt::profile(shared, tool.trim_start_matches("mcp_vw."), input);
+        let browser = profile.as_deref().map(Browser::from_profile);
+        value["vwBrowserProfileId"] = profile.map_or(Value::Null, |id| {
+            Value::String(super::profiles::canonical(&id))
+        });
         value["vwBrowser"] =
             browser.map_or(Value::Null, |browser| Value::String(browser.name().into()));
         value["vwClickTarget"] = Value::Null;

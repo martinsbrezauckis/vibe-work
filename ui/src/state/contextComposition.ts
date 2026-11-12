@@ -1,17 +1,12 @@
 /**
  * Reads the selected chat's last model-call breakdown through the core command client.
- * Depends on generated Vibe types and coreStore; used only by the opt-in context popover.
+ * Depends on generated Vibe types and coreStore; used by the context popover.
  * Closed panels do no work; refreshed and disposed panels cannot display an older request's result.
  */
 import type { ContextBreakdown, ContextCategory, ContextCategoryId } from "../protocol/generated";
 import type { JsonValue } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
-
-/** Release build switch, selected with the app's context-composition feature. */
-export function contextCompositionEnabled(): boolean {
-  return import.meta.env.VITE_CONTEXT_COMPOSITION === "1";
-}
 
 export const CONTEXT_LABELS: Record<ContextCategoryId, string> = {
   system: "System",

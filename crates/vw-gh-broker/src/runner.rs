@@ -113,10 +113,12 @@ impl Broker {
         let mut stream = BufReader::new(stream);
         let mut reply = match wire::receive::<Request>(&mut stream) {
             Ok(_) if stopped.is_some_and(|s| s.load(std::sync::atomic::Ordering::Acquire)) => {
-                Reply::refused("GitHub reader is not available.")
+                Reply::refused(crate::entry::UNAVAILABLE)
             }
             Ok(request) => self.run(&request),
-            Err(_) => Reply::refused("invalid request; expected argv and cwd"),
+            Err(_) => Reply::refused(
+                "The GitHub request was not understood. Check the command arguments and try again.",
+            ),
         };
         reply.stdout = self.redact(&reply.stdout);
         reply.stderr = self.redact(&reply.stderr);
@@ -126,7 +128,8 @@ impl Broker {
     fn run(&self, request: &Request) -> Reply {
         if let Err(reason) = policy::validate(&request.argv) {
             return Reply::refused(&format!(
-                "Vibe Work only lets Vibe read GitHub. Use the Push and Create PR buttons for changes.\n{reason}"
+                "Not run: {reason}. Use a supported GitHub read command. {}",
+                crate::remote_change_refusal!()
             ));
         }
         #[cfg(windows)]

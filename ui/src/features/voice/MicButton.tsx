@@ -61,7 +61,7 @@ export function MicButton({
     : voiceChatOn
       ? "Dictate: unavailable while voice chat is on"
       : !mine
-        ? "Dictate: unavailable while dictating in another session"
+        ? "Dictate: unavailable while dictating in another chat"
         : phase === "starting"
           ? `Dictate: starting the microphone; press to stop (${keys}); Escape to cancel`
           : phase === "recording"

@@ -5,21 +5,45 @@
 // call (`REQ.textOffset`, `REQ.maxText`).
 // Hidden text is returned separately (bounded) for the prompt guard only.
 // REQ: { page, maxRefs, maxText, textOffset, find?, node? }. Synchronous; the answer is untrusted page data.
-/* global choiceContextFor, overlayChoiceRoots, nodeIdentity, ENV, KEY_TEXT, REQ, actionableCandidate, clip, collect, controlSearchText, formControl, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, labelledToggle, loginRole, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
+/* global choiceContextFor, overlayChoiceRoots, nodeIdentity, ENV, KEY_TEXT, REQ, extractData, safeSelectors, actionableCandidate, clip, collect, controlSearchText, formControl, enabled, frameDoc, globalRect, hideKeys, inFrame, keyHolder, keyLike, labelOf, labelledToggle, loginRole, privateField, refOf, rememberLabelledKeys, roleOf, secretKind, submitOrigins, vaultFilled, visible, visualCandidate -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
-  const everything = collect();
+  // eslint-disable-next-line no-undef -- Replaced by the Rust observation assembler.
+  __VW_SELECTORS__
+  __VW_EXTRACT__
+  const everything = collect(!REQ.selector && !REQ.extract);
   if (ENV && !ENV.frameDocument) Object.defineProperty(ENV, "frameDocument", { value:
     Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16)).join("-") });
   for (const el of everything.elements) rememberLabelledKeys(el);
+  const scopeRoots = REQ.scope ? everything.elements.filter(el => refOf(el) === REQ.scope.ref && nodeIdentity(el) === REQ.scope.node && (!REQ.scope.document || REQ.scope.document === ENV?.frameDocument)) : [];
+  const scopeRoot = scopeRoots.length === 1 ? scopeRoots[0] : null;
+  if (REQ.scope) everything.elements = everything.elements.filter(el => {
+    for (let up = el; up; up = up.parentElement || up.getRootNode()?.host) if (up === scopeRoot) return true;
+    return false;
+  });
+  const protectedEditor = everything.elements.some(el => el.isContentEditable && privateField(el));
+  const select = REQ.selector || REQ.extract || scopeRoot || protectedEditor ? safeSelectors(everything.elements) : null;
+  if (select?.truncated) everything.truncated = true;
   // The original address stays on the host for admission checks; only displayUrl goes into agent answers.
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };
   out.document = ENV?.frameDocument || "";
+  out.scopeMatches = scopeRoots.length;
+  if (REQ.extract) Object.assign(out, extractData(everything.elements, everything.truncated, select));
   const headings = everything.elements.filter(el => el.ownerDocument === document &&
     el.matches('h1,[role="heading"][aria-level="1"]') && visible(el));
-  out.mainHeadings = headings.slice(0, 3).map(el => clip(hideKeys(el.innerText || el.textContent, el), 180));
+  out.mainHeadings = headings.slice(0, 3).map(el => clip(hideKeys(select ? select.text(el) : el.innerText || el.textContent, el), 180));
   out.mainHeadingsTotal = headings.length;
   const { truncated, crossOriginFrames } = everything;
+  // Selector filters run before ref caps and use node identity, including open shadow roots.
+  let selected = null;
+  if (REQ.selector) {
+    selected = new Set();
+    try {
+      selected = select(REQ.selector.kind, REQ.selector.value);
+      selected = new Set(everything.elements.filter(el => selected.has(el) && !el.matches("script,style,noscript,template")));
+      out.selectorMatches = selected.size;
+    } catch { out.selectorError = "invalid"; out.selectorMatches = 0; selected.clear(); }
+  }
   const needle = typeof REQ.find === "string" ? REQ.find.toLowerCase() : null;
   // Search only redacted display fields, never the original value of a secret field. A checked click's fresh
   // observation (`REQ.node`) looks only for the node it clicks, so the ref cap never hides it.
@@ -64,13 +88,13 @@
     return onScreen ? 1 : 0;
   };
   // Overlays first, then rendered form controls and main content, even below the fold, before navigation.
-  const elements = everything.elements.filter(el => actionableCandidate(el) || visualCandidate(el))
-    .map((el) => ({ el, rank: refOf(el) === REQ.priorityRef ? 8 : Math.min(priority(el), frameLimit(el)) }))
+  const elements = everything.elements.filter(el => selected ? selected.has(el) : actionableCandidate(el) || visualCandidate(el))
+    .map((el) => ({ el, rank: selected ? 0 : refOf(el) === REQ.priorityRef ? 8 : Math.min(needle !== null && labelOf(el).toLowerCase() === needle ? 7 : priority(el), frameLimit(el)) }))
     .sort((a, b) => b.rank - a.rank);
   // A consent dialog in this document needs the same independent inventory as a covering child frame.
   // Find its roots before the ordinary page-choice cap: unrelated links cannot hide a late dialog.
-  const overlays = new Map(overlayChoiceRoots(elements.filter(({ el }) =>
-    el.ownerDocument === document && visible(el))).slice(0, 4)
+  const overlays = new Map((REQ.scope ? [] : overlayChoiceRoots(elements.filter(({ el }) =>
+    el.ownerDocument === document && visible(el)))).slice(0, 4)
     .map(root => [root, { choices: [], total: 0 }]));
   const refs = [];
   const choiceGroups = new Map();
@@ -88,7 +112,7 @@
   // Key-bearing elements are considered first within each document, named and valued as hidden.
   for (const el of everything.elements) {
     // Code and styles are not page choices. Redaction still registers their tokens above.
-    if (!keyHolder(el) || !visible(el) || !room(el)) continue;
+    if (selected || !keyHolder(el) || !visible(el) || !room(el)) continue;
     const ref = refOf(el);
     if (seen.has(ref)) continue;
     seen.add(ref);
@@ -101,11 +125,12 @@
     const ref = refOf(el);
     const alreadySeen = seen.has(ref);
     seen.add(ref);
-    const role = roleOf(el);
-    const label = labelOf(el);
+    const role = actionableCandidate(el) || visualCandidate(el) ? roleOf(el) : "text";
+    const label = select?.label(el) ?? (selected && !actionableCandidate(el) && !visualCandidate(el) && !["option", "optgroup"].includes(el.localName) ? select.text(el) : labelOf(el));
     const item = { ref, role, name: hideKeys(label, el), tag: el.localName, node: nodeIdentity(el), priority: rank,
       box: Object.fromEntries(Object.entries(globalRect(el)).map(([key, value]) => [key, Math.round(value)])) };
-    item.searchText = controlSearchText(el);
+    item.searchText = select?.private(el) ? "" : controlSearchText(el);
+    if (select?.kind(el)) item.redacted = select.kind(el);
     if (visualCandidate(el)) {
       item.coordinateKind = "region";
       item.name ||= `${el.localName} region`;
@@ -146,27 +171,33 @@
       const secret = vaultFilled(el) ? "vault" : secretKind(el);
       if (secret) item.redacted = secret;
       if (type === "checkbox" || type === "radio") item.checked = Boolean(el.checked);
-      else if (tag === "select") {
+      else if (tag === "select" && !item.redacted) {
         const options = Array.from(el.options || []);
         item.value = clip(hideKeys(options.filter((o) => o.selected).map((o) => o.label || o.text).join(", "), el), 200);
         item.options = options.slice(0, 20).map((o) => clip(hideKeys(o.label || o.text || o.value, el), 80));
         if (keyLike(el.value, el)) item.keyLike = true;
         if (options.length > 20) item.optionsMore = options.length - 20;
-      } else if (!item.redacted && !el.isContentEditable) {
-        item.value = clip(hideKeys(el.value, el), 300);
+      } else if (!item.redacted) {
+        item.value = clip(hideKeys(el.isContentEditable ? el.innerText : el.value, el), 300);
         if (keyLike(el.value, el)) item.keyLike = true;
       }
       if (el.required) item.required = true;
+      if (el.willValidate) {
+        item.valid = Boolean(el.validity.valid);
+        if (!item.valid && !item.redacted) item.validationMessage = clip(hideKeys(el.validationMessage, el), 300);
+      }
     } else {
       const checked = el.getAttribute("aria-checked");
       if (checked !== null) item.checked = checked === "true";
       if (labelledToggle(el)) item.checked = Boolean(el.control.checked);
     }
+    const selectedState = el.getAttribute("aria-selected");
+    if (selectedState !== null) item.selected = selectedState === "true";
     const expanded = el.getAttribute("aria-expanded");
     if (expanded !== null) item.expanded = expanded === "true";
     const pressed = el.getAttribute("aria-pressed");
     if (pressed !== null) item.pressed = pressed === "true";
-    if (tag === "a") {
+    if (tag === "a" && !item.redacted) {
       try {
         item.href = hideKeys(String(new URL(el.getAttribute("href"), location.href).href)).slice(0, 300);
       } catch {
@@ -190,7 +221,7 @@
   }
   // Visible page text, including any dialog text.
   let text;
-  try { text = String(document.body?.innerText || ""); } catch { text = ""; }
+  try { text = REQ.scope ? scopeRoot ? select.text(scopeRoot) : "" : select ? select.text(document.body) : String(document.body?.innerText || ""); } catch { text = ""; }
   // Text that looks like a key is hidden (the element that shows it has a keyLike ref).
   text = hideKeys(text);
   let offset = Math.max(0, Math.min(Number(REQ.textOffset) || 0, text.length));
@@ -204,10 +235,11 @@
   const hidden = [];
   let hiddenLength = 0;
   try {
-    const walker = document.createTreeWalker(document.body || document.documentElement, 4);
+    const walker = document.createTreeWalker(REQ.scope ? scopeRoot || document.createElement("div") : document.body || document.documentElement, 4);
     for (let node = walker.nextNode(); node && hiddenLength < 3000; node = walker.nextNode()) {
       const value = String(node.textContent || "").trim();
       const parent = node.parentElement;
+      if (parent && select?.private(parent)) continue;
       if (!value || !parent || ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(parent.tagName)) continue;
       const style = getComputedStyle(parent);
       const rect = parent.getBoundingClientRect();
@@ -225,14 +257,14 @@
   out.hiddenText = hideKeys(hidden.join("\n")).slice(0, 3000);
   out.coveringFrames = [];
   out.choiceContext = [];
-  out.documentContext = choiceContextFor(document.body || document.documentElement);
+  out.documentContext = REQ.scope ? scopeRoot ? { frameOrigin: hideKeys(location.origin), headings: [], text: text.slice(0, 1000), complete: text.length <= 1000 && !truncated } : null : choiceContextFor(document.body || document.documentElement, select?.private);
   for (const [root, group] of overlays) {
     if (!group.total) continue;
     group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
     const choices = group.choices.map(({ item }) => item);
     out.coveringFrames.push({ origin: hideKeys(location.origin), choices,
       total: group.total, complete: !truncated && group.total === choices.length });
-    out.choiceContext.push(choiceContextFor(root));
+    out.choiceContext.push(choiceContextFor(root, select?.private));
   }
   for (const [doc, group] of choiceGroups) {
     group.choices.sort((a, b) => a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1);
@@ -243,14 +275,14 @@
     } else if (group.choices.length && frameLimit(group.choices[0].el) === 7) {
       out.coveringFrames.push({ origin: hideKeys(doc.location.origin), choices,
         total: group.total, complete: !truncated && group.total === choices.length });
-      out.choiceContext.push(choiceContextFor(doc.body || doc.documentElement));
+      out.choiceContext.push(choiceContextFor(doc.body || doc.documentElement, select?.private));
     }
   }
   refs.sort((a, b) => b.priority - a.priority);
   let reserved = Math.min(counts[0], Math.ceil(REQ.maxRefs / 2)), remaining = REQ.maxRefs;
   out.refs = refs.filter(item => {
     const main = item.frame !== true;
-    if (!remaining || (!main && remaining <= reserved)) return false;
+    if (!remaining || (!selected && !main && remaining <= reserved)) return false;
     remaining -= 1;
     if (main) reserved = Math.max(0, reserved - 1);
     return true;

@@ -118,13 +118,16 @@ fn unrelated_removal_errors_return_without_backoff() {
     let (_data, record) = fixture();
     let folder = record.new_scratch().unwrap();
     let mut attempts = 0;
-    let started = Instant::now();
-    remove_scratch_in_with(folder.parent().unwrap(), &folder, |_| {
-        attempts += 1;
-        Err(io::ErrorKind::PermissionDenied.into())
-    });
+    super::remove_scratch_with_wait(
+        folder.parent().unwrap(),
+        &folder,
+        |_| {
+            attempts += 1;
+            Err(io::ErrorKind::PermissionDenied.into())
+        },
+        |delay| panic!("an unrelated removal failure must never schedule backoff: {delay:?}"),
+    );
     assert_eq!(attempts, 1);
-    assert!(started.elapsed() < Duration::from_millis(250));
     assert!(folder.exists());
 }
 

@@ -206,7 +206,6 @@
   font-size: var(--text-11);
 }
 .pr-chip {
-  cursor: pointer;
   background: transparent;
   max-width: 32ch;
   overflow: hidden;

@@ -12,7 +12,7 @@ export type Kind = "session" | "message" | "file" | "setting" | "action";
 export const GROUPS: readonly { kind: Kind; label: string; icon: IconName; one: string }[] = [
   {
     kind: "session",
-    label: "Sessions",
+    label: "Chats",
     icon: "message-square",
     one: term("workNames", "session").name,
   },

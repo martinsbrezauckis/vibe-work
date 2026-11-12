@@ -29,7 +29,7 @@ use std::sync::{Mutex, PoisonError};
 use vw_gate::{Confirmation, ConfirmationRequest, Requester};
 
 use crate::Origin;
-use crate::command::CommandResult;
+use crate::command::{Command, CommandResult};
 use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::new_chat_view::{NewChatRequest, NewChatView};
@@ -205,6 +205,11 @@ impl Draft {
         !id.is_empty() && self.lock().id == id
     }
 
+    /// Current recipient for person-shared context when no loaded chat owns its source window.
+    pub(crate) fn owner_id(&self) -> String {
+        self.lock().id.clone()
+    }
+
     /// Gives the screen a fresh id (after a hand-off or Close all); returns the old one.
     fn renew(&self) -> String {
         std::mem::replace(&mut self.lock().id, fresh_id())
@@ -263,6 +268,42 @@ pub(crate) fn too_many(max: usize) -> CoreError {
     )
 }
 
+/// Why no ordinary chat may start in `folder`, as the text the person reads; `None` when nothing speaks against it.
+/// A Temporary chat's own folder (`temporary::new_scratch`) is deleted with that chat, so whatever another chat kept
+/// there would go too; a folder that no longer exists makes every tool call of the chat fail. Neither is ever the New
+/// chat folder ([`NewChatRequest::SetFolder`] drops it) nor the folder of a started or forked chat
+/// ([`start_folder_refusal`]). A relative spelling is left to the callers' own rules.
+pub(crate) fn unusable_start_folder(shared: &Shared, folder: &Path) -> Option<&'static str> {
+    if shared.temporary.is_scratch(folder) {
+        Some(
+            "This folder belongs to a temporary chat and is deleted with it. Choose another folder for this chat.",
+        )
+    } else if folder.is_absolute() && !folder.is_dir() {
+        Some("This folder no longer exists. Choose another folder for this chat.")
+    } else {
+        None
+    }
+}
+
+/// The refusal of a client's own start or fork (`startSession`, `forkSession`, a raw `session/start` or
+/// `session/fork` call) whose `agentConfig.cwd` is [`unusable_start_folder`]. Temporary chats start through
+/// `sessionTools startTemporary`, which this does not see.
+pub(crate) fn start_folder_refusal(shared: &Shared, command: &Command) -> Option<CoreError> {
+    let config = match command {
+        Command::StartSession { agent_config } | Command::ForkSession { agent_config, .. } => {
+            agent_config.as_ref()
+        }
+        Command::Call { method, params, .. }
+            if matches!(method.as_str(), "session/start" | "session/fork") =>
+        {
+            params.get("agentConfig")
+        }
+        _ => None,
+    }?;
+    let cwd = config.get("cwd")?.as_str().filter(|cwd| !cwd.is_empty())?;
+    unusable_start_folder(shared, Path::new(cwd)).map(|why| CoreError::new(ErrorCode::Denied, why))
+}
+
 /// The same rule as a project's main folder: chosen with Choose folder, a session's folder or a project's.
 fn may_use(shared: &Shared, origin: Origin, folder: &Path) -> bool {
     origin == Origin::DebugApi
@@ -308,7 +349,8 @@ pub(crate) async fn adopt(
     shared
         .chrome_control
         .adopt_tab_context(&old, session_id)
-        .await;
+        .await
+        .map_err(|reason| CoreError::new(crate::ErrorCode::InvalidCommand, reason))?;
     // One lease per session: a fresh session that already leased ports gives back the ones nothing uses.
     if !shared.procmon.leases().of(&old).is_empty()
         && !shared.procmon.leases().of(session_id).is_empty()
@@ -353,7 +395,9 @@ pub(crate) async fn adopt(
 pub(crate) async fn close_all(shared: &std::sync::Arc<Shared>) {
     let id = shared.new_chat.renew();
     let next = shared.new_chat.lock().id.clone();
-    shared.chrome_control.adopt_tab_context(&id, &next).await;
+    if let Err(reason) = shared.chrome_control.adopt_tab_context(&id, &next).await {
+        tracing::warn!(%reason, "Draft browser choice could not follow the reset");
+    }
     crate::terminals::close_session(shared, &id).await;
     crate::processes::end_session(shared, &id, false).await;
     crate::previews::session_ended(shared, &id, true).await;
@@ -372,6 +416,22 @@ impl Core {
             NewChatRequest::SetFolder { folder } => {
                 let _change = shared.new_chat.change.lock().await;
                 let folder = folder.filter(|f| !f.is_empty()).map(PathBuf::from);
+                // A Temporary chat's own folder or a folder that is gone is never the New chat folder, not even as a
+                // restore: the screen goes back to no folder (the window then clears its chip) and nothing is kept
+                // for the next start.
+                if folder
+                    .as_deref()
+                    .is_some_and(|f| unusable_start_folder(shared, f).is_some())
+                {
+                    {
+                        let mut state = shared.new_chat.lock();
+                        state.folder = None;
+                        state.refused = false;
+                        state.restored = false;
+                    }
+                    shared.new_chat.record(None);
+                    return Ok(CommandResult::NewChat { view: view(shared) });
+                }
                 let usable = |f: &Path| f.is_absolute() && f.is_dir();
                 // Picked in this run (natively or by the Debug API): recorded for the next start.
                 let picked = folder
@@ -418,3 +478,7 @@ impl Core {
         Ok(CommandResult::NewChat { view: view(shared) })
     }
 }
+
+#[cfg(test)]
+#[path = "new_chat_tests.rs"]
+mod tests;

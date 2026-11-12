@@ -58,7 +58,7 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         return {
           title: `Revert ${confirm.file.path}?`,
           action: "Revert",
-          body: <p>The file goes back to how it was when the session started.</p>,
+          body: <p>The file goes back to how it was when the chat started.</p>,
         };
       return {
         title: `Delete ${confirm.file.path}?`,
@@ -66,7 +66,7 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         body: (
           <>
             <p>
-              This file did not exist when the session started. Reverting it deletes it from the
+              This file did not exist when the chat started. Reverting it deletes it from the
               folder:
             </p>
             <Paths paths={confirm.deletes} />
@@ -87,10 +87,10 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         action: confirm.deletes.length > 0 ? "Revert all and delete" : "Revert all",
         body: (
           <>
-            <p>Every file goes back to how it was when the session started.</p>
+            <p>Every file goes back to how it was when the chat started.</p>
             {confirm.deletes.length > 0 && (
               <>
-                <p>These files were created in the session and will be deleted:</p>
+                <p>These files were created in the chat and will be deleted:</p>
                 <Paths paths={confirm.deletes} />
               </>
             )}
@@ -105,7 +105,7 @@ function content(confirm: Confirm): { title: string; action: string; body: React
         body: (
           <>
             <p>
-              The session goes back to before turn {confirm.turnNumber}
+              The chat goes back to before turn {confirm.turnNumber}
               {p.turnsRemoved > 1 ? ` (${String(p.turnsRemoved)} turns are removed)` : ""}, and your
               message is put back in the box.
             </p>

@@ -8,6 +8,17 @@ use vw_supervisor::SupervisorConfig;
 use super::ScriptedModel;
 
 impl ScriptedModel {
+    /// Content-free counters from the actual proxy, for admission and cancellation barriers.
+    pub fn proxy_stats(&self) -> Vec<Arc<vw_keyproxy::ProxyStats>> {
+        self.inner
+            .lock()
+            .unwrap()
+            .proxies
+            .iter()
+            .map(|proxy| proxy.stats().clone())
+            .collect()
+    }
+
     pub async fn route(&self, server: &mut SupervisorConfig) -> Arc<ProxySecretProvider> {
         self.route_with(server, ProxyConfig::default()).await
     }

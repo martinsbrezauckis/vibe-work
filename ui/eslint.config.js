@@ -37,6 +37,25 @@ export default tseslint.config(
     plugins: { controls: { rules: { "test-id": controlTestId } } },
     rules: { "controls/test-id": "error" },
   },
+  {
+    files: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "MemberExpression[object.name=/^(it|test|describe)$/][property.name=/^(only|skip|todo)$/]",
+          message:
+            "Focused and disabled tests hide coverage. Run a named test filter; use a documented prerequisite for conditional captures.",
+        },
+        {
+          selector: "CallExpression[callee.name=/^(fit|fdescribe|xit|xtest|xdescribe)$/]",
+          message:
+            "Focused and disabled test aliases hide coverage. Use the ordinary test definition.",
+        },
+      ],
+    },
+  },
   // Plain JS files (this config) are not part of the TypeScript project: lint them without type info.
   { files: ["**/*.js"], ...tseslint.configs.disableTypeChecked },
 );

@@ -13,7 +13,7 @@ export function RenameField({
   initial,
   onCommit,
   onCancel,
-  label = "Rename session",
+  label = "Rename chat",
   placeholder,
 }: {
   initial: string;

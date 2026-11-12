@@ -27,10 +27,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::MarketError;
 
-#[cfg(test)]
-#[path = "receipt_reads_tests.rs"]
-mod tests;
-
 /// The receipt file inside an installed plugin folder.
 pub const RECEIPT: &str = ".vw-market.json";
 

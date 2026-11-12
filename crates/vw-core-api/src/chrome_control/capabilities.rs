@@ -17,11 +17,55 @@ pub(super) const PERMISSIONS: &[&str] = &[
     "tabs.emulate",
 ];
 pub(super) fn gated(action: &str) -> bool {
-    action == "page.find" || ACTIONS.contains(&action)
+    matches!(
+        action,
+        "page.find"
+            | "tabs.context"
+            | "tabs.pin"
+            | "window.focus"
+            | "window.close"
+            | "windows.list"
+            | "tabs.group"
+            | "tabs.group_update"
+            | "tabs.ungroup"
+            | "page.resolve_point"
+            | "page.move"
+            | "page.wheel"
+            | "page.focus"
+            | "page.blur"
+            | "page.insert_text"
+            | "page.scroll_into_view"
+            | "page.highlight"
+            | "page.wait_for"
+            | "clipboard.read_rich"
+            | "clipboard.write_rich"
+    ) || ACTIONS.contains(&action)
 }
 pub(super) fn supports(profile: &Value, action: &str) -> bool {
     // The helper implements find for older extensions too; its negotiated feature list is authoritative.
-    if action == "page.find" {
+    if matches!(
+        action,
+        "page.find"
+            | "tabs.context"
+            | "tabs.pin"
+            | "window.focus"
+            | "window.close"
+            | "windows.list"
+            | "tabs.group"
+            | "tabs.group_update"
+            | "tabs.ungroup"
+            | "page.resolve_point"
+            | "page.move"
+            | "page.wheel"
+            | "page.focus"
+            | "page.blur"
+            | "page.insert_text"
+            | "page.scroll_into_view"
+            | "page.highlight"
+            | "page.wait_for"
+            | "clipboard.read_rich"
+            | "clipboard.write_rich"
+    ) {
         return profile["connected"] == true
             && profile["features"]
                 .as_array()

@@ -137,6 +137,11 @@ export function useModalFocus(
         event.target.closest('[data-dialog-manages-tab="true"]')
       )
         return;
+      // Native Tab movement establishes keyboard focus styling in WebKit. Only take over
+      // at the boundaries; cancelling every Tab hides the ring on non-text controls.
+      const items = focusables(dialog);
+      const index = items.findIndex((el) => el === document.activeElement);
+      if (index >= 0 && (event.shiftKey ? index > 0 : index < items.length - 1)) return;
       event.preventDefault();
       moveFocus(document.activeElement, event.shiftKey);
     };

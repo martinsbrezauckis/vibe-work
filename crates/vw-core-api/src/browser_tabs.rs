@@ -63,6 +63,12 @@ pub(crate) fn agent_page(
     owner: &str,
     tab: Option<&str>,
 ) -> Result<String, CoreError> {
+    if tab.is_none() && service.popup_needs_selection(owner) {
+        return Err(crate::CoreError::new(
+            crate::ErrorCode::InvalidCommand,
+            "The popup opener is unavailable. List the current tabs and explicitly choose a page before continuing; do not repeat the popup input.",
+        ));
+    }
     let key = match tab {
         Some("new") => service.create_web_tab(owner).map_err(|e| core_error(&e))?,
         Some(key) => key.to_owned(),

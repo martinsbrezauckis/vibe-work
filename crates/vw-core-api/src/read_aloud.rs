@@ -176,7 +176,11 @@ pub(crate) async fn start(
     {
         return outcome(
             "keyMissing",
-            "Reading aloud needs your Mistral key; set it in Settings > Account.",
+            concat!(
+                "Reading aloud needs your Mistral key; set it in ",
+                vw_vocabulary::settings_path!("Account"),
+                "."
+            ),
         );
     }
     let resolved = text

@@ -93,11 +93,15 @@ impl DynConfirmer {
             if let Some(fields) = request.params.as_object_mut() {
                 fields.insert("askId".to_owned(), handle.ask.id.clone().into());
             }
+            // Capture before the presentation is polled on another task by the guard adapter.
+            let notice = (request.requester == Requester::Agent)
+                .then(crate::approval_notice::capture)
+                .flatten();
             Box::pin(async move {
                 let offered = request.always.is_some();
                 let confirmation = tokio::select! {
                     biased;
-                    outcome = handle.closed() => return as_confirmation(&outcome),
+                    outcome = handle.closed() => as_confirmation(&outcome),
                     answer = confirmer.confirm(&request) => answer,
                 };
                 let confirmation = match confirmation {
@@ -120,6 +124,9 @@ impl DynConfirmer {
                     Confirmation::Approved | Confirmation::ApprovedAlways
                 ) {
                     record_delete(&deletes, &request);
+                    if let Some(notice) = notice {
+                        notice.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                 }
                 answer
             }) as Asking
@@ -273,6 +280,38 @@ mod tests {
             requester,
             always: None,
         }
+    }
+
+    #[tokio::test]
+    async fn only_a_presented_and_approved_dialog_marks_its_invocation() {
+        struct Yes;
+        impl Confirmer for Yes {
+            fn confirm(
+                &self,
+                _: &ConfirmationRequest,
+            ) -> impl std::future::Future<Output = Confirmation> {
+                std::future::ready(Confirmation::Approved)
+            }
+        }
+        let confirmer = DynConfirmer::new(
+            Yes,
+            Arc::new(Names::default()),
+            SessionStore::new(),
+            crate::ask::Service::new(
+                Arc::new(crate::SystemAskClock::default()),
+                tokio::sync::broadcast::channel(100).0,
+            ),
+        );
+        for (requester, shown) in [(Requester::Agent, true), (Requester::DebugApi, false)] {
+            let (_, observed) = crate::approval_notice::observe(async {
+                let presented =
+                    confirmer.begin(request(requester, "vibe-work/gitGuard", json!({})));
+                tokio::spawn(presented).await.unwrap()
+            })
+            .await;
+            assert_eq!(observed, shown);
+        }
+        assert!(crate::approval_notice::capture().is_none());
     }
 
     #[test]

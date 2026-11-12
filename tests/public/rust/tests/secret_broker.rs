@@ -472,7 +472,14 @@ async fn the_secret_broker_end_to_end() {
         ("secret_run", run_args("sh", &["./safe.sh"], env.clone())),
         ("secret_run_status", json!({"requestId":"missing"})),
     ] {
-        assert_eq!(call(&who, tool, args).await.unwrap_err(), expected);
+        // This fixture answers secret_list's generic Ask card; the vault still refuses the call.
+        // The two internally gated tools have no card here, so they must not claim an approval.
+        let reason = if tool == "secret_list" {
+            format!("{expected}\n{}", vw_agent_tools::hook::ALLOWED_NOTE)
+        } else {
+            expected.to_owned()
+        };
+        assert_eq!(call(&who, tool, args).await.unwrap_err(), reason);
     }
     secrets(
         &rig.core,

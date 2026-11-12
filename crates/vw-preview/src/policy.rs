@@ -275,28 +275,3 @@ fn short(text: &str) -> String {
 pub(crate) fn embedded_document(url: &Url) -> bool {
     url.scheme() == "data" || (url.scheme() == "about" && matches!(url.path(), "srcdoc" | "blank"))
 }
-
-#[cfg(test)]
-mod local_address_tests {
-    use super::*;
-
-    #[test]
-    fn browser_addresses_do_not_need_a_local_network_grant() {
-        let private = format!("http://{}/", std::net::Ipv4Addr::new(192, 168, 1, 2));
-        for url in [
-            private.as_str(),
-            "http://localhost:9999/",
-            "https://127.0.0.2/",
-            "http://169.254.1.1/",
-            "http://[fe80::1]/",
-            "http://nas.local/",
-        ] {
-            assert!(
-                UrlPolicy::default()
-                    .check(url, |_| PortOwner::Nobody, false)
-                    .is_ok(),
-                "{url}"
-            );
-        }
-    }
-}

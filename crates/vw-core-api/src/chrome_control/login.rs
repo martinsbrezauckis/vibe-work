@@ -101,19 +101,11 @@ pub(super) async fn send(
             "VAULT_PREPARATION_REQUIRED",
         ))
     } else {
-        escalation::send(shared, session, tool, args).await
+        escalation::send(shared, session, tool, args, None).await
     }
 }
 
 pub(crate) async fn prepare(
-    shared: &Arc<Shared>,
-    session: &str,
-    args: Value,
-) -> Result<Execution, String> {
-    prepare_consented(shared, session, args, None).await
-}
-
-pub(super) async fn prepare_consented(
     shared: &Arc<Shared>,
     session: &str,
     mut args: Value,
@@ -123,7 +115,7 @@ pub(super) async fn prepare_consented(
     // The mode refusal comes first, as in the gateway: the agent learns which mode the action needs.
     super::check::authorize_read(shared, session, "chrome_execute", &args, consent.as_ref())?;
     super::gateway::validate_session(shared, session, "chrome_execute", &args)?;
-    let checked = escalation::send_read(
+    let checked = escalation::send(
         shared,
         session,
         "chrome_execute",

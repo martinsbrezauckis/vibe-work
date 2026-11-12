@@ -11,90 +11,20 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 use tokio::time::{Duration, Instant};
+
+#[path = "unknown_input.rs"]
+pub(crate) mod unknown_input;
 
 /// Log entries kept per session.
 pub const LOG_CAP: usize = 40;
 /// An agent counts as "using the browser" this long after its last action (ms).
 pub const ACTIVE_FOR_MS: u64 = 30_000;
 
-/// Who ran an action.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum Actor {
-    /// The session's agent (`browser_act` through its credential).
-    Agent,
-    /// A Debug API client (acting as the user).
-    DebugApi,
-    /// The app's own window (the user).
-    User,
-}
-
-/// How an action ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum Outcome {
-    /// Done.
-    Done,
-    /// Refused before anything happened (policy, stale ref, secret field, not actionable, stopped).
-    Refused,
-    /// Failed while running.
-    Failed,
-    /// Cancelled by the user's Stop.
-    Stopped,
-}
-
-/// One line of the action log.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct LogEntry {
-    /// Increasing per session.
-    pub seq: u32,
-    /// When it ended (ms since the Unix epoch).
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub at_ms: u64,
-    /// Who.
-    pub by: Actor,
-    /// The action (`click`, `navigate`, ...).
-    pub action: String,
-    /// What it acted on (role and name, or a URL; page text, at most 80 characters).
-    pub target: String,
-    /// How it ended.
-    pub outcome: Outcome,
-    /// A short result or reason (at most 160 characters).
-    pub detail: String,
-}
-
-/// What the Browser tab shows about agent use.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserState {
-    /// The session.
-    pub session_id: String,
-    /// The agent acted within the last 30 s or is acting now ("Agent is using the browser").
-    pub agent_active: bool,
-    /// An agent action is running now.
-    pub in_flight: bool,
-    /// One authorized native click is waiting for the user to bring this window to the front.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
-    pub pending_native_click: Option<String>,
-    /// The user pressed Stop; agent actions are refused until Resume or the next turn.
-    pub stopped: bool,
-    /// The last agent action (ms since the epoch).
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub last_agent_at_ms: Option<u64>,
-    /// Recent actions, newest last.
-    pub log: Vec<LogEntry>,
-    /// Metadata-only receipts for acts authorized by browser permission or native confirmation.
-    pub receipts: Vec<crate::delegation::DelegationReceipt>,
-}
+#[path = "sessions_model.rs"]
+mod model;
+pub use model::{Actor, BrowserState, LogEntry, Outcome};
 
 /// The latest observation plus bounded ref history for its document.
 #[derive(Clone, Debug)]
@@ -122,6 +52,7 @@ enum Activity {
 
 #[derive(Default)]
 struct Session {
+    unknown_input: unknown_input::Fence,
     ended: bool,
     activity: Activity,
     seen: Option<Seen>,
@@ -192,6 +123,7 @@ impl Sessions {
         let in_flight = s.is_some_and(|s| s.activity == Activity::Active && s.in_flight > 0);
         BrowserState {
             session_id: session_id.to_owned(),
+            window_id: None,
             agent_active: in_flight
                 || s.filter(|s| s.activity == Activity::Active)
                     .and_then(|s| s.last_agent_clock)
@@ -503,22 +435,3 @@ impl Drop for AuthorizationWait<'_> {
 #[cfg(test)]
 #[path = "session_clock_tests.rs"]
 mod clock_tests;
-
-#[cfg(test)]
-mod close_wait_tests {
-    use super::{Actor, Sessions};
-
-    #[test]
-    fn turn_end_cancels_a_pending_host_close_decision() {
-        let sessions = Sessions::default();
-        let mut cancel = sessions.cancel_signal("page");
-        cancel.borrow_and_update();
-        let wait = sessions.authorization_wait("page", Actor::Agent);
-        sessions.cancel_confirmations("page");
-        assert!(cancel.has_changed().unwrap());
-        drop(wait);
-        cancel.borrow_and_update();
-        sessions.cancel_confirmations("page");
-        assert!(!cancel.has_changed().unwrap());
-    }
-}

@@ -7,7 +7,7 @@
  */
 import { literalInputProps } from "../../components/inputProps";
 import { Button } from "../../components/Controls";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useApp } from "../shell/AppContext";
 import { ConsoleLink } from "./ConsoleLink";
@@ -37,11 +37,25 @@ export function KeyStep({
   const savedKeys = useKeyUi((s) => s.mistralKeys);
   const [name, setName] = useState(savedKeys.length > 0 ? "Work key" : "Personal key");
   const [key, setKey] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const keyRef = useRef<HTMLInputElement>(null);
+  const missingText =
+    offers && vibeKeys.length > 0
+      ? "A key is required. Paste your Mistral key or use Vibe's key."
+      : offers && candidates.length > 0
+        ? "A key is required. Paste your Mistral key or use the saved key."
+        : "A key is required. Paste your Mistral key.";
 
   const save = () => {
-    if (keys === null || key.trim() === "") return;
+    if (keys === null || busy) return;
+    setSubmitted(true);
+    if (key.trim() === "") {
+      keyRef.current?.focus();
+      return;
+    }
     const value = key;
     setKey("");
+    setSubmitted(false);
     void (additional ? keys.addMistralKey(name, value) : keys.saveKey(value)).then((ok) => {
       if (ok) onSaved?.();
     });
@@ -110,6 +124,8 @@ export function KeyStep({
           value={key}
           onChange={setKey}
           placeholder="Your key"
+          inputRef={keyRef}
+          error={submitted && key.trim() === "" ? missingText : null}
           autoFocus={offers && candidates.length === 0 && vibeKeys.length === 0}
         />
         <ConsoleLink />
@@ -119,7 +135,7 @@ export function KeyStep({
             type="submit"
             appearance="dialog"
             data-testid="setup.save"
-            disabled={busy || key.trim() === "" || (additional && name.trim() === "")}
+            disabled={busy || (additional && name.trim() === "")}
           >
             {busy ? "Saving…" : "Save and test the key"}
           </Button>

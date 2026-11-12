@@ -32,8 +32,10 @@ async fn request(address: SocketAddr, port: u16) -> String {
         .await
         .unwrap();
     let mut response = String::new();
+    // Windows retries a refused loopback connect for about 2 s before reporting it, so the
+    // guard's 502 for a closed port arrives after that; a 2 s read timeout raced it.
     tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(10),
         client.read_to_string(&mut response),
     )
     .await
@@ -73,4 +75,69 @@ async fn no_proxy_keeps_direct_owner_grants_and_refuses_other_chats() {
     let answer = request(owner, port).await;
     assert!(answer.starts_with("HTTP/1.1 200") && answer.ends_with("ok"));
     server.await.unwrap();
+}
+
+type Receipt = (String, String, u16, Vec<SocketAddr>);
+
+#[derive(Default)]
+struct Receipts(std::sync::Mutex<Vec<Receipt>>);
+
+impl PageContext for Receipts {
+    fn browser_addresses(&self, _: &str) -> bool {
+        true
+    }
+    fn loopback<'a>(&'a self, _: &'a str, _: u16) -> ScopeFuture<'a> {
+        Box::pin(async { Ok(()) })
+    }
+    fn connected(&self, key: &str, host: &str, port: u16, addresses: &[SocketAddr]) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((key.into(), host.into(), port, addresses.to_vec()));
+    }
+}
+
+#[tokio::test]
+async fn only_successful_unambiguous_connections_deliver_pinned_addresses() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let guard = NetGuard::bind(Arc::new(SystemResolver)).unwrap();
+    guard.set_upstream(Upstream::none());
+    let receipts = Arc::new(Receipts::default());
+    guard.set_context(receipts.clone());
+    guard.serve();
+    let address = proxy_client::addr(&guard.proxy_url_for_store("load", "page").unwrap());
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 1024];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        }
+    });
+    assert!(request(address, port).await.starts_with("HTTP/1.1 200"));
+    assert_eq!(
+        *receipts.0.lock().unwrap(),
+        vec![(
+            "page".into(),
+            "127.0.0.1".into(),
+            port,
+            vec![SocketAddr::from(([127, 0, 0, 1], port))]
+        )]
+    );
+    // A shared listener cannot identify which mount made the connection; it grants neither.
+    guard.proxy_url_for_store("load", "other-page").unwrap();
+    assert!(request(address, port).await.starts_with("HTTP/1.1 200"));
+    server.await.unwrap();
+    assert_eq!(receipts.0.lock().unwrap().len(), 1);
+    guard.forget_session("other-page");
+    assert!(request(address, port).await.starts_with("HTTP/1.1 502"));
+    assert_eq!(
+        receipts.0.lock().unwrap().len(),
+        1,
+        "failed connection is not load evidence"
+    );
 }

@@ -11,7 +11,6 @@
  * so it can never become a command; a deleted session's draft and chips are dropped.
  */
 import type { ContextItem } from "../features/composer/model/message";
-import { FEEDBACK_ENABLED } from "./feedbackEnabled";
 import { selectedModel } from "../features/composer/model/models";
 import type { ComposerActions } from "./composerImpl";
 import { runningTurnId } from "../features/composer/model/session";
@@ -385,7 +384,7 @@ export function createComposer(deps: {
         return sessionId === NEW_CHAT ? Promise.resolve() : deferred.loadLoops(sessionId, force);
       },
       runCommand(sessionId: string, name: string, args: string): Promise<SendOutcome> {
-        if (FEEDBACK_ENABLED && (name === "feedback" || name === "help"))
+        if (name === "feedback" || name === "help")
           return deferred.runCommand(sessionId, name, args);
         const blocked = deps.keyGuard?.() ?? null;
         if (blocked !== null) return Promise.resolve({ ok: false, kind: "key", message: blocked });
@@ -404,7 +403,6 @@ export function createComposer(deps: {
       send(sessionId: string, mode: SendMode): Promise<NewChatOutcome> {
         const current = composer.store.get();
         if (
-          FEEDBACK_ENABLED &&
           /^\/(?:feedback|help)(?:\s|$)/.test((current.drafts[sessionId] ?? "").trim()) &&
           current.literal[sessionId] !== true &&
           (current.context[sessionId]?.length ?? 0) === 0 &&

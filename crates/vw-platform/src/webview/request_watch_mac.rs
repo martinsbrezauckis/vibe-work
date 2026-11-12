@@ -1,65 +1,29 @@
 //! The agent browser's request watch on macOS through Apple's PRIVATE `-[WKWebView _setResourceLoadDelegate:]`
-//! (`_WKResourceLoadDelegate`, WebKit `WKWebViewPrivate.h`; present since macOS 11). Watch only: every request of the
-//! page (documents, frames, scripts, images, fetch/XHR), its redirects, response status and completion; no bodies,
+//! (`_WKResourceLoadDelegate`, `WebKit` `WKWebViewPrivate.h`; present since macOS 11). Watch only: every request of the
+//! page (documents, frames, scripts, images, fetch/XHR), bounded headers, redirects, response status and completion; no bodies,
 //! no changes, no cancelling.
 //!
 //! Private API: not allowed in an App Store build; legal for a notarized direct download. Any macOS update may
-//! change or remove it, so every selector is checked at run time and a missing one leaves the watch off without a
-//! notice ([`attach`] answers `false`). The switch lives in Settings > Developer, off by default,
-//! and this file is re-tested on each macOS release.
+//! change or remove it, so required selectors are checked at run time ([`attach`] answers `false`). The
+//! browser log surfaces that failure with a diagnosis and retry instruction. The separate developer fixture
+//! can opt into its own watch. Re-test this interface on each macOS release.
 //!
 //! Depends on: objc2, objc2-foundation, objc2-web-kit. Called by: vw-webview `mac_agent` (inside Tauri's
 //! `with_webview`, on the main thread).
-//! Invariants: main thread only; WebKit holds the delegate weakly, so it is kept here per webview until [`detach`];
+//! Invariants: main thread only; `WebKit` holds the delegate weakly, so it is kept here per webview until [`detach`];
 //! the sink is called on the main thread and must return quickly.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::Arc;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, NSObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-use objc2_foundation::{NSError, NSObjectProtocol, NSString, NSURL};
+use objc2_foundation::{NSDictionary, NSError, NSObjectProtocol, NSString, NSURL};
 use objc2_web_kit::WKWebView;
 
-/// What happened to one request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RequestStep {
-    /// The request was sent.
-    Sent,
-    /// A redirect to `url`.
-    Redirected,
-    /// The response headers arrived (`status`).
-    Response,
-    /// The load ended (`error` when it failed).
-    Completed,
-}
-
-/// One watched request event (no headers, no bodies).
-#[derive(Clone, Debug)]
-pub struct RequestEvent {
-    /// `WebKit`'s id of the load (stable across its steps).
-    pub id: u64,
-    /// The step.
-    pub step: RequestStep,
-    /// The URL of this step (the new URL for a redirect).
-    pub url: String,
-    /// The HTTP method of the original request.
-    pub method: String,
-    /// `WebKit`'s resource type number (`_WKResourceLoadInfoResourceType`), -1 when unknown.
-    pub resource_type: i64,
-    /// The HTTP status of a response or completion, 0 when none.
-    pub status: i64,
-    /// Served from the cache.
-    pub from_cache: bool,
-    /// The error text of a failed load.
-    pub error: Option<String>,
-}
-
-/// Receives the events (main thread).
-pub type RequestSink = Arc<dyn Fn(RequestEvent) + Send + Sync>;
+pub use super::request_event::{HeaderFields, RequestEvent, RequestSink, RequestStep};
 
 /// The delegate's sink.
 struct Watch {
@@ -80,7 +44,7 @@ define_class!(
         #[unsafe(method(webView:resourceLoad:didSendRequest:))]
         fn did_send(&self, _view: &AnyObject, load: &AnyObject, request: &AnyObject) {
             let url = request_url(request);
-            self.emit(load, RequestStep::Sent, url, None, None);
+            self.emit(load, RequestStep::Sent, url, None, None, Some(request));
         }
 
         #[unsafe(method(webView:resourceLoad:didPerformHTTPRedirection:newRequest:))]
@@ -92,13 +56,13 @@ define_class!(
             request: &AnyObject,
         ) {
             let url = request_url(request);
-            self.emit(load, RequestStep::Redirected, url, Some(response), None);
+            self.emit(load, RequestStep::Redirected, url, Some(response), None, Some(request));
         }
 
         #[unsafe(method(webView:resourceLoad:didReceiveResponse:))]
         fn did_receive(&self, _view: &AnyObject, load: &AnyObject, response: &AnyObject) {
             let url = response_url(response);
-            self.emit(load, RequestStep::Response, url, Some(response), None);
+            self.emit(load, RequestStep::Response, url, Some(response), None, None);
         }
 
         #[unsafe(method(webView:resourceLoad:didCompleteWithError:response:))]
@@ -113,7 +77,7 @@ define_class!(
             let (response, error) = unsafe { (response.as_ref(), error.as_ref()) };
             let url = response.map(response_url).unwrap_or_default();
             let error = error.map(|e| e.localizedDescription().to_string());
-            self.emit(load, RequestStep::Completed, url, response, error);
+            self.emit(load, RequestStep::Completed, url, response, error, None);
         }
     }
 );
@@ -132,6 +96,7 @@ impl WatchDelegate {
         url: String,
         response: Option<&AnyObject>,
         error: Option<String>,
+        request: Option<&AnyObject>,
     ) {
         let info = LoadInfo::read(load);
         let url = if url.is_empty() { info.url } else { url };
@@ -140,10 +105,18 @@ impl WatchDelegate {
             id: info.id,
             step,
             url,
-            method: info.method,
+            response_url: response.map(response_url),
+            method: request.map_or(info.method, |request| {
+                // SAFETY: WebKit supplies an NSURLRequest with its documented HTTPMethod getter.
+                let method: Option<Retained<NSString>> = unsafe { msg_send![request, HTTPMethod] };
+                method.map(|method| method.to_string()).unwrap_or_default()
+            }),
             resource_type: info.resource_type,
             status,
             from_cache: info.from_cache,
+            main_document: info.main_document,
+            request_headers: request.and_then(|r| headers(r, sel!(allHTTPHeaderFields))),
+            response_headers: response.and_then(|r| headers(r, sel!(allHeaderFields))),
             error,
         });
     }
@@ -156,6 +129,7 @@ struct LoadInfo {
     method: String,
     resource_type: i64,
     from_cache: bool,
+    main_document: bool,
 }
 
 impl LoadInfo {
@@ -196,15 +170,55 @@ impl LoadInfo {
             } else {
                 false
             };
+            let main_document = resource_type == 3 && responds(sel!(parentFrame)) && {
+                let parent: Option<Retained<AnyObject>> = msg_send![load, parentFrame];
+                parent.is_none()
+            };
             Self {
                 id,
                 url,
                 method,
                 resource_type: resource_type as i64,
                 from_cache,
+                main_document,
             }
         }
     }
+}
+
+/// Copies at most 32 native header fields before they cross into the request log.
+fn headers(object: &AnyObject, selector: objc2::runtime::Sel) -> Option<HeaderFields> {
+    // SAFETY: WebKit supplies NSURLRequest/NSURLResponse objects; only request/HTTP response
+    // selectors returning an NSDictionary of string header fields are passed by our callbacks.
+    let dictionary: Option<Retained<NSDictionary<NSString, NSString>>> = unsafe {
+        let responds: bool = msg_send![object, respondsToSelector: selector];
+        if !responds {
+            return None;
+        }
+        if selector == sel!(allHTTPHeaderFields) {
+            msg_send![object, allHTTPHeaderFields]
+        } else {
+            msg_send![object, allHeaderFields]
+        }
+    };
+    let Some(dictionary) = dictionary else {
+        return Some(HeaderFields::default());
+    };
+    let mut fields = HeaderFields {
+        truncated: dictionary.len() > 32,
+        ..HeaderFields::default()
+    };
+    for key in dictionary.keys().take(32) {
+        if let Some(value) = dictionary.objectForKey(&key) {
+            let (key, value) = (key.to_string(), value.to_string());
+            fields.truncated |= key.chars().count() > 128 || value.chars().count() > 512;
+            fields.values.insert(
+                key.chars().take(128).collect(),
+                value.chars().take(512).collect(),
+            );
+        }
+    }
+    Some(fields)
 }
 
 fn request_url(request: &AnyObject) -> String {
@@ -268,7 +282,15 @@ pub fn available(webview: *mut c_void) -> bool {
         && view.respondsToSelector(sel!(_resourceLoadDelegate))
         && AnyClass::get(c"_WKResourceLoadInfo").is_some_and(|class| {
             // SAFETY: an instance-selector query on a class object.
-            unsafe { msg_send![class, instancesRespondToSelector: sel!(resourceLoadID)] }
+            [
+                sel!(resourceLoadID),
+                sel!(resourceType),
+                sel!(parentFrame),
+                sel!(originalURL),
+                sel!(originalHTTPMethod),
+            ]
+            .into_iter()
+            .all(|selector| unsafe { msg_send![class, instancesRespondToSelector: selector] })
         })
 }
 

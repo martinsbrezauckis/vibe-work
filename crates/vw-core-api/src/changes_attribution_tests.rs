@@ -85,3 +85,41 @@ fn check_child_authors(linked: bool) {
     drop(hub);
     std::fs::remove_dir_all(base).unwrap();
 }
+
+#[test]
+fn non_git_child_effects_are_not_dropped_for_windows_journal_spellings() {
+    use std::path::Path;
+    let hub = Hub::new(None, None);
+    let folder = Path::new(r"\\?\C:\Work\Project");
+    for journal in [
+        r"C:\Work\Project\child-review.txt",
+        r"c:\work\project\child-review.txt",
+        r"C:/Work/Project/child-review.txt",
+        r"\\?\C:\Work\Project\child-review.txt",
+        r"C:\WORK~1\PROJEC~1\child-review.txt",
+    ] {
+        let mut tracker = Tracker::unopened(folder);
+        let mut parent = facts(&json!({"session": {"cwd": folder}}));
+        let child = facts(
+            &json!({"session": {"cwd": folder}, "turns": [{"id": "child-turn", "startedAt": 1}],
+            "history": [{"id": "child-write", "type": "effect", "turnId": "child-turn", "detail": {"kind": "file_write"},
+                "state": {"status": "completed", "output": {"filePath": journal, "fileExisted": false}}}]}),
+        );
+        parent.subagents.push((
+            ChangesSubagent {
+                session_id: "child".into(),
+                name: "Helper".into(),
+            },
+            child,
+        ));
+        let view = build_view(&hub, "parent", &mut tracker, &parent);
+        assert_eq!(view.mode, ChangesMode::Effects, "{journal}");
+        assert_eq!(view.turns.len(), 1, "{journal}");
+        assert!(
+            view.turns[0].files[0].path.ends_with("child-review.txt"),
+            "{journal}"
+        );
+        assert_eq!(view.turns[0].files[0].entry_ids, ["child-write"]);
+        assert!(view.turns[0].anchor_entry_id.is_none());
+    }
+}

@@ -99,8 +99,7 @@ export function ConnectorsPage(): ReactElement {
         <div className="chead">
           <ToolsTabs />
           <p className="cmuted">
-            Mistral hosts these and keeps their sign-ins. Sessions use them in their own access
-            mode.
+            Mistral hosts these and keeps their sign-ins. Chats use them in their own access mode.
           </p>
         </div>
         <Toolbar />

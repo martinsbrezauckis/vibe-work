@@ -122,7 +122,7 @@ export function serverStatusText(s: ServerView): string {
   if (s.key?.grant === "locked") return "Vault locked";
   switch (s.status) {
     case null:
-      return s.signIn === "oauth" ? "Added (status shows once a session is open)" : "Added";
+      return s.signIn === "oauth" ? "Added (status shows once a chat is open)" : "Added";
     case "connected":
       return "Connected";
     // Vibe 2.26.1 says `enabled` for a working server without OAuth (`app_server/_projection.py`): connected once

@@ -1,5 +1,7 @@
 //! Independent chat browser windows using Tauri's shared desktop window API.
 //! A single guarded child fills each window; native engine adapters remain the same as panel pages.
+//! Depends on: Tauri windows and checked preview mounts.
+//! Called by: preview engine browser-window methods.
 use super::TauriEngine;
 use std::sync::PoisonError;
 use tauri::{
@@ -54,7 +56,11 @@ impl TauriEngine {
         page: String,
         action: PageWindowAction,
     ) -> Result<Option<PageWindowInfo>, EngineError> {
-        let current = self.page_window_native(&page);
+        let current = if action == PageWindowAction::FocusPanel {
+            self.app.get_window(&self.window_label)
+        } else {
+            self.page_window_native(&page)
+        };
         if action == PageWindowAction::Open {
             if current.is_some() {
                 return Err(failure("This browser page already has a window."));
@@ -122,7 +128,7 @@ impl TauriEngine {
                     .remove(&page);
                 Ok(None)
             }
-            PageWindowAction::Focus => {
+            PageWindowAction::Focus | PageWindowAction::FocusPanel => {
                 window.unminimize().map_err(failure)?;
                 window.show().map_err(failure)?;
                 window.set_focus().map_err(failure)?;
@@ -137,9 +143,26 @@ impl TauriEngine {
                     "The operating system did not focus this browser window. Bring it to the front before continuing.",
                 ))
             }
+            PageWindowAction::Resize { width, height } => {
+                resize(&window, width, height).await.map(Some)
+            }
             PageWindowAction::Inspect => info(&window).map(Some),
             PageWindowAction::Open => unreachable!(),
         }
+    }
+
+    // Prepare once before placement/navigation; feedback must not reparent an already painted page.
+    #[cfg(target_os = "linux")]
+    pub(super) async fn prepare_window_page(view: &Webview<Wry>) -> Result<(), EngineError> {
+        crate::platform::with_native(
+            view,
+            "prepare browser window overlay",
+            std::time::Duration::from_secs(5),
+            |native, reply| {
+                let _ = reply.send(crate::linux_layout::prepare(&native.inner()));
+            },
+        )
+        .await
     }
 
     pub(super) fn window_placement(window: &Window<Wry>) -> Result<Placement, EngineError> {
@@ -195,4 +218,28 @@ impl TauriEngine {
         .await?;
         view.show().map_err(failure)
     }
+}
+
+async fn resize(
+    window: &Window<Wry>,
+    width: u32,
+    height: u32,
+) -> Result<PageWindowInfo, EngineError> {
+    window
+        .set_size(LogicalSize::new(width, height))
+        .map_err(failure)?;
+    for _ in 0..40 {
+        let snapshot = info(window)?;
+        if (snapshot.width - f64::from(width)).abs() <= 1.0
+            && (snapshot.height - f64::from(height)).abs() <= 1.0
+        {
+            return Ok(snapshot);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let actual = info(window)?;
+    Err(failure(format!(
+        "The operating system kept the browser window at {}×{} instead of {width}×{height}; choose a size that fits this display.",
+        actual.width, actual.height
+    )))
 }

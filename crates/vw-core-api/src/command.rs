@@ -1,39 +1,38 @@
-//! Typed core requests/results for Tauri UI and Debug API HTTP; executed by `dispatch`.
+//! Typed core requests for Tauri UI and Debug API HTTP; executed by `dispatch`.
 //! Depends on view payloads, serde and `serde_json`; the UI uses generated TypeScript bindings.
 //! Wire tags and fields are camelCase, unknown fields are refused, and each identifier has one spelling.
 //! Nested Vibe JSON is validated by the gate against generated protocol types before sending.
+use crate::changes_view::ChangesRequest;
+use crate::connectors_view::ConnectorsRequest;
+use crate::documents_view::DocumentsRequest;
+use crate::files_view::FilesRequest;
+use crate::git_browser_view::GitBrowserRequest;
+use crate::git_view::GitRequest;
+use crate::instructions_view::InstructionsRequest;
+use crate::keys::KeyRequest;
+use crate::left_running_view::ProcessesRequest;
+use crate::line_comments_view::LineCommentsRequest;
+use crate::market_view::MarketRequest;
+use crate::network_view::NetworkRequest;
+use crate::pages_view::PagesRequest;
+use crate::preview_view::PreviewRequest;
+use crate::project_instructions_view::ProjectInstructionsRequest;
+use crate::projects_view::ProjectsRequest;
+use crate::safety_view::SafetyRequest;
+use crate::search_view::SearchRequest;
+use crate::secrets_view::SecretsRequest;
+use crate::session_tools_view::SessionToolsRequest;
+use crate::skills_view::SkillsRequest;
+use crate::speech_view::SpeechRequest;
+use crate::terminal_view::TerminalRequest;
+use crate::work_view::{ImagesRequest, LibrariesRequest};
+use crate::worktrees_view::WorktreesRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::changes_view::{ChangesRequest, ChangesResult};
-use crate::connectors_view::{ConnectorsRequest, ConnectorsResult};
-use crate::documents_view::{DocumentsRequest, DocumentsResult};
-use crate::files_view::{FilesRequest, FilesResult};
-use crate::git_browser_view::{GitBrowserRequest, GitBrowserResult};
-use crate::git_view::{GitRequest, GitResult};
-use crate::instructions_view::{InstructionsRequest, InstructionsResult};
-use crate::keys::{KeyRequest, KeyStatusView, VibeKeyView};
-use crate::left_running_view::{ProcessesRequest, ProcessesResult};
-use crate::line_comments_view::{LineCommentsRequest, LineCommentsResult};
-use crate::market_view::{MarketRequest, MarketResult};
-use crate::network_view::{NetworkRequest, NetworkResult};
-use crate::pages_view::{PagesRequest, PagesResult};
-use crate::preview_view::{PreviewRequest, PreviewResult};
-use crate::project_instructions_view::{ProjectInstructionsRequest, ProjectInstructionsResult};
-use crate::projects_view::{ProjectsRequest, ProjectsResult};
-use crate::safety_view::{SafetyRequest, SafetyResult};
-use crate::search_view::{SearchRequest, SearchResult};
-use crate::secrets_view::{SecretsRequest, SecretsResult};
-use crate::session_tools_view::{SessionToolsRequest, SessionToolsResult};
-use crate::skills_view::{SkillsRequest, SkillsResult};
-use crate::speech_view::{SpeechRequest, SpeechResult};
-use crate::terminal_view::{TerminalRequest, TerminalResult};
-use crate::view::{AnomalyReport, CallbackInfo, CoreStatus, SessionRowView, SessionSnapshot};
-use crate::work_view::{ImagesRequest, ImagesResult, LibrariesRequest, LibrariesResult};
-use crate::worktrees_view::{WorktreesRequest, WorktreesResult};
-
 pub use crate::command_origin::Origin;
 pub(crate) use crate::command_origin::requester;
+pub use crate::command_result::CommandResult;
 
 /// One request to the core. External Vibe calls use the gate; plugin refresh owns its internal reload/reopen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -505,291 +504,5 @@ pub enum Command {
     Search {
         /// What to search.
         request: SearchRequest,
-    },
-}
-
-/// What a successful command returns.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum CommandResult {
-    /// The feedback panel after an operation.
-    Feedback {
-        /// Core-owned review and diagnostic facts.
-        view: crate::FeedbackView,
-    },
-    /// Shared prompt history, oldest first (at most 100).
-    PromptHistory {
-        /// Submitted prompts, without known vault values.
-        entries: Vec<String>,
-    },
-    /// The protected-folder decision and its readable record.
-    ProtectedChange {
-        /// Final review state.
-        proposal: crate::ProtectedChangeView,
-    },
-    /// `listSessions`.
-    Sessions {
-        /// Local-only sessions first (newest first), then the server's page in order.
-        rows: Vec<SessionRowView>,
-        /// Cursor for the next page, when there is one.
-        next_cursor: Option<String>,
-        /// Retained for client compatibility; Vibe no longer supplies a CLI continuation target.
-        continue_session_id: Option<String>,
-    },
-    /// Every command that loads or reads one session.
-    Session {
-        /// The store's copy after the command.
-        snapshot: SessionSnapshot,
-        /// The server's result without its `state` (e.g. rewind's `restoredPaths`); `null` for
-        /// pure reads.
-        detail: Value,
-    },
-    /// A forwarded call (turns, model pick, access mode, `call`, callback answers).
-    Reply {
-        /// The server's result.
-        result: Value,
-        /// For turn start/steer: the anchor id that was sent.
-        client_user_message_id: Option<String>,
-        /// For `session/turn/enqueue`: the `entryId` of each user entry.
-        user_entry_ids: Vec<String>,
-    },
-    /// `listCallbacks`.
-    Callbacks {
-        /// Open callbacks, ordered by id.
-        open: Vec<CallbackInfo>,
-    },
-    /// `requestConfirmation`: the user approved; pass the token with the call.
-    Confirmation {
-        /// Single-use token for exactly that method and params.
-        token: String,
-    },
-    /// `readStatus`.
-    Status {
-        /// Supervisor, versions, uptime, Debug API flag.
-        status: CoreStatus,
-    },
-    /// `readAnomalies`.
-    Anomalies {
-        /// Counters and recent records.
-        report: AnomalyReport,
-    },
-    /// A one-way operation succeeded (nothing else is returned).
-    Done {},
-    /// Every `vibe` op: the install view after it ran.
-    VibeInstall {
-        /// Phase, offer, existing installs.
-        view: vw_vibe_install::InstallView,
-    },
-    /// `keys` / `readStatus`.
-    KeyStatus {
-        /// Vault and key status (no secret).
-        status: KeyStatusView,
-    },
-    /// All saved Mistral keys; metadata only.
-    MistralKeys {
-        /// Account rows without credential values.
-        keys: Vec<crate::MistralKeyView>,
-    },
-    /// `keys` / `testKey`: the key works.
-    KeyTest {
-        /// Models the key can use.
-        model_count: u32,
-    },
-    /// `keys` / `detectVibeKey`.
-    VibeKeys {
-        /// Where Vibe itself holds a key (no values).
-        found: Vec<VibeKeyView>,
-    },
-    /// `terminal`.
-    Terminal {
-        /// The terminal request's answer.
-        result: TerminalResult,
-    },
-    /// `instructions`.
-    Instructions {
-        /// The instructions request's answer.
-        result: InstructionsResult,
-    },
-    /// `projectInstructions`.
-    ProjectInstructions {
-        /// The project instruction request's answer.
-        result: ProjectInstructionsResult,
-    },
-    /// `documents`.
-    Documents {
-        /// The documents request's answer.
-        result: DocumentsResult,
-    },
-    /// `changes`.
-    Changes {
-        /// The Changes request's answer.
-        result: ChangesResult,
-    },
-    /// `lineComments`.
-    LineComments {
-        /// The line-comment request's answer.
-        result: LineCommentsResult,
-    },
-    /// `preview`.
-    Preview {
-        /// The preview request's answer.
-        result: PreviewResult,
-    },
-    /// `browser`.
-    Browser {
-        /// The browser request's answer.
-        result: crate::browser_view::BrowserResult,
-    },
-    /// `pages`.
-    Pages {
-        /// The Pages request's answer.
-        result: PagesResult,
-    },
-    /// `projects`.
-    Projects {
-        /// The project request's answer.
-        result: ProjectsResult,
-    },
-    /// `files`.
-    Files {
-        /// The File tab request's answer.
-        result: FilesResult,
-    },
-    /// `speech`.
-    Speech {
-        /// The speech request's answer.
-        result: SpeechResult,
-    },
-    /// `libraries`.
-    Libraries {
-        /// The Libraries request's answer.
-        result: LibrariesResult,
-    },
-    /// `images`.
-    Images {
-        /// The images request's answer.
-        result: ImagesResult,
-    },
-    /// `connectors`.
-    Connectors {
-        /// The connectors request's answer.
-        result: ConnectorsResult,
-    },
-    /// `skills`.
-    Skills {
-        /// The skills response.
-        result: SkillsResult,
-    },
-    /// The reviewed Tools marketplace.
-    Marketplace {
-        /// The marketplace request's answer.
-        result: MarketResult,
-    },
-    /// `worktrees`.
-    Worktrees {
-        /// The worktree request's answer.
-        result: WorktreesResult,
-    },
-    /// `gitBrowser`.
-    GitBrowser {
-        /// Project browser answer.
-        result: GitBrowserResult,
-    },
-    /// `git`.
-    Git {
-        /// The git request's answer.
-        result: GitResult,
-    },
-    /// `processes`.
-    Processes {
-        /// The processes request's answer.
-        result: ProcessesResult,
-    },
-    /// `secrets`.
-    Secrets {
-        /// The secrets request's answer.
-        result: SecretsResult,
-    },
-    /// GitHub reader preference and account status.
-    GithubReads {
-        /// Current GitHub reader state.
-        view: crate::GithubReadsView,
-    },
-    /// `askGrants`: every kept session grant, oldest first.
-    AskGrants {
-        /// The grants after the request.
-        grants: Vec<vw_ask::SessionGrant>,
-        /// What "Allow for this session" would keep on each open card that offers it (its covers line).
-        offers: Vec<vw_ask::GrantOffer>,
-        /// How many grants the request removed (0 for `list`).
-        removed: u32,
-    },
-    /// `chromeControl`: Settings › Browser › Your Chrome after the request.
-    ChromeControl {
-        /// Availability, connection and chat work states.
-        view: crate::ChromeControlView,
-        /// The set up offer the window shows before the click (`offerSetup` only).
-        offer: Option<Box<crate::ToolsInstallOffer>>,
-    },
-    /// Connected tabs for the composer picker.
-    ChromeTabs {
-        /// Tabs in all connected profiles.
-        tabs: Vec<crate::ChromeTab>,
-    },
-    /// A selected Chrome context item claimed by a composer.
-    ChromeSelection {
-        /// Absent when another window already claimed it.
-        selection: Option<crate::ChromeSelection>,
-    },
-    /// `vibeRules`: the lasting rules after the request.
-    VibeRules {
-        /// Each rule: a tool-wide `always`, or one added allowlist pattern.
-        rules: Vec<crate::VibeRule>,
-        /// Vibe's default allowlists were read, so its shipped patterns are left out.
-        defaults_known: bool,
-        /// How many rules the request removed (0 for `list`).
-        removed: u32,
-    },
-    /// Automatic idle-sleep preference and status.
-    KeepAwake {
-        /// Core-owned view.
-        view: crate::KeepAwakeView,
-    },
-    /// The New chat screen's owner id and folder.
-    NewChat {
-        /// The current state.
-        view: crate::NewChatView,
-    },
-    /// Session log settings, status and retained findings.
-    SecretScan {
-        /// Value-free scanner view.
-        view: crate::SecretScanView,
-        /// File paths for Developer error detail only; absent from finding events and the bell.
-        file_errors: Vec<String>,
-    },
-    /// `safety`.
-    Safety {
-        /// The safety settings after the request.
-        result: SafetyResult,
-    },
-    /// `network`.
-    Network {
-        /// The network settings, a test result or the problems found.
-        result: NetworkResult,
-    },
-    /// `sessionTools`.
-    SessionTools {
-        /// The session tools' answer.
-        result: SessionToolsResult,
-    },
-    /// `search`.
-    Search {
-        /// The search's answer.
-        result: SearchResult,
     },
 }

@@ -79,6 +79,7 @@ export function ResultStep() {
             type="button"
             appearance="dialog"
             data-testid="setup.continue"
+            disabled={busy || status?.keyState !== "ready"}
             onClick={() => {
               keys?.finish();
             }}

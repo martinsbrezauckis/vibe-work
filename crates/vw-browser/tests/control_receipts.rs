@@ -168,6 +168,13 @@ async fn invalid_native_date_is_refused_without_erasing_the_existing_value() {
         "2026-03-14"
     );
     act(&rig, json!({"action":"press","ref":reference,"key":"Tab"})).await;
+    // Native Tab visits the date control's editable segments before the next control.
+    for _ in 0..4 {
+        if rig.engine.eval("document.activeElement.tagName").await == "BUTTON" {
+            break;
+        }
+        act(&rig, json!({"action":"press","key":"Tab"})).await;
+    }
     assert_eq!(
         rig.engine.eval("document.activeElement.tagName").await,
         "BUTTON"

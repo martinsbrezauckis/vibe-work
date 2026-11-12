@@ -161,6 +161,11 @@ export function arrivedText(core: CoreState, ask: Ask): string {
     words.command !== undefined && !words.summary.includes(words.command)
       ? `${words.summary}: ${words.command}`
       : words.summary;
+  if (ask.kind === "user_input") {
+    const question = clip(what);
+    const end = /[.!?]$/.test(question) ? "" : ".";
+    return `Vibe asks you in “${words.session}”: ${question}${end} Press ${formatKeys(GO_TO_PROMPT_KEYS)} to go there.`;
+  }
   return wording(TEXT.askArrived, {
     session: words.session,
     question: words.question,

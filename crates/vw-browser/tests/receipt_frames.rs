@@ -15,8 +15,7 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 async fn prepared(child: bool) -> (Rig, vw_browser::Action) {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval(r#"document.body.innerHTML = '<button id="target" style="position:fixed;left:20px;top:20px;width:100px;height:40px">A</button>';
       scrollTo(0,0);window.presses=[];
       window.addEventListener('mousedown',e=>{if(e.isTrusted)window.presses.push(e.target.id)},true)"#).await;
@@ -76,7 +75,7 @@ async fn user_click_after_mark_cannot_confirm_agent_input_in_a_new_frame() {
         .await;
     assert_eq!(
         rig.engine.eval("window.presses").await,
-        serde_json::json!(["target", "cover"])
+        serde_json::json!(["target"])
     );
     assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 1);
     let error = result.expect_err("user receipt confirmed input delivered to an unarmed frame");
@@ -235,8 +234,7 @@ async fn silent_frame_in_a_shadow_root(
     Vec<String>,
     Result<serde_json::Value, vw_browser::ActError>,
 ) {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval(&format!(r#"new Promise(resolve=>{{
       document.body.innerHTML = '<button id="target" style="position:fixed;left:20px;top:20px;width:100px;height:40px">A</button><div id="host"></div>';
       scrollTo(0,0);
@@ -292,8 +290,7 @@ async fn a_silent_frame_in_a_shadow_root_refuses_a_checked_click_before_input() 
 /// before any input. (The outer frame's page embeds a frame of its own.)
 #[tokio::test(flavor = "multi_thread")]
 async fn other_frames_reasons_never_hide_a_silent_frame_in_a_shadow_root() {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     rig.engine.eval(r#"new Promise(resolve=>{
       document.body.innerHTML = '<button id="target" style="position:fixed;left:20px;top:20px;width:100px;height:40px">A</button><div id="host"></div>';
       scrollTo(0,0);

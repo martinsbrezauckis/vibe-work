@@ -146,3 +146,37 @@ pub fn parked(last_area: Option<Rect>, width: DeviceWidth) -> Placement {
             zoom: 1.0,
         })
 }
+
+/// Fits an explicit CSS viewport inside the panel without changing its aspect ratio.
+/// Refuses sizes that cannot fit at the minimum supported zoom.
+pub(crate) fn place_viewport(
+    area: Rect,
+    width: DeviceWidth,
+    viewport: Option<(u32, u32)>,
+) -> Result<Placement, String> {
+    let Some((width, height)) = viewport else {
+        return place(area, width);
+    };
+    let area = area.checked()?;
+    let (width, height) = (f64::from(width), f64::from(height));
+    let zoom = (area.width / width).min(area.height / height).min(1.0);
+    if zoom < MIN_ZOOM {
+        return Err("The Browser panel is too small for this viewport; enlarge it or request a smaller size.".into());
+    }
+    let bounds = Rect {
+        x: area.x + ((area.width - width * zoom) / 2.0).max(0.0).floor(),
+        y: area.y + ((area.height - height * zoom) / 2.0).max(0.0).floor(),
+        width: width * zoom,
+        height: height * zoom,
+    };
+    Ok(Placement { bounds, zoom })
+}
+
+pub(crate) fn parked_viewport(
+    area: Option<Rect>,
+    width: DeviceWidth,
+    viewport: Option<(u32, u32)>,
+) -> Placement {
+    place_viewport(area.unwrap_or(PARKED_AREA), width, viewport)
+        .unwrap_or_else(|_| parked(None, width))
+}

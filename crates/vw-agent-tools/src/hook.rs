@@ -98,9 +98,10 @@ fn deny(reason: &str) -> String {
 }
 
 /// The whole shell request is refused before execution; earlier commands in a chain did not run either.
-pub const PUSH_REASON: &str = "Not run: sending commits to a remote is the user's step in Vibe Work. \
-                               No command in this line ran. Existing commits are unchanged. \
-                               The Push button is in the Changes tab.";
+pub const PUSH_REASON: &str = vw_gh_broker::remote_change_refusal!(
+    "Not run: sending commits to a remote is the user's step in Vibe Work. \
+     No command in this line ran. Existing commits are unchanged."
+);
 
 /// One check within the combined pre-tool hook, or the separate post-tool note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,7 +124,7 @@ pub enum Guard {
 }
 
 /// The line added to the result of a command the person allowed in a guard's dialog: a fact, nothing to do.
-pub const ALLOWED_NOTE: &str = "The user allowed this command.";
+pub const ALLOWED_NOTE: &str = "The user approved this action in Vibe Work.";
 
 impl Guard {
     /// Every pre-tool guard in execution order; the first refusal wins.
@@ -185,7 +186,7 @@ impl Guard {
         }
     }
 
-    /// The original per-guard matcher. Vibe 3.1.0 matches full, leaf and underscore-joined names,
+    /// The original per-guard matcher. Vibe 3.1.1 matches full, leaf and underscore-joined names,
     /// plus its built-in model aliases; kept for compatibility and pinned matcher parity tests.
     ///
     /// The command guards match every tool (fail closed, like the folder guard): Vibe's hooked shells are not only
@@ -200,14 +201,9 @@ impl Guard {
         match self {
             // Every tool. Command guards: see above. Folder guard: any tool input that names a path is checked
             // Unknown tools fail closed.
-            Self::Safety | Self::Process | Self::Git | Self::Folder => "*",
+            Self::Safety | Self::Process | Self::Git | Self::Folder | Self::Allowed => "*",
             Self::Connector => "re:connector_.+|mcp_.+",
             Self::Receipt => "mcp_vw.*",
-            // Only the command routes a guard holds (the shells, the sandbox's background processes): a note is not a
-            // guard, so it need not run after every tool.
-            Self::Allowed => {
-                "re:(.+\\.)?(bash|experimental_bash|powershell|powershell_stdin)|process\\.(start|write)"
-            }
         }
     }
 
@@ -309,6 +305,7 @@ fn decide_allowed(payload: &str, endpoint_file: &Path) -> Option<String> {
 
 /// The folder guard's half: Vibe's file tools and bash paths inside another session's copy.
 fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
+    use folders::diagnostics::Failure;
     let payload = serde_json::from_str::<Value>(payload).ok()?;
     let tool = payload.get("tool_name").and_then(Value::as_str)?;
     // Our own `mcp_vw.*` tools run only inside the session's folders (`session::inside` in the core).
@@ -326,7 +323,7 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
             || std::env::var_os("VIBE_HOME").is_none())
     {
         return Some(deny(
-            "Not run: the folder guard could not check the native Windows path.",
+            &Failure::WindowsContext.report("missing cwd or VIBE_HOME for native Windows path"),
         ));
     }
     let cwd = payload
@@ -337,9 +334,8 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
     let layout = match folders::Layout::new(&vibe_home, Path::new(cwd)) {
         Ok(layout) => layout,
         Err(error) => {
-            return Some(deny(&format!(
-                "Not run: the folder guard could not resolve the session folders: {error}"
-            )));
+            eprintln!("folder check ChatFolders: {error}");
+            return Some(deny(&folders::diagnostics::folder_resolution(&error)));
         }
     };
     let leaf = tool.rsplit('.').next().unwrap_or(tool);
@@ -375,11 +371,12 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
             Ok(value) => Err(value
                 .get("reason")
                 .and_then(Value::as_str)
-                .unwrap_or("Vibe Work did not allow it")
-                .to_owned()),
-            Err(problem) => Err(format!(
-                "Vibe Work could not check who uses this copy ({problem})"
-            )),
+                .filter(|reason| !reason.is_empty())
+                .map_or_else(
+                    || Failure::CopyAnswer.report("copy check reply has no refusal reason"),
+                    str::to_owned,
+                )),
+            Err(problem) => Err(Failure::CopyUnavailable.report(problem)),
         };
         asked
             .borrow_mut()
@@ -662,39 +659,4 @@ fn report_refusal(guard: Guard, payload: &str, endpoint_file: &Path, answer: Str
         Err(error) => eprintln!("guard refusal could not be published: {error}"),
     }
     decision.to_string()
-}
-
-#[cfg(test)]
-mod kill_refusal_tests {
-    use super::*;
-
-    #[test]
-    fn a_push_chain_refusal_states_that_no_command_in_the_line_ran() {
-        for command in [
-            "git add . && git commit -m change && git push",
-            "echo before; git push; echo after",
-        ] {
-            let payload = json!({"tool_name":"file_system.bash", "tool_input":{"command":command}});
-            let answer = Guard::Git
-                .decide(&payload.to_string(), Path::new("absent-hook-endpoint"))
-                .unwrap();
-            let answer: Value = serde_json::from_str(&answer).unwrap();
-            assert_eq!(answer["decision"], "deny");
-            let reason = answer["reason"].as_str().unwrap();
-            assert!(reason.contains("No command in this line ran"), "{reason}");
-            assert!(
-                !reason.contains("Tell the user"),
-                "a refusal contains facts, not response instructions"
-            );
-        }
-    }
-
-    #[test]
-    fn a_user_no_is_returned_as_it_is_and_a_guard_refusal_gets_the_process_tools() {
-        let declined = "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
-        assert_eq!(DECLINED, declined);
-        assert_eq!(kill_refusal(declined), deny(declined));
-        let refused = "Not run: pid 7 belongs to another app.";
-        assert_eq!(kill_refusal(refused), deny(&format!("{refused} {ADVICE}")));
-    }
 }

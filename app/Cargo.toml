@@ -15,19 +15,14 @@ workspace = true
 tauri-build = { version = "2.7.1", features = [] }
 
 [features]
-# Optional context breakdown; the default list below controls release inclusion.
-context-composition = ["vw-core-api/context-composition"]
 # Optional agent capture directly into the vault. Off in default builds.
 agent-vault = ["vw-core-api/agent-vault"]
 # Upstream HTTP, HTTPS and SOCKS transports, included in release builds.
 proxy-transports = ["vw-core-api/proxy-transports"]
-feedback = ["vw-core-api/feedback"]
-# Monthly allowance reads; the default list below controls release inclusion.
-plan-usage = ["vw-keyproxy/plan-usage"]
 # Bounded video review using installed system decoders and the packaged isolated helper.
 video = ["vw-core-api/video"]
 linux-video = ["video", "vw-core-api/linux-video"]
-# Firefox remains optional; Edge ships in the default build.
+# Firefox and Edge ship in the default build.
 your-firefox = ["vw-core-api/your-firefox"]
 your-edge = ["vw-core-api/your-edge"]
 # The macOS release builder enables Safari; other platforms leave it out.
@@ -45,61 +40,59 @@ vault-e2e = ["vw-debug-api/vault-e2e"]
 # (vw-webview `macos-proxy`, Network.framework's proxy API: macOS 14+, the release minimum in tauri.conf.json and
 # .cargo/config.toml). No effect on Linux and Windows. `--no-default-features` builds the macOS content-rules-only
 # previews (minimum 11), which no release ships.
-default = ["macos-proxy", "your-edge", "proxy-transports", "video", "plan-usage", "context-composition", "feedback", "click-marker", "linux-video"]
-# Optional input feedback, included in release builds through the default list.
-click-marker = ["vw-core-api/click-marker", "vw-webview/click-marker"]
+default = ["macos-proxy", "your-edge", "your-firefox", "proxy-transports", "video", "linux-video"]
 macos-proxy = ["vw-webview/macos-proxy"]
 
 [dependencies]
 # Tauri's standard data folder, resolved before a second launch initializes the GUI runtime.
 dirs = "7"
-tauri = { version = "2.12.1", features = ["tray-icon"] }
+tauri = { workspace = true, features = ["tray-icon"] }
 # Native dialogs (folder picker, delete confirmation), used from Rust only: the webview gets no plugin
 # permission (capabilities/main.json lists bridge commands only). Pinned exactly. Notifications use vw-platform (notify-rust), see its notify.rs for why.
 tauri-plugin-dialog = "=2.8.1"
 # `tauri::generate_context!` emits `serde_json` values for a build whose config has plugin settings (the
 # updater channel of a release or test overlay), so the crate must name it.
-serde_json = "1"
-vw-vocabulary = { path = "../crates/vw-vocabulary" }
-vw-host = { path = "../crates/vw-host" }
+serde_json = { workspace = true }
+vw-vocabulary = { workspace = true }
+vw-host = { workspace = true }
 # The Vibe installer type held for the Vibe update check (`updater::VibeSlot`).
-vw-vibe-install = { path = "../crates/vw-vibe-install" }
-vw-core-api = { path = "../crates/vw-core-api" }
-vw-supervisor = { path = "../crates/vw-supervisor" }
-vw-platform = { path = "../crates/vw-platform", features = ["desktop-tray", "startup-dialog"] }
-vw-gate = { path = "../crates/vw-gate" }
-tokio = { version = "1.53", features = ["rt", "sync", "time"] }
-vw-mistral = { path = "../crates/vw-mistral" }
-vw-keys = { path = "../crates/vw-keys" }
-vw-keyproxy = { path = "../crates/vw-keyproxy" }
-vw-vault = { path = "../crates/vw-vault" }
+vw-vibe-install = { workspace = true }
+vw-core-api = { workspace = true }
+vw-supervisor = { workspace = true }
+vw-platform = { workspace = true, features = ["desktop-tray", "startup-dialog"] }
+vw-gate = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+vw-mistral = { workspace = true }
+vw-keys = { workspace = true }
+vw-keyproxy = { workspace = true }
+vw-vault = { workspace = true }
 # Preview pane: the model the core drives and its Tauri engine (child webviews).
-vw-preview = { path = "../crates/vw-preview" }
+vw-preview = { workspace = true }
 vw-webview = { path = "../crates/vw-webview" }
 # The agent browser's network guard.
-vw-netguard = { path = "../crates/vw-netguard" }
+vw-netguard = { workspace = true }
 # The Debug API's window routes: the `AppWindow` this crate implements on Tauri.
-vw-debug-api = { path = "../crates/vw-debug-api" }
+vw-debug-api = { workspace = true }
 # Project Pages: the page viewer settings.
-vw-pages = { path = "../crates/vw-pages" }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
+vw-pages = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "std"] }
 
 # Updates: registered only for builds whose config carries an accepted update channel
 # (vw_host::updates). Pinned exactly. TLS follows
 # vw-mistral: rustls (ring) on Linux, the OS's native TLS on Windows and macOS (the plugin's default rustls
 # would also build ring for Windows, which the cross-target lint on WSL cannot compile).
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 # Tauri's mock runtime for the Linux confirmation window tests (`dialogs/linux_confirmation.rs`).
-tauri = { version = "2.12.1", features = ["test"] }
+tauri = { workspace = true, features = ["test"] }
 # The release manifest tool: its output must parse with the updater plugin (`updater::manifest_format`).
-make-latest-json = { path = "../tools/public/update-manifest" }
+make-latest-json = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
+tauri-plugin-updater = { workspace = true, features = ["rustls-tls", "system-proxy"] }
 # Confirmation windows need a handle so cancellation can close the GTK dialog.
-gtk = "0.18"
+gtk = { workspace = true }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["native-tls", "system-proxy", "zip"] }
+tauri-plugin-updater = { workspace = true, features = ["native-tls", "system-proxy", "zip"] }

@@ -131,9 +131,7 @@ export function createSkills({ core, shell }: { core: CoreController; shell: She
         result.kind === "view" &&
         !result.view.skills.some((skill) => skill.name === name && skill.installed)
       )
-        throw new Error(
-          "Vibe accepted the install, but this skill is not available in this session.",
-        );
+        throw new Error("Vibe accepted the install, but this skill is not available in this chat.");
       if (result.kind === "view" && scopeKey === key()) {
         const next = result.view.skills.find((r) => r.name === name);
         patch({

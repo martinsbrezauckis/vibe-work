@@ -281,12 +281,12 @@ export function createNewChatDraft(deps: {
         toasts.push({
           kind: "warn",
           bellKind: "failure",
-          text: `The session started, but what was open here did not move to it: ${toCallError(thrown).error.message}`,
+          text: `The chat started, but what was open here did not move to it: ${toCallError(thrown).error.message}`,
         });
         return;
       }
       store.set((s) => ({ ...s, open: { terminals: 0, pages: 0 } }));
-      if (had) toasts.feedback("The session started. What you had open stays open.");
+      if (had) toasts.feedback("The chat started. What you had open stays open.");
     },
     /**
      * Close all: the terminals stop, the pages close, the files close (unsaved ones stay open). The text and the

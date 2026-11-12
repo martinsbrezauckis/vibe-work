@@ -9,7 +9,7 @@
  * Invariants: vendor pages open only through the link dialog; the headless browser's note that it has none of the
  * built-in browser's address guards is the catalog's text, shown as is.
  */
-import { Badge, Button } from "../../components/Controls";
+import { Badge, Button, LinkButton } from "../../components/Controls";
 import { type ReactElement, useRef } from "react";
 
 import type { MarketEntryView, MarketView } from "../../protocol/core";
@@ -23,14 +23,12 @@ import { categoryLabel, contents, pinLine, progressText, statusOf } from "./mode
 function SessionPart({ e }: { e: MarketEntryView }): ReactElement | null {
   const s = e.inSession;
   if (e.installed === null) return null;
-  if (s === null) return <p className="cmuted">Open a session to see how it runs there.</p>;
+  if (s === null) return <p className="cmuted">Open a chat to see how it runs there.</p>;
   return (
     <>
-      <h3>In the open session</h3>
+      <h3>In the open chat</h3>
       <p className="cmuted">
-        {s.loaded
-          ? "Loaded in this session."
-          : "Not loaded in this session yet: new sessions use it."}
+        {s.loaded ? "Loaded in this chat." : "Not loaded in this chat yet: new chats use it."}
       </p>
       {s.skills.length === 0 ? null : (
         <ul className="ctools">
@@ -39,7 +37,7 @@ function SessionPart({ e }: { e: MarketEntryView }): ReactElement | null {
               <span className="mono">/{k.name}</span>
               <span className="cmuted">
                 {" "}
-                {k.enabled === null ? "offered in new sessions" : k.enabled ? "on" : "off"}
+                {k.enabled === null ? "offered in new chats" : k.enabled ? "on" : "off"}
               </span>
             </li>
           ))}
@@ -51,8 +49,8 @@ function SessionPart({ e }: { e: MarketEntryView }): ReactElement | null {
         </p>
       ))}
       <p className="cmuted">
-        Vibe has no switch for single plugin skills or for one session: turn off the plugin to stop
-        it in new chats.
+        Vibe has no switch for single plugin skills or for one chat: turn off the plugin to stop it
+        in new chats.
       </p>
     </>
   );
@@ -72,16 +70,15 @@ function ServerRule({ e }: { e: MarketEntryView }): ReactElement | null {
           {server.ruleSource === undefined ? null : (
             <>
               {" "}
-              <button
+              <LinkButton
                 data-testid="marketplace.market-detail-ask-link"
-                type="button"
-                className="linkish"
+
                 onClick={() => {
                   transcript.askLink(server.ruleSource ?? null);
                 }}
               >
                 Vendor page
-              </button>
+              </LinkButton>
             </>
           )}
         </blockquote>
@@ -262,16 +259,15 @@ function Body({ e, view }: { e: MarketEntryView; view: MarketView | null }): Rea
       </p>
       {e.entry.homepage === undefined ? null : (
         <p>
-          <button
+          <LinkButton
             data-testid="marketplace.market-detail-ask-link-2"
-            type="button"
-            className="linkish"
+
             onClick={() => {
               transcript.askLink(e.entry.homepage ?? null);
             }}
           >
             Vendor page
-          </button>
+          </LinkButton>
         </p>
       )}
       <SessionPart e={e} />

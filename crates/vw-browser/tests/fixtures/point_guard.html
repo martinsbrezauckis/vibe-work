@@ -1,0 +1,93 @@
+<!doctype html>
+<!-- Hostile target swap fixture for checked native input; the native test reads only DOM effect counters. -->
+<meta charset="utf-8">
+<title>Checked input fixture</title>
+<style>
+  #target, #cover { position: fixed; top: 20px; width: 100px; height: 40px; }
+  #target { left: 20px; } #cover { left: 180px; }
+  iframe { position: fixed; left: 180px; top: 80px; width: 120px; height: 100px; border: 0; }
+</style>
+<button id="target">Press</button>
+<form method="post"><button id="cover">Send</button></form>
+<script>
+  const mode = new URL(location.href).searchParams.get("mode");
+  document.body.dataset.effects = "[]";
+  document.body.dataset.ready = "0";
+  const effect = name => {
+    const effects = JSON.parse(document.body.dataset.effects);
+    effects.push(name);
+    document.body.dataset.effects = JSON.stringify(effects);
+    if (mode === "child") parent.postMessage(name, "*");
+  };
+  for (const type of ["pointerdown", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu"])
+    window.addEventListener(type, event => {
+      if (event.target.id === "cover") effect(type);
+    }, true);
+  document.querySelector("form").onsubmit = event => { event.preventDefault(); effect("submit"); };
+  if (mode === "own-child") {
+    document.querySelector("#target").style.width = "60px";
+    document.querySelector("#cover").style.left = "120px";
+    document.querySelector("#cover").style.width = "60px";
+    window.addEventListener("mousemove", () => {
+      if (parent.document.body.dataset.armed !== "1") return;
+      parent.document.body.dataset.armed = "0";
+      frameElement.style.left = "-100px";
+      void parent.document.body.offsetWidth;
+    });
+  } else if (mode === "child") {
+    document.querySelector("#target").remove();
+    document.querySelector("#cover").style.cssText = "position:fixed;inset:0;width:100%;height:100%";
+  } else {
+    if (mode === "frame" || mode === "own-frame") {
+      const frame = document.createElement("iframe");
+      frame.id = "frame";
+      const url = new URL(location.href);
+      if (mode === "own-frame") {
+        document.querySelector("#target").remove();
+        document.querySelector("form").remove();
+        frame.style.cssText = "position:fixed;left:20px;top:20px;width:250px;height:100px;border:0";
+        url.search = "?mode=own-child";
+      } else {
+        url.hostname = "localhost";
+        url.search = "?mode=child";
+      }
+      frame.src = url.href;
+      frame.onload = () => { document.body.dataset.ready = "1"; };
+      document.body.append(frame);
+      window.addEventListener("message", event => {
+        if (event.origin === url.origin) effect(event.data);
+      });
+    } else document.body.dataset.ready = "1";
+    window.addEventListener("mousemove", () => {
+      if (document.body.dataset.armed !== "1") return;
+      document.body.dataset.armed = "0";
+      if (mode === "new-frame" || mode === "new-frame-busy") {
+        // Initial about:blank is usable synchronously: the control exists before this motion handler returns.
+        const frame = document.createElement("iframe");
+        frame.id = "frame";
+        frame.style.left = "20px";
+        frame.style.top = "20px";
+        document.body.append(frame);
+        const child = frame.contentDocument;
+        child.body.innerHTML = '<form><button style="position:fixed;inset:0;width:100%;height:100%">Send</button></form>';
+        child.body.dataset.effects = "[]";
+        const record = type => {
+          const effects = JSON.parse(child.body.dataset.effects);
+          effects.push(type);
+          child.body.dataset.effects = JSON.stringify(effects);
+        };
+        for (const type of ["pointerdown", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu"])
+          frame.contentWindow.addEventListener(type, () => record(type), true);
+        child.querySelector("form").onsubmit = event => { event.preventDefault(); record("submit"); };
+        if (mode === "new-frame-busy") {
+          const until = performance.now() + 400;
+          while (performance.now() < until) { /* Delay delivery beyond the new document's grace period. */ }
+        }
+        return;
+      }
+      const cover = document.querySelector(mode === "frame" ? "#frame" : "#cover");
+      cover.style.left = "20px";
+      cover.style.top = "20px";
+    });
+  }
+</script>

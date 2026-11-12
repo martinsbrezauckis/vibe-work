@@ -102,6 +102,11 @@ pub enum PreviewRequest {
         /// Current UI facts; the service picks the first screenshot refusal reason for each target.
         report: VisibilityReport,
     },
+    /// The app UI's currently open modal dialog, separate from web-page dialogs.
+    AppDialog {
+        /// Accessible dialog name; absent once all UI modal dialogs are closed.
+        name: Option<String>,
+    },
     /// Native Tauri window visibility, sent on minimize and show events.
     NativeWindowVisibility {
         /// False when minimized or hidden.

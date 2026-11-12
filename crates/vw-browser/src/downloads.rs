@@ -1,5 +1,7 @@
 //! Download management using the preview's chat-scoped staging and delivery records.
 //! Called inside the browser Stop scope; never accepts a filesystem path or another chat's download id.
+//! Depends on: preview download records.
+//! Called by: browser host actions.
 use crate::{
     ActError, Browser,
     driver::{failed, refused},

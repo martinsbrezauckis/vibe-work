@@ -14,5 +14,5 @@ workspace = true
 [dependencies]
 # The reference minisign implementation (same author and format as minisign-verify, which the app checks with;
 # the Tauri CLI signs update packages with this crate too). MIT. Signing needs it; the app never links it.
-minisign = "0.9.1"
-base64 = "0.22"
+minisign = { workspace = true }
+base64 = { workspace = true }

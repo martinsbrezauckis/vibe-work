@@ -643,7 +643,7 @@ async fn an_unrepairable_host_has_the_same_recovery_action_for_settings_and_the_
     assert!(
         addon
             .instruction
-            .contains("registration is missing or changed")
+            .contains("connection setup is missing or changed")
     );
     assert!(addon.instruction.contains("Set up again"));
     assert!(addon.step.is_none());

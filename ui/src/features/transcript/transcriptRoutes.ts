@@ -177,8 +177,7 @@ export function registerTranscriptRoutes(app: App): () => void {
   };
   const stateOf = (sessionId: string) => {
     const entry = app.core?.store.get().sessions[sessionId];
-    if (entry === undefined)
-      throw new UiControlError("notFound", `no session ${sessionId} in the UI`);
+    if (entry === undefined) throw new UiControlError("notFound", `no chat ${sessionId} in the UI`);
     return entry;
   };
   const rowsOf = (sessionId: string) => {
@@ -248,7 +247,7 @@ export function registerTranscriptRoutes(app: App): () => void {
     );
     if (child?.kind === "callback" && child.answerFor !== undefined)
       return { entry: child.entry, answerFor: child.answerFor };
-    throw new UiControlError("notFound", `no callback ${callbackId} in this session's history`);
+    throw new UiControlError("notFound", `no callback ${callbackId} in this chat's history`);
   };
   const answer = async (input: Record<string, unknown>) => {
     const sessionId = sessionOf(input);

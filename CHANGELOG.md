@@ -2,6 +2,27 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.10 (2026-11-12)
+
+Built for Vibe 3.1.2 on Python 3.14.8.
+
+- **Your Firefox**: the agent works in Firefox. Set it up in Settings > Browser. On Linux it needs Mozilla's Firefox
+  (the .deb package or the download), not the Snap package.
+- **Your Safari**: forms, waiting for pages, finding page elements, page captures and full-page screenshots, copy and
+  paste with images, and sharing a page from Safari's menu.
+- **Browsers do more**: harder forms, waiting for pages, tables to a spreadsheet, page video and audio, copy and paste
+  with images.
+- **Checks while you build a page**: console, errors, network requests, element styles, phone and tablet sizes, light
+  and dark.
+- **Your Chrome and Your Edge**: each profile gets its own row; drag, tab groups and local files.
+- **Hand over and take back**: for a CAPTCHA, payment or passkey, the agent hands you the tab and continues afterwards.
+- **Chrome and Edge reconnect by themselves** after an update.
+- **Built-in browser**: share a page to the chat; the agent types with real keyboard input.
+- **Diagrams and math** are drawn in the chat.
+- **Feedback from any screen** through the title bar icon.
+- Clearer agent messages, safer browser work, less background activity, accessibility improvements and many smaller
+  fixes.
+
 ## 0.1.9 (2026-11-09)
 
 Built for Vibe 3.1.0 on Python 3.14.8.

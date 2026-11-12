@@ -18,155 +18,10 @@ pub(crate) fn project(value: &mut Value) {
         _ => {}
     }
 }
-// These failures say nothing about decoder support; their next step depends on the failed check.
-fn recovery(lower: &str) -> Option<(&'static str, &'static str)> {
-    if lower.contains("selected model") {
-        Some((
-            "This model has no confirmed image support.",
-            "Use metadata output, or ask the person to choose an image-capable model for frames.",
-        ))
-    } else if lower.contains("video jobs are active") || lower.contains("already has a video job") {
-        Some((
-            "Video extraction is busy.",
-            "Wait for an active video job to finish before requesting another.",
-        ))
-    } else if lower.contains("512 mib")
-        || lower.contains("source bytes")
-        || lower.contains("video file size")
-    {
-        Some((
-            "The video file is outside the input limits.",
-            "Ask for a nonempty, smaller video file of at most 512 MiB.",
-        ))
-    } else if lower == "limit_exceeded: duration" || lower == "limit_exceeded: video duration" {
-        Some((
-            "The video duration is outside the supported range.",
-            "Ask for a nonempty video no longer than two hours.",
-        ))
-    } else if lower == "limit_exceeded: video worker memory" {
-        Some((
-            "This video's resolution is too large for this computer's video worker.",
-            "Ask for a lower-resolution copy of the video or still images.",
-        ))
-    } else if lower.starts_with("timeout:") {
-        Some((
-            "Video extraction timed out.",
-            "Choose a shorter range or fewer samples, or ask for still images.",
-        ))
-    } else if lower.starts_with("changed_input:") {
-        Some((
-            "The video file changed or could not be read consistently.",
-            "Use a readable local copy after it has finished changing, then request frames from that file.",
-        ))
-    } else if lower.starts_with("cancelled:") {
-        Some((
-            "Video extraction ended before completion.",
-            "Continue only after the person's next message if they still want video frames.",
-        ))
-    } else {
-        None
-    }
-}
-/// Diagnose the native refusal for the row; retain the exact reason and a next action for the agent.
-pub(crate) fn failure(reason: &str) -> (String, String) {
-    for (prefix, label, instruction) in [
-        (
-            "not_found: ",
-            "Not found",
-            "Check the file name and folder.",
-        ),
-        (
-            "cannot_read: ",
-            "Cannot read",
-            "Check that this path names a readable local file.",
-        ),
-    ] {
-        if let Some(path) = reason.strip_prefix(prefix) {
-            let row = format!("{label}: {path}.");
-            return (
-                row.clone(),
-                format!("{row} No video images were sent. {instruction}"),
-            );
-        }
-    }
-    let lower = reason.to_ascii_lowercase();
-    if let Some((row, instruction)) = recovery(&lower) {
-        return (
-            row.into(),
-            format!("{reason}\n{row} No video images were sent. {instruction}"),
-        );
-    }
-    if lower.contains("range_outside_video")
-        || lower.contains("limit_exceeded: select")
-        || lower.contains("limit_exceeded: scene scanning")
-    {
-        return (
-            "The selected video range is unavailable.".into(),
-            format!(
-                "{reason} No video images were sent. Choose a valid range or sampling step and request the selection again; do not claim to have seen the refused range."
-            ),
-        );
-    }
-    if lower.contains("image allowance") {
-        let row = "This message's video image allowance is used.".to_owned();
-        let agent = format!(
-            "{reason}\n{row} No more video images were sent in this turn. Use the images already returned; more can be taken after the person's next message. Do not retry in this turn and do not claim to have seen frames that were not returned."
-        );
-        return (row, agent);
-    }
-    // Isolation, launch or supervision failures say nothing about the file or the computer's decoders; the
-    // agent must not turn them into "this computer cannot decode" (a sandbox fault once read exactly like that).
-    // Time/memory limits stay with their own outcomes below.
-    let limit = lower.starts_with("limit_exceeded") || lower.starts_with("timeout");
-    if lower.contains("worker_failed")
-        || (!limit && (lower.contains("sandbox") || lower.contains("helper")))
-    {
-        let row = "The video worker failed.".to_owned();
-        let agent = format!(
-            "{reason}\n{row} Vibe Work's isolated video worker did not run correctly, so nothing is known about this video's format or this computer's decoders. No video images were sent. Tell the person the video worker failed and give the reason above; they can send still images if they need the content now. Do not say the video or this computer cannot be decoded, do not install decoders, and do not retry the same extraction."
-        );
-        return (row, agent);
-    }
-    if limit {
-        let row = "Video extraction exceeded a limit.".to_owned();
-        let agent = format!(
-            "{reason}\n{row} No video images were sent. Use a smaller video or reduce the selected range, frame count or max_edge."
-        );
-        return (row, agent);
-    }
-    let codec = [
-        ("h.264", "H.264"),
-        ("h264", "H.264"),
-        ("hevc", "HEVC"),
-        ("h265", "HEVC"),
-        ("av1", "AV1"),
-        ("vp9", "VP9"),
-        ("vp8", "VP8"),
-    ]
-    .iter()
-    .find(|(needle, _)| lower.contains(needle))
-    .map(|(_, name)| *name);
-    let row = if let Some(codec) = codec.filter(|_| lower.contains("unsupported_codec")) {
-        format!("Cannot decode this video: {codec} support is missing.")
-    } else if lower.contains("qtdemux") {
-        "Cannot decode this video: MP4 support is missing.".into()
-    } else if lower.contains("matroskademux") {
-        "Cannot decode this video: WebM support is missing.".into()
-    } else if lower.contains("backend_unavailable")
-        && (lower.contains("gstreamer") || lower.contains("appsink"))
-    {
-        "Cannot decode this video: GStreamer media support is missing.".into()
-    } else if lower.contains("unsupported_container") {
-        "Cannot decode this video format.".into()
-    } else if lower.contains("unsupported_codec") {
-        "Cannot decode this video on this computer.".into()
-    } else {
-        "The video frames could not be read.".into()
-    };
-    let agent = format!(
-        "{reason}\n{row} No video images were sent. Ask for still images or a copy in a format this computer can decode, or continue using the available file metadata. Do not claim to have seen the video, install decoders, or retry the same unsupported extraction."
-    );
-    (row, agent)
+/// One final boundary for native, worker, request and policy failures. Details remain in the app log.
+pub(crate) fn failure(error: &vw_video_types::Error) -> (String, String) {
+    tracing::warn!(code = ?error.code, detail = %error.detail, "video extraction failed");
+    (error.row(), error.agent())
 }
 /// Called at all session snapshot/event boundaries when video is enabled.
 pub(crate) fn apply(shared: &crate::core::Shared, value: &mut Value) {
@@ -181,101 +36,57 @@ pub(crate) fn apply(shared: &crate::core::Shared, value: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn non_decoder_failures_give_the_relevant_next_step() {
-        for (reason, instruction) in [
-            (
-                "unsupported_codec: the selected model has no confirmed image support",
-                "image-capable model",
-            ),
-            (
-                "limit_exceeded: two video jobs are active",
-                "Wait for an active video job",
-            ),
-            (
-                "limit_exceeded: regular video must be between 1 byte and 512 MiB",
-                "smaller video file",
-            ),
-            ("timeout: video job deadline", "shorter range"),
-            ("limit_exceeded: duration", "no longer than two hours"),
-            ("limit_exceeded: video duration", "no longer than two hours"),
-            ("limit_exceeded: helper resident memory", "smaller video"),
-            (
-                "changed_input: source changed during snapshot",
-                "finished changing",
-            ),
-            ("cancelled: video job ended", "next message"),
-        ] {
-            let (_, text) = failure(reason);
-            assert!(text.contains(reason), "{text}");
-            assert!(text.contains(instruction), "{text}");
-            assert!(!text.contains("format this computer can decode"), "{text}");
-        }
-    }
-    #[test]
-    fn worker_memory_limit_names_the_resolution_not_missing_decoding() {
-        let reason = "limit_exceeded: video worker memory";
-        let (row, agent) = failure(reason);
-        assert_eq!(
-            row,
-            "This video's resolution is too large for this computer's video worker."
-        );
-        assert!(agent.starts_with(reason), "{agent}");
-        assert!(agent.contains("lower-resolution copy"), "{agent}");
-        assert!(agent.contains("still images"), "{agent}");
-        assert!(!agent.contains("decode"), "{agent}");
-    }
     use serde_json::json;
+    use vw_video_types::{Code, Codec, Error, Media};
     #[test]
-    fn native_unsupported_media_is_named_as_cannot_decode_with_reason_and_instruction() {
-        for reason in [
-            "unsupported_codec: Media Foundation decoder or media support unavailable (0xc00d5212)",
-            "unsupported_codec: AVFoundation could not decode avc1",
+    fn outcomes_keep_the_specific_diagnosis_without_internal_prefixes() {
+        for (code, diagnosis, action) in [
+            (Code::Rotation, "rotation", "Ask the user"),
+            (Code::Hdr, "HDR", "Ask the user"),
+            (Code::WorkerStart, "could not start", "Ask the user"),
+            (Code::InvalidReply, "incomplete", "Ask the user"),
+            (Code::ScanSamples, "240", "Increase"),
         ] {
-            let (row, agent) = failure(reason);
-            assert!(row.starts_with("Cannot decode this video"), "{row}");
-            assert!(agent.contains(reason));
-            assert!(agent.contains("Ask for still images"));
-            assert!(agent.contains("Do not claim to have seen"));
+            let (_, agent) = failure(&Error::new(code, "backend_unavailable: helper detail"));
+            assert!(
+                !agent.contains("backend_unavailable:") && !agent.contains("helper detail"),
+                "{agent}"
+            );
+            assert!(agent.contains(diagnosis), "{agent}");
+            assert!(agent.contains(action), "{agent}");
         }
     }
     #[test]
-    fn worker_or_sandbox_failure_is_named_as_such_not_as_missing_decoding() {
-        for reason in [
-            "worker_failed: AVFoundation could not open the video snapshot",
-            "backend_unavailable: macOS media sandbox denied",
-            "backend_unavailable: helper requires its sandbox",
-            "backend_unavailable: Windows media sandbox denied",
-            "backend_unavailable: Linux sandbox namespaces or media access denied",
-            "backend_unavailable: helper sandbox could not start",
-            "backend_unavailable: video helper is missing",
-            "decode_failed: video helper terminated (signal: 25 (SIGXFSZ))",
-            "decode_failed: helper reply shape",
+    fn diagnostics_cannot_change_the_outcome_or_appear_in_agent_text() {
+        for (code, instruction) in [
+            (Code::ModelImages, "image-capable model"),
+            (Code::Busy, "Wait for an active video job"),
+            (Code::InputSize, "smaller video file"),
+            (Code::Timeout, "shorter range"),
+            (Code::Duration, "no longer than two hours"),
+            (Code::Memory, "lower resolution"),
+            (Code::ChangedInput, "finished changing"),
+            (Code::Cancelled, "next message"),
+            (Code::ImageAllowance, "Do not retry in this turn"),
+            (Code::WorkerIsolation, "protection"),
+            (Code::WorkerFailed, "stopped unexpectedly"),
+            (
+                Code::UnsupportedCodec {
+                    codec: Some(Codec::H264),
+                },
+                "H.264",
+            ),
+            (Code::MediaUnavailable { media: Media::Mp4 }, "MP4"),
         ] {
-            let (row, agent) = failure(reason);
-            assert_eq!(row, "The video worker failed.", "{reason}");
-            assert!(agent.starts_with(reason), "{agent}");
-            assert!(
-                agent.contains("Vibe Work's isolated video worker"),
-                "{agent}"
-            );
-            assert!(agent.contains("Tell the person"), "{agent}");
-            assert!(agent.contains("Do not say"), "{agent}");
-            assert!(!agent.contains("Cannot decode"), "{agent}");
-            assert!(
-                !agent.contains("format this computer can decode"),
-                "{agent}"
-            );
+            let expected = failure(&Error::new(code.clone(), "original native reason"));
+            let misleading = failure(&Error::new(
+                code,
+                "helper H.264 image allowance sandbox timeout: not_found: /private/codec",
+            ));
+            assert_eq!(expected, misleading);
+            assert!(expected.1.contains(instruction), "{expected:?}");
+            assert!(!expected.1.contains("original native reason"));
         }
-    }
-    #[test]
-    fn used_turn_image_allowance_is_not_called_a_decoding_problem() {
-        let reason = "limit_exceeded: this user turn's image allowance is used";
-        let (row, agent) = failure(reason);
-        assert_eq!(row, "This message's video image allowance is used.");
-        assert!(agent.starts_with(reason), "{agent}");
-        assert!(agent.contains("next message"), "{agent}");
-        assert!(!agent.contains("decode"), "{agent}");
     }
     #[test]
     fn automatic_running_effect_has_counts_before_any_result() {
@@ -288,16 +99,6 @@ mod tests {
         row["detail"]["input"]["output"] = json!("metadata");
         project(&mut row);
         assert_eq!(row["vwVideo"]["imageCount"], 0);
-    }
-    #[test]
-    fn missing_support_names_codec_and_tells_agent_what_to_do_next() {
-        let (row, agent) = failure(
-            "unsupported_codec: H.264; caps video/x-h264; missing installed element avdec_h264",
-        );
-        assert_eq!(row, "Cannot decode this video: H.264 support is missing.");
-        assert!(agent.contains("H.264"));
-        assert!(agent.contains("Ask for"));
-        assert!(agent.contains("Do not"));
     }
 }
 

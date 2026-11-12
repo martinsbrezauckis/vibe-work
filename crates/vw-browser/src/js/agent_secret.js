@@ -12,7 +12,7 @@
     const target = targets[0];
     // Read exactly the pointed input or text, never a label, attribute, sibling or surrounding page.
     const value = target.localName === "input" || target.localName === "textarea"
-      ? String(target.value) : String(target.innerText || target.textContent || "");
+      ? String(target.value) : String(target.innerText ?? "");
     if (!value || new TextEncoder().encode(value).length > 4096) return reply("invalid");
     return reply("captured", value);
   } catch { return reply("unreadable"); }

@@ -1,0 +1,40 @@
+/* Passive diagrams and native MathML in Markdown. Uses the app's fonts/tokens; no renderer styles or remote fonts. */
+.md-diagram {
+  --fg: var(--text);
+  --_text: var(--text);
+  --_text-sec: var(--text-2);
+  --_text-muted: var(--text-2);
+  --_text-faint: var(--text-3);
+  --_line: var(--text-3);
+  --_arrow: var(--text-2);
+  --_node-fill: var(--raised);
+  --_node-stroke: var(--control-line);
+  --_group-fill: var(--panel);
+  --_group-hdr: var(--hover);
+  --_inner-stroke: var(--line-3);
+  --_key-badge: var(--active);
+}
+.md-diagram-drawing {
+  padding: 12px;
+  overflow-x: auto;
+}
+.md-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: auto;
+  font-family: var(--font-ui);
+}
+.md-math {
+  color: var(--text);
+}
+.md-math[data-display="display"] {
+  display: block;
+  overflow-x: auto;
+  padding: 8px 0;
+  margin: 4px 0;
+}
+.md-render-error {
+  color: var(--text-2);
+  font-size: var(--text-12);
+}

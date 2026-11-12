@@ -91,11 +91,7 @@
 }
 .shead .wt-chip {
   max-width: min(100%, 56ch);
-  font-family: inherit;
   background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
 }
 .wt-chip-text {
   min-width: 0;

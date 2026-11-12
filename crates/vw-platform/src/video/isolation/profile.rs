@@ -1,5 +1,6 @@
 //! Seatbelt policy construction. Paths are literals, never executable profile syntax.
 use std::path::Path;
+use vw_video_types::{Code, Error};
 
 // Rules beyond the deny-by-default base, each tied to the native denial it fixes:
 // - `iokit-open IOSurfaceRootUserClient`: without it Seatbelt reports `deny(1) iokit-open-user-client
@@ -8,11 +9,11 @@ use std::path::Path;
 //   IOSurface is the shared-memory handle for decoded pixel buffers; it grants no file, network or process access.
 // Other reported denials (preferences, GPU device, window server, dirhelper, TCC, disk space) are not needed for
 // extraction and stay denied.
-pub(super) fn profile(input: &Path) -> Result<String, String> {
+pub(super) fn profile(input: &Path) -> Result<String, Error> {
     let path = input
         .to_str()
         .filter(|s| s.starts_with('/') && !s.chars().any(char::is_control))
-        .ok_or("backend_unavailable: sandbox input path")?;
+        .ok_or(Error::new(Code::WorkerIsolation, "sandbox input path"))?;
     let literal = path.replace('\\', "\\\\").replace('"', "\\\"");
     Ok(format!(
         r#"(version 1)

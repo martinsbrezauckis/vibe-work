@@ -140,7 +140,7 @@ async function projectAction(
     case "projectMove": {
       const ids = input["sessionIds"];
       if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string" && i !== "")) {
-        throw new UiControlError("invalidParams", "sessionIds must be a list of session ids");
+        throw new UiControlError("invalidParams", "sessionIds must be a list of chat ids");
       }
       return {
         moved: await groups.move(ids as string[], nullableText(input["projectId"], "projectId")),

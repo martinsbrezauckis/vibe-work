@@ -85,3 +85,23 @@ pub(crate) async fn barrier(webview: &Webview<Wry>) -> Result<(), EngineError> {
     )
     .await
 }
+
+/// Native single-tab mute and readback; macOS exposes suspension, which is not tab mute.
+pub(crate) async fn tab_audio(
+    webview: &Webview<Wry>,
+    muted: Option<bool>,
+) -> Result<serde_json::Value, EngineError> {
+    with_native(webview, "tab audio", Duration::from_secs(5), move |native, reply| {
+        #[cfg(target_os = "linux")]
+        {
+            use webkit2gtk::WebViewExt as _;
+            let view = native.inner();
+            if let Some(muted) = muted { view.set_is_muted(muted); }
+            let _ = reply.send(Ok(serde_json::json!({"muted":view.is_muted(),"audible":view.is_playing_audio()})));
+        }
+        #[cfg(windows)]
+        { let _ = reply.send(vw_platform::webview_audio::state(&native.controller(), muted).map(|(muted,audible)| serde_json::json!({"muted":muted,"audible":audible}))); }
+        #[cfg(target_os = "macos")]
+        { let _ = (native, muted); let _ = reply.send(Err("This engine exposes playback suspension, not native tab mute or audible state; use media.read and media.mute for individual elements.".into())); }
+    }).await
+}

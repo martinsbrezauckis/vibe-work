@@ -42,6 +42,7 @@ export function QuestionField({
       </legend>
       <AnswerOptions
         question={question}
+        questionId={legend}
         name={name}
         picked={picked}
         disabled={disabled}
@@ -54,6 +55,7 @@ export function QuestionField({
             data-testid="transcript.question-card-on-change-2"
             type="text"
             aria-label="Other"
+            aria-describedby={legend}
             title="Other"
             value={picked.other}
             maxLength={4000}

@@ -49,11 +49,19 @@ impl Attempts {
 pub(super) trait Keychain {
     fn inspect(&mut self) -> Result<Option<Binding>, String>;
     fn read(&mut self) -> Result<Zeroizing<Vec<u8>>, String>;
-    // Prepare the access object before deleting anything; creation also records migration atomically.
+    // Creation uses a distinct identity while the old item remains recoverable.
     fn prepare_create(&mut self) -> Result<(), String>;
     fn create_bound(&mut self, secret: &[u8]) -> Result<(), String>;
+    fn verify_bound(&mut self, secret: &[u8]) -> Result<(), String> {
+        if self.inspect()? != Some(Binding::Bound) || self.read()?.as_slice() != secret {
+            return Err(
+                "Keychain replacement could not be verified; the old item was kept".to_owned(),
+            );
+        }
+        Ok(())
+    }
     fn update(&mut self, secret: &[u8]) -> Result<(), String>;
-    fn delete(&mut self) -> Result<(), String>;
+    fn delete_legacy(&mut self) -> Result<(), String>;
 }
 
 pub(super) fn get(store: &mut impl Keychain) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
@@ -63,9 +71,12 @@ pub(super) fn get(store: &mut impl Keychain) -> Result<Option<Zeroizing<Vec<u8>>
     let secret = store.read()?;
     if binding == Binding::Legacy {
         store.prepare_create()?;
-        store.delete()?;
         store.create_bound(&secret)?;
+        store.verify_bound(&secret)?;
+        store.delete_legacy()?;
     }
+    // A reopened bound item does not prove its earlier migration was verified. Retain any fallback
+    // after an interrupted/failed verification; explicit credential removal still removes both.
     Ok(Some(secret))
 }
 
@@ -78,10 +89,12 @@ pub(super) fn set(store: &mut impl Keychain, secret: &[u8]) -> Result<(), String
                 let _authorized = store.read()?;
             }
             store.prepare_create()?;
-            if binding.is_some() {
-                store.delete()?;
+            store.create_bound(secret)?;
+            if binding == Some(Binding::Legacy) {
+                store.verify_bound(secret)?;
+                store.delete_legacy()?;
             }
-            store.create_bound(secret)
+            Ok(())
         }
     }
 }

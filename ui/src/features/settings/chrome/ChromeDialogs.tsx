@@ -18,7 +18,7 @@ export function ChromeRemoveDialog({
   browser?: "Chrome" | "Edge" | "Safari" | "Firefox";
   onClose: () => void;
 }): ReactElement | null {
-  const prefix = browser === "Safari" ? "safari" : "chrome";
+  const prefix = browser === "Firefox" ? "firefox" : browser === "Safari" ? "safari" : "chrome";
   const ref = useRef<HTMLDivElement>(null);
   useModalFocus(open, ref, onClose);
   if (!open) return null;
@@ -41,12 +41,14 @@ export function ChromeRemoveDialog({
         </header>
         <section>
           <p>
-            {browser === "Safari"
-              ? TEXT.safariRemoveEffect
-              : browser === "Chrome" &&
-                  ["external", "restartChrome"].includes(chrome.view?.setup.installState ?? "")
-                ? TEXT.chromeRemoveExternalEffect
-                : TEXT.browserRemoveEffect.replaceAll("{browser}", browser)}
+            {browser === "Firefox"
+              ? "Closes the Vibe Work Firefox window and removes its connection. Firefox profiles and the add-on stay in Firefox."
+              : browser === "Safari"
+                ? TEXT.safariRemoveEffect
+                : browser === "Chrome" &&
+                    ["external", "restartChrome"].includes(chrome.view?.setup.installState ?? "")
+                  ? TEXT.chromeRemoveExternalEffect
+                  : TEXT.browserRemoveEffect.replaceAll("{browser}", browser)}
           </p>
         </section>
         <footer className="modal-actions">

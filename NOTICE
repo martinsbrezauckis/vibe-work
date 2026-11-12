@@ -99,3 +99,10 @@ GStreamer audio plugins (LGPL-2.1-or-later) support WebKit audio playback and mi
 The AppImage carries these audio plugins unmodified from the build system.
 License and attribution texts are in third_party/media/. Source distributions are available at
 https://github.com/containers/bubblewrap and https://gstreamer.freedesktop.org/src/.
+
+Chat diagrams and formulas
+
+beautiful-mermaid 0.1.3 and Dagre/Graphlib (MIT) render diagrams. KaTeX 0.19.1 (MIT) renders formulas
+as MathML. Saxes 6.0.0 (ISC) and xmlchars (MIT) parse the renderer output before the UI rebuilds passive
+elements. License texts are in third_party/beautiful-mermaid, third_party/dagrejs-dagre,
+third_party/dagrejs-graphlib, third_party/katex, third_party/commander, third_party/saxes and third_party/xmlchars.

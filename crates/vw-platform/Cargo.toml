@@ -22,22 +22,28 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [features]
+# Operation-bound native Safari input through Accessibility and CoreGraphics.
+safari-input = ["dep:serde", "dep:vw-ask"]
 # A startup failure must be visible before a window or Tauri handle exists.
 startup-dialog = ["dep:gtk"]
 # Native tray attention and menu ownership for the desktop app.
 desktop-tray = ["dep:gtk", "dep:libappindicator", "dep:png"]
-# Optional native input markers; renderers and their tests compile only with this switch.
-click-marker = []
 # Native system proxy/PAC discovery for the opt-in guard transports.
 proxy-resolver = ["dep:libloading", "windows/Win32_Networking_WinHttp", "dep:core-foundation-sys"]
 video-sandbox = ["windows/Win32_Security_Isolation", "windows/Win32_System_Registry"]
 video = ["video-sandbox","dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "windows/Win32_Media_MediaFoundation", "windows/Win32_Security_Isolation", "windows/Win32_System_Com_StructuredStorage", "windows/Win32_System_Variant", "dep:objc2-av-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-graphics"]
 # Native webview calls for the preview engine (`webview.rs`); only vw-webview turns it on.
 webview = [
+    "dep:vw-ask",
     "dep:webview2-com",
     "dep:base64",
-    "dep:serde_json",
     "dep:objc2-web-kit",
+    "dep:objc2-core-graphics",
+    "objc2-core-graphics/CGEvent",
+    "objc2-core-graphics/CGEventTypes",
+    "objc2-core-graphics/CGEventSource",
+    "objc2-app-kit/objc2-core-graphics",
+    "objc2-app-kit/NSScreen",
     "dep:gtk",
     "dep:gdk",
     "dep:glib",
@@ -46,40 +52,44 @@ webview = [
 ]
 
 [dependencies]
+vw-video-types = { workspace = true }
+vw-ask = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 # Hidden child flags must survive process-wrap's temporary suspended job assignment on Windows.
-process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "creation-flags"] }
+process-wrap = { workspace = true, features = ["tokio1", "creation-flags"] }
 # Random exclusive sibling names for ordinary atomic replacement.
-getrandom = "0.3"
+getrandom = { workspace = true }
 libloading = { version = "0.7.4", optional = true }
 # Handle-relative cleanup of immutable Vibe package copies; never follow links while changing modes.
-cap-std = "4.0.3"
-cap-fs-ext = "4.0.3"
+cap-std = { workspace = true }
+cap-fs-ext = { workspace = true }
 # Idle-sleep inhibition only; no CLI features or display inhibition. MIT.
 keepawake = { version = "=0.6.1", default-features = false }
-thiserror = "2"
-arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control"] }
-tokio = { version = "1.53", features = ["sync", "time", "rt", "macros", "process"] }
-zeroize = "1.8"
+thiserror = { workspace = true }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+arboard = { version = "=3.6.1", default-features = false, features = ["wayland-data-control", "image-data"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros", "process"] }
+zeroize = { workspace = true }
 # Link checks before opening the browser; same major version as vw-host.
-url = "2"
+url = { workspace = true }
 # OS notifications with click handling. The Tauri notification plugin (2.5.1) drops the handle on
 # desktop and exposes no click, so the library underneath is used directly (default features =
 # pure-Rust zbus on Linux, no libdbus). Pinned exactly.
 notify-rust = "=4.18.2"
 # The everyday spelling of canonical paths on Windows (`paths.rs`): no `\\?\` prefix in what people
 # read or in a program's working folder. Pure string rules; already in the lockfile through Tauri (1.0.5).
-dunce = "1.0.5"
+dunce = { workspace = true }
 # Strict JSON boolean result from the page's final native-click guard (all webview platforms).
-serde_json = { version = "1", optional = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 # examples/confirm_window_probe.rs (macOS): its own app window (NSBackingStoreType is in NSGraphics, the activation
 # policy in NSRunningApplication) and a close from another thread through the main queue. Versions in the lockfile.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 dispatch2 = "0.3"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSRunningApplication"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSGraphics", "NSRunningApplication"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Owned CF references for the vault's explicit signed-app Keychain ACL.
@@ -93,18 +103,20 @@ objc2-core-graphics = { version = "0.3", optional = true, default-features = fal
 # `WKWebView` snapshots (webview.rs, feature `webview`), the confirmation window (`confirm_window/mac.rs`) and the
 # services provider of "Send to Vibe Work" (`send_to_mac.rs`). The versions wry 0.57 already uses (lockfile).
 objc2 = { version = "0.6", features = ["exception"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSLocale", "NSGeometry", "NSJSONSerialization", "NSValue", "NSURL", "NSDate", "NSSet", "NSUserDefaults", "NSEnumerator", "NSURLRequest", "NSURLResponse", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLProtectionSpace", "NSURLSession", "NSTimer", "block2"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "NSPrintInfo", "NSPrintOperation", "objc2-core-foundation", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "block2", "NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl", "NSBezierPath", "NSColor", "NSAccessibility", "NSTrackingArea"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSData", "NSDictionary", "NSError", "NSString", "NSArray", "NSHTTPCookie", "NSProcessInfo", "NSLocale", "NSGeometry", "NSJSONSerialization", "NSValue", "NSURL", "NSDate", "NSSet", "NSUserDefaults", "NSEnumerator", "NSURLRequest", "NSURLResponse", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLProtectionSpace", "NSURLSession", "NSTimer", "block2"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSPasteboard", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSGraphicsContext", "NSPrintInfo", "NSPrintOperation", "objc2-core-foundation", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "libc", "block2", "NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl", "NSBezierPath", "NSColor", "NSAccessibility", "NSTrackingArea", "NSAppearance"] }
 # Content rule lists per preview webview (WKContentRuleListStore, the configuration's user content controller).
 objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKPreferences", "WKSnapshotConfiguration", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord", "WKHTTPCookieStore", "WKContentWorld", "WKUserScript", "WKFrameInfo", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin"] }
 block2 = "0.6"
 # proc_pidinfo(PROC_PIDTBSDINFO) for precise start times (process.rs). Already in the lockfile.
-libc = "0.2"
+libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+# Atomic browser registration transactions, shared by setup and removal.
+winreg = { workspace = true, features = ["transactions"] }
 # WebView2 DevTools screenshot (webview.rs, feature `webview`). Same version as wry 0.57 (lockfile).
 webview2-com = { version = "0.39", optional = true }
-base64 = { version = "0.22", optional = true }
+base64 = { workspace = true, optional = true }
 # OpenProcess / GetProcessTimes / TerminateProcess (process.rs). Same version as vw-supervisor and listeners.
 # Window captures (`window_capture.rs`): GDI, PrintWindow (Storage_Xps), the display ICC profile.
 # User-only folders and files (`private_file.rs`): the token's SID, SDDL, Get/SetNamedSecurityInfoW.
@@ -114,7 +126,7 @@ base64 = { version = "0.22", optional = true }
 # The Git Bash wrapper's kill-on-close job (`kill_job.rs`): job objects, the command line, the standard handles.
 # The person's pointer watch (`native_click/person/windows.rs`): the low-level mouse hook, button state.
 # Toast objects and subscriptions (`notify/windows.rs`) stay alive for banner clicks, then are removed.
-windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Globalization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_RemoteDesktop", "Win32_System_WindowsProgramming", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_UI_Notifications", "Win32_Security_Credentials", "Win32_Security_Cryptography"] }
+windows = { workspace = true, features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Globalization", "Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_RemoteDesktop", "Win32_System_WindowsProgramming", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging", "Win32_UI_ColorSystem", "Win32_UI_HiDpi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_System_Com", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_System_Environment", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_UI_Notifications", "Win32_Security_Credentials", "Win32_Security_Cryptography"] }
 # The "Send to Vibe Work" Explorer verbs under HKCU (`send_to_windows.rs`) and the WebView2 UserDataFolder policy
 # lookup (webview.rs `user_data_folder_override`); already in the lockfile (0.6.1).
 windows-registry = "0.6"
@@ -122,27 +134,28 @@ windows-registry = "0.6"
 windows-core = "0.62"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
 libappindicator = { version = "0.9", optional = true }
-png = { version = "0.18", optional = true }
+png = { workspace = true, optional = true }
 # Bounded StatusNotifier watcher/host detection; same pure-Rust bus transport as notify-rust.
 zbus = "5.19"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { workspace = true, features = ["std"] }
 gstreamer = { version = "0.24", optional = true }
 gstreamer-app = { version = "0.24", optional = true }
 gstreamer-video = { version = "0.24", optional = true }
 # gnu_get_libc_version for the update check's glibc reading (`system_version.rs`). Already in the lockfile.
-libc = "0.2"
+libc = { workspace = true }
 # The startup accessibility bus check (`a11y_bus.rs`): libdbus, the library GTK's accessibility bridge registers
 # with, so the check fails exactly when the bridge would. Already in the lockfile through tao (0.9.12).
 dbus = "0.9"
 # Native click delivery on the Tauri child WebKitGTK widget, using GTK's event queue.
-gtk = { version = "0.18", optional = true }
+gtk = { workspace = true, optional = true }
 gdk = { version = "0.18", optional = true }
-glib = { version = "0.18", optional = true }
-webkit2gtk = { version = "=2.0.2", optional = true, features = ["v2_40"] }
+glib = { workspace = true, optional = true }
+webkit2gtk = { workspace = true, optional = true, features = ["v2_40"] }
 javascriptcore-rs = { version = "1.1.2", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 # Process hardening without our own `unsafe`: safe wrappers for prctl/setrlimit.
 # rustix 1.1.5 is already in the lockfile through other crates.
-rustix = { version = "1.1.5", features = ["process", "fs"] }
+rustix = { workspace = true, default-features = true, features = ["process", "fs"] }

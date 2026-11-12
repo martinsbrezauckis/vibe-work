@@ -55,8 +55,8 @@ pub fn checked(server: &Path) -> Result<Runtime, String> {
 fn selected_version(explicit: bool, candidate: Option<&str>) -> Result<&str, String> {
     match candidate {
         None => Ok(PIN.trim()),
-        Some(version @ ("3.0.4" | "3.1.0")) if explicit => Ok(version),
-        _ => Err("VW_TEST_VIBE_CANDIDATE requires an explicit server and an audited version (3.0.4 or 3.1.0)".into()),
+        Some(version @ ("3.0.4" | "3.1.0" | "3.1.1" | "3.1.2")) if explicit => Ok(version),
+        _ => Err("VW_TEST_VIBE_CANDIDATE requires an explicit server and an audited version (3.0.4, 3.1.0, 3.1.1 or 3.1.2)".into()),
     }
 }
 
@@ -132,7 +132,7 @@ mod tests {
     use super::*;
     #[test]
     fn old_and_future_versions_are_refused_with_the_found_version() {
-        for found in ["2.26.1", "3.0.4", "3.1.1"] {
+        for found in ["2.26.1", "3.0.4", "3.1.0", "999.0.0"] {
             let error = require_version(Path::new("selected-server"), found, "3.12.13", PIN.trim())
                 .unwrap_err();
             assert!(
@@ -155,7 +155,9 @@ mod tests {
         assert_eq!(selected_version(true, None).unwrap(), PIN.trim());
         assert_eq!(selected_version(true, Some("3.1.0")).unwrap(), "3.1.0");
         assert!(selected_version(false, Some("3.1.0")).is_err());
-        assert!(selected_version(true, Some("3.1.1")).is_err());
+        assert_eq!(selected_version(true, Some("3.1.1")).unwrap(), "3.1.1");
+        assert_eq!(selected_version(true, Some("3.1.2")).unwrap(), "3.1.2");
+        assert!(selected_version(true, Some("999.0.0")).is_err());
         assert!(require_version(Path::new("candidate"), "3.1.0", "3.14.8", "3.1.0").is_ok());
         assert!(require_version(Path::new("candidate"), "3.0.4", "3.14.8", "3.1.0").is_err());
     }

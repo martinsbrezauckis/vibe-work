@@ -91,7 +91,6 @@ jobs:
         env:
           BUNDLES: ${{ matrix.bundles }}
         run: |
-          eval "$(node scripts/public/release_ui_env.mjs --shell)"
           config='{"bundle":{"createUpdaterArtifacts":false,"externalBin":["binaries/vw-agent-tools","binaries/vw-video-helper"]}}'
           if [[ "$RUNNER_OS" == Linux ]]; then
             config='{"bundle":{"createUpdaterArtifacts":false,"externalBin":["binaries/vw-agent-tools","binaries/vw-video-helper","binaries/vw-video-sandbox"],"linux":{"deb":{"depends":["gstreamer1.0-plugins-base","gstreamer1.0-plugins-good","gstreamer1.0-plugins-bad","gstreamer1.0-libav","bubblewrap"]}}}}'

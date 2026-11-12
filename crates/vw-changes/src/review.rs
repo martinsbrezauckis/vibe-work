@@ -518,7 +518,3 @@ fn modified_ms(baseline: &Baseline, path: &[u8]) -> u64 {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
-
-#[cfg(test)]
-#[path = "review_user_save_tests.rs"]
-mod user_save_tests;

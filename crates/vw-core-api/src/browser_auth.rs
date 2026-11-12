@@ -1,5 +1,7 @@
 //! HTTP Basic authentication for the built-in browser through the existing vault/person consent route.
 //! Holds an exact native challenge and mount across consent; no credential enters tool arguments or receipts.
+//! Depends on: the preview dialog challenge and vault fill path.
+//! Called by: browser tool preparation.
 use crate::{
     ask::tool_calls::receipts::Execution,
     browser_fill::{self, LoginWriter},
@@ -72,7 +74,7 @@ impl LoginWriter for Writer {
                 return Err("HTTP credentials were sent, but the page closed or stopped before sign-in could be checked. Read the page before trying again.".into());
             }
             if hub.service.pending_dialog(&self.page).is_some() {
-                return Err("The site asked for authentication again. Check the chosen vault login with the person before trying again.".into());
+                return Err("The site asked for authentication again. Check the chosen vault login with the user before trying again.".into());
             }
             if let Some(state) = hub.service.load_state(&self.page)
                 && !state.loading
@@ -172,7 +174,10 @@ async fn prepare_inner(
         shared: Arc::downgrade(shared),
         owner: owner.clone(),
         page: page.into(),
-        mount: hub.service.page_mount(page).ok_or("Browser closed.")?,
+        mount: hub
+            .service
+            .page_mount(page)
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?,
         dialog: dialog["dialogId"]
             .as_str()
             .ok_or("HTTP challenge has no id.")?

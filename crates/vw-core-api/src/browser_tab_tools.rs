@@ -17,7 +17,13 @@ fn close_allowed(shared: &Shared, owner: &str, _user_origin: bool) -> Result<(),
     let mode = crate::chrome_control::check::mode(shared, owner);
     mode.as_deref()
         .and_then(vw_ask::chrome::Tier::from_mode)
-        .ok_or("Not run: closing browser tabs is unavailable in this access mode.")?;
+        .ok_or_else(|| {
+            crate::chrome_control::check::mode_refusal(
+                "Closing browser tabs",
+                vw_ask::chrome::Tier::Ask,
+                mode.as_deref().unwrap_or("an unavailable access mode"),
+            )
+        })?;
     Ok(())
 }
 
@@ -36,6 +42,7 @@ fn site(tab: &PageTab) -> Option<String> {
 fn tab_json(tab: &PageTab) -> Value {
     json!({
         "id": tab.page_key,
+        "windowId": tab.window_id,
         "site": site(tab),
         "owner": tab.owner_kind,
         "active": tab.active,
@@ -80,7 +87,7 @@ fn current_tab(service: &PreviewService, owner: &str, key: &str) -> Result<PageT
         .tabs(owner)
         .into_iter()
         .find(|tab| tab.page_key == key && tab.kind == PageTabKind::Web)
-        .ok_or_else(|| "web tab does not belong to this session".to_owned())
+        .ok_or_else(|| crate::browser_outcomes::TARGET_UNAVAILABLE.to_owned())
 }
 
 fn still_running(shared: &Shared, owner: &str, key: &str) -> Result<(), String> {
@@ -89,7 +96,7 @@ fn still_running(shared: &Shared, owner: &str, key: &str) -> Result<(), String> 
         return Err(vw_browser::STOPPED.to_owned());
     }
     if shared.store.view(owner).is_none() {
-        return Err("browser session is no longer loaded".to_owned());
+        return Err(crate::browser_outcomes::SESSION_UNAVAILABLE.to_owned());
     }
     Ok(())
 }
@@ -131,7 +138,9 @@ pub(crate) fn prepare_close(
     let weak = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Ok(Box::pin(async move {
-        let shared = weak.upgrade().ok_or("Browser closed.")?;
+        let shared = weak
+            .upgrade()
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?;
         let driver = browser(&shared).map_err(|error| error.message)?;
         let _flight = driver.sessions().begin(&owner, Actor::Agent);
         let result = action.await;
@@ -179,7 +188,9 @@ fn prepare_close_action(
     let owner = owner.to_owned();
     let key = key.to_owned();
     Ok(Box::pin(async move {
-        let shared = weak.upgrade().ok_or("Browser closed.")?;
+        let shared = weak
+            .upgrade()
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?;
         let shared = &shared;
         let owner = owner.as_str();
         let key = key.as_str();
@@ -213,13 +224,25 @@ fn prepare_close_action(
             .await
             .map_err(|error| error.to_string())?;
         driver.sessions().session_ended(key);
-        Ok(close_receipt(
+        let mut receipt = close_receipt(
             driver,
             owner,
             &tab,
             restore_error.map(|error| error.to_string()),
-        ))
+        );
+        add_popup_status(service, owner, &mut receipt);
+        Ok(receipt)
     }))
+}
+
+fn add_popup_status(service: &PreviewService, owner: &str, result: &mut Value) {
+    if let (Some(output), Some(status)) = (
+        result.as_object_mut(),
+        service.popup_status(owner).as_object(),
+    ) {
+        output.extend(status.clone());
+    }
+    vw_browser::observe::fit(result, vw_browser::observe::ACT_BUDGET);
 }
 
 fn close_receipt(
@@ -260,22 +283,14 @@ pub(crate) async fn call(
     tab: Option<&str>,
 ) -> Result<Value, String> {
     if shared.store.view(owner).is_none() {
-        return Err("browser session is no longer loaded".to_owned());
+        return Err(crate::browser_outcomes::SESSION_UNAVAILABLE.to_owned());
     }
     let service = &hub(shared).map_err(|error| error.message)?.service;
     match args.get("action").and_then(Value::as_str) {
         Some("list_tabs") => {
             still_running(shared, owner, owner)?;
             let mut result = list_pages(service.tabs(owner), tab)?;
-            if let Some(tabs) = result["tabs"].as_array_mut() {
-                for tab in tabs {
-                    tab["windowId"] = json!(
-                        tab["id"]
-                            .as_str()
-                            .and_then(|page| service.page_window_id(page))
-                    );
-                }
-            }
+            add_popup_status(service, owner, &mut result);
             Ok(result)
         }
         Some("close_tab") => prepare_close(shared, owner, tab.unwrap_or(""))?.await,
@@ -291,6 +306,7 @@ mod tests {
         let pages: Vec<_> = (0..100)
             .map(|i| PageTab {
                 page_key: format!("web-page-fixture-{i}"),
+                window_id: Some(format!("panel-fixture-{i}")),
                 kind: PageTabKind::Web,
                 owner_kind: Some(PageTabOwner::Agent),
                 active: false,
@@ -359,6 +375,17 @@ mod tests {
                 user,
                 "{mode}"
             );
+            if !own {
+                let reason = close_allowed(&core.shared, "s", false).unwrap_err();
+                assert!(
+                    reason.contains(vw_vocabulary::label("accessModes", mode)),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains("ask the user to change the chat mode"),
+                    "{reason}"
+                );
+            }
             assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
         }
         let old: vw_browser::delegation::BrowserPermissions =

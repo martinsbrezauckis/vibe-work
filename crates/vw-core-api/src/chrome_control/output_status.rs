@@ -1,15 +1,17 @@
 //! Compact discovery after live support and chat-mode checks. Called by the gateway after page marking.
 //! Schema JSON stays lossless and compact when a code-mode program is re-indented; shared status facts occur once.
+#[path = "output_profiles.rs"]
+mod profiles;
 use crate::core::Shared;
 use serde_json::{Value, json};
 
 /// Invalid discovery arguments need no connection or helper status: only the app's executable action names.
 pub(super) fn unknown_action(action: &str) -> Option<Value> {
-    if super::mapping::action_names().any(|known| known == action) {
+    if super::mapping::external_action_names().any(|known| known == action) {
         return None;
     }
     let mut groups = std::collections::BTreeMap::<&str, Vec<&str>>::new();
-    for action in super::mapping::action_names() {
+    for action in super::mapping::external_action_names() {
         if let Some((group, name)) = action.split_once('.') {
             groups.entry(group).or_default().push(name);
         }
@@ -46,14 +48,7 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
     if let Some(status) = status.as_object_mut() {
         status.remove("addon");
     }
-    // The selected browser's state is already in the browser-labelled add-on list.
-    if let Some(addons) = body["addons"].as_array_mut() {
-        for addon in addons {
-            if addon["label"] == addon["state"] {
-                addon.as_object_mut().map(|a| a.remove("label"));
-            }
-        }
-    }
+    compact_addons(body);
     let status = &mut body["untrustedPageContent"];
     share_feature_lists(status);
     if let Some(rows) = status["capabilities"]["permissions"].as_array() {
@@ -62,8 +57,9 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
             .filter(|r| r["available"] != true)
             .cloned()
             .collect();
+        // Available count is total minus exceptions; do not repeat this derived fact.
         status["capabilities"]["permissions"] = json!({"total":rows.len(),"defaultAvailable":true,
-            "available":rows.iter().filter(|r| r["available"] == true).count(),"exceptions":exceptions});
+            "exceptions":exceptions});
     }
     if let Some(rows) = status["capabilities"]["actions"].as_array_mut() {
         for row in rows {
@@ -117,20 +113,80 @@ pub(super) fn compact(shared: &Shared, chat: &str, action: Option<&str>, result:
         "needs/typingKeysNeed: modes index (blocked); approvalRequired/typingKeysApprovalRequired asks. Support: features. Schema: chrome_status({action})."
     );
     status["capabilities"]["execution"] =
-        json!("Receipts report outcomes. Never replay an unknown outcome.");
-    status["capabilities"]["savedLogin"] = json!(
-        "Use auth.fill with a named vault login; vault consent applies. No Chrome password extraction."
-    );
+        json!("Read receipts. Unknown outcome: inspect the page; never replay.");
+    status["capabilities"]["savedLogin"] =
+        json!("Use auth.fill: named vault login and consent; no browser password extraction.");
     if !super::output::fits(body, 6000) {
         let capabilities = &mut body["untrustedPageContent"]["capabilities"];
         share_capability_names(capabilities);
         capabilities["availability"] = json!(
-            "capability: capabilityNames index; needs/typingKeysNeed: modes index (blocked); approvalRequired/typingKeysApprovalRequired asks. Support: features. Schema: chrome_status({action})."
+            "capability indexes capabilityNames; needs/typingKeysNeed index modes (blocked). Approval flags ask. Support: features. Schema: chrome_status({action})."
         );
     }
-    super::safari::compact_overview(body);
+    profiles::compact(body);
     share_catalog_features(body);
+    share_action_rows(body);
     super::output::sync_text(result);
+}
+
+// Four browser add-ons can leave repeated permission rows over budget even after names are shared.
+// The table keeps every field and action binding; it changes only the model-facing representation.
+fn share_action_rows(body: &mut Value) {
+    if super::output::fits(body, 6000) {
+        return;
+    }
+    let capabilities = &mut body["untrustedPageContent"]["capabilities"];
+    let Some(actions) = capabilities["actions"].as_object() else {
+        return;
+    };
+    let mut rows = Vec::new();
+    let indexed: serde_json::Map<String, Value> = actions
+        .iter()
+        .map(|(id, row)| {
+            let index = rows
+                .iter()
+                .position(|value| value == row)
+                .unwrap_or_else(|| {
+                    rows.push(row.clone());
+                    rows.len() - 1
+                });
+            (id.clone(), json!(index))
+        })
+        .collect();
+    let indexed = Value::Object(indexed);
+    let rows = json!(rows);
+    if indexed.to_string().len() + rows.to_string().len() + 80
+        >= capabilities["actions"].to_string().len()
+    {
+        return;
+    }
+    capabilities["actions"] = indexed;
+    capabilities["actionRows"] = rows;
+    if let Some(instruction) = capabilities["availability"].as_str() {
+        capabilities["availability"] =
+            json!(format!("{instruction} Numeric actions index actionRows."));
+    }
+}
+
+fn compact_addons(body: &mut Value) {
+    // The selected browser's state is already in the browser-labelled add-on list.
+    if let Some(addons) = body["addons"].as_array_mut() {
+        for addon in addons {
+            if addon["label"] == addon["state"] {
+                addon.as_object_mut().map(|a| a.remove("label"));
+            }
+            // Unknown versions have no value to repeat, including the optional Firefox sharing add-on.
+            let omit_unknown_version = |fact: &mut Value| {
+                if let Some(fields) = fact.as_object_mut() {
+                    fields.retain(|key, value| key != "extensionVersion" || !value.is_null());
+                }
+            };
+            omit_unknown_version(addon);
+            if let Some(sharing) = addon.get_mut("sharing") {
+                omit_unknown_version(sharing);
+            }
+        }
+    }
 }
 
 // Crowded discovery can refer to the catalog's action keys instead of repeating the same support set.
@@ -157,7 +213,7 @@ fn share_catalog_features(body: &mut Value) {
     }
     if shared && let Some(instruction) = status["capabilities"]["availability"].as_str() {
         status["capabilities"]["availability"] = json!(format!(
-            "{instruction} allActions means every capabilities.actions key."
+            "{instruction} allActions: capabilities.actions keys."
         ));
     }
 }
@@ -188,6 +244,7 @@ fn share_session_fields(status: &mut Value) {
     }
     let mut defaults = serde_json::Map::new();
     for key in [
+        "state",
         "clientId",
         "clientName",
         "clientSessionId",

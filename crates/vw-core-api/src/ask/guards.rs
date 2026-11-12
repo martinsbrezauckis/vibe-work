@@ -72,7 +72,7 @@ fn pending(
             (pending.id.clone(), pending.result.clone())
         } else {
             if calls.len() >= 500 {
-                return Err("Too many open permission prompts.".into());
+                return Err(vw_vocabulary::texts::AGENT_PROMPT_LIMIT.into());
             }
             let id = format!(
                 "guard-{}",

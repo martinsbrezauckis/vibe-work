@@ -31,6 +31,9 @@ export default defineConfig({
   },
   // Public smoke and component tests share the synthetic browser setup.
   test: {
+    allowOnly: false,
+    // Missing or obsolete snapshots require an explicit reviewer update (`vitest -u`).
+    update: "none",
     globals: true,
     environment: "jsdom",
     setupFiles: ["../tests/public/ui/setup.ts"],

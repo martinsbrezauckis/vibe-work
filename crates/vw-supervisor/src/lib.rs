@@ -16,6 +16,7 @@
 //! - One process per app, multiplexed: many isolated
 //!   channels, one per active session, plus the lobby channel [`Supervisor::current`] returns.
 
+mod adapter_file;
 mod backoff;
 mod child;
 mod config;
@@ -24,10 +25,12 @@ mod env;
 mod handshake;
 mod launch;
 mod live_ids;
+mod model_requests;
 mod python;
 mod shell_env;
 mod supervisor;
 
+pub use adapter_file::{ADAPTER_BOOTSTRAP, adapter_digest, adapter_path};
 pub use backoff::Backoff;
 pub use config::{Recovering, SupervisorConfig, SupervisorError, SupervisorState};
 pub use discovery::{
@@ -36,11 +39,12 @@ pub use discovery::{
 };
 pub use env::{
     API_KEY_VAR, ApiKey, EXPERIMENT_CONFIG_KEYS, EnvError, EnvPlan, EnvSecretProvider, INHERITED,
-    LOOPBACK_NO_PROXY, MCP_TOKEN_VAR, NoSecret, RUNTIME_PINNED_OFF, SecretError, SecretProvider,
-    build_env, is_hijack_var,
+    LOOPBACK_NO_PROXY, MCP_TOKEN_VAR, NoSecret, RUNTIME_PINNED_OFF, STABLE_CONFIG_KEYS,
+    SecretError, SecretProvider, build_env, is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
 pub use launch::{CHILD_STOP_ADAPTER, adapter_python};
+pub use model_requests::{ModelRequestHold, ModelRequests};
 pub use python::server_python;
 pub use supervisor::{OpenedChannel, Supervisor};
 pub use vw_agent_tools::agent_env::isolate_credentials;

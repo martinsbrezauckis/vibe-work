@@ -121,7 +121,7 @@ export function registerPlanRoute(
   return app.uiControl.register("plan", async (body: unknown) => {
     const input = (body ?? {}) as Record<string, unknown>;
     const sessionId = app.shell.store.get().selected;
-    if (sessionId === null) throw new UiControlError("invalidParams", "no session is shown");
+    if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
     await pages.loadPlan(sessionId);
     const plan = pages.store.get().plans[sessionId];
     const action = input["action"] ?? "state";

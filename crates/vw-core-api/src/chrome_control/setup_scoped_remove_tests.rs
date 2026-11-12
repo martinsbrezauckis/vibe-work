@@ -67,7 +67,15 @@ fn scoped_remove_preserves_other_registration_and_shared_files_in_both_orders() 
                 || manifest_path(&state, target.name),
                 |hosts| hosts.join(format!("{HOST_NAME}.json")),
             );
-            assert_eq!(path.exists(), cfg!(windows) || target.name == kept);
+            // Only the two browsers installed above have manifests; Firefox (a default feature) was never set up.
+            // Windows keeps both installed browsers' manifest files and removes the registry key instead.
+            let installed = target.name == removed || target.name == kept;
+            assert_eq!(
+                path.exists(),
+                installed && (cfg!(windows) || target.name == kept),
+                "{}",
+                target.name
+            );
             #[cfg(windows)]
             if let Some(root) = target.registry {
                 assert_eq!(

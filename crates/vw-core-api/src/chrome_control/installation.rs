@@ -1,5 +1,5 @@
-//! Browser installation facts and remembered launch profiles. Setup receipts own browser roots; confirmed
-//! connections record unambiguous directories for reopening. Settings and agent views use read-only probes.
+//! Browser-wide installation facts from read-only probes. Folder availability never proves a pairing UUID;
+//! profile selection and history use authenticated helper identities, including when a browser is reopened.
 use super::{agent_browser::Browser, probe, setup};
 use crate::core::Shared;
 use std::path::PathBuf;
@@ -7,29 +7,6 @@ use std::path::PathBuf;
 pub(super) fn profiles(shared: &Shared, browser: Browser) -> Vec<PathBuf> {
     let chrome = &shared.chrome_control;
     let installed = installed_profiles(chrome, browser);
-    if installed.len() <= 1 {
-        return installed;
-    }
-    let history = super::profile_folders::load(chrome, browser);
-    let paired: Vec<_> = installed
-        .iter()
-        .filter(|path| history.contains(path))
-        .cloned()
-        .collect();
-    if !paired.is_empty() {
-        return paired;
-    }
-    // A directory observed at pairing is stronger evidence than an external install in a new profile.
-    if let Some(saved) = saved_directory(chrome, browser)
-        && let Some(profile) = installed
-            .iter()
-            .find(|p| p.file_name() == Some(saved.as_ref()))
-    {
-        return vec![profile.clone()];
-    }
-    if browser.paired(shared) {
-        return installed;
-    }
     let selectable = selectable_profiles(chrome, browser, &installed);
     if selectable.is_empty() {
         installed
@@ -38,19 +15,12 @@ pub(super) fn profiles(shared: &Shared, browser: Browser) -> Vec<PathBuf> {
     }
 }
 
-fn saved_directory(chrome: &super::ChromeControl, browser: Browser) -> Option<String> {
-    let record = directory_record(chrome, browser)?;
-    serde_json::from_slice(&std::fs::read(record).ok()?).ok()
-}
-
 /// Disabled unpaired copies are installation prompts, not browser choices. Unknown reads stay ambiguous.
 fn selectable_profiles(
     chrome: &super::ChromeControl,
     browser: Browser,
     installed: &[PathBuf],
 ) -> Vec<PathBuf> {
-    let saved = saved_directory(chrome, browser);
-    let history = super::profile_folders::load(chrome, browser);
     let prober = if browser == Browser::Edge {
         &chrome.edge_prober
     } else {
@@ -59,19 +29,15 @@ fn selectable_profiles(
     installed
         .iter()
         .filter(|profile| {
-            history.contains(profile)
-                || saved
-                    .as_ref()
-                    .is_some_and(|name| profile.file_name() == Some(name.as_ref()))
-                || !matches!(
-                    prober.probe_for(
-                        &chrome.config,
-                        vec![(*profile).clone()],
-                        &chrome.config.extension_id,
-                        std::time::Instant::now()
-                    ),
-                    probe::Probe::Off | probe::Probe::AwaitingEnable
-                )
+            !matches!(
+                prober.probe_for(
+                    &chrome.config,
+                    vec![(*profile).clone()],
+                    &chrome.config.extension_id,
+                    std::time::Instant::now()
+                ),
+                probe::Probe::Off | probe::Probe::AwaitingEnable
+            )
         })
         .cloned()
         .collect()
@@ -101,36 +67,9 @@ fn directory_record(chrome: &super::ChromeControl, browser: Browser) -> Option<P
     })
 }
 
-/// Remember an unambiguous directory only while the extension has actually connected with this owner.
-/// A previous pairing flag alone cannot establish which currently installed profile was paired.
+/// Keep legacy history UUIDs without recording an unproven launch directory.
 pub(super) fn remember_directory(chrome: &super::ChromeControl, browser: Browser) {
-    if chrome.config.is_macos() {
-        return;
-    }
-    let Some(record) = directory_record(chrome, browser) else {
-        return;
-    };
-    let installed = installed_profiles(chrome, browser);
-    let profiles = selectable_profiles(chrome, browser, &installed);
-    super::profile_folders::observe(chrome, browser, &profiles);
-    if record.is_file() {
-        return;
-    }
-    let [profile] = profiles.as_slice() else {
-        return;
-    };
-    let Some(name) = profile.file_name().and_then(|name| name.to_str()) else {
-        return;
-    };
-    let Ok(bytes) = serde_json::to_vec(name) else {
-        return;
-    };
-    if let Some(parent) = record.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Err(reason) = vw_platform::replace_private(&record, &bytes) {
-        tracing::debug!(%reason, "the browser profile directory could not be remembered");
-    }
+    super::profile_folders::observe(chrome, browser);
 }
 
 pub(super) fn forget_directory(chrome: &super::ChromeControl, browser: Browser) {
@@ -140,19 +79,10 @@ pub(super) fn forget_directory(chrome: &super::ChromeControl, browser: Browser) 
     }
 }
 
-/// Launch the sole existing paired or enabled extension profile. Historical unknown pairings do not
-/// identify a folder, and a deleted saved folder cannot be a launch choice. Multiple choices keep the picker.
-pub(super) fn paired_directory(shared: &Shared, browser: Browser) -> Option<String> {
-    let chrome = &shared.chrome_control;
-    if chrome.config.is_macos() || !browser.was_paired(shared) {
-        return None;
-    }
-    let installed = installed_profiles(chrome, browser);
-    let profiles = selectable_profiles(chrome, browser, &installed);
-    let [profile] = profiles.as_slice() else {
-        return None;
-    };
-    Some(profile.file_name()?.to_str()?.to_owned())
+/// The frozen hello cannot prove a filesystem directory. Normal browser startup may reconnect a trusted
+/// identity, but only the subsequent authenticated inventory can authorize a task for the selected profile.
+pub(super) fn paired_directory(_shared: &Shared, _browser: Browser) -> Option<String> {
+    None
 }
 
 pub(super) fn version(shared: &Shared, browser: Browser) -> Option<String> {
@@ -217,9 +147,11 @@ pub(crate) fn addons(shared: &Shared) -> serde_json::Value {
             .chain(cfg!(feature = "your-firefox").then_some(Browser::Firefox))
             .map(|browser| {
                 let view = browser.addon(shared);
-                serde_json::json!({"id":browser.id(), "name":browser.name(), "state":view.label,
+                let mut fact = serde_json::json!({"id":browser.id(), "name":browser.name(), "state":view.label,
                 "stateCode":view.state, "label":view.label, "instruction":view.instruction,
-                "extensionVersion":view.extension_version})
+                "extensionVersion":view.extension_version});
+                if browser == Browser::Firefox && let Some(sharing) = super::firefox_sharing::shown(shared) { fact["sharing"] = serde_json::to_value(sharing).unwrap_or_default(); }
+                fact
             })
             .chain(super::safari::agent_fact(shared))
             .collect(),

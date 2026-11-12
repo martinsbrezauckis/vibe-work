@@ -119,9 +119,6 @@
   flex: none;
   white-space: nowrap;
 }
-.preview-save-control > .preview-btn:first-child {
-  border-radius: var(--radius-7) 0 0 var(--radius-7);
-}
 .preview-save-control > .preview-save-more {
   border-radius: 0 var(--radius-7) var(--radius-7) 0;
   border-left: 0;

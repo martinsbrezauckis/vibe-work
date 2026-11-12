@@ -46,6 +46,12 @@ fn text_paging_counts_utf16_and_keeps_document_bindings() {
         body["outputLimit"]
             .as_str()
             .unwrap()
+            .starts_with("Browser output capped")
+    );
+    assert!(
+        body["outputLimit"]
+            .as_str()
+            .unwrap()
             .contains("textOffset=nextTextOffset")
     );
 }
@@ -85,6 +91,7 @@ async fn sixteen_large_batch_steps_keep_every_outcome_under_one_budget() {
             std::future::ready(Ok(json!({"vwMcpResult":result})))
         },
         || panic!("no timeout"),
+        super::batch_wait::Clock::default(),
     )
     .await;
     assert_eq!(calls, 16);

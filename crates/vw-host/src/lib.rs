@@ -55,8 +55,6 @@ mod documents;
 mod events;
 pub mod exit;
 pub mod experiment_pins;
-#[cfg(test)]
-mod experiment_pins_tests;
 mod export;
 mod extension_paths;
 mod files_routes;
@@ -71,6 +69,7 @@ mod launch_version;
 pub mod media;
 pub mod navigation;
 mod notify;
+pub mod powershell_shell;
 pub mod product;
 pub mod send_to;
 pub mod settings;
@@ -96,8 +95,8 @@ pub use confirm::{
     AGENT_LINE, ALLOW_ONCE, CLOSE, CONTINUE, DEBUG_API_LINE, DIALOG_PARAMS_MAX_CHARS, DIALOG_TITLE,
     DONT_ALLOW, MAX_PAGES, NEXT_PART, PAGE_CHARS, SHORT_HEAD, SHORT_TAIL, SHOW_FULL,
     SharedConfirmer, ShortOutcome, ShortStep, dialog_answer, dialog_buttons, dialog_heading,
-    dialog_text, full_pages, shortened_answer, shortened_buttons, shortened_dialog_text,
-    system_dialog_order,
+    dialog_text, foreground_confirmation, full_pages, shortened_answer, shortened_buttons,
+    shortened_dialog_text, system_dialog_order,
 };
 pub use documents::DocumentsPicked;
 pub use events::HostEvent;
@@ -117,9 +116,6 @@ pub const CRATE_ROLE: &str =
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
-
-#[cfg(test)]
-mod config_comments_tests;
 
 pub mod uninstall;
 

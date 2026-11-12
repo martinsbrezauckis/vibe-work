@@ -3,25 +3,6 @@
   display: flex;
   gap: 4px;
   margin-bottom: 10px;
-  border-bottom: 1px solid var(--line-2);
-}
-.ttab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 6px 10px;
-  color: var(--text-2);
-  font: inherit;
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-}
-.ttab[aria-selected="true"] {
-  color: var(--text);
-  border-bottom-color: var(--orange-3);
-}
-.ttab:focus-visible {
-  outline: 2px solid var(--orange-3);
-  outline-offset: 2px;
 }
 .mstat-ok {
   background: var(--green-soft);
@@ -43,15 +24,7 @@
   color: var(--text-2);
   font-size: var(--text-12-5);
 }
-.linkish {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--orange-3);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
+
 .local-plugin {
   min-width: 0;
   padding: 16px;

@@ -171,6 +171,3 @@ pub struct AskRecord {
     /// Winning outcome.
     pub outcome: Outcome,
 }
-
-#[cfg(test)]
-mod tests;

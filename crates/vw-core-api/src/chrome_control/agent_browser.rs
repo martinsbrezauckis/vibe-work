@@ -151,6 +151,8 @@ impl Browser {
     pub(crate) fn enabled(self, shared: &Shared) -> bool {
         if self == Self::Safari {
             super::safari::enabled(shared)
+        } else if self == Self::Firefox {
+            cfg!(feature = "your-firefox") && shared.chrome_control.firefox_enabled()
         } else if self == Self::Edge {
             cfg!(feature = "your-edge") && shared.chrome_control.edge_enabled()
         } else {
@@ -160,15 +162,7 @@ impl Browser {
     pub(crate) fn addon(self, shared: &Shared) -> AddonView {
         if self == Self::Safari {
             return super::safari::view(shared).map_or_else(
-                || {
-                    super::addon::view_for(
-                        AddonState::Unavailable,
-                        &self.words(
-                            "{yourBrowser} is unavailable in this build. Use an available browser.",
-                        ),
-                        self,
-                    )
-                },
+                || super::addon::view_for(AddonState::Unavailable, "Unavailable", self),
                 |v| v.addon,
             );
         }
@@ -278,7 +272,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
         return AddonView {
             state: S::Unavailable, label: reason.into(), action: None, step: None,
             extension_version: super::installation::version(shared, Browser::Edge),
-            instruction: "Edge is blocked by your organization's browser policy. Ask the person to contact their administrator to allow this extension and native messaging.".into(),
+            instruction: "Edge is blocked by the user's organization. Ask the user to contact their administrator to allow Vibe Work's browser connection.".into(),
         };
     }
     let chrome = &shared.chrome_control;
@@ -303,7 +297,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
     let paired_once = Browser::Edge.was_paired(shared);
     let facts = super::addon::Facts {
         package: setup.package,
-        package_text: Browser::Edge.text(&setup.pairing),
+        package_text: super::browser_text::label(Browser::Edge, &setup.pairing),
         set_up: setup.state != super::setup::SetupState::NotSetUp
             && setup.state != super::setup::SetupState::Absent,
         browser_issue: setup.browser_issue,
@@ -352,7 +346,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
     } else {
         super::setup::absent_for(true)
     };
-    let package_text = Browser::Edge.text(package_text);
+    let package_text = super::browser_text::label(Browser::Edge, package_text);
     let mut view = super::addon::view_for(state, &package_text, Browser::Edge);
     view.extension_version = super::installation::version(shared, Browser::Edge);
     super::addon::reconnecting_for(

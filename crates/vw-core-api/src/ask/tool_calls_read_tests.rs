@@ -19,6 +19,17 @@ const READS: [&str; 10] = [
     names::BROWSER_READ,
 ];
 
+#[tokio::test]
+async fn unavailable_tools_give_a_recovery_step_without_opening_a_prompt() {
+    let core = crate::offline_core::start("tool-approval-unavailable").await;
+    let reason = super::approve(&core.shared, "s", "s", "call", json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(reason, vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE);
+    assert_eq!(core.asks(), [] as [vw_ask::Ask; 0]);
+    core.shutdown().await;
+}
+
 /// True when the call waited on an approval card; false when it was allowed at once.
 async fn asks(
     shared: &std::sync::Arc<crate::core::Shared>,
@@ -451,12 +462,25 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
         "drag",
         "upload",
     ] {
-        assert!(
-            !asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
-            "{action}"
-        );
+        let mut args = json!({"action":action});
+        if action == "press" {
+            args["key"] = json!("a");
+        }
+        assert!(!asks(shared, names::BROWSER_ACT, args).await, "{action}");
     }
-    for action in ["raw.execute", "future.action", ""] {
+    let refused = permission(
+        shared,
+        "s",
+        "s",
+        "script",
+        names::BROWSER_ACT,
+        &json!({"action":"raw.execute","expression":"document.cookie"}),
+    )
+    .await;
+    let full = vw_ask::chrome::Tier::FullAccess.label();
+    assert!(refused.unwrap_err().contains(full));
+    assert_eq!(shared.asks.list().len(), 0);
+    for action in ["future.action", ""] {
         assert!(
             asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
             "{action}"
@@ -492,6 +516,11 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
             "capture: {what}"
         );
     }
+    builtin_explicit_rules_ask(shared).await;
+    fixture.finish().await;
+}
+
+async fn builtin_explicit_rules_ask(shared: &std::sync::Arc<crate::core::Shared>) {
     let config = shared.instructions.own_home.join("config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "[tools.vw_browser_act]\npermission = \"ask\"\n").unwrap();
@@ -512,5 +541,4 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
         .unwrap();
         assert!(asks(shared, tool, args).await, "explicit rule: {tool}");
     }
-    fixture.finish().await;
 }

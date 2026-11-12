@@ -53,6 +53,16 @@
       "title": "Enablenotifications",
       "type": "boolean"
     },
+    "enablePrMonitoring": {
+      "default": true,
+      "title": "Enableprmonitoring",
+      "type": "boolean"
+    },
+    "enableStickyPrompt": {
+      "default": true,
+      "title": "Enablestickyprompt",
+      "type": "boolean"
+    },
     "enableSystemTrustStore": {
       "default": false,
       "title": "Enablesystemtruststore",
@@ -154,6 +164,11 @@
       },
       "title": "Validationwarnings",
       "type": "array"
+    },
+    "vimKeybindings": {
+      "default": false,
+      "title": "Vimkeybindings",
+      "type": "boolean"
     },
     "voiceModeEnabled": {
       "title": "Voicemodeenabled",

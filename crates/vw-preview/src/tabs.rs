@@ -10,7 +10,7 @@ use crate::policy::Destination;
 use crate::service::{OpenRequest, PreviewError, PreviewService};
 use crate::state::{BrowserMountState, PreviewView};
 
-fn review_fingerprint(
+pub(crate) fn review_fingerprint(
     state: &crate::state::State,
     owner: &str,
     page_key: &str,
@@ -57,6 +57,10 @@ impl Drop for ClosingPage<'_> {
 pub struct PageTab {
     /// Opaque key passed to preview operations. The app page key is the session id.
     pub page_key: String,
+    /// Chat-scoped window focus handle; absent for the pinned app preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub window_id: Option<String>,
     /// The pinned app page or a regular browser page.
     pub kind: PageTabKind,
     /// Who controls this web page; the pinned app preview has no handoff owner.
@@ -110,7 +114,22 @@ impl PreviewService {
                 "web page was closed before navigation".to_owned(),
             ));
         }
-        let destination = self.inner.policy.classify(&request.url)?;
+        let local = self
+            .inner
+            .lock()
+            .entries
+            .get(session)
+            .and_then(|entry| entry.local_document.as_ref())
+            .is_some_and(|approved| crate::same_local_document(approved, &request.url));
+        let destination = if local {
+            Destination::Public
+        } else {
+            let destination = self.inner.policy.classify(&request.url)?;
+            if let Some(entry) = self.inner.lock().entries.get_mut(session) {
+                entry.local_document = None;
+            }
+            destination
+        };
         let pinned_app = {
             let mut state = self.inner.lock();
             let pinned =
@@ -130,7 +149,7 @@ impl PreviewService {
             )
         {
             return Err(PreviewError::InvalidTab(
-                "the App preview opens only this session's local servers".to_owned(),
+                "the App preview opens only this chat's local servers".to_owned(),
             ));
         }
         let mut state = self.inner.lock();
@@ -339,6 +358,7 @@ impl PreviewService {
         }
         keys.into_iter()
             .map(|(key, kind)| PageTab {
+                window_id: crate::windows::focusable_id(&state, &key),
                 active: key == selected,
                 agent_current: tabs.and_then(|tabs| tabs.agent.as_deref()) == Some(key.as_str()),
                 preview: state
@@ -610,6 +630,7 @@ impl PreviewService {
                 }
             }
             state.page_owners.remove(page_key);
+            let popup_return = crate::popups::closed(&mut state, owner, page_key);
             if state.is_shown(page_key) {
                 state.shown = None;
             }
@@ -628,15 +649,22 @@ impl PreviewService {
                     );
                 }
                 if tabs.agent.as_deref() == Some(page_key) {
-                    tabs.agent = tabs.web[closed_at.min(tabs.web.len())..]
-                        .iter()
-                        .chain(tabs.web[..closed_at.min(tabs.web.len())].iter().rev())
-                        .find(|key| {
-                            tabs.owners
-                                .get(*key)
-                                .is_some_and(|kind| *kind != PageTabOwner::User)
-                        })
-                        .cloned();
+                    tabs.agent = if let Some(opener) = popup_return {
+                        match opener {
+                            crate::popups::Return::Available(page) => Some(page),
+                            crate::popups::Return::Unavailable => None,
+                        }
+                    } else {
+                        tabs.web[closed_at.min(tabs.web.len())..]
+                            .iter()
+                            .chain(tabs.web[..closed_at.min(tabs.web.len())].iter().rev())
+                            .find(|key| {
+                                tabs.owners
+                                    .get(*key)
+                                    .is_some_and(|kind| *kind != PageTabOwner::User)
+                            })
+                            .cloned()
+                    };
                 }
             }
         }

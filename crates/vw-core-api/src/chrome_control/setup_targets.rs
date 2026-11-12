@@ -50,6 +50,27 @@ pub(super) fn targets<'a>(home: &Path, config: &'a ChromeControlConfig) -> Vec<T
             registry: cfg!(windows).then_some(config.edge_registry_root.as_str()),
         });
     }
+    if cfg!(feature = "your-firefox") {
+        let (user_data, hosts) = if config.is_macos() {
+            (
+                home.join("Library/Application Support/Firefox"),
+                home.join("Library/Application Support/Mozilla/NativeMessagingHosts"),
+            )
+        } else if cfg!(windows) {
+            (home.join("AppData/Roaming/Mozilla/Firefox"), PathBuf::new())
+        } else {
+            (
+                home.join(".mozilla/firefox"),
+                home.join(".mozilla/native-messaging-hosts"),
+            )
+        };
+        chrome.push(Target {
+            name: "Mozilla Firefox",
+            user_data,
+            hosts: (!cfg!(windows)).then_some(hosts),
+            registry: cfg!(windows).then_some(config.firefox_registry_root.as_str()),
+        });
+    }
     chrome
 }
 
@@ -115,6 +136,16 @@ pub(super) fn browser_of(path: &Path) -> Option<&'static str> {
 pub(super) fn installed(config: &ChromeControlConfig, browser: &str) -> bool {
     if !config.is_macos() {
         return true;
+    }
+    if browser == "Mozilla Firefox" {
+        return super::home_of(config).is_ok_and(|home| {
+            [
+                PathBuf::from("/Applications/Firefox.app/Contents/MacOS/firefox"),
+                home.join("Applications/Firefox.app/Contents/MacOS/firefox"),
+            ]
+            .iter()
+            .any(|path| path.is_file())
+        });
     }
     let browser = match browser {
         "Google Chrome" => vw_platform::browser::Browser::Chrome,

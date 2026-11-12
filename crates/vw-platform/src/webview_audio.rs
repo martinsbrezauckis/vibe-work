@@ -65,3 +65,31 @@ pub fn suspend(
             .setAllMediaPlaybackSuspended_completionHandler(suspended, Some(&completion));
     }
 }
+
+#[cfg(windows)]
+/// Read or change one native tab's audio and return its actual mute and playing state.
+/// # Errors
+/// The runtime lacks the native audio interface or refuses a call.
+pub fn state(
+    controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+    muted: Option<bool>,
+) -> Result<(bool, bool), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+    use windows::core::Interface as _;
+    // SAFETY: the caller holds Tauri's live controller on the UI thread; output parameters are initialized.
+    unsafe {
+        let view: ICoreWebView2_8 = controller
+            .CoreWebView2()
+            .and_then(|v| v.cast())
+            .map_err(|e| e.to_string())?;
+        if let Some(muted) = muted {
+            view.SetIsMuted(muted).map_err(|e| e.to_string())?;
+        }
+        let mut muted = windows::core::BOOL::default();
+        let mut playing = windows::core::BOOL::default();
+        view.IsMuted(&raw mut muted).map_err(|e| e.to_string())?;
+        view.IsDocumentPlayingAudio(&raw mut playing)
+            .map_err(|e| e.to_string())?;
+        Ok((muted.as_bool(), playing.as_bool()))
+    }
+}

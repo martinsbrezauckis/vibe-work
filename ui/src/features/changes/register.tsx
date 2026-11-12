@@ -12,6 +12,7 @@
 import { statusType } from "../../state/sessionSummary";
 import { registerGitRoute } from "../git/gitRoutes";
 import { barShown } from "../git/model";
+import { createTurnRefresh } from "../git/turnRefresh";
 import type { App } from "../shell/AppContext";
 import { ChangesTab } from "./ChangesTab";
 import { registerChangesRoute } from "./changesRoutes";
@@ -38,11 +39,12 @@ export function registerChangesTab(app: App): () => void {
   let shown: string | null = null;
   let shownStatus: string | null = null;
   let shownBar: import("../../protocol/core").GitStatusView | undefined;
+  const turnFinished = createTurnRefresh();
   const sync = () => {
     const selected = app.shell.store.get().selected;
     const entry = selected === null ? undefined : core.store.get().sessions[selected];
     const status = entry === undefined ? null : statusType(entry.session);
-    const finished = (shownStatus === "running" || shownStatus === "blocked") && status === "idle";
+    const finished = turnFinished(selected, entry);
     const started = shownStatus === "idle" && status === "running";
     shownStatus = status;
     // A chosen stored session is read once it is open: until then the core has nothing to answer.

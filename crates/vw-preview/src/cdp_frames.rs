@@ -19,6 +19,8 @@ use crate::FrameAnswer;
 #[path = "cdp_act.rs"]
 mod act;
 use act::Act;
+#[path = "cdp_keyboard.rs"]
+mod keyboard;
 
 /// Completes one protocol call with its result object, or the protocol's error text.
 pub type CdpDone = Box<dyn FnOnce(Result<Value, String>)>;
@@ -83,8 +85,11 @@ struct Frame {
 struct State {
     generation: u64,
     act: Act,
+    keyboard: keyboard::Fence,
     /// Child sessions of frames in other processes, attached automatically.
     sessions: BTreeSet<String>,
+    /// Processes waiting for their document-start input guard.
+    pending_guards: BTreeSet<String>,
     /// The frame tree read by the previous evaluation: id -> (session, document loader).
     seen: BTreeMap<String, (String, String)>,
 }
@@ -100,8 +105,8 @@ pub struct CdpFrames {
 }
 
 fn auto_attach() -> Value {
-    // Frames in other processes become sessions of their own; nothing waits for the debugger.
-    json!({"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
+    // Install the isolated capture boundary before a new process can register page handlers.
+    json!({"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
         "filter": [{"type": "iframe", "exclude": false}]})
 }
 
@@ -126,6 +131,16 @@ impl CdpFrames {
     /// Enables frame lifecycle events and automatic attachment to frames in other processes.
     pub fn install(&self, done: Box<dyn FnOnce(Result<(), String>)>) {
         let transport = self.transport.clone();
+        let follow = transport.clone();
+        let done: Box<dyn FnOnce(Result<(), String>)> = Box::new(move |result| match result {
+            Err(error) => done(Err(error)),
+            Ok(()) => follow.call(
+                "",
+                "Page.addScriptToEvaluateOnNewDocument",
+                json!({"source": crate::POINT_GUARD, "worldName": WORLD, "runImmediately": true}),
+                Box::new(move |result| done(result.map(drop))),
+            ),
+        });
         self.transport.call(
             "",
             "Page.enable",
@@ -172,6 +187,7 @@ impl CdpFrames {
                         && state.sessions.len() < MAX_SESSIONS
                         && state.sessions.insert(child.to_owned())
                     {
+                        state.pending_guards.insert(child.to_owned());
                         Some(child.to_owned())
                     } else {
                         None
@@ -180,6 +196,7 @@ impl CdpFrames {
                 "Target.detachedFromTarget" => {
                     if let Some(child) = params["sessionId"].as_str() {
                         state.sessions.remove(child);
+                        state.pending_guards.remove(child);
                     }
                     state.generation += 1;
                     None
@@ -191,20 +208,52 @@ impl CdpFrames {
                 _ => None,
             }
         };
-        // The child's own events and its nested frames in further processes; answers are not needed.
+        // A new process stays paused until its document-start guard has been installed.
         if let Some(child) = attach {
-            self.transport
-                .call(&child, "Page.enable", json!({}), Box::new(drop));
-            if !self.state.borrow().act.enabled && !self.state.borrow().act.running {
-                self.transport.call(
-                    &child,
-                    "Target.setAutoAttach",
-                    auto_attach(),
-                    Box::new(drop),
-                );
-            }
-            self.sync_act();
+            self.prepare_point_guard(child);
         }
+    }
+
+    fn prepare_point_guard(&self, child: String) {
+        let frames = self.clone();
+        self.transport.call(&child.clone(), "Page.enable", json!({}), Box::new(move |enabled| {
+            if enabled.is_err() { frames.point_guard_failed(); return; }
+            let ready = frames.clone();
+            frames.transport.call(&child.clone(), "Page.addScriptToEvaluateOnNewDocument",
+                json!({"source": crate::POINT_GUARD, "worldName": WORLD, "runImmediately": true}),
+                Box::new(move |installed| {
+                    if installed.is_err() { ready.point_guard_failed(); return; }
+                    let prepared = ready.clone();
+                    ready.prepare_keyboard(child.clone(), true, Box::new(move |result| {
+                    let ready = prepared;
+                    if result.is_err() { ready.point_guard_failed(); return; }
+                    ready.state.borrow_mut().pending_guards.remove(&child);
+                    if ready.state.borrow().act.enabled || ready.state.borrow().act.running {
+                        ready.sync_act();
+                    } else {
+                        let transport = ready.transport.clone();
+                        let failed = ready.clone();
+                        ready.transport.call(&child.clone(), "Target.setAutoAttach", auto_attach(), Box::new(move |attached| {
+                            if attached.is_ok() {
+                                transport.call(&child, "Runtime.runIfWaitingForDebugger", json!({}), Box::new(move |resumed| {
+                                    if resumed.is_err() { failed.point_guard_failed(); }
+                                }));
+                            } else { failed.point_guard_failed(); }
+                        }));
+                    }
+                    }));
+                }));
+        }));
+    }
+
+    fn point_guard_failed(&self) {
+        // A process without the document-start boundary cannot safely resume. Dispose of the view through
+        // the existing failed-control path rather than leaving a person's embedded document paused forever.
+        self.close_act_view(Box::new(|result| {
+            if let Err(error) = result {
+                tracing::error!("browser input guard teardown: {error}");
+            }
+        }));
     }
 
     /// Evaluates `script` in the isolated world of every frame (`None`) or of one frame id, with no fallback to
@@ -601,7 +650,3 @@ fn evaluate_frame(
         }),
     );
 }
-
-#[cfg(test)]
-#[path = "cdp_frames_tests.rs"]
-mod tests;

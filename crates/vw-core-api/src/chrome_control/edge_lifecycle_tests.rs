@@ -48,7 +48,7 @@ async fn stopped_session(browser: &str, profile: &str, other: &str) {
         &json!({"structuredContent":{"sessions":[{"sessionId":"task","state":"stopped"}]}}),
     );
     let expected = format!(
-        "Not run: the person pressed Stop in Your {browser}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer."
+        "Not run: the user pressed Stop in Your {browser}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer."
     );
     for reset in [false, true] {
         if reset {
@@ -71,11 +71,19 @@ async fn stopped_session(browser: &str, profile: &str, other: &str) {
             );
         }
     }
-    // The person's Stop holds only the browser they stopped, including across a helper reset.
+    // Another chat can use the other profile; the stopped chat keeps its choice.
+    super::test_support::chat(shared, "other-chat");
+    super::test_support::answering(shared, |tool, args| {
+        if tool == "chrome_session" {
+            json!({"structuredContent":{"sessionId":"other-task","profileId":args["profileId"],"state":"active"}})
+        } else {
+            json!({"structuredContent":{}})
+        }
+    });
     assert!(
         gateway::call(
             shared,
-            "s",
+            "other-chat",
             "chrome_session",
             json!({"action":"open","profileId":other})
         )
@@ -86,7 +94,7 @@ async fn stopped_session(browser: &str, profile: &str, other: &str) {
     assert!(
         gateway::call(
             shared,
-            "s",
+            "other-chat",
             "chrome_session",
             json!({"action":"open","profileId":other})
         )

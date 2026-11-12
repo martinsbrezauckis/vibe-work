@@ -10,26 +10,17 @@ pub(super) async fn send(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
-    args: Value,
-) -> Result<owner::Answer, String> {
-    send_read(shared, session, tool, args, None).await
-}
-
-pub(super) async fn send_read(
-    shared: &Arc<Shared>,
-    session: &str,
-    tool: &str,
     mut args: Value,
     consent: Option<&super::read_consent::Consent>,
 ) -> Result<owner::Answer, String> {
     let mut tier = super::check::authorize_read(shared, session, tool, &args, consent)?;
     let sensitive = tool == "chrome_execute"
         && (super::capabilities::gated(args["action"].as_str().unwrap_or_default())
-            || matches!(
-                super::mapping::need(tool, &args),
-                vw_ask::chrome::Need::SecretRead(_)
-            ));
+            || super::mapping::need(tool, &args).full_access_only());
     if tool == "chrome_execute" {
+        if args["action"] == "page.key" {
+            vw_ask::chrome::keys::normalize_args(&mut args["args"])?;
+        }
         args["_approvedCapabilities"] =
             json!(call_capabilities(shared, session, tool, &args, tier));
         // The agent's network rule: a url argument is checked now, everything else in Chrome (network.rs).
@@ -43,7 +34,15 @@ pub(super) async fn send_read(
             json!(call_capabilities(shared, session, tool, &args, tier));
     }
     let checked = args.clone();
-    let answer = shared.chrome_control.owner.call(tool, args).await;
+    let mut answer = shared.chrome_control.owner.call(tool, args).await;
+    if let owner::Answer::Helper(result) = &mut answer {
+        shared
+            .chrome_control
+            .local_documents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .annotate(session, result);
+    }
     if sensitive {
         super::check::authorize_read(shared, session, tool, &checked, consent)?;
         super::gateway::validate_session(shared, session, tool, &checked)?;
@@ -124,6 +123,55 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn page_key_aliases_use_identical_wire_keys_before_any_browser_adapter() {
+        let core = super::super::read_consent_tests::core("page-key-wire").await;
+        let seen = super::super::test_support::answering(&core.shared, |_, _| {
+            super::super::output_tests::mcp(json!({"status":"completed","data":{}}))
+        });
+        for args in [
+            json!({"key":"Shift+Tab"}),
+            json!({"key":"Tab","modifiers":["Shift"]}),
+        ] {
+            send(
+                &core.shared,
+                "s",
+                "chrome_execute",
+                json!({"sessionId":"t","action":"page.key","args":args}),
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        let before = seen.lock().unwrap().len();
+        let refused = send(
+            &core.shared,
+            "s",
+            "chrome_execute",
+            json!({"sessionId":"t","action":"page.key","args":{"key":"Meta+w"}}),
+            None,
+        )
+        .await
+        .err()
+        .expect("system shortcut must refuse");
+        assert!(refused.contains("browser or system") && refused.contains("Use"));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            before,
+            "forbidden input must never reach an adapter"
+        );
+        core.shutdown().await;
+        let calls = seen.lock().unwrap();
+        let requests: Vec<_> = calls
+            .iter()
+            .filter(|(tool, _)| tool == "chrome_execute")
+            .collect();
+        assert_eq!(requests.len(), 2);
+        for (_, args) in requests {
+            assert_eq!(args["args"], json!({"key":"Tab","modifiers":["Shift"]}));
+        }
+    }
+
+    #[tokio::test]
     async fn secret_read_rechecks_preserve_older_helpers_permission_names() {
         let core = super::super::read_consent_tests::core("browser-secret-old-helper").await;
         core.shared.access.observe_request(
@@ -150,6 +198,7 @@ mod tests {
                 "s",
                 "chrome_execute",
                 json!({"sessionId":"t","action":action,"args":{"unredacted":true}}),
+                None,
             )
             .await
             .unwrap();
@@ -248,11 +297,11 @@ mod tests {
                 "target":{"title":"Page title"}}}}})
         };
         let reason = refusal(&helper("page.commit"), Tier::Ask, "ask").unwrap();
-        assert!(reason.contains("Use an allowed action or ask the person"));
+        assert!(reason.contains("Use an allowed action or ask the user"));
         assert_eq!(
             reason,
             format!(
-                "Not run: sending this form needs {}; this chat is in {}. Use an allowed action or ask the person to change the chat mode.",
+                "Not run: sending this form needs {}; this chat is in {}. Use an allowed action or ask the user to change the chat mode.",
                 Tier::AcceptEdits.required_label(),
                 Tier::Ask.label()
             )

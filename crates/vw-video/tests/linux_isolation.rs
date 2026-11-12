@@ -26,7 +26,8 @@ async fn snapshot_is_readable_but_network_files_writes_and_children_are_denied()
         .await
         .err()
         .unwrap();
-    let probes: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(result.code, vw_video_types::Code::WorkerFailed);
+    let probes: serde_json::Value = serde_json::from_str(&result.detail).unwrap();
     for name in [
         "read_allowed",
         "read_denied",

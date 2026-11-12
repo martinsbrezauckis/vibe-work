@@ -57,7 +57,16 @@ fn main() {
             std::fs::create_dir_all(&dir).expect("python dir");
             println!("Installed Python {version} (fake) in {}", dir.display());
         }
-        ["venv", .., dir] => {
+        ["venv", flags @ .., dir] => {
+            // Like uv 0.12: an existing venv is refused unless `--clear` replaces it.
+            if Path::new(dir).exists() {
+                if !flags.contains(&"--clear") {
+                    eprintln!("error: Failed to create virtual environment");
+                    eprintln!("  Caused by: A virtual environment already exists at: {dir}");
+                    std::process::exit(2);
+                }
+                std::fs::remove_dir_all(dir).expect("clear the venv");
+            }
             std::fs::create_dir_all(bin_dir(Path::new(dir))).expect("venv dir");
             println!("Creating virtual environment at: {dir}");
         }

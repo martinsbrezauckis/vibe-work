@@ -27,6 +27,8 @@
 //! - Nothing here decides ownership: the core does, from the process monitor (vw-procmon).
 
 pub mod agent_env;
+mod browser_data;
+mod browser_diagnostics;
 mod browser_everyday;
 pub mod browser_input;
 mod capture_spec;
@@ -48,9 +50,11 @@ mod killparse_shell;
 pub mod mcp;
 mod msys_paths;
 pub mod output;
+pub mod powershell;
 mod receipt_hook;
 pub mod safety;
 pub mod secretspec;
+pub mod shell_find;
 pub mod spawn;
 mod specs;
 pub mod wire;

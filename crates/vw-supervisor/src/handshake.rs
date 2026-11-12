@@ -35,6 +35,11 @@ pub fn default_initialize_params() -> InitializeParams {
             // Cross-chat tools need a separate design for VW's folder and vault boundaries.
             session_peers: None,
             session_peer_restore: Some(false),
+            session_peer_mark_seen: None,
+            // Worktrees remain owned by the app's chat-copy flow.
+            agent_worktrees: None,
+            agent_plugins: None,
+            client_tool_definitions: None,
             disabled_notifications: None,
             // Vibe Work does not lend its sign-in tokens to Vibe, so Vibe never sends
             // `platformCredentials/resolve` and keeps its own sign-in.
@@ -72,9 +77,15 @@ pub async fn handshake(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn peers_stay_off_in_the_handshake() {
-        let params = serde_json::to_value(super::default_initialize_params()).unwrap();
-        assert!(params["capabilities"].get("sessionPeers").is_none());
-        assert_eq!(params["capabilities"]["sessionPeerRestore"], false);
+    fn host_execution_capabilities_remain_unadvertised() {
+        let raw = serde_json::to_value(super::default_initialize_params()).unwrap();
+        for key in [
+            "clientTools",
+            "clientToolDefinitions",
+            "agentPlugins",
+            "agentWorktrees",
+        ] {
+            assert!(raw["capabilities"].get(key).is_none(), "{key}");
+        }
     }
 }

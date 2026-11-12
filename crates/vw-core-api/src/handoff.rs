@@ -38,6 +38,7 @@ pub(crate) async fn handed_off(shared: &Arc<Shared>, old: &str, new: &str) {
         shared.channels.close(old).await;
         return;
     }
+    shared.holders.handed_off(old);
     shared.supervisor.untrack_session(old);
     shared.supervisor.track_session(new);
     shared.access.hand_off(old, new);

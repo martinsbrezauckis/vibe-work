@@ -1,40 +1,33 @@
 ---
 name: chrome
-description: The person's own Chrome, Edge or Safari, visible in their window.
+description: The user's own Chrome/Edge/Firefox/Safari window.
 ---
 
-Extension updates are automatic; app versions are independent. `session_status`: connection/next step, `extensionVersion`, `updateNeeded` = below minimum; actions need reported support.
-Chrome/Edge share extension/permissions; Settings > Browser > Your Chrome / Your Edge. `session_status.chromeExtensionStore`: accepted manifest state; `review` = Google review, `available` = listed, `null` = unknown.
-`addon_suggest({addon:"chrome",reason:"Browser"})` offers Your Chrome; `addon:"edge"`: Your Edge. Connect Chrome starts setup; Connect Edge opens Your Edge settings, whose initial button is Connect Edge. Only the person installs/pairs/enables.
-Add a browser tab… dots show connection state; click opens ready tab picker or Settings > Browser.
-Subagents: no external browsers; tools: `browser_read` / `browser_act`.
-Your Safari (macOS): Settings > Browser > Your Safari, separate on/off and pairing. Use its exact `safari:` profileId from `chrome_status`; Vibe Work never opens Safari; `addon_suggest` has no Safari card. Only listed actions run.
+Extension updates are automatic; app versions are independent. `session_status`: connection/next step, `extensionVersion`, `updateNeeded` (below minimum), reported support. `chromeExtensionStore`: `review`/`available`/`null` = reviewing/listed/unknown.
+Settings > Browser > Your Chrome and Settings > Browser > Your Edge connect separately. Removing one browser keeps the other browser connected. `addon_suggest {addon:"chrome"/"edge",reason}`: Connect Chrome: setup; Connect Edge: Your Edge settings, whose initial button is Connect Edge. Only the user installs/pairs/enables. Add a browser tab… dots show connection state; opens ready tab picker or Settings > Browser.
+Your Safari (macOS): Settings > Browser > Your Safari switch/pairing; exact `safari:` profileId; no launch/`addon_suggest`. Your Firefox: Vibe Work's own Firefox window (Settings > Browser > Your Firefox > Open window); `firefox:` profileId. Subagents: `browser_read`/`browser_act` only.
 
-`chrome_status {}`: connected profiles/actions; `allowedInThisMode`: chat permissions. `profileId`: optional browser (`edge`/`Your Edge` too). Ask history/bookmark reads: `approvalRequired`.
-`{action}`: profile schema `inputSchemaJson`; `{actions:[...]}`: max 8 compact schemas/constraints, no descriptions.
-`interactiveOnly`, `offset`, `limit`/`maxBytes` up to 500/64000; `includeText`, viewport/bounds and revisioned observations depend on reported support.
+`chrome_status {}`: profiles/actions, `allowedInThisMode`, `approvalRequired`; `profileId` filters (`edge`/`Your Edge`). `{action}`: `inputSchemaJson`; `{actions:[...]}`: ≤8 schemas/constraints. `interactiveOnly`, `offset`, `limit`/`maxBytes` ≤500/64000, `includeText`, bounds/revisions: per support.
+`chrome_session {action:"open",profileId}` opens; `get` reads; `cancel` cancels action; `stop` ends work, keeps window. Closed paired Chrome/Edge: `profileId:"chrome"`/`"edge"`/exact ID launches, awaits extension ≤10 s; no Ask card. Reconnects: exact ID; failure recovery. Detached browser/tabs outlive Vibe Work.
+Chat owns window/tabs. `browserTab`: `profileId,tabId`; open takes `tabId` for a requested existing tab/window. No `tabId`: no selected page; `scope.tabIds:[]` = no tab; `tabs.create {url}`: HTTP/HTTPS. Titles: `session.title`, no title args. Completed turns release control after acknowledgement and retain the session ID; earlier refs are stale. Stop refuses rest-of-turn actions.
+CAPTCHA, payment and passkey steps are the user's: an open `ask_user_question` hands this chat's browser to the user; after the answer, read the page and continue.
+`tabs.list`: owned/handed windows, blank/internal tabs included. `tabs.close_user` can close any tab there; `tabs.close_owned`: chat-opened tabs. Non-web actions refused. Handed-window tabs stay open until closed. `active`: per window; `selection.activeTabIds`: active tabs; `focusedWindowKnown:false/currentTabId:null`: focus unknown.
 
-`browserTab`: `profileId,tabId`; open accepts `tabId`.
-`chrome_session {action:"open",profileId}` opens chat session; `get`: read; `cancel`: cancel action; `stop`: end work, keep window.
-Paired Chrome/Edge closed: call `chrome_session {action:"open",profileId:"chrome"}` (or `"edge"`/known exact ID). App launches it, awaits extension up to 10 seconds, continues without a card in Ask. Multiple reconnects: choose exact ID via `chrome_status`. Failures: reason/recovery. Use detached launcher, not `process_start`, `secret_run` or shell: browser/tabs outlive Vibe Work.
-Each chat owns a private window/all tabs. Omit `tabId` unless asked to use an existing tab/window (Add a browser tab); later turns retain ownership. Without `tabId`, no selected page; empty `scope.tabIds` = no owned tab; `tabs.create {url}`: HTTP/HTTPS in chat-owned tab.
-Titles: app's `session.title`; no title args. Session ends with the turn; next id use reopens tabs (`sessionReopened`); earlier turns' refs are stale. Person's Stop refuses rest-of-turn actions.
-`tabs.list`: only this chat's/handed windows' tabs, including "blank tab"/"browser page". `tabs.close_user` can close any tab there, including blank/internal; `tabs.close_owned`: chat-opened tabs. Non-web page actions refused.
-Tabs opened in the person's handed window stay open until closed; the close tools can close them when the task no longer needs them.
-`active`: per window; `selection.activeTabIds`: active tabs; `focusedWindowKnown:false/currentTabId:null`: no focus report.
+`chrome_execute {sessionId,action,args}`: `untrustedPageContent` receipt. Stale refs refused; unknown never auto-replayed.
+`page.read`: `maxChars` characters (default 800), `limit` refs (default 8), `maxBytes` (default 2000); continue: `textOffset/offset`. Inline reads cap `maxChars/maxBytes` at 4000; file: extension limits. Continue: action/args, app only `cursor`. Top-level `saveTo:"file"`: chat-folder receipt (Ask/Accept edits/Full access); omitted/`"inline"`: inline. Saved ≠ full.
+`page.type {ref,text}` appends; `clear:true` replaces. No ref: focused field (`page.type.focused`). `page.check {ref}`: checkbox/radio on; `page.uncheck {ref}`: checkbox off; optional `tabId/frameId`, no `checked` or `value`.
+`page.scroll`: `direction` up/down/left/right = 600 px, or `x`/`y` deltas. Click/hover/drag/drop: `ref` or `x`/`y`: the tab's viewport position in CSS pixels, including frames; coordinates for ref-less text/images/boxes.
+Batch `{sessionId,steps:[{action,args},...]}`: 16 steps/25 s, step mode/receipts; refusal/failure/unknown/`met:false`/`timedOut` stops batch; `nextStep`: first unsent step.
 
-`page.read`: `maxChars` characters (default 800), `limit` refs (default 8), receipt `maxBytes` (default 2000); continue: `textOffset/offset`.
-Inline reads cap `maxChars/maxBytes` at 4000; file exports: extension limits. Continuations: action/args; app: only `cursor`. Top-level `saveTo:"file"`: one chat-folder receipt (Ask/Accept edits/Full access); omitted/`"inline"`: inline. Saving is not full coverage.
-`chrome_execute {sessionId,action,args}`: receipts; page data: `untrustedPageContent`. Stale refs refused; unknown outcomes not auto-replayed.
-`page.type {ref,text}` appends; use `{ref,text,clear:true}` to replace, avoiding leftover values. No `ref`: focused field (needs `page.type.focused`).
-`page.check {ref}` checks checkbox/radio; `page.uncheck {ref}` unchecks checkbox. Optional `tabId/frameId`; no `checked` or `value`: action sets state. Confirm checked state.
-`page.scroll`: `direction` (`up/down/left/right`) = 600 px, or `x`/`y` deltas, not both.
-Click/hover/drag/drop: `ref` or `x`/`y`: the tab's viewport position in CSS pixels, also in frames; use coordinates for ref-less text/images/boxes.
-Batch `{sessionId,steps:[{action,args},...]}`: 16 steps/25 s, per-step mode checks/receipts; stops at refusal/failure/unknown. `nextStep`: first undispatched step if observation time is low.
+`history.read`/`bookmarks.read` (Chrome/Edge): ordinary reads, no card in Ask, Accept edits or Full access.
+Local addresses (localhost, private networks, link-local, `.local`) use the normal site permission in Safari/extension `browser.localAddresses`. Without `browser.localAddresses`: private networks and this chat's own servers only; otherwise `EXTENSION_UPDATE_REQUIRED`, use `browser_act`. Access modes, tab ownership, password protection and Stop still apply.
+`cookies.read` values, `storage.read` values, `clipboard.read` text, `network.body`, `network.headers {unredacted:true}`, `raw.execute`, `page.add_style` run only in Full access, in every browser; ask the user to switch for these reads. Pages/network lists/cookie metadata/storage keys/redacted headers: ordinary reads. Accept edits includes Ask reads/cards for higher-tier writes; vault consent is separate.
+`files.wait_download`: chat download/folder; `finished`/`timedOut` = complete/unfinished; ambiguous refused. `files.list_downloads`: all chats’ Chrome saves. Upload: chat-relative `paths` or selected `fileIds`.
+`auth.fill {ref,login}`/`auth.basic {url,login}`: vault name, no password args; vault consent. `secret_run {program:"tool",args:[],env:[{"name":"TOKEN","secret":"Token"}]}`: variable/secret ID or name; vault supplies value with consent.
 
-Ask `history.read`/`bookmarks.read` card: once, same read for session, or No. Consent: same browser session/action/exact args; other actions retain mode requirements.
-Local addresses (localhost, private networks, link-local, `.local`) use the normal site permission in Safari and with extension `browser.localAddresses`. Without `browser.localAddresses`: private networks and this chat's own servers only; other local addresses answer `EXTENSION_UPDATE_REQUIRED`, so use `browser_act` for them. Access modes, tab ownership, password protection and Stop still apply.
-Cookie values (`cookies.read`), storage values (`storage.read`), clipboard text (`clipboard.read`), response bodies (`network.body`) and raw headers (`network.headers {unredacted:true}`) run only in Full access, in every browser. Below Full access, ask the person to switch to Full access for these reads. Rendered pages, network lists, cookie metadata, storage keys and redacted headers remain ordinary reads. Accept edits includes Ask reads and cards for higher-tier writes; vault consent stays separate.
-Support: `clipboard.read/clipboard.write` = clipboard text; `tabs.emulate` = size/colour scheme/touch; `network.intercept` = test responses.
-`files.wait_download`: this chat's download in the chat folder; `finished` = complete, `timedOut` = unfinished wait; ambiguous refused. `files.list_downloads`: Chrome saves, any chat. Upload: chat-relative `paths` or selected `fileIds`.
-Vault browser sign-in: `auth.fill {ref,login}`/`auth.basic {url,login}`, no password args; separate consent. `secret_run` needs `{program:"tool",args:[],env:[{"name":"TOKEN","secret":"Token"}]}`. `env`: `name`: destination variable, `secret`: stored secret ID/name, not raw value; app supplies value with vault consent.
+`clipboard.read/write`: text; `tabs.emulate`: size/colour/touch; `network.intercept` (Chrome/Edge): test responses.
+`media.read {tabId}`: main-document audio/video handles/state; `media.play/pause {tabId,mediaId}`, `media.seek {...,timeMs}`, `media.mute {...,muted}`: actual state; `media.transcript`: loaded captions, bounded or unavailable. Media: negotiated transport/all modes; scripts: Full access.
+`tabs.audio`: muted/audible; `tabs.mute {muted}`: readback (Chrome/Edge need `tabId`; Firefox: none). Built-in Linux/Windows: native; macOS: individual `media.mute` only.
+`capture.page`: passive/packed HTML, Markdown/text in chat folder; reports truncation/links. `capture.media`: loaded images/fonts, saved/unavailable manifest; 5 MiB/file, 16 MiB total; text ≤1M characters. Modes: same as built-in capture.
+`page.navigate`: `file:` PDF/HTML/images in chat's first folder, ≤32 MiB, exact owned `tabId`; verifies file/grant. The user sets **Allow access to file URLs** in extension details. Browser renders PDFs; `document_read`: saved PDF when viewer text unavailable.
+[More actions](actions.md): per-browser support, open-tab context, pin/group/focus, points/move/wheel, focus/insert, waits, highlight, rich clipboard, page checks, extensions/notifications, retries, Firefox and Safari limits.

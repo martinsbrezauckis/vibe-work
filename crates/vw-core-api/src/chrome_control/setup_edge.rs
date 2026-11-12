@@ -2,7 +2,7 @@
 //! Uses setup's checked pin and receipt; called after confirming the browser setup offer.
 use super::{
     ChromeControlConfig, HOST_NAME, Made, Path, RECEIPT, absent_for, helper_name, home_of,
-    host_manifest, packaged_helper, read_receipt, registry_set, targets, write_file,
+    manifest_for, manifest_path, packaged_helper, read_receipt, registry_set, targets, write_file,
 };
 
 pub(in crate::chrome_control) fn register_edge(
@@ -55,15 +55,15 @@ pub(super) fn register_browser(
             super::registration::ensure_manifest(
                 config,
                 &path,
-                &host_manifest(&helper, &config.extension_id),
+                &manifest_for(&helper, config, browser),
                 false,
             )?;
             made.written
-                .push((path.clone(), host_manifest(&helper, &config.extension_id)));
+                .push((path.clone(), manifest_for(&helper, config, browser)));
             made.files.push(path);
         } else if let Some(root) = target.registry {
-            let file = state.join("host").join(format!("{HOST_NAME}.json"));
-            let manifest = host_manifest(&helper, &config.extension_id);
+            let file = manifest_path(state, browser);
+            let manifest = manifest_for(&helper, config, browser);
             let owned = receipt.files.contains(&file);
             super::registration::ensure_manifest(config, &file, &manifest, owned)?;
             if !owned {

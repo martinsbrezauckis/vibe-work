@@ -24,6 +24,34 @@ pub fn validate(tool: &str, args: &Value) -> Result<(), String> {
     if !matches!(tool, "browser_read" | "browser_act") {
         return Ok(());
     }
+    if tool == "browser_act" && args.get("steps").is_some() {
+        let fields = args
+            .as_object()
+            .ok_or("Batch arguments must be an object.")?;
+        if fields.len() != 1 {
+            return Err(
+                "A batch takes only steps; put each action's fields inside its step.".into(),
+            );
+        }
+        let steps = args["steps"]
+            .as_array()
+            .filter(|v| !v.is_empty() && v.len() <= 16)
+            .ok_or("A batch needs 1 to 16 steps; split larger work into separate calls.")?;
+        for step in steps {
+            if step.get("steps").is_some()
+                || !step["action"]
+                    .as_str()
+                    .is_some_and(|a| actions().contains_key(a))
+            {
+                return Err(
+                    "Each batch step needs one advertised action; nested batches are unavailable."
+                        .into(),
+                );
+            }
+            validate(tool, step)?;
+        }
+        return Ok(());
+    }
     let fields = args
         .as_object()
         .ok_or("browser arguments must be an object")?;

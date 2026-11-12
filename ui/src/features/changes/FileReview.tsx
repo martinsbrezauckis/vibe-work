@@ -101,8 +101,8 @@ export function FileReview(props: {
       </div>
       {!readOnly && (
         <p className="bnote">
-          Revert puts the lines back the way they were when this session started. Keep accepts them
-          and leaves the file as it is.
+          Revert puts the lines back the way they were when this chat started. Keep accepts them and
+          leaves the file as it is.
         </p>
       )}
     </div>

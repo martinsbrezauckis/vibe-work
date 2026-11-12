@@ -31,7 +31,7 @@ async fn chords_preserve_modifiers_and_do_not_submit_plain_enter() {
         .await
         .unwrap();
     let reference = &model.refs.iter().find(|r| r.name == "Editor").unwrap().id;
-    for key in ["Control+Shift+K", "Meta+Enter", "Alt+ArrowDown"] {
+    for key in ["Control+Shift+Z", "Meta+ArrowLeft", "Alt+ArrowDown"] {
         let action =
             vw_browser::parse(&json!({"action":"press", "ref":reference,"key":key})).unwrap();
         rig.browser
@@ -42,8 +42,8 @@ async fn chords_preserve_modifiers_and_do_not_submit_plain_enter() {
     assert_eq!(
         rig.engine.eval("window.keys").await,
         json!([
-            ["K", "KeyK", true, true, false, false],
-            ["Enter", "Enter", false, false, false, true],
+            ["Z", "KeyZ", true, true, false, false],
+            ["ArrowLeft", "ArrowLeft", false, false, false, true],
             ["ArrowDown", "ArrowDown", false, false, true, false]
         ])
     );

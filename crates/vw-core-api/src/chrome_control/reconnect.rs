@@ -204,7 +204,7 @@ fn active(shared: &Shared, session: &str, browser: Browser, generation: u64) -> 
     if generation != crate::stops::generation(shared, session)
         || shared.store.view(session).is_none()
     {
-        return Err(browser.text("Not run: this chat's Chrome work ended."));
+        return Err(super::person_stop::ended(browser));
     }
     Ok(())
 }

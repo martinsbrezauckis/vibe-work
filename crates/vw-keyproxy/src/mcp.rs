@@ -156,12 +156,12 @@ fn refusal_response(refusal: McpRefusal) -> Response {
         McpRefusal::PermissionsUnreadable => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "vibe_work_mcp_permissions_unreadable",
-            "The secret's permissions could not be read; forwarding was refused. Check the vault in Vibe Work.",
+            "The secret's permissions could not be read; forwarding was refused. Ask the user to check the vault in Vibe Work.",
         ),
         McpRefusal::Locked => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "vibe_work_key_unavailable",
-            "Vibe Work's vault is locked. Unlock it in Vibe Work, then refresh the server.",
+            vw_vocabulary::texts::AGENT_VAULT_LOCKED,
         ),
         McpRefusal::AgentAccessLocked => error(
             StatusCode::FORBIDDEN,
@@ -256,7 +256,7 @@ async fn forward(
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "vibe_work_mcp_secret_missing",
-            "The stored key contains characters a header cannot carry. Replace the secret in Vibe Work.",
+            "The stored key contains characters a header cannot carry. Ask the user to replace the secret in Vibe Work.",
         );
     };
     value.set_sensitive(true);

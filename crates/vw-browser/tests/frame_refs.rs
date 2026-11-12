@@ -151,9 +151,10 @@ async fn fill_rechecks_field_after_beforeinput() {
 async fn frame_addresses_do_not_expose_query_credentials() {
     let rig = framed().await;
     rig.engine
-        .eval("document.querySelector('iframe').src += '?token=frame-query-value-never-shown'")
+        .eval_frames(
+            "document.querySelector('iframe').src += '?token=frame-query-value-never-shown'",
+        )
         .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let (answer, _) = rig
         .browser
         .read(
@@ -224,9 +225,8 @@ async fn main_frame_refs_still_work_with_user_annotations() {
 async fn same_origin_frame_uses_its_own_document_and_preserves_annotation_refs() {
     let rig = Rig::new().await;
     rig.engine
-        .eval("document.body.innerHTML='<iframe src=\"/same-frame\"></iframe>'")
+        .eval_frames("document.body.innerHTML='<iframe src=\"/same-frame\"></iframe>'")
         .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let (model, _, _) = rig
         .browser
         .observe(SESSION, ReadOptions::default())
@@ -306,8 +306,7 @@ async fn frame_cannot_claim_another_origin_in_its_observation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn opaque_sandbox_origin_cannot_receive_a_vault_fill() {
     let rig = Rig::new().await;
-    rig.engine.eval("document.body.innerHTML='<iframe sandbox=\"allow-scripts\" src=\"https://frame.example.test/login\"></iframe>'").await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    rig.engine.eval_frames("document.body.innerHTML='<iframe sandbox=\"allow-scripts\" src=\"https://frame.example.test/login\"></iframe>'").await;
     let (model, _, _) = rig
         .browser
         .observe(SESSION, ReadOptions::default())
@@ -330,8 +329,7 @@ async fn opaque_sandbox_origin_cannot_receive_a_vault_fill() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inline_frame_controls_are_read_and_filled_with_the_parents_origin() {
     let rig = Rig::new().await;
-    rig.engine.eval("const f=document.createElement('iframe');f.srcdoc='<form method=post><input type=password aria-label=Secret><button>Inline control</button></form>';document.body.replaceChildren(f)").await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    rig.engine.eval_frames("const f=document.createElement('iframe');f.srcdoc='<form method=post><input type=password aria-label=Secret><button>Inline control</button></form>';document.body.replaceChildren(f)").await;
     let (model, _, _) = rig
         .browser
         .observe(SESSION, ReadOptions::default())
@@ -354,8 +352,7 @@ async fn inline_frame_controls_are_read_and_filled_with_the_parents_origin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn sandbox_cannot_replace_window_origin_to_request_a_site_login() {
     let rig = Rig::new().await;
-    rig.engine.eval("document.body.innerHTML='<iframe sandbox=\"allow-scripts\" src=\"https://frame.example.test/login\"></iframe>'").await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    rig.engine.eval_frames("document.body.innerHTML='<iframe sandbox=\"allow-scripts\" src=\"https://frame.example.test/login\"></iframe>'").await;
     // The frame's own page script; a page-world evaluator shares it, an isolated world does not.
     rig.engine
         .eval_in_frame_pages("if(location.hostname==='frame.example.test')Object.defineProperty(window,'origin',{value:'https://frame.example.test'})")
@@ -402,8 +399,7 @@ async fn native_reply_order_does_not_change_ref_order_or_snapshot() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scroll_to_a_control_in_another_sites_frame_below_the_screen_shows_it() {
     let rig = Rig::new().await;
-    rig.engine.eval("document.body.style.margin='0'; document.body.innerHTML = '<div style=\"height:900px\"></div><iframe style=\"width:280px;height:180px;border:0\" src=\"https://frame.example.test/login\"></iframe><div style=\"height:900px\"></div>'; scrollTo(0,0)").await;
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    rig.engine.eval_frames("document.body.style.margin='0'; document.body.innerHTML = '<div style=\"height:900px\"></div><iframe style=\"width:280px;height:180px;border:0\" src=\"https://frame.example.test/login\"></iframe><div style=\"height:900px\"></div>'; scrollTo(0,0)").await;
     let (model, _, _) = rig
         .browser
         .observe(SESSION, ReadOptions::default())

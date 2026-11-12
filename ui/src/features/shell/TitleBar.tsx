@@ -17,6 +17,7 @@ import { useApp } from "./AppContext";
 import { switchTheme } from "../../state/themeSwitch";
 import { TEXT } from "../../vocabulary";
 import { useCoreState, useLayout, useShellState } from "./hooks";
+import { feedbackFor } from "../../state/feedback";
 import { useStore } from "../../state/createStore";
 
 /** The title bar. */
@@ -46,32 +47,7 @@ export function TitleBar() {
         <span className="brand-name">Vibe Work</span>
       </div>
       <div className="spacer" />
-      {phone ? (
-        <IconButton
-          data-testid="shell.title-bar-set-overlay"
-          icon="search"
-          label="Search sessions, messages, files and settings"
-          title="Search"
-          onClick={() => {
-            shell.actions.setOverlay("palette");
-          }}
-        />
-      ) : (
-        <button
-          data-testid="shell.title-bar-set-overlay-2"
-          type="button"
-          className="search"
-          // The visible label stays short enough for a 960 px window; the name says all it covers.
-          aria-label="Search sessions, messages, files and settings"
-          onClick={() => {
-            shell.actions.setOverlay("palette");
-          }}
-        >
-          <Icon name="search" />
-          <span className="s-label">Search sessions, messages and files</span>
-          <kbd>{formatKeys("Mod+K")}</kbd>
-        </button>
-      )}
+      <TitleBarSearch phone={phone} />
       <div className="spacer" />
       {phone && (
         <IconButton
@@ -104,6 +80,7 @@ export function TitleBar() {
           <span className="dbg-text">Debug API on</span>
         </button>
       )}
+      <TitleBarFeedback />
       <IconButton
         data-testid="shell.title-bar-close"
         id="notifications-trigger"
@@ -138,5 +115,54 @@ export function TitleBar() {
         }}
       />
     </header>
+  );
+}
+
+/** Opens the same palette from the compact or full-width search control. */
+function TitleBarSearch({ phone }: { phone: boolean }) {
+  const { shell } = useApp();
+  return phone ? (
+    <IconButton
+      data-testid="shell.title-bar-set-overlay"
+      icon="search"
+      label="Search chats, messages, files and settings"
+      title="Search"
+      onClick={() => {
+        shell.actions.setOverlay("palette");
+      }}
+    />
+  ) : (
+    <button
+      data-testid="shell.title-bar-set-overlay-2"
+      type="button"
+      className="search"
+      // The visible label stays short enough for a 960 px window; the name says all it covers.
+      aria-label="Search chats, messages, files and settings"
+      onClick={() => {
+        shell.actions.setOverlay("palette");
+      }}
+    >
+      <Icon name="search" />
+      <span className="s-label">Search chats, messages and files</span>
+      <kbd>{formatKeys("Mod+K")}</kbd>
+    </button>
+  );
+}
+
+/** Opens the existing draft over the current screen when a core is connected. */
+function TitleBarFeedback() {
+  const { core } = useApp();
+  return (
+    core && (
+      <IconButton
+        data-testid="shell.title-bar-feedback"
+        icon="megaphone"
+        label="Send feedback"
+        title="Send feedback"
+        onClick={() => {
+          void feedbackFor(core).open();
+        }}
+      />
+    )
   );
 }

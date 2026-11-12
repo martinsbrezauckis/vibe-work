@@ -30,9 +30,6 @@
   display: grid;
   gap: 4px;
 }
-.set-cat-body .vault-actions-menu .tb-btn {
-  justify-content: flex-start;
-}
 .set-cat-body .vault-actions-editor {
   align-items: end;
 }
@@ -98,4 +95,8 @@
 .titlebar [data-rail="vault-narrow"][aria-current="true"] {
   background: var(--active);
   color: var(--text);
+}
+
+.set-cat-body .vault-actions-menu .tb-btn {
+  justify-content: flex-start;
 }

@@ -158,10 +158,13 @@ impl SessionDir {
     pub fn write_state(&self, state: &BaselineState) -> Result<(), ChangesError> {
         let bytes = serde_json::to_vec_pretty(state)
             .map_err(|e| ChangesError::Parse(format!("state.json: {e}")))?;
-        let tmp = self.dir.join("state.json.tmp");
         let path = self.dir.join("state.json");
-        std::fs::write(&tmp, bytes).map_err(|e| ChangesError::io("write", &tmp, e))?;
-        std::fs::rename(&tmp, &path).map_err(|e| ChangesError::io("replace", &path, e))
+        vw_platform::atomic_file::replace_file(
+            &path,
+            &bytes,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|e| ChangesError::io("replace", &path, e))
     }
 
     /// Removes the session's review data (the baseline is gone afterwards).

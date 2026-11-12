@@ -5,10 +5,8 @@ import { Tab, Tabs } from "../../components/Tabs";
 import { useModalFocus } from "../../hooks/useModalFocus";
 import { useStore } from "../../state/createStore";
 import { feedbackFor, type Feedback } from "../../state/feedback";
-import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import type { CoreController } from "../../state/coreStore";
 import { useApp } from "../shell/AppContext";
-import "./feedback.css";
 
 /** The panel bound to a feedback controller; also used by fixture and component tests. */
 export function FeedbackPanel({ feedback }: { feedback: Feedback }) {
@@ -266,5 +264,5 @@ export function FeedbackDialog() {
 }
 /** The same mount outside a failed shell; no AppProvider is required by the recovery view. */
 export function CoreFeedbackDialog({ core }: { core: CoreController | null | undefined }) {
-  return !FEEDBACK_ENABLED || !core ? null : <ConnectedFeedback feedback={feedbackFor(core)} />;
+  return !core ? null : <ConnectedFeedback feedback={feedbackFor(core)} />;
 }

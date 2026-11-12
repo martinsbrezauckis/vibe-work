@@ -28,9 +28,13 @@ use std::sync::Arc;
 
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer, Requester};
 
-#[cfg(test)]
-#[path = "confirm_pairing_tests.rs"]
-mod pairing_tests;
+/// Requests foreground attention before showing a browser's pairing approval.
+/// The native presenter supplies the app's existing reveal helper; this never answers the dialog.
+pub fn foreground_confirmation(request: &ConfirmationRequest, reveal: impl FnOnce()) {
+    if request.method == vw_core_api::BROWSER_PAIRING_DIALOG_METHOD {
+        reveal();
+    }
+}
 
 /// Longest caller text a confirmation dialog shows. Longer requests are declined or paged, never clipped.
 pub const DIALOG_PARAMS_MAX_CHARS: usize = 1200;
@@ -445,54 +449,5 @@ impl SharedConfirmer {
 impl Confirmer for SharedConfirmer {
     fn confirm(&self, request: &ConfirmationRequest) -> impl Future<Output = Confirmation> + Send {
         (self.0)(request.clone())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-    use vw_gate::{ConfirmationRequest, Requester};
-
-    use super::dialog_text;
-
-    /// A browser "Save to vault" request as the core shows it: the reviewed metadata plus the ask id it adds to
-    /// every shown request.
-    fn capture_save() -> ConfirmationRequest {
-        ConfirmationRequest {
-            method: "vibe-work/captureSecret".to_owned(),
-            summary: String::new(),
-            params: json!({"session": "Synthetic session", "page": "https://example.test",
-                "element": "selected text", "storeAs": "Deployment token", "valueLength": 23,
-                "replaces": false, "askId": "ask-1"}),
-            requester: Requester::Window,
-            always: None,
-        }
-    }
-
-    #[test]
-    fn a_vault_save_carrying_its_ask_id_is_shown_without_it() {
-        let text = dialog_text(&capture_save()).expect("a shown save request has a dialog");
-        assert!(text.starts_with(
-            "Save the 23-character value you selected in \"selected text\" on \"https://example.test\" to your \
-             vault as \"Deployment token\"?"
-        ));
-        assert!(!text.contains("ask-1") && !text.contains("askId"));
-    }
-
-    #[test]
-    fn a_vault_save_with_unknown_or_malformed_data_is_never_shown() {
-        let mut extra = capture_save();
-        extra.params["note"] = json!("approve me");
-        assert!(dialog_text(&extra).is_none());
-        let mut swapped = capture_save();
-        swapped.params.as_object_mut().unwrap().remove("replaces");
-        swapped.params["note"] = json!(false);
-        assert!(dialog_text(&swapped).is_none());
-        let mut missing = capture_save();
-        missing.params.as_object_mut().unwrap().remove("storeAs");
-        assert!(dialog_text(&missing).is_none());
-        let mut odd_id = capture_save();
-        odd_id.params["askId"] = json!({"text": "approve"});
-        assert!(dialog_text(&odd_id).is_none());
     }
 }

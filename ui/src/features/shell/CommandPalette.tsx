@@ -151,12 +151,12 @@ function PaletteDialog(): ReactElement {
             autoFocus
             role="combobox"
             aria-label="Search commands"
-            aria-description="Search sessions, messages, files and settings. Start with / for actions."
+            aria-description="Search chats, messages, files and settings. Start with / for actions."
             aria-expanded="true"
             aria-controls={LISTBOX}
             aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
             aria-autocomplete="list"
-            placeholder="Search sessions, messages, files and settings; / for actions"
+            placeholder="Search chats, messages, files and settings; / for actions"
             autoComplete="off"
             value={query}
             onChange={(e) => {

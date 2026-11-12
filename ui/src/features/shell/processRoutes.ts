@@ -52,7 +52,7 @@ async function sessionAction(app: App, input: Record<string, unknown>): Promise<
     return { ...sessionJson(app), leftRunning: leftRunningJson(app) };
   const id = input["id"];
   if (typeof id !== "string" || !procs.store.get().items.some((i) => i.id === id))
-    throw new UiControlError("notFound", "no process of the open session has that id");
+    throw new UiControlError("notFound", "no process of the open chat has that id");
   if (input["action"] === "output") {
     procs.toggleOutput(id);
     await procs.readOutputs();

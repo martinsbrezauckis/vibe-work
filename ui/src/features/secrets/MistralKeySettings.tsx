@@ -71,7 +71,7 @@ export function MistralKeyDetails({
           <div className="check">
             <dt>Last tested</dt>
             <dd role={test.phase === "failed" ? "alert" : "status"}>
-              {test.phase === "idle" && "Not tested this session."}
+              {test.phase === "idle" && "Not tested since start."}
               {test.phase === "running" && "Testing…"}
               {test.phase === "ok" && "Key works."}
               {test.phase === "failed" && test.text}

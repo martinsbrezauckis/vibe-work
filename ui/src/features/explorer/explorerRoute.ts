@@ -189,7 +189,7 @@ async function route(
     if (context.session)
       throw new UiControlError(
         "invalidParams",
-        `${what} is offered before a session; in a session use the Changes tab (ui/changes, ui/git)`,
+        `${what} is offered before a chat; in a chat use the Changes tab (ui/changes, ui/git)`,
       );
   };
   const inRepository = () => {
@@ -208,7 +208,7 @@ async function route(
       if (option === undefined)
         throw new UiControlError("notFound", "folder is not one of the Places");
       if (option.disabled === true)
-        throw new UiControlError("denied", "this copy is outside the project and has no session");
+        throw new UiControlError("denied", "this copy is outside the project and has no chat");
       places.set({ key, place: folder });
       ws.closeInit();
       ({ context } = read());
@@ -309,7 +309,7 @@ async function route(
       break;
     case "reviewSession":
       if (!context.session)
-        throw new UiControlError("invalidParams", "no session is selected (use review)");
+        throw new UiControlError("invalidParams", "no chat is selected (use review)");
       app.panelTabs.setHidden("changes", false);
       app.shell.actions.openTab("changes");
       break;

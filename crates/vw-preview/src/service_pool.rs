@@ -38,6 +38,13 @@ pub(super) fn save_setting(path: &std::path::Path, data: &[u8]) -> Result<(), Pr
 }
 
 impl PreviewService {
+    /// Whether any admitted browser engine still needs idle maintenance. Unlike the pool snapshot,
+    /// this only reads admissions and does not probe system memory.
+    #[must_use]
+    pub fn has_active_browsers(&self) -> bool {
+        !self.lock_pool().active.is_empty()
+    }
+
     pub(crate) fn touch_pool(&self, session_id: &str) {
         if let Some(used) = self.lock_pool().active.get_mut(session_id) {
             *used = tokio::time::Instant::now();

@@ -7,11 +7,14 @@
   body { margin: 0; }
   #target, #cell { position: fixed; left: 20px; top: 20px; width: 180px; height: 50px; }
   #cell { top: 100px; }
+  #aux { position: fixed; left: 20px; top: 160px; width: 180px; height: 30px; }
 </style>
 <button id="target">Menu button</button>
 <div id="cell" ondblclick="record(event)" oncontextmenu="record(event)" onauxclick="record(event)">Cell A1</div>
+<span id="aux" onauxclick="record(event)">Aux target</span>
 <script>
   document.body.dataset.events = "[]";
+  document.body.dataset.pointerEvents = "[]";
   document.body.dataset.appMenus = "0";
   function record(event) {
     const events = JSON.parse(document.body.dataset.events);
@@ -19,6 +22,14 @@
     document.body.dataset.events = JSON.stringify(events);
   }
   for (const type of ["contextmenu", "dblclick", "auxclick", "click"]) target.addEventListener(type, record);
+  for (const type of ["mousedown", "mouseup", "click", "dblclick", "auxclick"]) {
+    window.addEventListener(type, event => {
+      const events = JSON.parse(document.body.dataset.pointerEvents);
+      events.push({ type, target: event.target.id, trusted: event.isTrusted, button: event.button,
+        buttons: event.buttons, detail: event.detail, x: event.clientX, y: event.clientY });
+      document.body.dataset.pointerEvents = JSON.stringify(events);
+    }, true);
+  }
   new MutationObserver(records => {
     for (const record of records) for (const node of record.addedNodes) {
       if (node.nodeType === 1 && node.localName === "div") {

@@ -6,7 +6,7 @@
  * wrong password) comes from the key controller's `problem`.
  */
 import { Button } from "../../components/Controls";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Problem, SecretField } from "./fields";
 import { useKeyUi } from "./useKeys";
@@ -22,14 +22,22 @@ export function PasswordAsk(props: {
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);
   const [password, setPassword] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
   return (
     <form
       className="key-ask"
       onSubmit={(e) => {
         e.preventDefault();
-        if (password === "") return;
+        if (busy) return;
+        setSubmitted(true);
+        if (password === "") {
+          passwordRef.current?.focus();
+          return;
+        }
         const pass = password;
         setPassword("");
+        setSubmitted(false);
         props.onSubmit(pass);
       }}
     >
@@ -40,6 +48,10 @@ export function PasswordAsk(props: {
         onChange={setPassword}
         autoFocus={props.autoFocus}
         invalid={problem?.reason === "wrongPassphrase"}
+        inputRef={passwordRef}
+        error={
+          submitted && password === "" ? "A password is required. Enter your vault password." : null
+        }
       />
       <Problem text={problem?.text ?? null} />
       <div className="set-actions">
@@ -48,7 +60,7 @@ export function PasswordAsk(props: {
           type="submit"
           shape="outlined"
           variant="primary"
-          disabled={busy || password === ""}
+          disabled={busy}
         >
           {props.action}
         </Button>

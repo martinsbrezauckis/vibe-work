@@ -73,6 +73,6 @@ fn shim_fails_plainly_when_endpoint_is_missing() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         output.stderr,
-        b"gh broker: GitHub reader is not available (no broker endpoint configured)\n"
+        b"GitHub reader is not available. Try again in a moment; if it repeats, tell the user.\n"
     );
 }

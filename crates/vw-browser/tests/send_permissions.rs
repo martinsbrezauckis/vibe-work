@@ -1,4 +1,4 @@
-//! Ask send preflight follows label activation and stays inside native focus waits.
+//! Ask send preflight follows implicit submission and label activation, including native focus waits.
 //! Uses production scripts in real Chromium, with a fake host focus guard; refused sends dispatch no input.
 #![cfg(feature = "e2e-script")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -403,21 +403,12 @@ async fn label_classification_follows_composed_ancestry_and_fails_closed() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// The native receipt currently regards a label's forwarded trusted click as overlap. These tests
-// check admission and actual form effects, retaining that conservative post-input receipt behavior.
+// The label's validated native default belongs to the same action, with one press and a confirmed receipt.
 fn assert_label_admitted(rig: &Rig, point: bool, result: &Result<Value, vw_browser::ActError>) {
     if point {
         assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 1);
-        assert!(
-            result.is_ok()
-                || result.as_ref().is_err_and(|error| error
-                    .text
-                    .contains("the page or the user clicked at the same time")),
-            "{result:?}"
-        );
-    } else {
-        assert!(result.is_ok(), "{result:?}");
     }
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -461,27 +452,232 @@ async fn label_keys_do_not_implicitly_submit_an_associated_text_field() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn scripted_enter_checks_the_form_method_without_a_submitter() {
+// Keep navigation cancelled so the real engine's submitter, method and action can be inspected.
+async fn key_fixture(contents: &str) -> (Rig, String) {
     let rig = Rig::new().await;
-    rig.engine.eval("document.body.innerHTML='<form method=post><input aria-label=Message><button formmethod=get>Search</button></form>';window.sends=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();window.sends++};scrollTo(0,0)").await;
+    rig.engine.eval(&format!(
+        "document.body.innerHTML={};window.submissions=[];window.clicks=0;window.inputs=0; \
+         document.addEventListener('submit',e=>{{e.preventDefault();const s=e.submitter,f=e.target; \
+         window.submissions.push([s?.hasAttribute('formmethod')?s.formMethod:f.method, \
+         s?.hasAttribute('formaction')?s.formAction:f.action,s?.id||null])}}); \
+         document.addEventListener('click',()=>window.clicks++); \
+         document.addEventListener('keydown',()=>window.inputs++);scrollTo(0,0)", json!(contents)
+    )).await;
     let (model, _, _) = rig
         .browser
         .observe(SESSION, ReadOptions::default())
         .await
         .unwrap();
-    let reference = &model
+    let reference = model
         .refs
         .iter()
-        .find(|item| item.name == "Message")
+        .find(|item| item.name == "Key target")
         .unwrap()
-        .id;
-    let action =
-        vw_browser::parse(&json!({"action":"press","ref":reference,"key":"Enter"})).unwrap();
-    let result = rig
-        .browser
-        .act_with_sending(SESSION, action, Actor::Agent, &NoNavigation, false)
+        .id
+        .clone();
+    (rig, reference)
+}
+
+async fn press_key(
+    rig: &Rig,
+    reference: Option<&str>,
+    key: &str,
+    allow: bool,
+) -> Result<Value, vw_browser::ActError> {
+    let mut action = json!({"action":"press","key":key});
+    if let Some(reference) = reference {
+        action["ref"] = json!(reference);
+    } else {
+        rig.engine
+            .eval("document.querySelector('[aria-label=\"Key target\"]').focus()")
+            .await;
+    }
+    rig.browser
+        .act_with_sending(
+            SESSION,
+            vw_browser::parse(&action).unwrap(),
+            Actor::Agent,
+            &NoNavigation,
+            allow,
+        )
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scripted_enter_on_non_text_controls_does_not_submit() {
+    let mut failures = Vec::new();
+    for control in [
+        "<input type=button>",
+        "<select><option>Choice</option></select>",
+        "<input type=checkbox>",
+        "<input type=radio>",
+        "<input type=reset>",
+        "<input type=file>",
+        "<input type=range>",
+        "<textarea></textarea>",
+    ] {
+        let control = control.replacen('>', " aria-label='Key target'>", 1);
+        let (rig, reference) = key_fixture(&format!("<form method=post>{control}</form>")).await;
+        let result = press_key(&rig, Some(&reference), "Enter", false).await;
+        let submits = rig.engine.eval("window.submissions").await;
+        let accepted = if control.starts_with("<select") {
+            result.as_ref().is_err_and(|error| {
+                error.outcome == vw_browser::Outcome::Refused
+                    && error.text.contains("native select popup")
+            })
+        } else {
+            result.is_ok()
+        };
+        if !accepted || submits != json!([]) {
+            failures.push(format!("{control}: {result:?}; submissions={submits}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scripted_enter_uses_the_default_button_and_respects_blocking_fields() {
+    let mut failures = Vec::new();
+    for (before, after, expected) in [
+        (
+            "",
+            "<button id=default formmethod=get formaction=/search>Search</button>",
+            json!([["get", "https://93.184.215.14/search", "default"]]),
+        ),
+        (
+            "<input id=default type=submit form=post formmethod=get formaction=/search>",
+            "<button>Send</button>",
+            json!([["get", "https://93.184.215.14/search", "default"]]),
+        ),
+        (
+            "",
+            "<input id=default type=image formmethod=get formaction=/search><button>Send</button>",
+            json!([["get", "https://93.184.215.14/search", "default"]]),
+        ),
+        (
+            "",
+            "<button disabled>Disabled</button><button>Send</button>",
+            json!([]),
+        ),
+        (
+            "",
+            "<fieldset disabled><button>Disabled</button></fieldset><button>Send</button>",
+            json!([]),
+        ),
+        ("", "<input>", json!([])),
+        ("", "<input disabled>", json!([])),
+        ("<input form=post>", "", json!([])),
+    ] {
+        let (rig, reference) = key_fixture(&format!("{before}<form id=post method=post action=/post><input aria-label='Key target'>{after}</form>")).await;
+        let result = press_key(&rig, Some(&reference), "Enter", false).await;
+        let submits = rig.engine.eval("window.submissions").await;
+        if result.is_err() || submits != expected {
+            failures.push(format!(
+                "{before} / {after}: {result:?}; submissions={submits}, expected {expected}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scripted_post_enter_denied_sends_nothing_and_allow_once_sends_once() {
+    for submitter in ["", "<button id=default>Send</button>"] {
+        let (rig, reference) = key_fixture(&format!(
+            "<form method=post action=/post><input aria-label='Key target'>{submitter}</form>"
+        ))
         .await;
-    assert_eq!(result.unwrap_err().text, vw_browser::SEND_REQUIRED);
-    assert_eq!(rig.engine.eval("window.sends").await, json!(0));
+        for _ in 0..2 {
+            let denied = press_key(&rig, Some(&reference), "Enter", false).await;
+            assert_eq!(denied.unwrap_err().text, vw_browser::SEND_REQUIRED);
+            assert_eq!(
+                rig.engine.eval("[window.submissions,window.inputs]").await,
+                json!([[], 0])
+            );
+        }
+        let allowed = press_key(&rig, Some(&reference), "Enter", true).await;
+        assert!(allowed.is_ok(), "{allowed:?}");
+        assert_eq!(
+            rig.engine.eval("window.submissions").await,
+            json!([[
+                "post",
+                "https://93.184.215.14/post",
+                if submitter.is_empty() {
+                    None
+                } else {
+                    Some("default")
+                }
+            ]])
+        );
+        let next = press_key(&rig, Some(&reference), "Enter", false).await;
+        assert_eq!(next.unwrap_err().text, vw_browser::SEND_REQUIRED);
+        assert_eq!(rig.engine.eval("window.submissions.length").await, json!(1));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn focused_button_keys_click_and_keep_the_submitter_method() {
+    let mut failures = Vec::new();
+    for control in [
+        "<input type=button>",
+        "<input type=reset>",
+        "<input type=submit formmethod=get>",
+        "<input type=image formmethod=get>",
+        "<button formmethod=get>Search</button>",
+        "<input type=submit>",
+    ] {
+        for key in ["Enter", "Space"] {
+            let control = control.replacen('>', " id=target aria-label='Key target'>", 1);
+            let (rig, _) = key_fixture(&format!("<form method=post>{control}</form>")).await;
+            let blocked = control.starts_with("<input type=submit id=");
+            let result = press_key(&rig, None, key, false).await;
+            if blocked {
+                assert_eq!(result.unwrap_err().text, vw_browser::SEND_REQUIRED);
+                assert_eq!(
+                    rig.engine
+                        .eval("[window.submissions,window.clicks,window.inputs]")
+                        .await,
+                    json!([[], 0, 0])
+                );
+                assert!(press_key(&rig, None, key, true).await.is_ok());
+            } else if result.is_err() {
+                failures.push(format!("{control} / {key}: {result:?}"));
+                continue;
+            }
+            let expected = if control.contains("formmethod=get") {
+                json!([["get", "https://93.184.215.14/", "target"]])
+            } else if blocked {
+                json!([["post", "https://93.184.215.14/", "target"]])
+            } else {
+                json!([])
+            };
+            let effects = rig.engine.eval("[window.submissions,window.clicks]").await;
+            if effects != json!([expected, 1]) {
+                failures.push(format!(
+                    "{control} / {key}: effects={effects}, expected {}",
+                    json!([expected, 1])
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn implicit_form_classification_requires_readable_input_and_form_state() {
+    let rig = Rig::new().await;
+    let source = include_str!("../src/js/sending.js");
+    for setup in [
+        "Object.defineProperty(field,'type',{value:undefined})",
+        "Object.defineProperty(field,'form',{value:undefined})",
+        "Object.defineProperty(field,'form',{get(){throw Error('unreadable')}})",
+        "Object.defineProperty(button,'formMethod',{get(){throw Error('unreadable')}})",
+    ] {
+        let result = rig.engine.eval(&format!(
+            "(()=>{{document.body.innerHTML='<form method=get><input><button formmethod=get>Search</button></form>'; \
+             const field=document.querySelector('input'),button=document.querySelector('button'); \
+             {setup};{source}\nreturn postsForm(field,true)}})()"
+        )).await;
+        assert_eq!(result, json!(true), "{setup}");
+    }
 }

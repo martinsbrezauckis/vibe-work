@@ -130,7 +130,7 @@ export function shellActions(app: App): ShellAction[] {
     {
       // the open session as Markdown, through the native save dialog.
       id: "export-session",
-      label: "Export this session as Markdown",
+      label: "Export this chat as Markdown",
       keywords: "save download markdown md transcript",
       run: () => {
         const id = shell.store.get().selected;

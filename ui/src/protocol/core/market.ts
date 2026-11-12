@@ -163,6 +163,10 @@ managed: boolean,
  */
 off: boolean,
 /**
+ * Native Vibe switch state, separate from the app-owned off folder; absent for unreadable/old inventories.
+ */
+nativeEnabled?: boolean,
+/**
  * Vibe selected this installed folder for new chats (false for shadows and retained pins).
  */
 available: boolean,

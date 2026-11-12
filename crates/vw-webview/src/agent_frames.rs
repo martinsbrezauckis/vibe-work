@@ -118,6 +118,7 @@ pub(crate) fn forget(webview: &Webview<Wry>) -> Result<(), EngineError> {
             crate::frames_win::forget(&native);
             #[cfg(target_os = "macos")]
             {
+                vw_platform::webview::request_watch_mac::detach(native.inner());
                 vw_platform::webview::agent_world_mac::forget_agent_world(native.inner());
                 vw_platform::webview::full_screen_mac::forget(native.inner());
             }

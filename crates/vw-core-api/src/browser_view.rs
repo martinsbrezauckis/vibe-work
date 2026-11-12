@@ -22,6 +22,25 @@ use vw_browser::annotate::{Annotation, RecheckItem};
     deny_unknown_fields
 )]
 pub enum BrowserRequest {
+    /// Read confirmed browser presentation and built-in availability.
+    Preferences {},
+    /// Show or hide one browser in the composer without changing its availability.
+    SetComposerBrowser {
+        /// Browser whose composer entry changes.
+        browser: crate::ComposerBrowser,
+        /// Whether its entry is shown.
+        shown: bool,
+    },
+    /// Change the built-in browser's availability to the agent.
+    SetBuiltinEnabled {
+        /// Whether browser tools can use it.
+        enabled: bool,
+    },
+    /// Share the current built-in document to its chat through the person attachment queue.
+    Share {
+        /// Exact mounted page key from the Browser pane.
+        page_key: String,
+    },
     /// Current native ad-filter settings.
     Shields {},
     /// Change native ad filtering; Strict downloads its lists on first use.
@@ -315,6 +334,11 @@ pub struct SecretChoiceView {
     rename_all_fields = "camelCase"
 )]
 pub enum BrowserResult {
+    /// Confirmed composer presentation and built-in availability.
+    Preferences {
+        /// Current saved settings and native availability.
+        preferences: crate::BrowserPreferences,
+    },
     /// Confirmed native ad filtering.
     Shields {
         /// Confirmed mode and platform availability.

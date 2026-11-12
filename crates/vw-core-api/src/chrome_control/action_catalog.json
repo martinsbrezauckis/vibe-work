@@ -521,7 +521,6 @@
           }
         },
         "required": [
-          "ref",
           "text"
         ],
         "additionalProperties": false

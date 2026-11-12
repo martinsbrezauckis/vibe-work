@@ -3,6 +3,7 @@
  * push core events as if they came from Rust, and exposes the UI-control transport as a queue.
  * Synthetic data only. Depends on: ui/src/protocol/client/types.
  */
+import { drives } from "./uiContracts";
 import { vi } from "vitest";
 
 import type {
@@ -251,32 +252,7 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
   };
   const queue: UiControlRequest[] = [];
   const waiters: ((r: UiControlRequest | null) => void)[] = [];
-  // The host's driving rule (`ui_grants.rs` `drives`): pending requests, and whether each may act.
-  const PURE_ROUTES = [
-    "state",
-    "revision",
-    "settle",
-    "rect",
-    "layout",
-    "trace",
-    "setup",
-    "secrets",
-    "toasts",
-    "notifications",
-    "walkthrough",
-  ];
   const pending = new Map<string, boolean>();
-  const drives = (request: UiControlRequest): boolean => {
-    const action =
-      typeof request.body === "object" && request.body !== null
-        ? (request.body as { action?: unknown }).action
-        : undefined;
-    return !(
-      PURE_ROUTES.includes(request.name) ||
-      action === "read" ||
-      action === "state"
-    );
-  };
   const attributed = (): string =>
     [...pending.values()].some(Boolean) || client.servingProbe?.() === true
       ? "debug-api"

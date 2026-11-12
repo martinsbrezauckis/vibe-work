@@ -16,6 +16,8 @@ pub const EXTENSION_ID: &str = "gnlamocfdabihichplpepjpehlbafhng";
 /// keeps "Chrome" out of the name (the listing says "for Google Chrome"); the same family name will serve other
 /// browsers later. The one place to change it on Vibe Work's side; Vibe Work's Settings section stays "Your Chrome".
 pub const STORE_LISTING_NAME: &str = "Vibe Work";
+/// The Mozilla-signed Firefox sharing add-on inside the app's resources (release bundles only).
+pub const FIREFOX_ADDON_RESOURCE: &str = "firefox-addon/vibe-work.xpi";
 /// The Chrome Control installation offer key.
 pub const PLUGIN: &str = "chrome-control";
 
@@ -66,6 +68,10 @@ pub struct ChromeControlConfig {
     pub firefox_launcher: Option<Launcher>,
     /// Approved Mozilla listing supplied by the later-release package; none before publication.
     pub firefox_store_url: Option<String>,
+    /// SHA-256 of the Mozilla-signed Firefox sharing add-on shipped in the bundle, embedded by the release build.
+    pub firefox_addon_sha256: Option<String>,
+    /// The bundled signed add-on file (`firefox-addon/vibe-work.xpi` in the resources); `None` without a pin.
+    pub firefox_addon: Option<PathBuf>,
 }
 
 impl Default for ChromeControlConfig {
@@ -93,6 +99,8 @@ impl Default for ChromeControlConfig {
             edge_launcher: None,
             firefox_launcher: None,
             firefox_store_url: None,
+            firefox_addon_sha256: option_env!("VW_FIREFOX_ADDON_SHA256").map(str::to_owned),
+            firefox_addon: None,
             firefox_registry_root: r"HKCU\Software\Mozilla\NativeMessagingHosts".to_owned(),
         }
     }
@@ -116,11 +124,16 @@ impl ChromeControlConfig {
     }
 
     /// A release without a helper pin has no package; a pinned but missing helper needs repair.
+    /// The signed Firefox add-on follows its own pin the same way.
     pub fn bundled(&mut self, resources: &Path) {
         self.package = self
             .helper_sha256
             .as_ref()
             .map(|_| resources.join("chrome-control"));
+        self.firefox_addon = self
+            .firefox_addon_sha256
+            .as_ref()
+            .map(|_| resources.join(FIREFOX_ADDON_RESOURCE));
     }
 }
 

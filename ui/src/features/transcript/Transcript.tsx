@@ -108,7 +108,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
   if (entry === undefined || unloaded || loading) {
     return (
       <div className="tx tx-empty" role="status">
-        {entry === undefined ? `${TEXT.thisSession} is not loaded.` : "Loading the session…"}
+        {entry === undefined ? `${TEXT.thisSession} is not loaded.` : "Loading the chat…"}
       </div>
     );
   }

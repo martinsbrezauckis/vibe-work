@@ -1,4 +1,4 @@
-/** Selected Chrome context becomes a chip. Delivery never sends a turn or changes typed text. */
+/** Person-shared browser context becomes a chip. Delivery never sends a turn or changes typed text. */
 import type { ChromeControlView } from "../../protocol/core";
 import { NEW_CHAT } from "../../state/newChatKey";
 import type { App } from "../shell/AppContext";
@@ -20,8 +20,16 @@ export function startChromeSelections(app: App): () => void {
           if (result.type !== "chromeSelection" || result.selection === null) return;
           const picked = result.selection;
           const sessionId = picked.sessionId ?? NEW_CHAT;
+          const prefix =
+            picked.kind === "page"
+              ? "Page:"
+              : picked.kind === "link"
+                ? "Link from"
+                : picked.kind === "image"
+                  ? "Image from"
+                  : "Selected text from";
           app.composer.actions?.insertContext(sessionId, {
-            label: `Selected text from ${picked.title.slice(0, 60) || picked.url.slice(0, 60)}`,
+            label: `${prefix} ${picked.title.slice(0, 60) || picked.url.slice(0, 60)}`,
             source: "browser",
             text: `${picked.url}\n${picked.text}`,
             modelText: picked.modelText,

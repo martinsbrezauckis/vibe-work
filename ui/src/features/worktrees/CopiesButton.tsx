@@ -9,7 +9,7 @@ import { useApp } from "../shell/AppContext";
 import { useCoreState, useSessionSummaries } from "../shell/hooks";
 import { openCopies } from "./openCopies";
 
-const DESCRIPTION = "Session copies (git worktrees) no chat uses anymore: review or remove them";
+const DESCRIPTION = "Chat copies (git worktrees) no chat uses anymore: review or remove them";
 
 /** The count includes leftover and kept copies, excluding those used by live sessions. */
 export function CopiesButton() {

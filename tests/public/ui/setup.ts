@@ -1,8 +1,8 @@
 /**
  * Vitest setup: registers the jest-dom matchers (toBeInTheDocument, ...), unmounts rendered trees
  * between tests, and gives jsdom a layout answer it lacks: `getClientRects()` returns one empty
- * rect for every element, so the focus-trap's "is this element visible" check (ported from ShellX)
- * works. Elements hidden with the `hidden` attribute still report none. Loaded by
+ * rect for every rendered element, so the focus-trap's "is this element visible" check (ported from ShellX)
+ * works. The real app styles and hidden ancestors suppress rectangles; this does not simulate pixel layout. Loaded by
  * `test.setupFiles` in both UI Vitest configurations.
  *
  * `ResizeObserver`: jsdom has none, and the transcript's virtualised list (virtua) needs
@@ -14,6 +14,7 @@
  * The app's announcer (`ui/src/state/announcer.ts`) is emptied after each test, and text queries skip its regions.
  */
 import "@testing-library/jest-dom/vitest";
+import { installAppStyles } from "./support/appStyles";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { resetAnnouncer } from "../../../ui/src/state/announcer";
@@ -74,14 +75,31 @@ HTMLElement.prototype.hidePopover = function hidePopover(): void {
   this.style.display = "none";
 };
 
+function hasVisibleAncestors(start: HTMLElement): boolean {
+  for (
+    let element: HTMLElement | null = start;
+    element !== null;
+    element = element.parentElement
+  ) {
+    const style = getComputedStyle(element);
+    if (
+      element.hidden ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse"
+    )
+      return false;
+  }
+  return true;
+}
+
 beforeEach(() => {
   localStorage.clear();
+  installAppStyles();
   HTMLElement.prototype.getClientRects = function getClientRects(
     this: HTMLElement,
   ) {
-    return this.hidden
-      ? ([] as unknown as DOMRectList)
-      : ([{}] as unknown as DOMRectList);
+    return (hasVisibleAncestors(this) ? [{}] : []) as unknown as DOMRectList;
   };
 });
 

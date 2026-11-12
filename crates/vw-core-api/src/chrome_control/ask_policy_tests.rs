@@ -5,7 +5,9 @@ use serde_json::json;
 use vw_ask::chrome::Tier;
 
 const WRITES: &[&str] = &[
-    "clipboard.write",
+    "notifications.create",
+    "notifications.clear",
+    "page.insert_text",
     "network.intercept",
     "auth.basic",
     "files.drop",
@@ -15,8 +17,8 @@ const WRITES: &[&str] = &[
     "page.commit",
     "cookies.change",
     "storage.change",
-    "raw.execute",
     "bookmarks.edit",
+    "tabs.group_update",
     "bookmarks.remove",
     "history.delete",
     "page.drag",
@@ -144,12 +146,12 @@ async fn every_catalog_action_runs_asks_or_refuses_secret_reads_in_ask() {
 }
 
 #[tokio::test]
-async fn typing_and_submitting_keys_ask_while_navigation_keys_run() {
+async fn typing_keys_ask_navigation_runs_and_clipboard_requires_full() {
     let core = core("browser-key-packages").await;
     let mut differences = Vec::new();
     for (key, expected) in [
         ("a", true),
-        ("Control+V", true),
+        ("Control+V", false),
         ("Delete", true),
         ("Backspace", true),
         ("Enter", true),
@@ -166,6 +168,16 @@ async fn typing_and_submitting_keys_ask_while_navigation_keys_run() {
             differences.push(key);
         }
     }
+    let paste = json!({"sessionId":"t","action":"page.key","args":{"key":"Control+V"}});
+    assert_eq!(
+        mapping::required("chrome_execute", &paste),
+        Some(Tier::FullAccess)
+    );
+    assert!(
+        check::authorize(&core.shared, "s", "chrome_execute", &paste)
+            .unwrap_err()
+            .contains("Full")
+    );
     core.shutdown().await;
     assert!(
         differences.is_empty(),
@@ -202,4 +214,24 @@ async fn wider_modes_keep_action_tiers_and_higher_write_cards() {
         }
     }
     core.shutdown().await;
+}
+
+#[test]
+fn arbitrary_page_javascript_requires_full_mode_because_it_can_read_site_secrets() {
+    let args = json!({"action":"raw.execute","args":{"expression":"document.cookie"}});
+    for mode in ["ask", "accept-edits"] {
+        assert!(
+            mapping::check_full(Some(mode), "chrome_execute", &args).is_err(),
+            "{mode}"
+        );
+        assert!(
+            super::builtin::check_full(
+                Some(mode),
+                &json!({"action":"raw.execute","expression":"document.cookie"})
+            )
+            .is_err(),
+            "builtin {mode}"
+        );
+    }
+    assert!(mapping::check_full(Some("auto-approve"), "chrome_execute", &args).is_ok());
 }

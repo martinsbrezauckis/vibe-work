@@ -12,9 +12,9 @@ publish = false
 workspace = true
 
 [dependencies]
-vw-protocol = { path = "../vw-protocol" }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
-thiserror = "2"
-tokio = { version = "1.53", features = ["io-util", "macros", "rt", "sync", "time"] }
-tracing = "0.1"
+vw-protocol = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] } # exact float parsing (durationMs etc.)
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
+tracing = { workspace = true }

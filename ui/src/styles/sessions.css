@@ -38,7 +38,7 @@
   color: var(--orange);
 }
 .sb.run::before {
-  animation: vw-dot 1.4s ease-in-out infinite;
+  animation: vw-dot var(--t-busy) var(--ease-pulse) infinite;
 }
 @keyframes vw-dot {
   0%,
@@ -115,7 +115,7 @@
 .srow-main:focus-visible {
   outline: none;
   /* Inset: the row sits flush in a scrolling column that would clip an outer ring. */
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: var(--focus-ring-inset);
   border-radius: var(--radius-sm);
 }
 .srow .t {
@@ -136,18 +136,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-10-5);
-  color: var(--text-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-pill);
-  padding: 0 6px;
-  line-height: 16px;
 }
 .tag.pin {
   flex: none;
-  border: 0;
-  padding: 0;
-  display: inline-flex;
 }
 .twist,
 .twist-gap {
@@ -365,14 +356,10 @@
 .tag.folder-chip {
   flex: 0 1 auto;
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
 }
 .tag.folder-chip > span {
   min-width: 0;
@@ -429,10 +416,6 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-7);
   background: var(--raised);
-}
-.new-session[data-ask-folder="true"] .folder-row .tb-btn {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--orange) 55%, transparent);
-  transition: box-shadow var(--t-ui) var(--ease-std);
 }
 .folder-hint {
   /* Readable in both themes (the orange ring on the button is the signal; orange text fails contrast on light). */

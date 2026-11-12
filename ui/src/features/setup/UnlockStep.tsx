@@ -5,7 +5,7 @@
  * Invariants: the password is cleared on submit. First selection offers the unlock policy; later unlocks keep it.
  */
 import { Button } from "../../components/Controls";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { VaultUnlockChoice } from "./VaultUnlockChoice";
 import type { VaultChoice, VaultUnlockMethod } from "../../protocol/core";
@@ -21,6 +21,8 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
   const busy = useKeyUi((s) => s.busy);
   const problem = useKeyUi((s) => s.problem);
   const [password, setPassword] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [unlockMethod, setUnlockMethod] = useState<VaultUnlockMethod>("system");
   const kind = choice ?? status?.vaultKind ?? null;
 
@@ -29,9 +31,15 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
       className="setup-step"
       onSubmit={(e) => {
         e.preventDefault();
-        if (keys === null || password === "") return;
+        if (keys === null || busy) return;
+        setSubmitted(true);
+        if (password === "") {
+          passwordRef.current?.focus();
+          return;
+        }
         const pass = password;
         setPassword("");
+        setSubmitted(false);
         void keys.unlock(
           pass,
           choice,
@@ -47,6 +55,10 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         onChange={setPassword}
         autoFocus
         invalid={problem?.reason === "wrongPassphrase"}
+        inputRef={passwordRef}
+        error={
+          submitted && password === "" ? "A password is required. Enter your vault password." : null
+        }
       />
       {choice !== undefined && (
         <VaultUnlockChoice
@@ -62,7 +74,7 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
           data-testid="setup.unlock-step-btn-primary"
           type="submit"
           appearance="dialog"
-          disabled={busy || password === ""}
+          disabled={busy}
         >
           {busy ? "Unlocking…" : "Unlock"}
         </Button>

@@ -27,16 +27,15 @@ export function SettingsRow(props: Omit<HTMLAttributes<HTMLDivElement>, "classNa
 }
 
 const BUTTON_APPEARANCE = {
-  expander: "show-all-btn",
-  compact: "mini",
-  page: "pages-btn",
-  preview: "preview-btn",
-  project: "pj-btn",
-  choice: "cbtn",
-  dialog: "btn-primary",
-  setup: "btn-secondary",
-  "key-link": "key-link",
-  "text-link": "link-btn",
+  expander: "ext-link show-all-btn",
+  compact: "tb-btn mini",
+  page: "tb-btn pages-btn",
+  preview: "tb-btn preview-btn",
+  project: "tb-btn pj-btn",
+  choice: "tb-btn cbtn",
+  dialog: "tb-btn btn-primary",
+  "key-link": "ext-link key-link",
+  "text-link": "ext-link link-btn",
   link: "ext-link",
   "browser-menu": "browser-menu-item",
   "menu-option": "it",
@@ -57,13 +56,13 @@ const BUTTON_PLACEMENT = {
 } as const;
 
 /**
- * Shared actions retain their existing presentation while callers supply intent and geometry. `shape` names the
+ * Shared actions use one visual style per job; legacy placement names retain layout hooks only. `shape` names the
  * plain button's two shapes: "ghost" (default; borderless, the toolbar button) and "outlined" (1 px border, 30 px
  * high: the Settings, dialog and form button).
  */
 export function Button({
   variant,
-  shape = "ghost",
+  shape,
   appearance,
   placement,
   ...props
@@ -73,25 +72,19 @@ export function Button({
   appearance?: keyof typeof BUTTON_APPEARANCE | undefined;
   placement?: keyof typeof BUTTON_PLACEMENT;
 }) {
-  const small = shape === "outlined";
   const base = appearance === undefined ? "tb-btn" : BUTTON_APPEARANCE[appearance];
-  const emphasis =
-    variant === "primary" && (appearance === "choice" || appearance === "page") ? "go" : variant;
+  const resolvedShape = shape ?? (appearance === undefined ? "ghost" : "outlined");
+  const emphasis = variant ?? (appearance === "dialog" ? "primary" : undefined);
   return (
     <button
       type="button"
       {...props}
       data-testid={props["data-testid"]}
-      className={[
-        base,
-        emphasis,
-        appearance === "project" && small ? "small" : undefined,
-        placement && BUTTON_PLACEMENT[placement],
-      ]
+      className={[base, emphasis, placement && BUTTON_PLACEMENT[placement]]
         .filter(Boolean)
         .join(" ")}
-      data-shape={shape}
-      data-size={small ? "small" : "normal"}
+      data-shape={resolvedShape}
+      data-size="small"
     />
   );
 }

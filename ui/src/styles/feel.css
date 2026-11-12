@@ -42,13 +42,12 @@
     border-color var(--t-hover) var(--ease-std),
     box-shadow var(--t-hover) var(--ease-std),
     opacity var(--t-hover) var(--ease-std),
-    transform 160ms var(--ease-out);
+    transform var(--t-release) var(--ease-out);
 }
 .srow,
 .srow-main,
 .proj-h,
 .proj-bar,
-.cmenu-item,
 .lc-row,
 .ctile-main,
 .pj-card,
@@ -90,19 +89,8 @@
   transition-duration: var(--t-press);
 }
 /* Rows do not shrink (a whole row scaling reads as a glitch); they darken while pressed. */
-:is(.srow-main, .proj-h, .cmenu-item, .set-cat, .set-result, .set-hit, .ctile-main):active {
+:is(.srow-main, .proj-h, .set-cat, .set-result, .set-hit, .ctile-main):active {
   background: var(--active);
-}
-/* Primary buttons carry a "key" edge (Mistral's pressed-key feel) that flips when pressed. */
-.btn-primary,
-.tb-btn.primary,
-.pj-btn.primary {
-  box-shadow: inset 0 -1.5px 0 var(--key-edge);
-}
-.btn-primary:active:not(:disabled),
-.tb-btn.primary:active:not(:disabled),
-.pj-btn.primary:active:not(:disabled) {
-  box-shadow: inset 0 1px 0 var(--key-edge);
 }
 /* Icons follow their button's text colour on hover (rail and toolbars). */
 .rbtn svg.i,
@@ -143,39 +131,21 @@
   transform: rotate(-45deg);
 }
 
-/* 5. Side panel tabs: the selected pill slides; a new tab body fades in. */
-.ptabs {
-  position: relative;
-  isolation: isolate;
-}
-.ptab-pill {
-  position: absolute;
-  z-index: var(--z-underlay);
-  top: 0;
-  left: 0;
-  border-radius: var(--radius-7);
-  background: var(--active);
-  transition:
-    transform var(--t-ui) var(--ease-out),
-    width var(--t-ui) var(--ease-out);
-}
-.ptabs:has(.ptab-pill) .ptab-group[data-selected="true"] {
-  background: transparent;
-}
+/* Panel content settles after a tab change. */
 .pbody > * {
-  animation: vw-fade-in 150ms var(--ease-std);
+  animation: vw-fade-in var(--t-fade) var(--ease-std);
 }
 
 /* 6. The side panel: its content fades in just after the panel starts to open. */
 .body.has-panel .panel .pbody {
-  animation: vw-fade-in 160ms var(--ease-std) 60ms both;
+  animation: vw-fade-in var(--t-release) var(--ease-std) var(--t-follow-delay) both;
 }
 
 /* 7. Approval and question cards: rise in and send one pulse, the first time they are on screen. */
 .approval.arrive {
   animation:
     vw-arrive var(--t-arrive) var(--ease-out),
-    vw-attention 900ms var(--ease-std) 260ms 1;
+    vw-attention var(--t-feedback) var(--ease-std) var(--t-attention-delay) 1;
 }
 @keyframes vw-arrive {
   from {
@@ -212,7 +182,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  animation: vw-rise 200ms var(--ease-out);
+  animation: vw-rise var(--t-ui) var(--ease-out);
 }
 .jump-latest:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -234,13 +204,13 @@
 }
 /* Clockwise: top-left, top-right, bottom-right, bottom-left. */
 .walker i:nth-child(2) {
-  animation-delay: -0.6s;
+  animation-delay: calc(-3 * var(--t-ui));
 }
 .walker i:nth-child(4) {
-  animation-delay: -0.4s;
+  animation-delay: calc(-2 * var(--t-ui));
 }
 .walker i:nth-child(3) {
-  animation-delay: -0.2s;
+  animation-delay: calc(-1 * var(--t-ui));
 }
 .walker-badge {
   --wp: 3px;
@@ -264,7 +234,7 @@
 
 /* 10. A row that moves into "Needs you" lands with one orange wash (sessions/listMotion). */
 .landed {
-  animation: vw-landed 900ms var(--ease-std);
+  animation: vw-landed var(--t-feedback) var(--ease-std);
 }
 @keyframes vw-landed {
   from {
@@ -279,7 +249,7 @@
   animation: vw-toast-in var(--t-panel) var(--ease-out);
 }
 .toast.out {
-  animation: vw-toast-out 160ms var(--ease-in) forwards;
+  animation: vw-toast-out var(--t-release) var(--ease-in) forwards;
 }
 .toast-timer {
   position: absolute;
@@ -401,7 +371,7 @@
     transparent
   );
   transform: translateX(-100%);
-  animation: vw-shimmer 1.6s var(--ease-std) infinite;
+  animation: vw-shimmer var(--t-busy-slow) var(--ease-std) infinite;
 }
 @keyframes vw-shimmer {
   to {
@@ -409,7 +379,7 @@
   }
 }
 .pj-skeleton + * {
-  animation: vw-fade-in 220ms var(--ease-out);
+  animation: vw-fade-in var(--t-layout) var(--ease-out);
 }
 
 /* 14. Small confirmations: the copy icon turns into a check. */
@@ -432,8 +402,8 @@
   border: 1.5px solid currentColor;
   border-radius: var(--radius-2-5);
   transition:
-    opacity 150ms var(--ease-std),
-    transform 200ms var(--ease-out);
+    opacity var(--t-fade) var(--ease-std),
+    transform var(--t-ui) var(--ease-out);
 }
 .copy-ic::before {
   left: 0;
@@ -513,7 +483,7 @@ mark {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
   background: var(--bg);
-  animation: vw-fade-in 150ms var(--ease-std);
+  animation: vw-fade-in var(--t-fade) var(--ease-std);
 }
 
 @keyframes vw-fade-in {
@@ -542,27 +512,9 @@ mark {
   pointer-events: none;
 }
 
-/* One keyboard ring, including controls whose resting shadows would cover it. */
+/* One keyboard ring; primary keys and the microphone retain their resting underlay. */
 :focus-visible,
-.twist:focus-visible,
-.srow-more:focus-visible,
-.sec-btn:focus-visible,
-.link-btn:focus-visible,
-.tb-btn[data-shape="outlined"]:focus-visible,
-.pj-name:focus-visible,
-.pj-actions:focus-visible,
-.pj-x:focus-visible,
-.pj-chip:focus-visible,
-.pj-btn:focus-visible,
-.lc-add:focus-visible,
-.fref:focus-visible,
-.key-field-row input:focus-visible,
-.key-link:focus-visible,
-.vault-choice:focus-visible,
-.instr-text:focus-visible,
-.btn-primary:focus-visible,
 .tb-btn.primary:focus-visible,
-.pj-btn.primary:focus-visible,
 .ccorner .ibtn.mic:focus-visible {
   box-shadow: var(--focus-ring-underlay, 0 0 transparent), var(--focus-ring);
 }

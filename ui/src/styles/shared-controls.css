@@ -4,6 +4,7 @@
  * Control state and size come from attributes, so feature pages need no visual overrides.
  */
 @import "./button-presentations.css";
+@import "./chips-tabs.css";
 @import "./card.css";
 /* Native disabled state outranks contextual control styles, including form fields. */
 button:disabled,
@@ -12,38 +13,6 @@ textarea:disabled,
 select:disabled {
   opacity: 0.45 !important;
   cursor: default !important;
-}
-/* Button shapes: "ghost" is the plain .tb-btn (borderless, the toolbar button); "outlined" is the Settings, dialog and
-   form button. */
-.tb-btn[data-shape="outlined"] {
-  min-height: var(--control-height-small);
-  padding: 0 10px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-md);
-  font-size: var(--text-12-5);
-  font-weight: var(--weight-medium);
-  white-space: nowrap;
-}
-.tb-btn.primary[data-shape="outlined"] {
-  border-color: transparent;
-}
-.ext-link {
-  min-height: var(--control-height-small);
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius-7);
-  background: transparent;
-  color: var(--blue);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  font-size: var(--text-12-5);
-  font-weight: var(--weight-medium);
-  text-decoration: none;
-}
-.ext-link:hover:where(:not(:disabled)) {
-  background: var(--hover);
-  color: var(--blue);
-  text-decoration: underline;
 }
 .ibtn[data-state="locked"],
 .ibtn[data-state="unlocked"] {
@@ -70,24 +39,6 @@ select:disabled {
 .ibtn[data-state="locked"]:hover:where(:not(:disabled)),
 .ibtn[data-state="unlocked"]:hover:where(:not(:disabled)) {
   background: var(--hover);
-}
-.ui-badge {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-  padding: 1px 7px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-pill);
-  color: var(--text-3);
-  font-size: var(--text-11);
-  font-weight: var(--weight-medium);
-  line-height: var(--leading-helper);
-  white-space: nowrap;
-}
-.ui-badge[data-size="small"] {
-  padding: 0 6px;
-  font-size: var(--text-11);
 }
 .ui-selector {
   position: relative;
@@ -267,12 +218,6 @@ select:disabled {
   border-top: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
-/* Destructive actions keep the same red text and tint in every feature. */
-.tb-btn.danger,
-.tb-btn.danger:hover:not(:disabled) {
-  background: var(--red-soft);
-  color: var(--red);
-}
 
 /* The message box and every note above it share the same centred column. */
 .view-tx {
@@ -327,7 +272,7 @@ select:disabled {
   height: 14px;
   border-radius: var(--radius-round);
   background: var(--primary-bg);
-  transition: left 0.15s;
+  transition: left var(--t-fade) var(--ease-native);
 }
 .switch[aria-checked="true"] {
   background: var(--orange);
@@ -335,16 +280,6 @@ select:disabled {
 .switch[aria-checked="true"]::after {
   background: var(--on-accent);
   left: 17px;
-}
-
-.ui-badge[data-tone="ok"] {
-  color: var(--green);
-}
-.ui-badge[data-tone="warn"] {
-  color: var(--orange-3);
-}
-.ui-badge[data-tone="bad"] {
-  color: var(--red);
 }
 
 /* Shared detail roles retain established paragraph and inline-source typography. */
@@ -370,11 +305,6 @@ select:disabled {
   min-width: 32px;
   padding-inline: 8px;
   white-space: nowrap;
-}
-
-/* A destructive row link opens its confirmation before any removal. */
-.ext-link.danger {
-  color: var(--red);
 }
 
 /* Paths keep their punctuation in order and leave room for the copy action. */
@@ -514,29 +444,4 @@ select:disabled {
   gap: 2px;
   margin: 6px 10px 2px;
   padding: 2px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-}
-.ui-segment {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--text-2);
-  font: inherit;
-  font-size: var(--text-12);
-  cursor: pointer;
-}
-.ui-segment:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.ui-segment[aria-selected="true"] {
-  background: var(--active);
-  color: var(--text);
-}
-.ui-segment:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
 }

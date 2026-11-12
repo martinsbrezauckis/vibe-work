@@ -126,7 +126,7 @@ export function openPrompts(
     const offers = asks.find((ask) => ask.id === `callback:${id}`)?.offers;
     const labels = {
       approve: "Allow once",
-      approve_for_session: "Allow for this session",
+      approve_for_session: "Allow for this chat",
       approve_permanently: term("vaultPermissions", "allowed").name,
       deny: "No",
       cancel_turn: "Stop",

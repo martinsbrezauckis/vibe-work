@@ -49,6 +49,81 @@ impl Channels {
     }
 }
 
+/// Compare exact installed roots, never a name-only toggle across scopes.
+pub(crate) fn native_pin_disabled(catalog: &Value, discovery: &Value) -> bool {
+    catalog
+        .pointer("/plugins/plugins")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|pin| {
+            discovery["plugins"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|row| {
+                    row["nativeEnabled"] == false
+                        && row["name"] == pin["name"]
+                        && row["path"]
+                            .as_str()
+                            .zip(pin["installedRoot"].as_str())
+                            .is_some_and(|(found, root)| Path::new(found) == Path::new(root))
+                })
+        })
+}
+
+impl crate::core::Core {
+    pub(crate) async fn native_plugin_switches_changed(
+        &self,
+        id: &str,
+    ) -> Result<bool, crate::error::CoreError> {
+        let catalog = self
+            .shared
+            .channels
+            .request_routed("plugin_catalog/read", json!({"sessionId":id}))
+            .await
+            .map_err(|error| {
+                crate::error::CoreError::new(
+                    crate::error::ErrorCode::ServerError,
+                    error.to_string(),
+                )
+            })?;
+        if catalog
+            .pointer("/plugins/plugins")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+        {
+            return Ok(false);
+        }
+        let project = self.plugin_project(Some(id), None);
+        let discovery = self
+            .discover_plugins(project.as_deref(), Some(id))
+            .await
+            .map_err(|message| {
+                crate::error::CoreError::new(crate::error::ErrorCode::ServerError, message)
+            })?;
+        Ok(native_pin_disabled(&catalog, &discovery))
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    #[test]
+    fn native_off_matches_exact_installed_scope_and_root() {
+        let catalog =
+            json!({"plugins":{"plugins":[{"name":"same","installedRoot":"/global/plugin"}]}});
+        for (root, disabled) in [("/project/plugin", false), ("/global/plugin", true)] {
+            let discovery = json!({"plugins":[{"name":"same","path":root,"nativeEnabled":false}]});
+            assert_eq!(native_pin_disabled(&catalog, &discovery), disabled);
+        }
+        assert!(!native_pin_disabled(
+            &catalog,
+            &json!({"plugins":[{"name":"same","path":"/global/plugin","nativeEnabled":true}]})
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

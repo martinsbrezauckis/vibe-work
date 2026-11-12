@@ -96,10 +96,10 @@ export function actionStep(target: BrowserTarget, action: BrowserAction): Browse
   let reason = admitted(target);
   if (action === "review") {
     label = "Open the Changes tab";
-    reason = target.sessionId ? null : "Open a session in this folder to review its changes.";
+    reason = target.sessionId ? null : "Open a chat in this folder to review its changes.";
   } else if (action === "open-chat") {
     label = "Open its chat";
-    reason = target.sessionId ? null : "This copy has no session.";
+    reason = target.sessionId ? null : "This copy has no chat.";
   } else if (action === "new-chat" || action === "new-task") {
     label = action === "new-chat" ? `${TEXT.newChat} here` : "New task here";
     reason =
@@ -125,7 +125,7 @@ export function actionStep(target: BrowserTarget, action: BrowserAction): Browse
     const base = status?.state?.base;
     label = `Bring into ${base?.name ?? "main"}`;
     if (status?.location !== "copy" || status.repo !== "." || base == null)
-      reason ??= "Only a session copy with a known base can bring commits in.";
+      reason ??= "Only a chat copy with a known base can bring commits in.";
     else if (base.ahead === 0) reason ??= `${base.name} already has these commits.`;
     else if ((status.uncommitted ?? 0) > 0) reason ??= "Commit the changes first.";
     // The existing Bring dialog performs the authoritative dry run and moved-base check.

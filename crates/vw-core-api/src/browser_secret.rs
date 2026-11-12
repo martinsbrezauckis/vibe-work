@@ -112,10 +112,10 @@ pub(crate) async fn save(
         .config
         .keys
         .as_ref()
-        .ok_or_else(|| denied("Vibe Work has no vault connected".to_owned()))?;
+        .ok_or_else(|| denied(vw_vocabulary::texts::AGENT_VAULT_MISSING.to_owned()))?;
     let existing = keys.project_secrets().await.map_err(|e| {
         if vw_keys::is_locked(&e) {
-            denied("the vault is locked: unlock it in Settings, then try again".to_owned())
+            denied(vw_vocabulary::texts::AGENT_VAULT_LOCKED.to_owned())
         } else {
             denied(format!("the vault could not be read ({e})"))
         }

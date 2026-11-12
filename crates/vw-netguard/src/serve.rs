@@ -260,6 +260,7 @@ async fn serve_one(
         who: who.clone(),
     };
     let decided = Decided {
+        connection_key: inner.refusal_key(&who),
         browser_addresses: crate::decide::Scope::browser_addresses(&scope),
         inner: &inner,
         who: &who,
@@ -279,6 +280,7 @@ async fn serve_one(
 
 /// A request the policy has judged: who asked, for which host and port.
 struct Decided<'a> {
+    connection_key: Option<String>,
     browser_addresses: bool,
     inner: &'a Inner,
     who: &'a Who,
@@ -290,6 +292,16 @@ struct Decided<'a> {
 }
 
 impl Decided<'_> {
+    fn connected(&self, addresses: &[SocketAddr]) {
+        self.inner.connected(
+            self.who,
+            self.connection_key.as_deref(),
+            self.bare,
+            self.port,
+            addresses,
+        );
+    }
+
     /// Records a refusal and answers its page text.
     fn refuse(&self, reason: &str) -> String {
         // Under the mount it came from (a store's only member; several members: none, see `Inner::refusal_key`).
@@ -388,7 +400,6 @@ async fn relay(
     addrs: &[SocketAddr],
     body: u64,
 ) {
-    let bare = decided.bare;
     let refuse = |reason: &str| decided.refuse(reason);
     let local = addrs.iter().all(|a| a.ip().is_loopback());
     let public = addrs
@@ -402,7 +413,7 @@ async fn relay(
     } else if public {
         None
     } else {
-        Some(crate::ws_origin::Rule::Host(bare))
+        Some(crate::ws_origin::Rule::Host(decided.bare))
     };
     if let Some(rule) = rule
         && let Target::Forward { headers, .. } = &head.target
@@ -423,6 +434,7 @@ async fn relay(
             return;
         }
     };
+    decided.connected(addrs);
     match &head.target {
         Target::Direct { .. } => {}
         Target::Tunnel { .. } => {

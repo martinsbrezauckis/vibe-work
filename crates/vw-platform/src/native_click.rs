@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::sync::oneshot;
 
+#[cfg(any(target_os = "macos", test))]
+mod macos_wheel_plan;
+
 /// Answer channel for a checked click. Dropping its receiver (Stop or timeout) cancels pending dispatch.
 pub type ClickReply = oneshot::Sender<Result<(), String>>;
 
@@ -81,7 +84,7 @@ mod linux {
         point: (f64, f64),
         sent: &AtomicBool,
     ) -> Result<(), String> {
-        click_options(view, point, sent, (0, 1, 0))
+        click_options(view, point, sent, (0, 1, 0, None))
     }
 
     /// Sends a bounded click variant: DOM button, click count and Alt/Control/Meta/Shift bits.
@@ -92,9 +95,20 @@ mod linux {
         view: &webkit2gtk::WebView,
         point: (f64, f64),
         sent: &AtomicBool,
-        options: (u8, u8, u8),
+        options: (u8, u8, u8, Option<(i32, i32)>),
     ) -> Result<(), String> {
-        let (button, count, modifiers) = options;
+        let (button, count, modifiers, wheel) = options;
+        let options = (button, count, modifiers);
+        if wheel.is_some_and(|(x, y)| {
+            count != 0
+                || modifiers != 0
+                || button != 0
+                || !(-20_000..=20_000).contains(&x)
+                || !(-20_000..=20_000).contains(&y)
+                || (x == 0 && y == 0)
+        }) {
+            return Err("invalid native wheel options".into());
+        }
         if options != (0, 0, 0) && (button > 2 || !(1..=3).contains(&count) || modifiers > 15) {
             return Err("invalid native click options".into());
         }
@@ -139,6 +153,9 @@ mod linux {
         super::person::own_input(|| {
             sent.store(true, Ordering::Release);
             move_pointer(&window, &device, x, y, rx, ry);
+            if let Some(delta) = wheel {
+                wheel_event(&window, &device, (x, y, rx, ry), delta);
+            }
             for n in 1..=count {
                 let kind = match n {
                     2 => gdk::EventType::DoubleButtonPress,
@@ -218,6 +235,43 @@ mod linux {
         gtk::main_do_event(&mut event);
     }
 
+    fn wheel_event(
+        window: &gdk::Window,
+        device: &gdk::Device,
+        point: (f64, f64, f64, f64),
+        delta: (i32, i32),
+    ) {
+        let mut event = gdk::Event::new(gdk::EventType::Scroll);
+        // SAFETY: GDK allocated this scroll event on the UI thread; retained window/device refs belong to it.
+        unsafe {
+            let event_ptr: *mut gdk::ffi::GdkEvent = event.to_glib_none().0;
+            let scroll = &mut (*event_ptr).scroll;
+            scroll.window = window.to_glib_none().0;
+            glib::gobject_ffi::g_object_ref(scroll.window.cast());
+            scroll.device = device.to_glib_none().0;
+            glib::gobject_ffi::g_object_ref(scroll.device.cast());
+            scroll.send_event = 1;
+            scroll.x = point.0;
+            scroll.y = point.1;
+            scroll.x_root = point.2;
+            scroll.y_root = point.3;
+            scroll.direction = gdk::ffi::GDK_SCROLL_SMOOTH;
+            // WebKitGTK scales mouse-wheel units by floor(view extent^(2/3)); touchpads use 40.
+            // Reverse that native scaling so the page receives the requested pixel deltas.
+            let step = |extent: i32| {
+                if device.source() == gdk::InputSource::Mouse {
+                    f64::from(extent).powf(2.0 / 3.0).floor().max(1.0)
+                } else {
+                    40.0
+                }
+            };
+            scroll.delta_x = f64::from(delta.0) / step(window.width());
+            scroll.delta_y = f64::from(delta.1) / step(window.height());
+            scroll.time = 0;
+        }
+        gtk::main_do_event(&mut event);
+    }
+
     fn dispatch(
         window: &gdk::Window,
         device: &gdk::Device,
@@ -283,6 +337,8 @@ mod linux {
     }
 }
 
+/// Keyboard translation for the same checked native frame path.
+pub mod keyboard;
 /// The person's own pointer activity on a preview webview (see `person`).
 pub mod person;
 

@@ -10,7 +10,6 @@
  * external link), never inside a webview; nothing here fetches either page.
  */
 import { feedbackFor } from "../../state/feedback";
-import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import { Button, LinkButton } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
@@ -112,61 +111,19 @@ export function AboutSettings(): ReactElement {
           description="Vibe Work's page in the ShellX family of apps"
         />
       </p>
-      {FEEDBACK_ENABLED && (
-        <div className="key-line">
-          <Button
-            data-testid="settings.send-feedback"
-            shape="outlined"
-            disabled={core === null}
-            onClick={() => {
-              if (core) void feedbackFor(core).open();
-            }}
-          >
-            Send feedback…
-          </Button>
-        </div>
-      )}
-      <div className="about-data" data-setting="data-retention">
-        <h4>Data retention</h4>
-        <div className="check">
-          <span>
-            Session history
-            <span className="d">
-              Vibe shares <code>~/.vibe/logs/session</code> with the Vibe command line (or uses your{" "}
-              <code>VIBE_HOME</code> folder). With &quot;Keep Vibe Work sessions separate from the
-              CLI&quot; on, it uses <code>vibe-home/logs/session</code> inside Vibe Work&apos;s data
-              folder. Each choice shows a different chat list; chats in the other list are hidden,
-              not deleted, until you switch back.
-            </span>
-          </span>
-        </div>
-        <div className="check">
-          <span>
-            Vibe Work&apos;s data
-            <span className="d">
-              Settings, project and review records, browser data and session copies stay in Vibe
-              Work&apos;s data folder (by default <code>{defaultDataFolder()}</code>). Keys stay in
-              the encrypted Vibe Work Vault folder beside it; captures are saved under{" "}
-              <code>capture/</code> in the session&apos;s folder.
-            </span>
-          </span>
-        </div>
-        <div className="check">
-          <span>
-            Sent to Mistral
-            <span className="d">
-              Model requests, and any voice, OCR, Libraries or image requests you make. Vibe Work
-              sends no telemetry of its own; Vibe&apos;s usage telemetry follows Settings › Privacy
-              and data.
-            </span>
-          </span>
-          <ExternalLink
-            testId="settings.about-data-policy"
-            url={MISTRAL_DATA_POLICY_URL}
-            label="Mistral data policy"
-          />
-        </div>
+      <div className="key-line">
+        <Button
+          data-testid="settings.send-feedback"
+          shape="outlined"
+          disabled={core === null}
+          onClick={() => {
+            if (core) void feedbackFor(core).open();
+          }}
+        >
+          Send feedback…
+        </Button>
       </div>
+      <DataRetention />
     </section>
   );
 }
@@ -207,5 +164,52 @@ function ExternalLink({
       </LinkButton>
       {fallback && <span role="status"> Open {url} in your browser.</span>}
     </>
+  );
+}
+
+/** Describes the existing local and upstream storage locations with their original links. */
+function DataRetention(): ReactElement {
+  return (
+    <div className="about-data" data-setting="data-retention">
+      <h4>Data retention</h4>
+      <div className="check">
+        <span>
+          Chat history
+          <span className="d">
+            Vibe shares <code>~/.vibe/logs/session</code> with the Vibe command line (or uses your{" "}
+            <code>VIBE_HOME</code> folder). With &quot;Keep Vibe Work chats separate from the
+            CLI&quot; on, it uses <code>vibe-home/logs/session</code> inside Vibe Work&apos;s data
+            folder. Each choice shows a different chat list; chats in the other list are hidden, not
+            deleted, until you switch back.
+          </span>
+        </span>
+      </div>
+      <div className="check">
+        <span>
+          Vibe Work&apos;s data
+          <span className="d">
+            Settings, project and review records, browser data and chat copies stay in Vibe
+            Work&apos;s data folder (by default <code>{defaultDataFolder()}</code>). Keys stay in
+            the encrypted Vibe Work Vault folder beside it; captures are saved under{" "}
+            <code>capture/</code> in the chat&apos;s folder.
+          </span>
+        </span>
+      </div>
+      <div className="check">
+        <span>
+          Sent to Mistral
+          <span className="d">
+            Model requests, and any voice, OCR, Libraries or image requests you make. Vibe Work
+            sends no telemetry of its own; Vibe&apos;s usage telemetry follows Settings › Privacy
+            and data.
+          </span>
+        </span>
+        <ExternalLink
+          testId="settings.about-data-policy"
+          url={MISTRAL_DATA_POLICY_URL}
+          label="Mistral data policy"
+        />
+      </div>
+    </div>
   );
 }

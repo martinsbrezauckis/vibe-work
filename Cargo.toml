@@ -33,6 +33,7 @@ members = [
     "crates/vw-gh-broker",
     "crates/vw-preview",
     "crates/vw-video",
+    "crates/vw-video-types",
     "crates/vw-netguard",
     "crates/vw-browser",
     "crates/vw-pages",
@@ -63,8 +64,98 @@ tauri-runtime-wry = { path = "third_party/tauri-runtime-wry" }
 # NAV: retain WK frame context through Tauri's URL-only callback (see the copy's PROVENANCE.json).
 wry = { path = "third_party/wry" }
 
+# Shared sources and exact version requirements. Members keep their own features and optionality.
+# Alternate requirements stay local; this table does not upgrade or widen them.
+[workspace.dependencies]
+vw-video-types = { path = "crates/vw-video-types" }
+axum = { version = "0.8.9", default-features = false }
+base64 = "0.22"
+blake3 = "1.8"
+cap-fs-ext = "4.0.3"
+cap-std = "4.0.3"
+dunce = "1.0.5"
+flate2 = "1.1"
+futures-util = { version = "0.3", default-features = false }
+getrandom = "0.3"
+glib = "0.18"
+gtk = "0.18"
+hex = "0.4"
+http = "1"
+keyring-core = "=1.0.0"
+libc = "0.2"
+lopdf = { version = "0.42", default-features = false }
+make-latest-json = { path = "tools/public/update-manifest" }
+memchr = "2"
+minisign = "0.9.1"
+minisign-verify = "0.2.5"
+native-tls = "0.2.18"
+nix = { version = "0.31", default-features = false }
+notify = "8.2.0"
+objc2-app-kit = { version = "0.3", default-features = false }
+png = "0.18"
+process-wrap = { version = "10.0.1", default-features = false }
+pulldown-cmark = { version = "0.13.5", default-features = false }
+rcgen = { version = "0.14", default-features = false }
+regex = "1"
+reqwest = { version = "0.13.5", default-features = false }
+rustix = { version = "1.1.5", default-features = false }
+rustls = { version = "0.23.45", default-features = false }
+rustls-platform-verifier = "0.7.1"
+semver = "1"
+serde = "1"
+serde_json = "1"
+sha2 = "0.10.9"
+similar = "3.2.0"
+subtle = "2.6"
+sysinfo = { version = "=0.38.4", default-features = false }
+tar = { version = "0.4.46", default-features = false }
+tauri = "2.12.1"
+tauri-plugin-updater = { version = "=2.14.1", default-features = false }
+tempfile = "3"
+thiserror = "2"
+tokio = "1.53"
+tokio-native-tls = "0.3.1"
+tokio-rustls = { version = "0.26.6", default-features = false }
+toml = "1"
+toml_edit = { version = "0.25", default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false }
+ts-rs = "12.0.1"
+url = "2"
+vw-agent-tools = { path = "crates/vw-agent-tools" }
+vw-ask = { path = "crates/vw-ask" }
+vw-changes = { path = "crates/vw-changes" }
+vw-core-api = { path = "crates/vw-core-api" }
+vw-debug-api = { path = "crates/vw-debug-api" }
+vw-documents = { path = "crates/vw-documents" }
+vw-gate = { path = "crates/vw-gate" }
+vw-host = { path = "crates/vw-host" }
+vw-keyproxy = { path = "crates/vw-keyproxy" }
+vw-keys = { path = "crates/vw-keys" }
+vw-mistral = { path = "crates/vw-mistral" }
+vw-netguard = { path = "crates/vw-netguard" }
+vw-pages = { path = "crates/vw-pages" }
+vw-platform = { path = "crates/vw-platform" }
+vw-preview = { path = "crates/vw-preview" }
+vw-procmon = { path = "crates/vw-procmon" }
+vw-protocol = { path = "crates/vw-protocol" }
+vw-rpc = { path = "crates/vw-rpc" }
+vw-secrets = { path = "crates/vw-secrets" }
+vw-session = { path = "crates/vw-session" }
+vw-supervisor = { path = "crates/vw-supervisor" }
+vw-vault = { path = "crates/vw-vault" }
+vw-vibe-install = { path = "crates/vw-vibe-install" }
+vw-vocabulary = { path = "crates/vw-vocabulary" }
+vw-worktrees = { path = "crates/vw-worktrees" }
+walkdir = "2"
+webkit2gtk = "=2.0.2"
+windows = "0.62"
+winreg = "0.56"
+zeroize = "1.8"
+zip = { version = "9.1.3", default-features = false }
+
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 license = "MIT"
 authors = ["Martins Brezauckis"]

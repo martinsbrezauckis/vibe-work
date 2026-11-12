@@ -13,7 +13,7 @@ use tokio::time::Instant;
 pub struct ChromeWorkView {
     /// The owning app chat.
     pub session_id: String,
-    /// Active, connecting, stopping, stopped or disconnected.
+    /// Active, connecting, releasing, idle, stopping, stopped or disconnected.
     pub state: String,
     /// Browser of this chat's selected or last browser session, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,6 +68,17 @@ enum Stop {
 #[derive(Default)]
 pub(super) struct Work(VecDeque<Session>);
 impl Work {
+    pub(super) fn releases(&self, chat: &str) -> Vec<super::profile_selection::Release> {
+        self.0
+            .iter()
+            .filter(|session| session.row.session_id == chat && session.row.state != "stopped")
+            .map(|session| super::profile_selection::Release {
+                id: session.id.clone(),
+                profile: session.profile.clone(),
+            })
+            .collect()
+    }
+
     pub(super) fn remove_browser(&mut self, browser: Browser) {
         for session in &mut self.0 {
             if browser.owns_profile(&session.profile) {
@@ -109,6 +120,23 @@ impl Work {
             self.0.pop_front();
         }
     }
+    pub(super) fn release(&mut self, chat: &str) {
+        for session in &mut self.0 {
+            if session.row.session_id == chat && session.stop == Stop::None {
+                session.row.state = "releasing".into();
+                session.opened = Instant::now();
+            }
+        }
+    }
+    pub(super) fn resumed(&mut self, id: &str, chat: &str, turn: Option<&str>) {
+        for session in &mut self.0 {
+            if session.id == id && session.row.session_id == chat && session.stop == Stop::None {
+                session.row.state = "active".into();
+                session.turn = turn.map(str::to_owned);
+                session.opened = Instant::now();
+            }
+        }
+    }
     pub(super) fn end(&mut self, chat: &str, deleted: bool) {
         if deleted {
             self.0.retain(|session| session.row.session_id != chat);
@@ -129,7 +157,10 @@ impl Work {
         for session in &mut self.0 {
             if session.id == helper
                 && session.row.session_id == chat
-                && matches!(session.row.state.as_str(), "active" | "connecting")
+                && matches!(
+                    session.row.state.as_str(),
+                    "active" | "connecting" | "idle" | "releasing"
+                )
             {
                 session.row.state = "stopping".into();
                 session.stop = Stop::Requested;
@@ -169,7 +200,10 @@ impl Work {
             .filter(|session| {
                 session.opened <= started
                     && session.stop == Stop::None
-                    && matches!(session.row.state.as_str(), "active" | "connecting")
+                    && matches!(
+                        session.row.state.as_str(),
+                        "active" | "connecting" | "idle" | "releasing"
+                    )
                     && rows.iter().any(|row| {
                         row["sessionId"] == session.id
                             && matches!(row["state"].as_str(), Some("stopping" | "stopped"))
@@ -179,6 +213,9 @@ impl Work {
                 chat: session.row.session_id.clone(),
                 browser: Browser::from_profile(&session.profile),
                 turn: session.turn.clone(),
+                connection_ended: rows.iter().any(|row| {
+                    row["sessionId"] == session.id && super::person_stop::connection_ended(row)
+                }),
             })
             .collect()
     }
@@ -211,9 +248,13 @@ impl Work {
             let row = &session.row;
             if let Some(current) = rows.iter_mut().find(|r| r.session_id == row.session_id) {
                 // A chat has one display row; either browser's live work keeps it active.
-                if matches!(row.state.as_str(), "active" | "connecting" | "stopping")
-                    || !matches!(current.state.as_str(), "active" | "connecting" | "stopping")
-                {
+                if matches!(
+                    row.state.as_str(),
+                    "active" | "connecting" | "releasing" | "stopping"
+                ) || !matches!(
+                    current.state.as_str(),
+                    "active" | "connecting" | "releasing" | "stopping"
+                ) {
                     current.clone_from(row);
                 }
             } else {
@@ -247,7 +288,12 @@ impl Work {
             if state.is_none() && session.row.state == "stopped" {
                 continue;
             }
-            if session.stop != Stop::None && matches!(state, Some("active" | "connecting")) {
+            if session.row.state == "releasing" && matches!(state, Some("active" | "connecting")) {
+                continue;
+            }
+            if session.stop != Stop::None
+                && matches!(state, Some("active" | "connecting" | "idle" | "releasing"))
+            {
                 continue;
             }
             if matches!(state, Some("stopping" | "stopped")) {
@@ -260,7 +306,7 @@ impl Work {
                 session.id == *id
                     && matches!(
                         session.row.state.as_str(),
-                        "active" | "connecting" | "stopping"
+                        "active" | "connecting" | "releasing" | "idle" | "stopping"
                     )
             })
         });
@@ -269,7 +315,7 @@ impl Work {
 }
 fn display_state(state: &str) -> &str {
     match state {
-        "active" | "connecting" | "stopping" | "stopped" => state,
+        "active" | "connecting" | "releasing" | "idle" | "stopping" | "stopped" => state,
         _ => "disconnected",
     }
 }
@@ -317,18 +363,43 @@ mod tests {
                 edge.then(|| super::super::person_stop::Stopped {
                     chat: "a".into(),
                     browser: Browser::from_profile("edge:p"),
-                    turn: None
+                    turn: None,
+                    connection_ended: false,
                 }),
                 Some(super::super::person_stop::Stopped {
                     chat: "b".into(),
                     browser: Browser::from_profile("chrome:p"),
-                    turn: None
+                    turn: None,
+                    connection_ended: false,
                 }),
             ]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn only_a_connection_loss_reason_drops_the_person_attribution() {
+        for (reason, ended) in [
+            (json!("ADAPTER_DISCONNECTED"), true),
+            (json!("SESSION_CHANGED"), true),
+            (json!("LEASE_EXPIRED"), true),
+            (json!("STOP_REQUESTED"), false),
+            (json!(null), false),
+            (json!("SOMETHING_NEW"), false),
+        ] {
+            let mut work = Work::default();
+            work.open("task", "chat", "active", "chrome:p", Some("one"));
+            let stopped = work.stopped_unasked(
+                &[json!({"sessionId":"task","state":"stopped","suspensionReason":reason})],
+                Instant::now(),
+            );
+            assert_eq!(stopped.len(), 1, "{reason}");
+            assert_eq!(stopped[0].connection_ended, ended, "{reason}");
+            let words = super::super::person_stop::notice(&stopped[0]);
+            assert_eq!(words.ends_with(" by you"), !ended, "{reason}: {words}");
+        }
     }
 
     #[test]
@@ -356,7 +427,8 @@ mod tests {
                 vec![super::super::person_stop::Stopped {
                     chat: "chat".into(),
                     browser: Browser::from_profile("chrome:p"),
-                    turn: None
+                    turn: None,
+                    connection_ended: false,
                 }]
             );
         }

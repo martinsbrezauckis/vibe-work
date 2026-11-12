@@ -398,7 +398,7 @@ async fn refusal_names_your_stop_and_ends_browser_calls() {
                     .await
                     .unwrap_err(),
                 format!(
-                    "Not run: the person pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+                    "Not run: the user pressed Stop in {}. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
                     browser.name()
                 )
             );
@@ -597,7 +597,7 @@ async fn an_inflight_reply_keeps_the_person_stop_reason_after_turn_end() {
 }
 
 #[cfg(feature = "your-edge")]
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn stops_of_both_browsers_share_one_turn_interrupt() {
     let core = fixture("browser-both-stop", "chrome:p").await;
     core.shared.chrome_control.work.lock().unwrap().open(
@@ -620,7 +620,62 @@ async fn stops_of_both_browsers_share_one_turn_interrupt() {
             {"sessionId":"task-a","state":"stopped"}, {"sessionId":"edge-task","state":"stopped"}, {"sessionId":"task-b","state":"active"}
         ]}}),
     );
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::task::yield_now().await;
     assert_eq!(calls.lock().unwrap().len(), 1);
     core.shutdown().await;
+}
+
+/// A session the helper ended because its browser connection was lost (its owned window closed:
+/// `suspensionReason` `ADAPTER_DISCONNECTED`) still ends the turn once, but the chat never says the person stopped it.
+async fn connection_end_is_not_attributed_to_the_person(profile: &str, browser: &str) {
+    let core = fixture(&format!("connection-ended-{browser}"), profile).await;
+    let mut events = core.subscribe(None);
+    let calls = runtime(&core);
+    owner::update_work_for_test(
+        &core.shared,
+        &json!({"structuredContent":{"sessions":[
+            {"sessionId":"task-a","state":"stopped","suspensionReason":"ADAPTER_DISCONNECTED"},
+            {"sessionId":"task-b","state":"active","suspensionReason":null}
+        ]}}),
+    );
+    let notice = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let value = serde_json::to_value(events.next().await.unwrap()).unwrap();
+            if value["change"]["kind"] == "notice" {
+                break value;
+            }
+        }
+    })
+    .await
+    .expect("the ended browser session must leave a notice in its chat");
+    assert_eq!(notice["change"]["sessionId"], "a");
+    assert_eq!(
+        notice["change"]["params"]["warning"]["message"],
+        format!("Stopped in Your {browser}: the browser connection ended")
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while core.shared.store.view("a").unwrap().state["turns"][0]["status"] != "interrupted" {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("a lost browser connection still ends the turn");
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![json!({"sessionId":"a","expectedTurnId":"one"})]
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn chrome_connection_end_is_not_attributed_to_the_person() {
+    connection_end_is_not_attributed_to_the_person("chrome:p", "Chrome").await;
+}
+
+#[cfg(feature = "your-firefox")]
+#[tokio::test]
+async fn owned_firefox_window_end_is_not_attributed_to_the_person() {
+    connection_end_is_not_attributed_to_the_person("firefox:agent", "Firefox").await;
 }

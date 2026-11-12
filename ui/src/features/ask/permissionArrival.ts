@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 
 const TYPING_MS = 1000;
-const KEY_GRACE_MS = 500;
+export const KEY_GRACE_MS = 500;
 let lastKey = -Infinity;
 
 /**

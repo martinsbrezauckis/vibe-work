@@ -71,6 +71,7 @@ mod tests {
                 vec![Choice::Once, Choice::No],
                 None,
                 false,
+                None,
             );
             let delivery = service.reserve(&handle.ask.id, AnsweredBy::Person).unwrap();
             assert!(
@@ -94,7 +95,7 @@ mod tests {
             Arc::new(super::super::SystemAskClock::default()),
             tokio::sync::broadcast::channel(16).0,
         );
-        let handle = service.open_callback("approval", None, vec![Choice::Once], None, false);
+        let handle = service.open_callback("approval", None, vec![Choice::Once], None, false, None);
         drop(service.reserve(&handle.ask.id, AnsweredBy::Person).unwrap());
         assert_eq!(
             service.records()[0].outcome,

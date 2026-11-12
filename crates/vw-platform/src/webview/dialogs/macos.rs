@@ -1,5 +1,7 @@
 //! `WKWebView` UI/navigation delegate proxies hold native dialog completion blocks on the main thread.
 //! Unhandled selectors forward to Wry's retained delegates, preserving navigation, popups, file pickers and downloads.
+//! Depends on: Objective-C delegate forwarding and the shared dialog hub.
+//! Called by: the macOS webview dialog adapter.
 use super::{Admit, Hub, hold};
 use block2::Block;
 use objc2::{

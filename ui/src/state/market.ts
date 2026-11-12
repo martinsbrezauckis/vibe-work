@@ -186,7 +186,7 @@ export function createMarket(deps: {
         installing: null,
         note:
           p.phase === "installed"
-            ? `${name} is installed. New sessions use it; open sessions pick it up when Vibe reloads their plugins.`
+            ? `${name} is installed. New chats use it; open chats pick it up when Vibe reloads their plugins.`
             : p.phase === "failed"
               ? `${name} was not installed: ${p.message ?? "unknown error"}`
               : `Stopped installing ${name}.`,

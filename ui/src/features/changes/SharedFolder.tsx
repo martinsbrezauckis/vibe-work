@@ -66,13 +66,13 @@ export function SharedFolderNote({
   sessions: readonly FolderSession[];
 }): ReactElement {
   const first = sessions[0];
-  const name = first?.title ?? "another session";
+  const name = first?.title ?? "another chat";
   return (
     <p className="shared-note" role="note">
       {sessions.length === 1
         ? `"${name}" is working in this folder.`
-        : `${String(sessions.length)} sessions are working in this folder.`}{" "}
-      Give the new session its own copy (a git worktree), so neither changes the other&apos;s files.
+        : `${String(sessions.length)} chats are working in this folder.`}{" "}
+      Give the new chat its own copy (a git worktree), so neither changes the other&apos;s files.
     </p>
   );
 }

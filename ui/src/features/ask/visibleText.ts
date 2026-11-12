@@ -1,4 +1,6 @@
-/** Visible permission-card text; used by every card adapter without changing execution or answer bytes. */
+/** Visible permission-card text; used by every card adapter without changing execution or answer bytes.
+ * Depends on: transcript diff value types. Called by: permission card adapters.
+ */
 import type { FileDiff } from "../transcript/model/diff";
 
 /** Escape controls and Unicode default-ignorables so they cannot hide or reorder an approved target. */

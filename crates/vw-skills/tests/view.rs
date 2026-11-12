@@ -47,6 +47,14 @@ fn merges_update_disabled_project_shadow_and_reported_sources() {
     assert_eq!(review.latest_version, Some(4));
     assert!(review.update_available);
     assert_eq!(review.installations.len(), 2);
+    assert!(
+        !review.installations[0].active,
+        "the shadowed global pin is inactive"
+    );
+    assert!(
+        review.installations[1].active,
+        "the project winner is active"
+    );
     assert_eq!(review.installations[0].scope, SkillScope::Global);
     assert_eq!(review.installations[1].scope, SkillScope::Project);
     assert_eq!(

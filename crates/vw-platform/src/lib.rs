@@ -16,23 +16,32 @@ pub mod browser;
 pub mod checked_executable;
 pub mod child_env;
 pub mod clipboard;
+pub use clipboard::content as clipboard_content;
 pub mod screen_reader;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub mod search_directory;
 pub use background::lower_thread_priority;
 #[cfg(target_os = "macos")]
+pub mod app_copies;
+#[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod clipboard_mac;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(
+    target_os = "macos",
+    windows,
+    all(target_os = "linux", feature = "startup-dialog")
+))]
 #[allow(unsafe_code)]
 pub mod confirm_window;
 #[cfg(all(feature = "webview", target_os = "macos"))]
 #[allow(unsafe_code)]
 pub mod content_rules;
+pub mod edge_policy;
 mod event_target;
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 mod exec_inherit;
+pub mod extension_registry;
 pub mod final_path;
 mod harden;
 mod in_front;
@@ -144,6 +153,5 @@ pub mod vault_keychain;
 #[allow(unsafe_code)]
 pub mod vault_tpm;
 
-#[cfg(test)]
-#[path = "vault_keychain/contract_tests.rs"]
-mod vault_keychain_contract_tests;
+#[cfg(feature = "safari-input")]
+pub mod safari_input;

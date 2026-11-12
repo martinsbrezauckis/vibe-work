@@ -5,14 +5,19 @@
 //! 1. Download uv: Astral's archive, SHA-256 checked before unpacking; only `uv(.exe)` is taken out.
 //! 2. Install Python: `uv python install <py> --no-bin` (+ `--no-registry` on Windows: no PEP 514 registry entry)
 //!    into the install folder (`UV_PYTHON_INSTALL_DIR`); nothing on PATH.
-//! 3. Create the environment: `uv venv --python <py> --no-project --no-config <venv>` (no Python download here).
+//! 3. Create the environment: `uv venv --python <py> --no-project --no-config --clear <venv>` (no Python download
+//!    here; `--clear` replaces a venv an earlier attempt left in the app-owned install folder).
 //! 4. Install Vibe: `uv pip install --require-hashes --only-binary:all: --no-deps --compile-bytecode --link-mode
 //!    copy --index-url https://pypi.org/simple --no-config -r requirements.txt` (every package and hash pinned; no
 //!    source builds; `--no-deps`: the file is the complete install set, so a security override in it is installed
 //!    even where `mistral-vibe`'s own metadata pins the older version, and nothing outside the file is resolved in;
 //!    bytecode compiled once so the first start is fast; copies, so the uv cache can go).
 //! 5. Check: the `mistral_vibe-<version>.dist-info` and the server executable exist; sizes; `installed.json`.
-//! 6. Start Vibe: the `on_ready` hook.
+//! 6. Start Vibe: the `on_ready` hook. Its progress keeps counting while it waits (the first start after an install
+//!    can take a minute or more on Windows while antivirus software checks the new files).
+//!
+//! Try again after a failed start: when this version's install is complete (`installed.json` matches the pinned
+//! requirements and uv), steps 1-5 are not repeated; only step 6 runs again ([`reusable`]).
 //!
 //! Every uv step: `UV_NO_CONFIG=1` (a user's uv.toml / index settings cannot redirect it), `UV_CACHE_DIR` in the
 //! install folder, `UV_SYSTEM_CERTS=1` (the OS trust store, so corporate CAs work), `UV_NO_PROGRESS=1`, the proxy
@@ -29,7 +34,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use tracing::{info, warn};
@@ -122,6 +127,9 @@ pub(crate) fn steps(sources: &Sources, layout: &Layout, limits: &Limits) -> Vec<
                 os(&sources.python),
                 os("--no-project"),
                 os("--no-config"),
+                // Only ever the app-owned `<install folder>/venv`: a venv left by an earlier attempt is replaced
+                // instead of failing the step (uv refuses an existing venv without it).
+                os("--clear"),
                 layout.venv().into_os_string(),
             ],
             limit: limits.venv,
@@ -236,7 +244,14 @@ pub(crate) async fn install(inner: Arc<Inner>, job: Job, cancel: watch::Receiver
         return;
     }
     let layout = &job.layout;
-    match install_steps(&run, &job, cancel).await {
+    let outcome = match reusable(&job) {
+        Some(record) => {
+            info!("the install is complete; only Vibe is started again");
+            Ok(record)
+        }
+        None => install_steps(&run, &job, cancel).await,
+    };
+    match outcome {
         Ok(record) => {
             info!(
                 ms = record.install_ms,
@@ -270,6 +285,16 @@ pub(crate) async fn install(inner: Arc<Inner>, job: Job, cancel: watch::Receiver
             inner.publish(&state);
         }
     }
+}
+
+/// This version's finished install, when it was made from exactly the pinned requirements and uv: a retry after a
+/// failed start uses it as it is (re-running the steps would only repeat the downloads and make the next start cold
+/// again). `None` for anything else, which runs the full install.
+fn reusable(job: &Job) -> Option<Installed> {
+    job.layout.installed().filter(|record| {
+        record.requirements_sha256 == job.sources.requirements_sha256
+            && record.uv == job.sources.uv_version
+    })
 }
 
 /// The end of an update install: `active.json` names the new version (the next start uses it) and the update
@@ -320,7 +345,7 @@ pub(crate) async fn start(
         inner.publish(&state);
     }
     let outcome = match inner.on_ready() {
-        Some(hook) => hook(server).await,
+        Some(hook) => waiting_start(inner, hook(server), step, index).await,
         None => Ok(()),
     };
     let mut state = inner.lock();
@@ -352,6 +377,39 @@ pub(crate) async fn start(
         state.deferred_support = None;
     }
     inner.publish(&state);
+}
+
+/// Shown under a start that takes longer than [`SLOW_START`]: the first start after an install reads every new file
+/// cold, and antivirus software checks each one first (42.6 s measured on a fresh Windows 11 with Defender).
+const SLOW_START_NOTE: &str = "The first start after an install can take a few minutes while the computer checks the new files.";
+const SLOW_START: Duration = Duration::from_secs(5);
+
+/// Waits for the start hook while the step's elapsed time keeps counting on the view (once a second), so a slow first
+/// start reads as progress rather than a stalled screen.
+async fn waiting_start(
+    inner: &Arc<Inner>,
+    start: impl std::future::Future<Output = Result<(), String>>,
+    step: &str,
+    index: u32,
+) -> Result<(), String> {
+    let started = Instant::now();
+    tokio::pin!(start);
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            outcome = &mut start => return outcome,
+            _ = tick.tick() => {
+                let elapsed = started.elapsed();
+                let note = if elapsed >= SLOW_START { SLOW_START_NOTE } else { "" };
+                let mut state = inner.lock();
+                if matches!(state.phase, InstallPhase::Installing { .. }) {
+                    state.phase = installing(step, index, millis(started), note.to_owned());
+                    inner.publish(&state);
+                }
+            }
+        }
+    }
 }
 
 fn fail(step: &str, kind: FailKind, error: String, tail: String) -> Failure {
@@ -496,7 +554,7 @@ async fn run_uv_steps(
             fail(
                 &step.name,
                 kind,
-                format!("{} {error}", step.name),
+                format!("{} did not finish: {error}", step.name),
                 tail.text(),
             )
         })?;

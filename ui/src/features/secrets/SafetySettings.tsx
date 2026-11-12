@@ -30,7 +30,10 @@ export function SafetySettings() {
         if (live) setView(v);
       })
       .catch((thrown: unknown) => {
-        if (live) setError(problem(thrown));
+        if (live)
+          setError(
+            `Could not read safety settings: ${problem(thrown).replace(/\.$/, "")}. Try again.`,
+          );
       });
     return () => {
       live = false;
@@ -47,7 +50,9 @@ export function SafetySettings() {
         setView(v);
       })
       .catch((thrown: unknown) => {
-        setError(problem(thrown));
+        setError(
+          `Could not save safety settings: ${problem(thrown).replace(/\.$/, "")}. Try again.`,
+        );
       })
       .finally(() => {
         setBusy(false);

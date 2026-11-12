@@ -227,7 +227,11 @@ fn browser_act(request: &BrowserRequest) -> Option<&'static str> {
             Some("browser.act.fill")
         }
         // No vault: page reads (key-like text hidden), other actions, state, annotations, screenshots.
-        BrowserRequest::Tabs { .. }
+        BrowserRequest::Preferences {}
+        | BrowserRequest::SetComposerBrowser { .. }
+        | BrowserRequest::SetBuiltinEnabled { .. }
+        | BrowserRequest::Share { .. }
+        | BrowserRequest::Tabs { .. }
         | BrowserRequest::OpenTab { .. }
         | BrowserRequest::SwitchTab { .. }
         | BrowserRequest::CloseTab { .. }

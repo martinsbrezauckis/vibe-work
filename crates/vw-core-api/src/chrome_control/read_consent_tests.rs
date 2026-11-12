@@ -80,17 +80,18 @@ async fn discovery_names_write_approval_and_keeps_reads_available_in_ask() {
         .as_array()
         .unwrap();
     for row in rows {
-        let asks = matches!(row["action"].as_str(), Some("page.type" | "raw.execute"));
+        let asks = row["action"] == "page.type";
+        let secret = row["action"] == "raw.execute";
         assert_eq!(row["approvalRequired"] == true, asks, "{row}");
-        assert_eq!(row["allowedInThisMode"] == true, !asks, "{row}");
-        assert!(row.get("needs").is_none(), "{row}");
+        assert_eq!(row["allowedInThisMode"] == true, !asks && !secret, "{row}");
+        assert_eq!(row.get("needs").is_some(), secret, "{row}");
     }
     core.shutdown().await;
 }
 
 #[tokio::test]
 async fn browser_writes_wait_for_once_session_or_no_before_any_helper_effect() {
-    for action in ["page.type", "raw.execute"] {
+    for action in ["page.type", "page.commit"] {
         for decision in ["approve", "approve_for_session", "deny"] {
             let core = core(&format!("browser-write-{action}-{decision}")).await;
             let seen = test_support::answering(&core.shared, |tool, args| {
@@ -139,10 +140,7 @@ async fn browser_writes_wait_for_once_session_or_no_before_any_helper_effect() {
                 let caps = call["_approvedCapabilities"].as_array().unwrap();
                 assert!(caps.contains(&json!("page.edit")));
                 assert!(caps.contains(&json!("page.commit")));
-                assert_eq!(
-                    caps.contains(&json!("raw.execute")),
-                    action == "raw.execute"
-                );
+                assert!(!caps.contains(&json!("raw.execute")));
                 drop(calls);
                 if decision == "approve_for_session" {
                     let changed = json!({"sessionId":"t","action":"files.upload","args":{"paths":["different.txt"]}});
@@ -167,7 +165,7 @@ async fn browser_writes_wait_for_once_session_or_no_before_any_helper_effect() {
 async fn write_consent_cannot_survive_a_planning_mode_or_authorize_a_direct_call() {
     let core = core("browser-write-mode-change").await;
     let seen = test_support::answering(&core.shared, |_, _| panic!("no helper call"));
-    let args = json!({"sessionId":"t","action":"raw.execute","args":{}});
+    let args = json!({"sessionId":"t","action":"page.commit","args":{}});
     assert!(
         super::gateway::call(&core.shared, "s", "chrome_execute", args.clone())
             .await

@@ -1,7 +1,10 @@
 /** Browser availability and shared connection controls. Uses confirmed core state; called by BrowserSettings. */
 import { type ReactElement, useState } from "react";
 import { Button, SettingsRow, Switch } from "../../../components/Controls";
+import { BrowserComposerSettings } from "../BrowserComposerSettings";
 import { ChromeRemoveDialog } from "./ChromeDialogs";
+import { FirefoxConnection } from "./FirefoxConnection";
+import { BrowserProfiles } from "./BrowserProfiles";
 import { ChromeConnection } from "./ChromeConnection";
 import { chromeAvailable } from "./chromeRows";
 import { useChromeControl } from "./useChromeControl";
@@ -49,54 +52,26 @@ export function YourChromeSettings({
               : "Extension not installed"}
         </p>
       ) : null}
-      {firefox ? (
-        <SettingsRow data-setting="firefox-control-status">
+      {browser === "Safari" && view?.safari?.otherAppCopies?.length ? (
+        <SettingsRow data-setting="safari-other-copies">
           <span>
-            Connection
-            <span className="d" role="status">
-              {chrome.readError !== null && view === null
-                ? "State unavailable"
-                : view?.setup.pairing}
-            </span>
+            Other app copies
+            {view.safari.otherAppCopies.map((path) => (
+              <span className="d" key={path}>
+                {path}
+              </span>
+            ))}
           </span>
-          <Button
-            data-testid="settings.firefox-window"
-            shape="outlined"
-            disabled={
-              busy ||
-              view.setup.pairingState === "blocked" ||
-              !view.setup.package ||
-              view.setup.pairingState === "notInstalled" ||
-              view.setup.pairingState === "connecting"
-            }
-            onClick={() => {
-              if (view === null) return;
-              void chrome.run(
-                !view.enabled
-                  ? { op: "setEnabled", enabled: true }
-                  : {
-                      op: view.setup.pairingState === "windowOpen" ? "closeFirefox" : "openFirefox",
-                    },
-                "window",
-              );
-            }}
-          >
-            {view?.setup.pairingState === "connecting"
-              ? "Starting…"
-              : view?.enabled === false
-                ? "Turn on"
-                : view?.setup.pairingState === "windowOpen"
-                  ? "Close"
-                  : "Open window"}
-          </Button>
         </SettingsRow>
+      ) : null}
+      {firefox ? (
+        <FirefoxConnection chrome={chrome} />
       ) : (
         <ChromeConnection chrome={chrome} browser={browser} showSwitch />
       )}
-      {firefox ? (
-        <p className="key-line">Other programs on this computer can also control this Firefox.</p>
-      ) : null}
-      {(setUp || browser === "Safari") && !firefox ? (
+      <BrowserProfiles browser={browser} chrome={chrome} />
+      <BrowserComposerSettings browser={browser} />
+      {setUp || browser === "Safari" || firefox ? (
         <SettingsRow data-setting={`${prefix}-control-enabled`}>
           <span>{useMyBrowser}</span>
           <Switch
@@ -120,7 +95,7 @@ export function YourChromeSettings({
           {chrome.status?.text ?? ""}
         </p>
       ) : null}
-      {setUp && !firefox && !removeRequired ? (
+      {(setUp || firefox) && !removeRequired ? (
         <SettingsRow data-setting={`${prefix}-control-remove`}>
           <span>Remove from Vibe Work</span>
           <Button

@@ -74,6 +74,18 @@ const PAGE: &str = "document.body.innerHTML = `\
 window.seen = []; for (const f of document.querySelectorAll('input[type=file]')) for (const t of ['input','change']) \
 f.addEventListener(t, () => seen.push(t + ':' + f.id + ':' + Array.from(f.files).map(x => x.name + '/' + x.size).join(',')));";
 
+#[tokio::test]
+async fn upload_does_not_claim_success_when_the_page_replaces_the_file() {
+    let rig = Rig::new().await;
+    rig.engine.eval(PAGE).await;
+    rig.engine.eval("document.getElementById('one').addEventListener('change',event=>{const data=new DataTransfer();data.items.add(new File(['changed'],'different.txt'));event.target.files=data.files;});").await;
+    let result = upload(&rig, "Your report", vec![file("report.txt", 10)]).await;
+    assert!(
+        result.is_err(),
+        "replaced file reported as uploaded: {result:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn upload_sets_the_files_and_the_page_sees_input_and_change() {
     let rig = Rig::new().await;

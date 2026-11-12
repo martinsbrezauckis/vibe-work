@@ -22,7 +22,6 @@ import { registerClipboard } from "../../state/clipboard";
 
 import { runUiControl } from "../../state/uiControl";
 import { feedbackFor } from "../../state/feedback";
-import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import { useApp } from "./AppContext";
 import { shellActions } from "./actions";
 import { useSessionWiring } from "../sessions/useSessionWiring";
@@ -87,7 +86,7 @@ export function useShellWiring(): void {
     };
   }, [app]);
   useEffect(() => startReplyAnnouncements(app), [app]);
-  useEffect(guardActivationClick, []);
+  useEffect(() => guardActivationClick(app.core?.client.desktop?.subscribeFocus), [app]);
   useEffect(startPromptActivity, []);
   useEffect(
     () =>
@@ -265,7 +264,7 @@ export function useShellWiring(): void {
     const active = () =>
       core.client.kind !== "tauri" ||
       core.store.get().debugApi.enabled ||
-      (FEEDBACK_ENABLED && feedbackFor(core).store.get().capturing);
+      feedbackFor(core).store.get().capturing;
     void runUiControl(core.client.uiControl, app.uiControl, active, abort.signal);
     return () => {
       abort.abort();

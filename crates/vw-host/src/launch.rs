@@ -11,6 +11,7 @@
 //! - `VW_DEV_HOME_TEMPLATE`: a `config.toml` copied into the dev `VIBE_HOME`
 //!   (default `<repo>/data/vibe-home-template/config.toml`).
 //! - `VW_DEV_RUN_DIR`: the run folder (default `<repo>/.scratch/dev-app`, git-ignored).
+//! - `VW_DEV_VIBE_KEYRING=os` (Windows): keep Vibe's OS keyring, see [`keep_os_keyring`] (read by `app`).
 //!
 //! Depends on: vw-supervisor (`SupervisorConfig`), vw-keys (`.env` key removal). Called by: `app` in
 //! development builds (user builds use [`ProductLaunch`] through [`crate::product`]), the
@@ -178,15 +179,37 @@ impl DevLaunch {
         ];
         // Windows without an interactive logon (e.g. over SSH) has no usable Credential Manager
         // (error 1312); a dev run takes its key from a supplied proxy placeholder, so Vibe's keyring
-        // is switched off (same as the live tests).
+        // is switched off (same as the live tests). A run in the interactive session can keep it: [`keep_os_keyring`].
         if cfg!(windows) {
-            supervisor.extra_env.push((
-                "PYTHON_KEYRING_BACKEND".to_owned(),
-                OsString::from("keyring.backends.null.Keyring"),
-            ));
+            supervisor
+                .extra_env
+                .push((KEYRING_BACKEND_VAR.to_owned(), OsString::from(NULL_KEYRING)));
         }
         Ok(supervisor)
     }
+}
+
+/// Python keyring's backend switch, and the null backend a Windows dev launch sets with it.
+const KEYRING_BACKEND_VAR: &str = "PYTHON_KEYRING_BACKEND";
+const NULL_KEYRING: &str = "keyring.backends.null.Keyring";
+
+/// The development switch that keeps Vibe's OS keyring in a dev launch: `VW_DEV_VIBE_KEYRING=os`.
+pub const DEV_VIBE_KEYRING_VAR: &str = "VW_DEV_VIBE_KEYRING";
+
+/// Undoes [`DevLaunch`]'s null keyring when `value` (the [`DEV_VIBE_KEYRING_VAR`] value) is exactly `os`: for a test
+/// run in the interactive logon session, where Windows Credential Manager works (a test runner started in the
+/// console session rather than over a remote shell), so Vibe keeps MCP OAuth tokens in the OS
+/// keyring as a user build ([`ProductLaunch`]) does. Any other value or unset leaves `config` as it is; only the
+/// null backend entry this module adds is removed, never a backend set some other way. Returns whether it was removed.
+pub fn keep_os_keyring(config: &mut SupervisorConfig, value: Option<&std::ffi::OsStr>) -> bool {
+    if value.is_none_or(|v| v != "os") {
+        return false;
+    }
+    let before = config.extra_env.len();
+    config
+        .extra_env
+        .retain(|(name, backend)| !(name == KEYRING_BACKEND_VAR && backend == NULL_KEYRING));
+    config.extra_env.len() != before
 }
 
 /// How a user build starts `vibe-app-server`: Vibe Work's own `VIBE_HOME`

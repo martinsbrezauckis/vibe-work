@@ -1,0 +1,240 @@
+[
+  {
+    "name": "append Unicode suffix",
+    "document": {
+      "text": "hello"
+    },
+    "operations": [
+      {
+        "op": "append",
+        "path": "/text",
+        "value": " 🌍"
+      }
+    ],
+    "expected": {
+      "text": "hello 🌍"
+    },
+    "error": false
+  },
+  {
+    "name": "append root string",
+    "document": "a",
+    "operations": [
+      {
+        "op": "append",
+        "path": "",
+        "value": "b"
+      }
+    ],
+    "expected": "ab",
+    "error": false
+  },
+  {
+    "name": "test then replace",
+    "document": {
+      "x": [1, 2]
+    },
+    "operations": [
+      {
+        "op": "test",
+        "path": "/x/0",
+        "value": 1
+      },
+      {
+        "op": "replace",
+        "path": "/x/1",
+        "value": 3
+      }
+    ],
+    "expected": {
+      "x": [1, 3]
+    },
+    "error": false
+  },
+  {
+    "name": "array insert and end",
+    "document": [1, 3],
+    "operations": [
+      {
+        "op": "add",
+        "path": "/1",
+        "value": 2
+      },
+      {
+        "op": "add",
+        "path": "/-",
+        "value": 4
+      }
+    ],
+    "expected": [1, 2, 3, 4],
+    "error": false
+  },
+  {
+    "name": "escaped pointer",
+    "document": {
+      "a/b": {
+        "~key": "old"
+      }
+    },
+    "operations": [
+      {
+        "op": "replace",
+        "path": "/a~1b/~0key",
+        "value": "new"
+      }
+    ],
+    "expected": {
+      "a/b": {
+        "~key": "new"
+      }
+    },
+    "error": false
+  },
+  {
+    "name": "remove object and array entry",
+    "document": {
+      "a": [1, 2, 3],
+      "b": null
+    },
+    "operations": [
+      {
+        "op": "remove",
+        "path": "/b"
+      },
+      {
+        "op": "remove",
+        "path": "/a/1"
+      }
+    ],
+    "expected": {
+      "a": [1, 3]
+    },
+    "error": false
+  },
+  {
+    "name": "root replacement",
+    "document": {
+      "a": 1
+    },
+    "operations": [
+      {
+        "op": "replace",
+        "path": "",
+        "value": [2]
+      }
+    ],
+    "expected": [2],
+    "error": false
+  },
+  {
+    "name": "failed test rolls back append and insertion",
+    "document": {
+      "a": ["x"],
+      "text": "start"
+    },
+    "operations": [
+      {
+        "op": "append",
+        "path": "/text",
+        "value": " end"
+      },
+      {
+        "op": "add",
+        "path": "/a/0",
+        "value": "new"
+      },
+      {
+        "op": "test",
+        "path": "/a/1",
+        "value": "wrong"
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "missing replace rolls back remove",
+    "document": {
+      "a": [1, 2]
+    },
+    "operations": [
+      {
+        "op": "remove",
+        "path": "/a/0"
+      },
+      {
+        "op": "replace",
+        "path": "/missing",
+        "value": 1
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "append rejects nonstrings",
+    "document": {
+      "a": 1
+    },
+    "operations": [
+      {
+        "op": "append",
+        "path": "/a",
+        "value": "x"
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "unknown wire operation",
+    "document": {
+      "a": 1
+    },
+    "operations": [
+      {
+        "op": "move",
+        "path": "/b",
+        "from": "/a"
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "array leading zero refused",
+    "document": [1, 2],
+    "operations": [
+      {
+        "op": "remove",
+        "path": "/01"
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "out of bounds array refused",
+    "document": [1],
+    "operations": [
+      {
+        "op": "add",
+        "path": "/2",
+        "value": 2
+      }
+    ],
+    "expected": null,
+    "error": true
+  },
+  {
+    "name": "empty patch",
+    "document": {
+      "a": null
+    },
+    "operations": [],
+    "expected": {
+      "a": null
+    },
+    "error": false
+  }
+]

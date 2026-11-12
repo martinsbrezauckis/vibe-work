@@ -1,7 +1,8 @@
 """Hold one real file read, without replacing Vibe or any protocol response.
 
 Called by real_process_fault before forwarding a resume. Unix uses a FIFO with the
-original bytes; Windows holds an NTFS oplock. EOF releases either fault early.
+original bytes; Windows holds an NTFS oplock. EOF or an optional marker releases
+either fault early; the deadline remains a cleanup bound if the test fails.
 """
 import ctypes
 import os
@@ -20,6 +21,17 @@ def on_eof():
 
 
 threading.Thread(target=on_eof, daemon=True).start()
+if len(sys.argv) > 3:
+    marker = Path(sys.argv[3])
+
+    def on_marker():
+        while not release.wait(0.01):
+            if marker.exists():
+                release.set()
+                return
+
+    threading.Thread(target=on_marker, daemon=True).start()
+
 if os.name == "nt":
     from ctypes import wintypes as w
 

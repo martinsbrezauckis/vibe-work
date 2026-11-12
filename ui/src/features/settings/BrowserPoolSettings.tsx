@@ -48,7 +48,10 @@ export function BrowserPoolSettings({
           setReadError(null);
         })
         .catch((thrown: unknown) => {
-          if (live) setReadError(toCallError(thrown).error.message);
+          if (live)
+            setReadError(
+              `Could not read browser settings: ${toCallError(thrown).error.message.replace(/\.$/, "")}. Try again.`,
+            );
         })
         .finally(() => {
           reading = false;
@@ -78,7 +81,9 @@ export function BrowserPoolSettings({
         setPool(result.result.pool);
       })
       .catch((thrown: unknown) => {
-        setSaveError(toCallError(thrown).error.message);
+        setSaveError(
+          `Could not save browser settings: ${toCallError(thrown).error.message.replace(/\.$/, "")}. Try again.`,
+        );
       })
       .finally(() => {
         setBusy(false);

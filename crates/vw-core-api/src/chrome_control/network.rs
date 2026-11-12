@@ -46,9 +46,11 @@ pub(super) async fn prepare(
     session: &str,
     args: &mut Value,
 ) -> Result<(), String> {
-    if super::agent_browser::selected(shared, session, "chrome_execute", args)
-        == super::agent_browser::Browser::Safari
-    {
+    let browser = super::agent_browser::selected(shared, session, "chrome_execute", args);
+    if browser == super::agent_browser::Browser::Firefox {
+        super::local_documents::prepare(shared, session, args).await?;
+    }
+    if browser == super::agent_browser::Browser::Safari {
         if URL_ACTIONS.contains(&args["action"].as_str().unwrap_or_default()) {
             let parsed = args["args"]["url"]
                 .as_str()
@@ -105,6 +107,28 @@ pub(super) async fn prepare(
         }
     }
     for destination in destinations {
+        if destination["action"] == "page.navigate"
+            && destination["args"]["url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("file:"))
+        {
+            let text = destination["args"]["url"].as_str().unwrap_or_default();
+            crate::browser_local::checked(shared, session, text).await?;
+            let result = super::page_plan::dispatch(
+                shared,
+                session,
+                &destination,
+                None,
+                json!([{"id":"state","op":"api","method":"permissions.status"}]),
+            )
+            .await?;
+            if result["status"] != "completed"
+                || result.pointer("/data/results/state/fileAccess") != Some(&json!(true))
+            {
+                return Err("Local file access is off or could not be confirmed. Ask the user to enable Allow access to file URLs in the extension's browser details, then retry page.navigate with this tabId.".into());
+            }
+            continue;
+        }
         check_url(url_policy, &destination)?;
     }
     args["_netPolicy"] = policy(local_network, &ports.allowed(true));
@@ -264,5 +288,81 @@ mod switch_delivery_tests {
         }
         assert!(ok, "acknowledged: applied");
         core.shutdown().await;
+    }
+}
+
+#[cfg(all(test, feature = "your-firefox"))]
+mod local_document_tests {
+    use super::*;
+    #[tokio::test]
+    async fn firefox_opens_only_a_confined_passive_snapshot_of_the_selected_file() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("local", &f.root, &[], false);
+        f.core.shared.access.observe_request(
+            "session/agent/update",
+            "local",
+            &json!({"agentName":"accept-edits"}),
+        );
+        f.core
+            .shared
+            .chrome_control
+            .tasks
+            .lock()
+            .unwrap()
+            .insert("owned".into(), "local".into());
+        f.core
+            .shared
+            .chrome_control
+            .chat_profiles
+            .lock()
+            .unwrap()
+            .insert("local".into(), "firefox:agent".into());
+        let path = f.root.join("article.html");
+        std::fs::write(
+            &path,
+            "<h1>Local article</h1><script>document.title='should not run'</script>",
+        )
+        .unwrap();
+        let mut source = url::Url::from_file_path(path).unwrap();
+        source.set_fragment(Some("section-2"));
+        let mut request = json!({"sessionId":"owned","action":"page.navigate","args":{"tabId":1,"url":source.as_str()}});
+        prepare(&f.core.shared, "local", &mut request)
+            .await
+            .unwrap();
+        assert!(
+            request["args"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("http://127.0.0.1:"),
+            "{request}"
+        );
+        let url = request["args"]["url"].as_str().unwrap();
+        assert_eq!(url::Url::parse(url).unwrap().fragment(), Some("section-2"));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let response = client.get(url).send().await.unwrap();
+        assert!(
+            response.headers()["content-security-policy"]
+                .to_str()
+                .unwrap()
+                .contains("script-src 'none'")
+        );
+        assert!(response.text().await.unwrap().contains("Local article"));
+        let sibling = url::Url::parse(url).unwrap().join("sibling.html").unwrap();
+        assert_eq!(
+            client.get(sibling).send().await.unwrap().status(),
+            reqwest::StatusCode::NOT_FOUND
+        );
+        f.core.shared.chrome_control.stop_chat("local");
+        if let Ok(response) = client.get(url).send().await {
+            assert!(
+                !response.status().is_success(),
+                "Stop must revoke a kept-alive preview connection"
+            );
+        }
+        f.finish().await;
     }
 }

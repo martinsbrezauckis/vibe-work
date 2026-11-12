@@ -52,6 +52,7 @@ fn ours_under(snapshot: &Snapshot, pid: u32, leader: u32, launchers: &[&str]) ->
                 "/env/Scripts/python.exe".into(),
                 "/base/python.exe".into(),
             ],
+            &adapter_path(),
         )
     })
 }
@@ -95,23 +96,35 @@ fn repeated_or_reordered_images_and_unreadable_owners_are_foreign() {
 #[test]
 fn only_an_executable_or_interpreter_script_position_names_the_server() {
     let program = Path::new("/test/vibe-app-server");
-    assert!(runs_program(&["/test/vibe-app-server".into()], program));
+    assert!(runs_program(
+        &["/test/vibe-app-server".into()],
+        program,
+        &adapter_path()
+    ));
     assert!(runs_program(
         &["python".into(), "/test/vibe-app-server".into()],
-        program
+        program,
+        &adapter_path()
     ));
     assert!(!runs_program(
         &["tap".into(), "--".into(), "/test/vibe-app-server".into()],
-        program
+        program,
+        &adapter_path()
     ));
-    assert!(!runs_program(&["/other/vibe-app-server".into()], program));
+    assert!(!runs_program(
+        &["/other/vibe-app-server".into()],
+        program,
+        &adapter_path()
+    ));
     assert!(runs_program(
         &["vibe-app-server".into(), String::new(), String::new()],
-        program
+        program,
+        &adapter_path()
     ));
     assert!(!runs_program(
         &["vibe-app-server".into(), "another-script".into()],
-        program
+        program,
+        &adapter_path()
     ));
 }
 #[test]
@@ -171,13 +184,19 @@ fn a_unix_script_server_is_matched_by_the_interpreter_its_first_line_names() {
     assert_eq!(launcher_images(&binary), std::slice::from_ref(&binary));
     std::fs::remove_dir_all(&dir).unwrap();
 }
-/// The command line of the adapter launch: `<env python> -P -c <adapter> <program> <mode args>`.
+/// The fixed verifier and private adapter file used by the actual supervisor launch.
+fn adapter_path() -> PathBuf {
+    vw_supervisor::adapter_path(Path::new("/app/vibe-home"))
+}
 fn adapter_cmdline(program: &Path) -> Vec<String> {
     vec![
         "/env/Scripts/python.exe".into(),
-        "-P".into(),
+        "-I".into(),
+        "-u".into(),
         "-c".into(),
-        vw_supervisor::CHILD_STOP_ADAPTER.into(),
+        vw_supervisor::ADAPTER_BOOTSTRAP.into(),
+        adapter_path().display().to_string(),
+        vw_supervisor::adapter_digest().into(),
         program.display().to_string(),
         "--multiplex".into(),
     ]
@@ -202,7 +221,7 @@ fn the_adapter_launch_is_ours_from_the_environment_python_down_to_its_base_pytho
     }
     let owned = |snapshot: &Snapshot, pid| {
         ancestors(snapshot, pid, 10)
-            .is_some_and(|chain| owns(snapshot, chain, 10, program, &[], &images))
+            .is_some_and(|chain| owns(snapshot, chain, 10, program, &[], &images, &adapter_path()))
     };
     assert!(owned(&snapshot, 10), "the spawned environment Python");
     assert!(
@@ -211,9 +230,13 @@ fn the_adapter_launch_is_ours_from_the_environment_python_down_to_its_base_pytho
     );
     assert!(!owned(&snapshot, 30), "a Python nested below our server");
     for (index, other) in [
-        (3, "print(1)"),
-        (4, "/other/vibe-app-server.exe"),
-        (1, "-I"),
+        (4, "print(1)"),
+        (5, "/tmp/other-adapter.py"),
+        (6, "wrong-digest"),
+        (7, "/other/vibe-app-server.exe"),
+        (8, "--other-mode"),
+        (1, "-P"),
+        (2, "-E"),
     ] {
         let mut changed = snapshot.clone();
         changed.processes.get_mut(&20).unwrap().cmdline[index] = other.into();
@@ -285,7 +308,8 @@ fn a_macos_framework_python_is_matched_by_the_app_its_stub_runs() {
         10,
         &server,
         &["/tap".into()],
-        &launcher_images(&server)
+        &launcher_images(&server),
+        &adapter_path()
     ));
     std::fs::remove_dir_all(&dir).unwrap();
 }

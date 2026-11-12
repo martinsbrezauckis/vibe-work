@@ -1,5 +1,6 @@
 //! App-owned gh discovery, credential acquisition and broker lifecycle. Core startup and settings call this.
-//! Depends on: `process_wrap`, `serde_json` and the core lifecycle. Called by: core startup, session launch and Settings.
+//! Depends on: `process_wrap`, `serde_json` and the core lifecycle. Called by: core startup, session launch, Settings
+//! and, for the shim's auth-failure marker, agent commands ([`refresh_if_marked`]); nothing here runs on a timer.
 //! Credentials travel only from app-side gh stdout to broker stdin, never into agent state or files.
 //! gh is asked outside the state lock and within [`GH_LIMIT`]: a gh that hangs (a keyring prompt, no network)
 //! never holds up a chat start, the git check's `enabled()` or Settings for longer than that.
@@ -119,6 +120,8 @@ pub(crate) struct Reader {
     directory: PathBuf,
     settings: Option<PathBuf>,
     shim_prepared: std::sync::OnceLock<()>,
+    /// A marker refresh is running ([`refresh_if_marked`]); a second agent command does not start another.
+    marked_refresh: std::sync::atomic::AtomicBool,
 }
 
 fn discover() -> Option<PathBuf> {
@@ -163,6 +166,7 @@ impl Reader {
             directory,
             settings,
             shim_prepared: std::sync::OnceLock::new(),
+            marked_refresh: std::sync::atomic::AtomicBool::new(false),
         });
         // A crash must never leave a stale endpoint available to the next run.
         let _ = std::fs::remove_file(reader.endpoint_file());
@@ -403,6 +407,7 @@ impl Reader {
     /// Asks gh (outside the state lock, each call within [`GH_LIMIT`]), then applies its answer under the lock.
     /// `None` only if applying panicked.
     pub(crate) async fn refresh(self: &Arc<Self>, requested: Option<bool>) -> Option<View> {
+        tracing::debug!(reader = %self.endpoint_file().display(), "checking GitHub read credentials");
         let wanted = requested.unwrap_or_else(|| self.enabled());
         let probe = match self.login().await {
             Ok((status, login)) => {
@@ -629,32 +634,47 @@ pub(crate) fn prepare(
     }
 }
 
-pub(crate) fn watch(shared: &Arc<crate::core::Shared>) {
+/// How long an agent command waits for a marker refresh before it runs anyway. Under the hook's 2 s
+/// `shell_command` budget (`vw-agent-tools` `decide_safety`), so the report itself is never cut off; a slower refresh
+/// finishes on its own and the command after it uses the result.
+const MARKED_WAIT: Duration = Duration::from_millis(1500);
+
+/// The per-read shim (`vw-gh-broker` `entry.rs`) leaves `<endpoint>.refresh` when gh refused the broker's token.
+/// It is looked at only here, right before an agent command that can run `gh` (the pre-tool hook's shell-command
+/// report, and the core's own `process_start`/`process_restart`/`secret_run`), never on a timer. With the marker
+/// there and reads on, the reader refreshes once (`apply` removes the marker), Settings hears of a changed view, and
+/// the command continues. Chat start and Settings keep their own refreshes.
+pub(crate) async fn refresh_if_marked(shared: &Arc<crate::core::Shared>) {
+    use std::sync::atomic::Ordering;
+    /// Clears the flag however the refresh ends.
+    struct Running(Arc<Reader>);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            self.0.marked_refresh.store(false, Ordering::SeqCst);
+        }
+    }
+    let reader = &shared.github_reads;
+    if !reader.enabled()
+        || !reader.endpoint_file().with_extension("refresh").exists()
+        || reader.marked_refresh.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let running = Running(reader.clone());
     let weak = Arc::downgrade(shared);
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let Some(shared) = weak.upgrade() else {
-                break;
-            };
-            // Credential checks happen on chat/settings starts or an auth failure, not continuously.
-            if shared.github_reads.enabled()
-                && shared
-                    .github_reads
-                    .endpoint_file()
-                    .with_extension("refresh")
-                    .exists()
-            {
-                let reader = shared.github_reads.clone();
-                let previous = reader.lock().view.clone();
-                if let Some(view) = reader.refresh(None).await
-                    && view != previous
-                {
-                    shared.emit(crate::CoreEvent::GithubReads { view });
-                }
-            }
+    // Detached: a hook that stops waiting must not cancel gh halfway (dropping the call kills gh).
+    let task = tokio::spawn(async move {
+        let reader = running.0.clone();
+        let previous = reader.lock().view.clone();
+        let view = reader.refresh(None).await;
+        drop(running);
+        if let (Some(view), Some(shared)) = (view, weak.upgrade())
+            && view != previous
+        {
+            shared.emit(crate::CoreEvent::GithubReads { view });
         }
     });
+    let _ = tokio::time::timeout(MARKED_WAIT, task).await;
 }
 
 #[cfg(all(test, target_os = "linux"))]

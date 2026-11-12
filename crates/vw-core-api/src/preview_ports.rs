@@ -38,9 +38,6 @@ pub(crate) struct SessionPorts {
     pub(crate) pending: Vec<u16>,
     /// Owner of every listening port (any session or app).
     owners: BTreeMap<u16, PortOwner>,
-    /// Every port a listener attributed to any session holds (what a Local page may reach), as the re-check's
-    /// [`LivePorts::servers`].
-    pub(crate) servers: Vec<u16>,
 }
 
 impl SessionPorts {
@@ -68,13 +65,9 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
     let mut owners: BTreeMap<u16, PortOwner> = BTreeMap::new();
     let mut proven: BTreeSet<u16> = BTreeSet::new();
     let mut targets: Vec<PreviewTarget> = Vec::new();
-    let mut servers: BTreeSet<u16> = BTreeSet::new();
     let leased = shared.procmon.leases().of(session_id);
     for item in attribution.listeners() {
         let port = item.listener.port;
-        if matches!(item.attributed.owner, Owner::Session { .. }) {
-            servers.insert(port);
-        }
         let owner = match &item.attributed.owner {
             Owner::Session { session_id: s } if s == session_id => PortOwner::ThisSession,
             Owner::Session { .. } => {
@@ -129,7 +122,6 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
         targets,
         leased,
         owners,
-        servers: servers.into_iter().collect(),
     })
 }
 
@@ -139,11 +131,9 @@ pub(crate) struct LivePorts {
     pub(crate) sessions: std::collections::HashMap<String, Vec<u16>>,
     /// Attributed listeners only; a lease without a listener cannot keep an open page live.
     pub(crate) listeners: std::collections::HashMap<String, Vec<u16>>,
-    /// Every port a listener attributed to any session holds (what a Local page may reach).
-    pub(crate) servers: Vec<u16>,
 }
 
-/// The ports each of `sessions` holds now, and every session server's port (re-check). One scan; leases
+/// The ports each of `sessions` holds now (re-check). One scan; leases
 /// are not topped up (a re-check never keeps a lease alive).
 ///
 /// # Errors
@@ -160,19 +150,17 @@ pub(crate) fn live_ports(shared: &Shared, sessions: &[String]) -> Result<LivePor
             (s.clone(), leased)
         })
         .collect();
-    let mut servers: BTreeSet<u16> = BTreeSet::new();
     let mut listeners: std::collections::HashMap<String, BTreeSet<u16>> =
         std::collections::HashMap::new();
     for item in attribution.listeners() {
-        if let Owner::Session { session_id } = &item.attributed.owner {
-            servers.insert(item.listener.port);
-            if let Some(ports) = live.get_mut(session_id) {
-                ports.insert(item.listener.port);
-                listeners
-                    .entry(session_id.clone())
-                    .or_default()
-                    .insert(item.listener.port);
-            }
+        if let Owner::Session { session_id } = &item.attributed.owner
+            && let Some(ports) = live.get_mut(session_id)
+        {
+            ports.insert(item.listener.port);
+            listeners
+                .entry(session_id.clone())
+                .or_default()
+                .insert(item.listener.port);
         }
     }
     Ok(LivePorts {
@@ -184,7 +172,6 @@ pub(crate) fn live_ports(shared: &Shared, sessions: &[String]) -> Result<LivePor
             .into_iter()
             .map(|(s, ports)| (s, ports.into_iter().collect()))
             .collect(),
-        servers: servers.into_iter().collect(),
     })
 }
 

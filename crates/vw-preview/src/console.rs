@@ -28,6 +28,12 @@ pub const MAX_DRAIN_BYTES: usize = 1024 * 1024;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum ConsoleLevel {
+    /// `console.log`.
+    Log,
+    /// `console.info`.
+    Info,
+    /// `console.debug`.
+    Debug,
     /// `console.error`.
     Error,
     /// `console.warn`.
@@ -36,6 +42,16 @@ pub enum ConsoleLevel {
     Exception,
     /// An unhandled promise rejection.
     Rejection,
+    /// A script, image or other element failed to load.
+    Resource,
+}
+
+impl ConsoleLevel {
+    /// Whether this entry came from a page error event instead of a console call.
+    #[must_use]
+    pub fn is_page_error(self) -> bool {
+        matches!(self, Self::Exception | Self::Rejection | Self::Resource)
+    }
 }
 
 /// One console entry (untrusted page text).
@@ -91,14 +107,19 @@ pub fn init_script(accessor: &str) -> String {
       if (ring.length > MAX) ring.splice(0, ring.length - MAX);
     }} catch (e) {{ /* logging must never break the page */ }}
   }};
-  for (const level of ["error", "warn"]) {{
+  for (const level of ["log", "info", "debug", "error", "warn"]) {{
     const original = console[level];
     console[level] = function (...args) {{
       push(level, args);
       return original.apply(this, args);
     }};
   }}
-  window.addEventListener("error", (e) => push("exception", [e.message || e.error || "error"]), true);
+  window.addEventListener("error", (e) => {{
+    const target = e.target;
+    if (target && target !== window && (target.src || target.href)) {{
+      push("resource", ["Resource failed to load:", target.src || target.href]);
+    }} else push("exception", [e.message || e.error || "error"]);
+  }}, true);
   window.addEventListener("unhandledrejection", (e) => push("rejection", [e.reason]));
   Object.defineProperty(window, NAME, {{
     value: () => JSON.stringify(ring.splice(0, ring.length)),
@@ -159,10 +180,14 @@ pub fn parse_drain(result: &str) -> Vec<ConsoleEntry> {
         .take(PAGE_RING)
         .filter_map(|e| {
             let level = match e.level.as_deref()? {
+                "log" => ConsoleLevel::Log,
+                "info" => ConsoleLevel::Info,
+                "debug" => ConsoleLevel::Debug,
                 "error" => ConsoleLevel::Error,
                 "warn" => ConsoleLevel::Warn,
                 "exception" => ConsoleLevel::Exception,
                 "rejection" => ConsoleLevel::Rejection,
+                "resource" => ConsoleLevel::Resource,
                 _ => return None,
             };
             Some(ConsoleEntry {

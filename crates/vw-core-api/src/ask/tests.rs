@@ -85,7 +85,7 @@ async fn questions_wait_until_skipped() {
     tokio::time::advance(std::time::Duration::from_secs(7_200)).await;
     assert_eq!(s.list().len(), 1);
     let outcome = Outcome::Cancelled {
-        reason: "the question was skipped".into(),
+        reason: "the user skipped this question".into(),
     };
     assert!(s.settle(&card.ask.id, outcome.clone()));
     assert_eq!(card.closed().await, outcome);

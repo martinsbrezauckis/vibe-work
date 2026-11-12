@@ -100,14 +100,17 @@
     probe.remove();
     var rootCs = win.getComputedStyle(root);
     var width = win.innerWidth;
-    if (root.scrollWidth > width + 1) {
+    // Engines choose different scrolling elements in standards/quirks documents. A constrained
+    // element can also scroll without widening the document; that case is measured below.
+    var pageWidth = Math.max(root.scrollWidth, doc.scrollingElement ? doc.scrollingElement.scrollWidth : 0, doc.body ? doc.body.scrollWidth : 0);
+    if (pageWidth > width + 1) {
       var clipped = rootCs.overflowX === "hidden" || rootCs.overflowX === "clip";
       var wide = [], all = doc.body ? doc.body.querySelectorAll("*") : [];
       for (var i = 0; i < all.length && i < MAX_ELEMENTS && wide.length < 3; i++) {
         var r = all[i].getBoundingClientRect(), pr = all[i].parentElement ? all[i].parentElement.getBoundingClientRect() : null;
         if (r.right > width + 1 && (!pr || pr.right <= width + 1)) wide.push(all[i]);
       }
-      var what = "the page is " + root.scrollWidth + " px wide in a " + width + " px window";
+      var what = "the page is " + pageWidth + " px wide in a " + width + " px window";
       if (!wide.length) add(clipped ? "cutOff" : "sideways", view, null, null, what);
       wide.forEach(function (el) {
         add(clipped ? "cutOff" : "sideways", view, null, el, what + " (this element ends at " + Math.round(el.getBoundingClientRect().right) + " px)");
@@ -121,6 +124,9 @@
       if (!visible(el, cs)) continue;
       var text = /\S/.test(el.textContent || "");
       if (text && el.clientWidth > 0) {
+        if ((cs.overflowX === "auto" || cs.overflowX === "scroll") && el.scrollWidth > el.clientWidth + 1) {
+          add("sideways", view, null, el, "content scrolls sideways (" + el.scrollWidth + " px in a " + el.clientWidth + " px box)");
+        }
         var hx = (cs.overflowX === "hidden" || cs.overflowX === "clip") && el.scrollWidth > el.clientWidth + 1;
         var hy = (cs.overflowY === "hidden" || cs.overflowY === "clip") && el.scrollHeight > el.clientHeight + 1;
         if (hx || hy) add("cutOff", view, null, el, hx ? "text is cut off at the side (" + el.scrollWidth + " px of text in " + el.clientWidth + " px)" : "text is cut off at the bottom (" + el.scrollHeight + " px of text in " + el.clientHeight + " px)");

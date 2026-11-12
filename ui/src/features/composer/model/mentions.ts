@@ -166,7 +166,7 @@ export function chooseSession(
   session: SessionMention,
 ): number {
   const marker = wording(TEXT.mentionSessionText, { title: session.title, id: session.id });
-  const id = `(session id ${session.id})`;
+  const id = `(chat id ${session.id})`;
   const held = () =>
     (app.composer.store.get().context[sessionId] ?? []).some(
       (item) =>

@@ -17,8 +17,12 @@
 //! - No credential is ever logged, put in argv, or returned to a client.
 //! - The listener is loopback only and owned by the core (aborted on shutdown).
 
+mod browser_batch;
+#[cfg(test)]
+mod browser_dialog_tests;
 mod browser_sending;
 mod browser_tools;
+pub(crate) use browser_tools::check_current as check_browser_current;
 #[cfg(feature = "video")]
 mod video_budget;
 #[cfg(feature = "video")]
@@ -54,7 +58,7 @@ pub(crate) mod shell_commands;
 mod start;
 mod tools;
 pub(crate) use prepare::prepare;
-pub(crate) use tools::restart_launch;
+pub(crate) use tools::{call_prepared, restart_launch};
 mod work_tools;
 
 /// The secret broker's dialog method (one of the vault's native-only dialogs, `vault_scope`).
@@ -391,6 +395,7 @@ impl AgentTools {
     /// A deleted session's credentials stop working.
     pub(crate) fn session_deleted(&self, session_id: &str) {
         self.table.revoke_session(session_id);
+        self.tool_asks.browser_requests.forget(session_id);
         #[cfg(feature = "video")]
         self.video.forget(session_id);
         #[cfg(feature = "video")]

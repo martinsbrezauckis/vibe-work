@@ -72,7 +72,7 @@ function ConnectorPart({
       <Tools tools={tile.connector.tools} empty="Mistral lists its tools once you are signed in." />
       <h3>Sign-in and access</h3>
       <p className="cmuted">
-        Mistral keeps this sign-in (it never reaches this computer). Sessions use the connector in
+        Mistral keeps this sign-in (it never reaches this computer). Chats use the connector in
         their own access mode, like every other tool.
       </p>
       <div className="cactions">
@@ -205,7 +205,7 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
         </>
       ) : null}
       <h3>What it can do</h3>
-      <Tools tools={server.tools} empty="Its tools show once a session has connected to it." />
+      <Tools tools={server.tools} empty="Its tools show once a chat has connected to it." />
       <h3>Sign-in</h3>
       {server.key !== null ? (
         <KeyLine server={server} />

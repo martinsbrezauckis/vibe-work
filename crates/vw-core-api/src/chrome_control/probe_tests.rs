@@ -42,7 +42,11 @@ fn prefs(reasons: &serde_json::Value) -> Vec<u8> {
 }
 
 fn probe(profiles: Vec<PathBuf>) -> Probe {
-    Prober::default().probe(profiles, ID, Instant::now())
+    let prober = Prober::default();
+    let _ = prober.probe(profiles, ID, Instant::now());
+    // File-shape fixtures need the completed read. Caller deadlines are tested independently below.
+    wait_for_worker(&prober);
+    prober.state.lock().unwrap().last.unwrap().0
 }
 
 #[test]
@@ -160,13 +164,11 @@ fn probe_fixtures() {
             .status()
             .unwrap();
         assert!(made.success(), "mkfifo");
-        let started = Instant::now();
         assert_eq!(probe(vec![p.clone()]), Probe::Unknown);
         assert!(
             open_no_follow(&profile_dir(&p).unwrap(), Path::new("Preferences")).is_some(),
             "non-blocking open"
         );
-        assert!(started.elapsed() < WAIT);
         // A device: lstat skips it, and fstat refuses it even when opened directly.
         let dev = s.profile("Device", &[]);
         symlink("/dev/zero", dev.join("Preferences")).unwrap();

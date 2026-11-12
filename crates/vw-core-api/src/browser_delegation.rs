@@ -49,7 +49,9 @@ impl DelegationAuthorizer for NativeDelegation {
         };
         shared.store.view(&owner).is_some()
             && (actor != vw_browser::Actor::Agent
-                || (crate::browser_tabs::agent_page_allowed(&hub.service, &owner, page_key)))
+                || (shared.browser_settings.enabled()
+                    && shared.asks.question_hold(&owner).is_none()
+                    && crate::browser_tabs::agent_page_allowed(&hub.service, &owner, page_key)))
     }
 
     fn record(&self, receipt: &vw_browser::delegation::DelegationReceipt) -> Result<(), String> {

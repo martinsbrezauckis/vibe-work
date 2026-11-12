@@ -12,6 +12,7 @@ use vw_agent_tools::{
     folders::{Access, Layout},
     video::{Output, Request},
 };
+use vw_video_types::{Code, Error};
 pub(super) fn prepare(
     shared: &Arc<Shared>,
     owner: &str,
@@ -19,10 +20,10 @@ pub(super) fn prepare(
     call_id: &str,
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
-    vw_agent_tools::video::require_available()?;
-    let request: Request =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
-    let frames = request.frame_limit()?;
+    vw_agent_tools::video::require_available().map_err(agent)?;
+    let request: Request = serde_json::from_value(args.clone())
+        .map_err(|e| agent(Error::new(Code::InvalidRequest, e)))?;
+    let frames = request.frame_limit().map_err(agent)?;
     crate::ask::tool_calls::changed(shared, owner);
     let (shared, owner, source, call_id) = (
         shared.clone(),
@@ -31,21 +32,25 @@ pub(super) fn prepare(
         call_id.to_owned(),
     );
     Ok(Box::pin(async move {
-        let tools = shared.agent_tools.as_ref().ok_or("Tools unavailable.")?;
-        let result = call(&shared, tools, &owner, args).await;
+        let tools = shared
+            .agent_tools
+            .as_ref()
+            .ok_or_else(|| agent(Error::new(Code::Cancelled, "agent tools unavailable")))?;
+        let result = extract(&shared, tools, &owner, args).await;
         let result = match result {
             Ok(mut reply) if reply["image_count"] == 1 => {
                 reply["source"] =
                     serde_json::json!(request.path.rsplit(['/', '\\']).next().unwrap_or("Video"));
-                reply["output"] =
-                    serde_json::to_value(request.output).map_err(|e| e.to_string())?;
+                reply["output"] = serde_json::json!(request.output);
                 reply["sheet_edge"] = serde_json::json!(
                     request
                         .max_edge
                         .unwrap_or(vw_preview::MAX_WIDTH)
                         .min(vw_preview::MAX_WIDTH)
                 );
-                save(&shared, &owner, &source, &call_id, reply.clone()).await?;
+                save(&shared, &owner, &source, &call_id, reply.clone())
+                    .await
+                    .map_err(|e| agent(Error::new(Code::HistorySave, e)))?;
                 Ok(reply)
             }
             Ok(mut reply) => {
@@ -53,15 +58,19 @@ pub(super) fn prepare(
                     serde_json::json!(request.path.rsplit(['/', '\\']).next().unwrap_or("Video"));
                 tools
                     .video_history
-                    .outcome(&source, &source, &call_id, reply.clone())?;
+                    .outcome(&source, &source, &call_id, reply.clone())
+                    .map_err(|e| agent(Error::new(Code::HistorySave, e)))?;
                 Ok(reply)
             }
             Err(reason) => {
                 let (row, agent) = crate::video_projection::failure(&reason);
                 let meta = serde_json::json!({"planned_frames":frames,"image_count":usize::from(request.output!=Output::Metadata),"source":request.path.rsplit(['/', '\\']).next().unwrap_or("Video"),"error":row});
-                tools
+                if let Err(error) = tools
                     .video_history
-                    .outcome(&source, &source, &call_id, meta)?;
+                    .outcome(&source, &source, &call_id, meta)
+                {
+                    tracing::warn!(%error, "could not record video failure");
+                }
                 Err(agent)
             }
         };
@@ -97,11 +106,29 @@ pub(super) async fn call(
     owner: &str,
     args: Value,
 ) -> Result<Value, String> {
+    extract(shared, tools, owner, args).await.map_err(agent)
+}
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "map_err consumes the typed error at the final text boundary"
+)]
+fn agent(error: Error) -> String {
+    crate::video_projection::failure(&error).1
+}
+async fn extract(
+    shared: &Arc<Shared>,
+    tools: &Arc<AgentTools>,
+    owner: &str,
+    args: Value,
+) -> Result<Value, Error> {
     vw_agent_tools::video::require_available()?;
     let request: Request =
-        serde_json::from_value(args).map_err(|e| format!("decode_failed: invalid video request: {e}. Supply integer millisecond times, a supported selection and output mode."))?;
+        serde_json::from_value(args).map_err(|e| Error::new(Code::InvalidRequest, e))?;
     request.times()?;
-    let view = shared.store.view(owner).ok_or("cancelled: chat closed")?;
+    let view = shared
+        .store
+        .view(owner)
+        .ok_or(Error::new(Code::Cancelled, "chat closed"))?;
     let image = request.output != Output::Metadata;
     if image
         && shared.store.runtime(owner).and_then(|r| {
@@ -109,7 +136,10 @@ pub(super) async fn call(
                 .and_then(Value::as_bool)
         }) != Some(true)
     {
-        return Err("unsupported_codec: the selected model has no confirmed image support".into());
+        return Err(Error::new(
+            Code::ModelImages,
+            "selected model has no confirmed image support",
+        ));
     }
     let mut reservation = tools.video.reserve(owner, &view.state, image)?;
     let stop = crate::stops::generation(shared, owner);
@@ -124,13 +154,15 @@ pub(super) async fn call(
     let extraction = async {
         let input = tokio::task::spawn_blocking(move || snapshot(&core, &session, &path))
             .await
-            .map_err(|_| "decode_failed: input preparation")??;
+            .map_err(|error| {
+                Error::at(Code::InputStaging, "input preparation task failed", error)
+            })??;
         let id = vw_agent_tools::credential::new_credential()
-            .map_err(|_| "backend_unavailable: job identity")?;
+            .map_err(|error| Error::at(Code::WorkerStart, "job identity unavailable", error))?;
         let reply =
             vw_video::sandbox::extract(&helper, input, vw_video::protocol::Job { id, request })
                 .await?;
-        Ok::<_, String>(reply.into_tool())
+        Ok::<_, Error>(reply.into_tool())
     };
     let invalidated = async {
         loop {
@@ -143,26 +175,28 @@ pub(super) async fn call(
             }
         }
     };
-    let reply = tokio::select! {biased; ()=invalidated=>return Err("cancelled: video job ended".into()), result=tokio::time::timeout(Duration::from_secs(40),extraction)=>result.map_err(|_|"timeout: video job deadline")??};
+    let reply = tokio::select! {biased; ()=invalidated=>return Err(Error::new(Code::Cancelled, "video job ended")), result=tokio::time::timeout(Duration::from_secs(40),extraction)=>result.map_err(|error| Error::at(Code::Timeout, "video job deadline", error))??};
     if crate::stops::generation(shared, owner) != stop || !tools.table.has_session(owner) {
-        return Err("cancelled: video job ended".into());
+        return Err(Error::new(Code::Cancelled, "video job ended"));
     }
-    let bytes = serde_json::to_vec(&reply).map_err(|_| "decode_failed: image envelope")?;
+    let bytes = serde_json::to_vec(&reply)
+        .map_err(|error| Error::at(Code::OutputEncoding, "image envelope", error))?;
     if bytes.len() + 32 >= vw_agent_tools::wire::MAX_ANSWER {
-        return Err("limit_exceeded: image envelope bytes".into());
+        return Err(Error::new(Code::OutputLimit, "image envelope bytes"));
     }
     reservation.sent(
         &shared
             .store
             .view(owner)
-            .ok_or("cancelled: chat closed")?
+            .ok_or(Error::new(Code::Cancelled, "chat closed"))?
             .state,
         reply["image_count"] == 1,
     )?;
     Ok(reply)
 }
-fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input::Input, String> {
-    let roots = super::session::folders(shared, owner)?;
+fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input::Input, Error> {
+    let roots =
+        super::session::folders(shared, owner).map_err(|e| Error::new(Code::FolderCheck, e))?;
     let given = path;
     #[cfg(windows)]
     let native = vw_agent_tools::video::windows_path(path);
@@ -177,32 +211,42 @@ fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input:
         .canonicalize()
         .map_err(|error| input_error(given, &error))?;
     let layout = Layout::new(&shared.instructions.own_home, &roots[0])
-        .map_err(|_| "decode_failed: folder policy")?;
-    let exclusions = crate::read_exclusions::ReadExclusions::for_chat(shared, &roots[0])?;
+        .map_err(|error| Error::at(Code::FolderCheck, "folder policy", error))?;
+    let exclusions = crate::read_exclusions::ReadExclusions::for_chat(shared, &roots[0])
+        .map_err(|e| Error::new(Code::FolderCheck, e))?;
     if exclusions.excludes(&real) {
-        return Err("decode_failed: protected source location".into());
+        return Err(Error::new(Code::ReadDenied, "protected source location"));
     }
     let rules = crate::search_read_rules::ReadRules::load(
         &shared.instructions.own_home,
         &roots,
         Instant::now() + Duration::from_secs(4),
-    )?;
+    )
+    .map_err(|e| Error::new(Code::FolderCheck, e))?;
     if !rules.allows(&real) {
-        return Err("decode_failed: file read policy denies this video".into());
+        return Err(Error::new(
+            Code::ReadDenied,
+            "file read policy denies source",
+        ));
     }
     if let Some(reason) = layout.check(&real, &roots[0], Access::Read, &|copy, own| {
         let tools = shared.agent_tools.as_ref().ok_or("Tools unavailable")?;
         super::copycheck::decide(shared, &tools.copy_locks, owner, copy, own)
     }) {
-        return Err(reason);
+        return Err(Error::new(
+            Code::FolderRefused { reason },
+            "folder access denied",
+        ));
     }
     #[cfg(not(unix))]
-    let parent = candidate.parent().ok_or("decode_failed: input parent")?;
+    let parent = candidate
+        .parent()
+        .ok_or(Error::new(Code::InvalidPath, "input parent"))?;
     #[cfg(not(unix))]
     let name = candidate
         .file_name()
         .and_then(|s| s.to_str())
-        .ok_or("decode_failed: input filename")?;
+        .ok_or(Error::new(Code::InvalidPath, "input filename"))?;
     #[cfg(unix)]
     let file = {
         // No read occurs until the final handle path matches the already authorized canonical path.
@@ -210,11 +254,11 @@ fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input:
         for part in candidate.ancestors() {
             if part
                 .symlink_metadata()
-                .map_err(|_| "changed_input: input path")?
+                .map_err(|error| Error::at(Code::ChangedInput, "input path", error))?
                 .file_type()
                 .is_symlink()
             {
-                return Err("decode_failed: input links are unsupported".into());
+                return Err(Error::new(Code::InputLinks, "source path includes links"));
             }
         }
         let fd = rustix::fs::open(
@@ -238,19 +282,25 @@ fn snapshot(shared: &Shared, owner: &str, path: &str) -> Result<vw_video::input:
         .map_err(|error| input_error(given, &error))?
         .is_file()
     {
-        return Err(format!("cannot_read: {given}"));
+        return Err(Error::new(
+            Code::CannotRead { path: given.into() },
+            "not a regular file",
+        ));
     }
-    exclusions.check_opened(&file, &real, None)?;
+    exclusions
+        .check_opened(&file, &real, None)
+        .map_err(|e| Error::new(Code::ReadDenied, e))?;
     vw_video::input::Input::copy(file, &real)
 }
 
-fn input_error(path: &str, error: &std::io::Error) -> String {
+fn input_error(path: &str, error: &std::io::Error) -> Error {
+    let path = path.to_owned();
     let code = if error.kind() == std::io::ErrorKind::NotFound {
-        "not_found"
+        Code::NotFound { path }
     } else {
-        "cannot_read"
+        Code::CannotRead { path }
     };
-    format!("{code}: {path}")
+    Error::new(code, error)
 }
 
 #[cfg(test)]
@@ -258,6 +308,32 @@ mod tests {
     use super::*;
     use base64::Engine as _;
     use serde_json::json;
+    #[cfg(any(windows, target_os = "macos", feature = "linux-video"))]
+    #[tokio::test]
+    async fn invalid_request_has_one_outcome_at_every_agent_boundary() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let shared = &f.core.shared;
+        let tools = shared.agent_tools.as_ref().unwrap();
+        let args = json!({"path":"clip.mp4","selection":{"kind":"timestamps","times_ms":[-1]},"output":"frame"});
+        let direct = call(shared, tools, "chat", args.clone()).await.unwrap_err();
+        let prepared = prepare(shared, "chat", "chat", "call", args.clone())
+            .err()
+            .unwrap();
+        let permission = crate::ask::tool_calls::permission(
+            shared,
+            "chat",
+            "chat",
+            "call",
+            "video_frames",
+            &args,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(direct, prepared);
+        assert_eq!(direct, permission);
+        assert!(direct.contains("Supply integer millisecond times"));
+        f.finish().await;
+    }
     #[tokio::test]
     async fn video_snapshot_names_missing_and_unreadable_sources_without_a_decode_diagnosis() {
         let f = crate::feature_test_core::Fixture::new().await;
@@ -265,7 +341,7 @@ mod tests {
         f.load("video", &cwd, &[], true);
         let given = "my ārā clip.mp4";
         let reason = snapshot(&f.core.shared, "video", given).err().unwrap();
-        assert_eq!(reason, format!("not_found: {given}"));
+        assert_eq!(reason.code, Code::NotFound { path: given.into() });
         let (row, agent) = crate::video_projection::failure(&reason);
         assert_eq!(row, format!("Not found: {given}."));
         assert!(agent.contains("Check the file name and folder."), "{agent}");
@@ -317,7 +393,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(reason.starts_with("Not run: video review is not available on Linux yet."));
-        assert!(reason.contains("Ask for still images"));
+        assert!(reason.contains("Ask the user for still images"));
         let prepared = prepare(
             &f.core.shared,
             "missing-chat",

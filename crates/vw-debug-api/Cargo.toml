@@ -20,21 +20,22 @@ e2e-script = []
 vault-e2e = ["vw-core-api/vault-e2e"]
 
 [dependencies]
-vw-ask = { path = "../vw-ask" }
-vw-core-api = { path = "../vw-core-api" }
-vw-platform = { path = "../vw-platform" }
-vw-secrets = { path = "../vw-secrets" }
-vw-keys = { path = "../vw-keys" }
-vw-vault = { path = "../vw-vault" }
+vw-vocabulary = { workspace = true }
+vw-ask = { workspace = true }
+vw-core-api = { workspace = true }
+vw-platform = { workspace = true }
+vw-secrets = { workspace = true }
+vw-keys = { workspace = true }
+vw-vault = { workspace = true }
 # Crops of window screenshots (decode, crop, encode).
-vw-preview = { path = "../vw-preview" }
+vw-preview = { workspace = true }
 # HTTP/1.1 server. axum 0.8.9 (MIT, MSRV 1.80), on hyper 1 and tokio, which
 # the workspace already uses; SSE is built in. Only the features we use.
-axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "query", "json"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
-getrandom = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing (durationMs etc.)
-thiserror = "2"
-tokio = { version = "1.53", features = ["macros", "net", "rt", "sync", "time"] }
-tracing = "0.1"
+axum = { workspace = true, features = ["http1", "tokio", "query", "json"] }
+futures-util = { workspace = true, features = ["std"] }
+getrandom = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] } # exact float parsing (durationMs etc.)
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tracing = { workspace = true }

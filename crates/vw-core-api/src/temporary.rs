@@ -592,7 +592,17 @@ fn remove_scratch_in(root: &Path, dir: &Path) {
 fn remove_scratch_in_with(
     root: &Path,
     dir: &Path,
+    remove_dir: impl FnMut(&Path) -> std::io::Result<()>,
+) {
+    remove_scratch_with_wait(root, dir, remove_dir, std::thread::sleep);
+}
+
+/// The wait seam makes retry policy observable independently of scheduler latency.
+fn remove_scratch_with_wait(
+    root: &Path,
+    dir: &Path,
     mut remove_dir: impl FnMut(&Path) -> std::io::Result<()>,
+    mut wait: impl FnMut(Duration),
 ) {
     let deadline = Instant::now() + SCRATCH_REMOVE_WAIT;
     let mut backoff = Duration::from_millis(20);
@@ -616,7 +626,7 @@ fn remove_scratch_in_with(
                 if remaining.is_zero() {
                     break Err(error);
                 }
-                std::thread::sleep(backoff.min(remaining));
+                wait(backoff.min(remaining));
                 backoff = (backoff * 2).min(Duration::from_millis(100));
             }
             other => break other,

@@ -71,7 +71,7 @@ pub(super) fn filter(row: &mut Value, profiles: &[Value], selected: Option<&str>
     let scope = fields.contains_key("scope");
     if removed {
         row["moreOptions"] = json!(
-            "Optional arguments need connected extension and helper support; use the schema shown."
+            "This browser connection may not support every optional argument; use the schema shown."
         );
         let description = row["description"].as_str().unwrap_or_default().to_owned();
         if action == "page.read" && !summary && description.contains("summary:true") {

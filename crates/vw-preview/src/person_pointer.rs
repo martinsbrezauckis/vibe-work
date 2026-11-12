@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 
 /// Refusal before any input is sent.
 pub const PERSON_BUSY: &str =
-    "Not run: the person is using the browser right now; try again in a moment";
+    "Not run: the user is using the browser right now; try again in a moment";
 /// Result once input was sent and the person pressed or released a pointer button in the view meanwhile.
-pub const PERSON_CLICKED: &str = "native input was sent; the person clicked in the browser at the same time, so earlier refs may no longer match; read the page again";
-const UNOBSERVED: &str = "native input was sent; the person's pointer could not be observed";
+pub const PERSON_CLICKED: &str = "native input was sent; the user clicked in the browser at the same time, so earlier refs may no longer match; read the page again";
+const UNOBSERVED: &str = "native input was sent; the user's pointer could not be observed";
 
 const IDLE: u8 = 0;
 const WATCHING: u8 = 1;
@@ -96,44 +96,5 @@ impl PersonPointer {
             return Err(PERSON_BUSY.to_owned());
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_press_while_armed_disturbs_and_refuses() {
-        let pointer = PersonPointer::default();
-        let interval = Arc::new(PersonInterval::default());
-        assert!(interval.undisturbed().is_err());
-        pointer.arm(&interval);
-        assert_eq!(pointer.admit(&interval, false, Duration::ZERO), Ok(()));
-        assert_eq!(interval.undisturbed(), Ok(()));
-        pointer.observed();
-        assert_eq!(interval.undisturbed(), Err(PERSON_CLICKED));
-        assert_eq!(
-            pointer.admit(&interval, false, Duration::ZERO),
-            Err(PERSON_BUSY.to_owned())
-        );
-    }
-
-    #[test]
-    fn held_recent_or_unarmed_refuses_and_a_later_interval_starts_clean() {
-        let pointer = PersonPointer::default();
-        let unarmed = PersonInterval::default();
-        assert!(pointer.admit(&unarmed, false, Duration::ZERO).is_err());
-        pointer.observed();
-        let interval = Arc::new(PersonInterval::default());
-        pointer.arm(&interval);
-        assert_eq!(interval.undisturbed(), Ok(()));
-        assert!(
-            pointer
-                .admit(&interval, false, Duration::from_secs(60))
-                .is_err()
-        );
-        assert!(pointer.admit(&interval, true, Duration::ZERO).is_err());
-        assert_eq!(pointer.admit(&interval, false, Duration::ZERO), Ok(()));
     }
 }

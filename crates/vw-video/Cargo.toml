@@ -15,14 +15,15 @@ name = "vw-video-helper"
 path = "src/main.rs"
 required-features = ["helper"]
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-vw-platform = { path = "../vw-platform", features = ["video-sandbox"] }
-vw-preview = { path = "../vw-preview" }
-vw-agent-tools = { path = "../vw-agent-tools" }
-tokio = { version = "1.53", features = ["process", "rt", "macros", "sync", "time", "io-util"] }
-process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
-tempfile = "3"
+vw-video-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+vw-platform = { workspace = true, features = ["video-sandbox"] }
+vw-preview = { workspace = true }
+vw-agent-tools = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt", "macros", "sync", "time", "io-util"] }
+process-wrap = { workspace = true, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+tempfile = { workspace = true }
 sha2 = "0.10"
-base64 = "0.22"
+base64 = { workspace = true }
 [dev-dependencies]

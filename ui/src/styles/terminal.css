@@ -39,22 +39,7 @@ vw-xterm-style {
   flex: 1;
 }
 .vw-term-tab {
-  border: 0;
-  background: none;
-  color: var(--text-3);
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  font: var(--text-12) var(--font-mono);
   white-space: nowrap;
-  cursor: pointer;
-}
-.vw-term-tab:hover:where(:not(:disabled)) {
-  background: var(--hover);
-  color: var(--text-2);
-}
-.vw-term-tab[aria-selected="true"] {
-  background: var(--active);
-  color: var(--text);
 }
 .vw-term-tab[data-state="exited"] {
   text-decoration: line-through;

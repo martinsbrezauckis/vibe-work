@@ -1,4 +1,5 @@
 /** The Tools skills list. Depends on shared controls and the skills controller; no transport logic. */
+import { useErrorText } from "../../state/errorDetail";
 import { builtinSkillText } from "../../state/builtinToolsText";
 import { useEffect, useRef } from "react";
 import { Button, LinkButton } from "../../components/Controls";
@@ -8,12 +9,12 @@ import { SKILLS_BUSY } from "../../state/skills";
 import { SkillRow } from "./SkillRow";
 import { SkillsRemoveDialog } from "./SkillsRemoveDialog";
 import { useSkills } from "./hooks";
-import "./skills.css";
 
 /** Third Tools tab, with installed and uninstalled catalog groups. */
 export function SkillsPage() {
   const { skills, shell } = useApp();
   const s = useSkills((state) => state);
+  const errorMessage = useErrorText(s.error ?? "");
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => skills?.watch(), [skills]);
   useEffect(() => {
@@ -60,8 +61,8 @@ export function SkillsPage() {
           </div>
         ) : null}
         {s.error === null ? null : (
-          <p className="server-note" role="alert">
-            Vibe could not list its skills: {s.error.replace(/\.$/, "")}.{" "}
+          <p className="key-problem" role="alert">
+            Could not read Vibe's skills: {errorMessage.replace(/\.$/, "")}.{" "}
             <Button
               data-testid="skills.retry"
               shape="outlined"

@@ -2,7 +2,7 @@
 use super::*;
 use std::sync::{Arc, atomic::Ordering};
 
-async fn memory_keys(root: &std::path::Path) -> Arc<vw_keys::KeyService> {
+pub(super) async fn memory_keys(root: &std::path::Path) -> Arc<vw_keys::KeyService> {
     vw_keys::KeyService::start(vw_keys::KeyServiceConfig {
         managed_vault: None,
         vault: vw_vault::VaultConfig {

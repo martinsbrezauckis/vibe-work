@@ -288,7 +288,7 @@ export function createSignIns(deps: {
       const notice = toasts.push({
         kind: "warn",
         bellKind: "approval",
-        text: `${name} needs you to sign in (asked in a session). Open Tools to sign in.`,
+        text: `${name} needs you to sign in (asked in a chat). Open Tools to sign in.`,
       });
       promptNotices.set(alias, notice);
     }
@@ -312,7 +312,7 @@ export function createSignIns(deps: {
           requestId: null,
           url: null,
           phase: "failed",
-          message: "Vibe signs connectors in through a session: open or start a session first.",
+          message: "Vibe signs connectors in through a chat: open or start a chat first.",
         });
         return;
       }

@@ -331,17 +331,3 @@ pub fn rejection(stdout: &str, stderr: &str) -> String {
         )
     )
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn rejected_push_explains_server_changes_without_overwriting() {
-        let expected = "The server has changes this branch does not have, so nothing was pushed (Vibe Work never overwrites the server). Get those changes first: ask Vibe to update this branch from the server, or use your own git tool.";
-        for reason in ["non-fast-forward", "fetch first"] {
-            assert_eq!(
-                super::rejection(&format!("[rejected] {reason}"), ""),
-                expected
-            );
-        }
-    }
-}

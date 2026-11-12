@@ -8,6 +8,34 @@ use tauri::{Webview, Wry};
 use vw_preview::{EngineError, FrameAnswer};
 use webkit2gtk::{UserMessageExt as _, WebViewExt as _};
 
+/// Before navigation, install the capture boundary ahead of every page's own handlers.
+pub(crate) async fn install_point_guard(webview: &Webview<Wry>) -> Result<(), EngineError> {
+    crate::platform::with_native(
+        webview,
+        "installing checked input capture",
+        Duration::from_secs(5),
+        move |native, reply| {
+            use webkit2gtk::UserContentManagerExt as _;
+            let result = native
+                .inner()
+                .user_content_manager()
+                .ok_or_else(|| "the preview content manager is unavailable".to_owned())
+                .map(|manager| {
+                    manager.add_script(&webkit2gtk::UserScript::for_world(
+                        vw_preview::POINT_GUARD,
+                        webkit2gtk::UserContentInjectedFrames::AllFrames,
+                        webkit2gtk::UserScriptInjectionTime::Start,
+                        AGENT_WORLD,
+                        &[],
+                        &[],
+                    ));
+                });
+            let _ = reply.send(result);
+        },
+    )
+    .await
+}
+
 pub(crate) fn extension_directory() -> Result<PathBuf, EngineError> {
     static DIRECTORY: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     DIRECTORY

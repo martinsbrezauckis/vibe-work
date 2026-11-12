@@ -20,6 +20,9 @@ use objc2_foundation::{
 };
 use objc2_web_kit::WKWebView;
 
+#[path = "macos_wheel.rs"]
+mod wheel;
+
 /// Sends a left-button press and release inside a visible, key-window `WKWebView`.
 ///
 /// # Errors
@@ -29,7 +32,7 @@ pub fn click(
     point: (f64, f64),
     sent: &AtomicBool,
 ) -> Result<(), String> {
-    click_options(webview, point, sent, (0, 1, 0))
+    click_options(webview, point, sent, (0, 1, 0, None))
 }
 
 /// Sends a native button/count/modifier sequence to this view only.
@@ -40,8 +43,10 @@ pub fn click_options(
     webview: *mut std::ffi::c_void,
     point: (f64, f64),
     sent: &AtomicBool,
-    options: (u8, u8, u8),
+    options: (u8, u8, u8, Option<(i32, i32)>),
 ) -> Result<(), String> {
+    let wheel = super::macos_wheel_plan::deltas(options)?;
+    let options = (options.0, options.1, options.2);
     if options != (0, 0, 0) && (options.0 > 2 || !(1..=3).contains(&options.1) || options.2 > 15) {
         return Err("invalid native click options".into());
     }
@@ -50,7 +55,7 @@ pub fn click_options(
     // view alive through both AppKit messages; no global event tap or other app receives the events.
     let view = unsafe { Retained::retain(webview.cast::<WKWebView>()) }
         .ok_or("native preview webview is unavailable")?;
-    click_view(&view, point, sent, options)
+    click_view(&view, point, sent, options, wheel)
 }
 
 fn click_view(
@@ -58,6 +63,7 @@ fn click_view(
     point: (f64, f64),
     sent: &AtomicBool,
     options: (u8, u8, u8),
+    wheel: Option<(i32, i32)>,
 ) -> Result<(), String> {
     let main = MainThreadMarker::new().ok_or("native click requires the main thread")?;
     if !NSApplication::sharedApplication(main).isActive() {
@@ -98,6 +104,9 @@ fn click_view(
         .ok_or("native preview point hit no view")?;
     if !std::ptr::eq(&raw const *hit, base) && !hit.isDescendantOf(base) {
         return Err("native preview point is occluded".to_owned());
+    }
+    if let Some(delta) = wheel {
+        return wheel::send(&hit, window_point, delta, sent);
     }
     let number = window.windowNumber();
     let time = NSProcessInfo::processInfo().systemUptime();
@@ -272,7 +281,7 @@ pub fn click_checked(
                 } else if allowed.as_ref().is_some_and(|allowed| !allowed()) {
                     Err("Not run: browser permission changed before native input".to_owned())
                 } else {
-                    click_view(&callback_view, point, &sent, (0, 1, 0))
+                    click_view(&callback_view, point, &sent, (0, 1, 0), None)
                 }
             } else {
                 Err("Not run: the page target changed before native input".to_owned())

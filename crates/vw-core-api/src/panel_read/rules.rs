@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use vw_agent_tools::folders::resolve;
 
 const DENIED: &str =
-    "Withheld by the person's file read rules. Do not read this file through another tool.";
+    "Withheld by the user's file read rules. Do not read this file through another tool.";
 const UNCHECKED: &str =
     "File read rules could not be checked. Do not read this file through another tool.";
 

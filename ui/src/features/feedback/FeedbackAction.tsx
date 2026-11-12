@@ -1,7 +1,6 @@
 /** Quiet action for explicitly classified app failures. Opens the shared editable Bug form; never attaches or sends. */
 import { Button } from "../../components/Controls";
 import { feedbackFor } from "../../state/feedback";
-import { FEEDBACK_ENABLED } from "../../state/feedbackEnabled";
 import type { CoreController } from "../../state/coreStore";
 import { useStore } from "../../state/createStore";
 
@@ -24,7 +23,7 @@ interface Props {
   onOpen?: () => void;
 }
 export function FeedbackAction(props: Props) {
-  if (!FEEDBACK_ENABLED || !props.core) return null;
+  if (!props.core) return null;
   return <ReadyAction {...props} core={props.core} />;
 }
 function ReadyAction({ core, title, text, onOpen }: Props & { core: CoreController }) {

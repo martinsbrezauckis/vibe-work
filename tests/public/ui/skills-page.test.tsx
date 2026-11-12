@@ -246,7 +246,7 @@ describe("Skills", () => {
       })),
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Vibe could not list its skills: transport closed.",
+      "Could not read Vibe's skills: transport closed. Try again",
     );
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(

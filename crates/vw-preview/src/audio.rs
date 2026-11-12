@@ -18,6 +18,21 @@ impl Drop for AudioQuiet {
 }
 
 impl crate::PreviewService {
+    /// Read/set native audio for a live mount, serializing with page replacement.
+    /// # Errors
+    /// Unsupported engine, a replaced mount or a native failure.
+    pub async fn tab_audio(
+        &self,
+        id: &crate::MountId,
+        muted: Option<bool>,
+    ) -> Result<serde_json::Value, crate::PreviewError> {
+        let _held = self.session_lock(&id.session_id).await;
+        if self.page_mount(&id.session_id).as_ref() != Some(id) {
+            return Err(crate::EngineError::NotMounted.into());
+        }
+        self.engine.tab_audio(id, muted).await.map_err(Into::into)
+    }
+
     /// Silence all engine tabs before opening a permission microphone.
     ///
     /// # Errors

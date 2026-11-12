@@ -29,7 +29,7 @@ async fn missing_extension_uses_the_same_step_for_chrome_and_edge() {
         edge.instruction.contains("not in Edge yet")
             && edge
                 .instruction
-                .contains("Ask the person to click Connect Edge"),
+                .contains("Ask the user to click Connect Edge"),
         "{edge:?}"
     );
     core.shared
@@ -86,7 +86,10 @@ async fn broken_helper_keeps_the_reinstall_reason_for_both_browsers() {
             let addon = edge.addon.unwrap();
             assert_eq!(addon.state, AddonState::Unavailable);
             assert_eq!(addon.action, None);
-            assert_eq!(addon.label, Browser::Edge.text(reason));
+            assert_eq!(
+                addon.label,
+                super::browser_text::label(Browser::Edge, reason)
+            );
         }
         core.shutdown().await;
     }
@@ -350,7 +353,7 @@ fn not_set_up_instructions_name_each_browsers_card_button() {
         assert_eq!(
             view.instruction,
             format!(
-                "{} is not set up. Ask the person to click {button}.",
+                "{} is not set up. Ask the user to click {button}.",
                 browser.words("{yourBrowser}")
             )
         );

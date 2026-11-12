@@ -126,7 +126,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
               data-testid="projects.projects-page-pick-folder"
               type="button"
               appearance="project"
-              title="Choose a folder and start a session in it; it then shows here"
+              title="Choose a folder and start a chat in it; it then shows here"
               onClick={() => {
                 void sessionActions?.pickFolder().then((folder) => {
                   if (folder !== null) projects.close();
@@ -211,7 +211,7 @@ function Page({ projects }: { projects: Projects }): ReactElement {
         ) : groups.length === 0 ? (
           <EmptyState glyph="folder" className="empty">
             {items.length === 0
-              ? "No projects yet: start a session in a folder, or create one with New project."
+              ? "No projects yet: start a chat in a folder, or create one with New project."
               : `No project matches “${state.query}”.`}
           </EmptyState>
         ) : (

@@ -13,7 +13,10 @@ export function browserView(
     return view.edge
       ? { ...view, setup: view.edge, enabled: view.edgeEnabled ?? view.enabled }
       : null;
-  if (browser === "Firefox") return view.firefox ? { ...view, setup: view.firefox } : null;
+  if (browser === "Firefox")
+    return view.firefox
+      ? { ...view, setup: view.firefox, enabled: view.firefoxEnabled ?? view.enabled }
+      : null;
   const safari = view.safari;
   if (!safari) return null;
   const state = safari.addon.state;

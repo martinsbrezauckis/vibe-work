@@ -143,21 +143,13 @@
 }
 .pages-empty .pages-btn {
   max-width: 100%;
-  min-height: 36px;
   text-align: left;
   white-space: normal;
 }
-.pages-plan-link {
+.pages-hub > .ext-link,
+.pj-dsec > .ext-link {
   margin-top: 8px;
-  border: 0;
-  padding: 4px 0;
-  background: transparent;
-  color: var(--blue);
-  font-size: var(--text-12);
   text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
 }
 .pages-hub-top {
   display: flex;
@@ -229,14 +221,6 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   color: var(--text-3);
 }
 /* the handbook's manifest, notices, findings and tags. */
-.pages-pill {
-  font-size: var(--text-11);
-  color: var(--text-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-pill);
-  padding: 1px 8px;
-  text-transform: capitalize;
-}
 .pages-summary {
   margin: 4px 0 0;
   font-size: var(--text-13);
@@ -280,14 +264,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   padding-top: 1px;
 }
 .pages-tag {
-  font-size: var(--text-10-5);
-  font-weight: var(--weight-medium);
-  color: var(--text-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-5);
-  padding: 0 5px;
   margin-left: 6px;
-  vertical-align: 1px;
 }
 .pages-hub-desc {
   font-size: var(--text-12);

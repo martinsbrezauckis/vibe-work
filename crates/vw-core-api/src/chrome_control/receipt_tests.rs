@@ -32,9 +32,10 @@ async fn every_action_receipt_names_its_bound_browser() {
         vec!["chrome:profile"]
     };
     for profile in &profiles {
+        test_support::chat(&core.shared, profile);
         let answer = gateway::call(
             &core.shared,
-            "s",
+            profile,
             "chrome_session",
             json!({"action":"open","profileId":profile}),
         )
@@ -42,7 +43,7 @@ async fn every_action_receipt_names_its_bound_browser() {
         .unwrap();
         assert_identity(&answer, profile);
     }
-    // Opening the other browser changes the chat selection, but never the first lease's identity.
+    // Independent chats keep their own selected profile and receipt identity.
     for profile in profiles {
         for (tool, args) in [
             (
@@ -66,7 +67,9 @@ async fn every_action_receipt_names_its_bound_browser() {
                 json!({"sessionId":profile,"action":"stop"}),
             ),
         ] {
-            let answer = gateway::call(&core.shared, "s", tool, args).await.unwrap();
+            let answer = gateway::call(&core.shared, profile, tool, args)
+                .await
+                .unwrap();
             assert_identity(&answer, profile);
             let body = &answer["vwMcpResult"]["structuredContent"];
             if body["steps"].is_array() {

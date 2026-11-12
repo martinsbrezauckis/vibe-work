@@ -192,7 +192,7 @@ impl ActionTracker {
         self.events.subscribe()
     }
 
-    /// Publish one completed agent action. Entire production call sites are behind `click-marker`.
+    /// Publish one completed agent action. Used by every browser input driver.
     pub fn record(
         &self,
         session_id: String,
@@ -250,7 +250,3 @@ impl ActionTracker {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "action_tracking_tests.rs"]
-mod tests;

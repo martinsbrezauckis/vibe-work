@@ -21,7 +21,7 @@ it("defines the header height once, as a token", () => {
   expect(tokens).toMatch(/--header-height: \d+px;/);
 });
 
-it("gives the chat header and the side panel tab bar that same height", () => {
+it("declares the shared header-height token on both header rules", () => {
   const chat = rule(css("content.css"), ".shead");
   const panel = rule(css("panel.css"), ".ptabs");
   for (const declarations of [chat, panel]) {
@@ -30,7 +30,7 @@ it("gives the chat header and the side panel tab bar that same height", () => {
   }
 });
 
-it("sizes the selected tab's pill from the tab, not from fixed offsets", () => {
-  const pill = rule(css("feel.css"), ".ptab-pill");
-  expect(pill).not.toMatch(/bottom:/);
+it("uses the same tab height across every strip", () => {
+  const tab = rule(css("chips-tabs.css"), ".ui-tab");
+  expect(tab).toContain("min-height: var(--control-height-small);");
 });

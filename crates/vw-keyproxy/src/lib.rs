@@ -41,6 +41,7 @@ mod key;
 mod limits;
 mod mcp;
 mod reasoning;
+mod resume;
 mod routes;
 mod server;
 mod token;

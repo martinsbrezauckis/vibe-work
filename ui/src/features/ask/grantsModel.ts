@@ -44,7 +44,7 @@ export function grantsOf(
 
 /** The chip's words: "1 allowed for this session" / "3 allowed for this session". */
 export function chipText(count: number): string {
-  return `${String(count)} allowed for this session`;
+  return `${String(count)} allowed for this chat`;
 }
 
 /** What kind of call a grant answers, in words (the row's `.d` line). */

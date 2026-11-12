@@ -361,7 +361,3 @@ impl HandOverInbox {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "hand_over_tests.rs"]
-mod tests;

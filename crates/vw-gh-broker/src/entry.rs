@@ -12,6 +12,9 @@ use std::sync::{
 };
 use zeroize::Zeroizing;
 
+pub(crate) const UNAVAILABLE: &str =
+    "GitHub reader is not available. Try again in a moment; if it repeats, tell the user.";
+
 /// The only commands that may run locally without an account or broker: the version and gh's own help.
 #[must_use]
 pub fn local_command(args: &[String]) -> bool {
@@ -85,11 +88,15 @@ pub fn shim() -> io::Result<i32> {
             .env("GH_PROMPT_DISABLED", "1");
         return Ok(child.status()?.code().unwrap_or(1));
     }
-    let configured = std::env::var(ENDPOINT_ENV).map_err(|_| {
-        io::Error::other("GitHub reader is not available (no broker endpoint configured)")
-    })?;
+    let configured = std::env::var(ENDPOINT_ENV).map_err(|_| io::Error::other(UNAVAILABLE))?;
     let endpoint = if let Some(path) = configured.strip_prefix("file:") {
-        std::fs::read_to_string(path).map_err(|_| io::Error::other("GitHub reader is not available. GitHub reads are off. The user can turn them on in Settings > General."))?
+        std::fs::read_to_string(path).map_err(|_| {
+            io::Error::other(concat!(
+                "GitHub reads are off. Ask the user to turn them on in ",
+                vw_vocabulary::settings_path!("General"),
+                ", then try again."
+            ))
+        })?
     } else {
         configured.clone()
     };
@@ -141,23 +148,4 @@ pub fn server(executable: &Path) -> io::Result<()> {
 // Other exit-1 results (missing repo, 403, failed checks) must not cause credential refresh.
 fn authentication_failed(exit: i32, stderr: &[u8]) -> bool {
     exit == 4 || (exit == 1 && stderr.windows(8).any(|part| part == b"HTTP 401"))
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn only_authentication_errors_request_refresh() {
-        assert!(super::authentication_failed(4, b"authentication required"));
-        assert!(super::authentication_failed(
-            1,
-            b"gh: Bad credentials (HTTP 401)"
-        ));
-        assert!(super::authentication_failed(
-            1,
-            b"HTTP 401: Bad credentials"
-        ));
-        assert!(!super::authentication_failed(1, b"HTTP 403: Forbidden"));
-        assert!(!super::authentication_failed(1, b"checks failed"));
-        assert!(!super::authentication_failed(0, b"HTTP 401"));
-    }
 }

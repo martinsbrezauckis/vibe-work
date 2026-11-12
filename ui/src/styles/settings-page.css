@@ -189,7 +189,7 @@
   color: var(--text-3);
 }
 .set-cat-body {
-  animation: vw-fade-in 150ms var(--ease-std);
+  animation: vw-fade-in var(--t-fade) var(--ease-std);
 }
 .set-cat-body > section,
 .set-group {
@@ -238,14 +238,9 @@
 .set-cat-body .check .d {
   font-weight: var(--weight-regular);
 }
-/* Only Settings normalizes setup-derived primary controls to the shared inline button geometry. */
-.set-cat-body .btn-primary {
-  height: auto;
-  font-weight: var(--weight-regular);
-}
 /* A setting a search found: lit for 1.5 s with the orange bar, then back to normal. */
 .set-flash {
-  animation: vw-set-flash 1.5s var(--ease-std);
+  animation: vw-set-flash var(--t-highlight) var(--ease-std);
 }
 @keyframes vw-set-flash {
   0%,
@@ -336,7 +331,7 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   max-height: min(600px, 82vh);
-  animation: vw-palette-in 220ms var(--ease-out);
+  animation: vw-palette-in var(--t-layout) var(--ease-out);
 }
 @keyframes vw-palette-in {
   from {
@@ -488,9 +483,6 @@
 
 /* Links to Mistral's pages (MistralLinks): an "Open ↗" button per row; web-only settings carry a small tag. */
 .ext-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   white-space: nowrap;
 }
 /* The status bar: the folder shrinks first (the context readout must stay visible at 390 px). */
@@ -539,9 +531,6 @@
   justify-self: start;
 }
 /* "Add rule" reads as a button (it looked like a line of text under the field). */
-.set-cat-body .secrets-add > .tb-btn:not(.primary) {
-  border: 1px solid var(--line-2);
-}
 .set-cat-body section h4 + .key-line {
   margin-top: 0;
 }

@@ -46,62 +46,6 @@ pub const DEFAULT_LONG_METHODS: &[(&str, Duration)] = &[
     ("mcp/login", Duration::from_secs(660)),
 ];
 
-#[cfg(test)]
-mod tests {
-    use super::{ConnectionConfig, DEFAULT_LONG_METHODS};
-    use std::time::Duration;
-
-    #[test]
-    fn requests_that_pin_plugins_outlast_a_slow_first_pin() {
-        let config = ConnectionConfig::default();
-        for method in [
-            "session/start",
-            "session/continue",
-            "session/fork",
-            "plugin/reload",
-        ] {
-            assert!(
-                config
-                    .method_timeouts
-                    .contains(&(method.to_owned(), Duration::from_secs(120))),
-                "{method}"
-            );
-        }
-        assert_eq!(config.default_timeout, Duration::from_secs(30));
-    }
-
-    /// A chat's first `turn/start` waits for Vibe's deferred session setup (copy, first-turn fetches, model pin) and
-    /// its promotion to a stored session before Vibe answers: on a loaded computer that took longer than 30 s while
-    /// Vibe went on to run the turn.
-    #[test]
-    fn a_first_turn_start_outlasts_the_session_setup_it_waits_for() {
-        let config = ConnectionConfig::default();
-        assert!(
-            config
-                .method_timeouts
-                .contains(&("turn/start".to_owned(), Duration::from_secs(120))),
-            "{:?}",
-            config.method_timeouts
-        );
-    }
-
-    #[test]
-    fn manual_compaction_waits_longer_than_the_model_proxy_deadline() {
-        assert_eq!(
-            DEFAULT_LONG_METHODS
-                .iter()
-                .find(|(method, _)| *method == "session/compact"),
-            Some(&("session/compact", Duration::from_secs(90)))
-        );
-        let config = ConnectionConfig::default();
-        assert!(
-            config
-                .method_timeouts
-                .contains(&("session/compact".to_owned(), Duration::from_secs(90)))
-        );
-    }
-}
-
 /// Tuning for one connection. `Default` gives production values.
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {

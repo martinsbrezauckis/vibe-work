@@ -191,7 +191,6 @@
   gap: 6px;
   padding: 10px 12px 0;
 }
-.ctxchip,
 .att {
   display: inline-flex;
   align-items: center;
@@ -203,9 +202,8 @@
   min-width: 0;
 }
 .ctxchip {
-  border: 1px solid color-mix(in srgb, var(--orange-2) 45%, var(--line-2));
-  background: var(--orange-soft);
-  padding: 3px 4px 3px 8px;
+  max-width: 100%;
+  min-width: 0;
 }
 .ctxchip b {
   color: var(--text);
@@ -511,4 +509,16 @@
 }
 .browser-signal[data-state="ready"] {
   background: var(--green);
+}
+
+.composer-profile-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+.composer-profile-label {
+  color: var(--text-2);
+  font-size: var(--text-12);
 }

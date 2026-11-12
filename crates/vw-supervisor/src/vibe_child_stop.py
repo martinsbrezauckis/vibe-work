@@ -2,7 +2,7 @@
 
 A Stop of an owned child session goes through Vibe's subagent controller and its
 durable interrupt operation. Access-mode switches wait for configuration reads
-and reloads before rebuilding synchronously. Revisit these guards at each Vibe pin
+and reloads before rebuilding the profile. Revisit these guards at each Vibe pin
 bump. Native plugin hook subprocesses are refused before binding: they bypass
 our tool guards. No installed Vibe files are changed; original handlers apply allowed operations.
 An admitted background process finishes its acknowledgment even when its turn is interrupted,
@@ -13,7 +13,11 @@ import sys
 
 
 def install_config_switch_guard(adapter):
-    """Keep synchronous profile rebuilds clear of tasks that need the server loop."""
+    """Wait for config readers before profile rebuilds or copying their layer locks.
+
+    Async profile switching avoids the older deadlock, but a contended layer lock
+    still retains its event loop, which makes Vibe's subsequent config copy fail.
+    """
     from functools import wraps
 
     async def quiescent_config(orchestrator):
@@ -54,7 +58,8 @@ def install_config_switch_guard(adapter):
                 await current_context(self)
                 return result
             await current_context(self)
-            # No yielding await precedes switch_profile in these pinned handlers.
+            # Older runtimes rebuild synchronously. Async rebuilds also need this
+            # wait: queueing on a layer lock makes the later config copy fail.
             return await original(self, *args, **kwargs)
         return guarded
 
@@ -73,23 +78,25 @@ def install_config_switch_guard(adapter):
     from vibe.app_server._deferred_config import DeferredConfiguration
     from vibe.core.config.orchestrator import ConfigOrchestrator
 
-    org_context = ContextVar("vw_org_config_context", default=None)
+    copy_context = ContextVar("vw_config_copy_context", default=None)
     original_org = backend._commit_org_config
     original_commit = DeferredConfiguration.commit
     original_reload = ConfigOrchestrator.reload_layer
 
-    @wraps(original_org)
-    async def commit_org(self, *args, **kwargs):
-        await current_context(self)
-        token = org_context.set(self._context)
-        try:
-            return await original_org(self, *args, **kwargs)
-        finally:
-            org_context.reset(token)
+    def copying_context(original):
+        @wraps(original)
+        async def guarded(self, *args, **kwargs):
+            await current_context(self)
+            token = copy_context.set(self._context)
+            try:
+                return await original(self, *args, **kwargs)
+            finally:
+                copy_context.reset(token)
+        return guarded
 
     @wraps(original_commit)
     async def commit(self, build, **kwargs):
-        context = org_context.get()
+        context = copy_context.get()
         if context is None:
             return await original_commit(self, build, **kwargs)
 
@@ -103,13 +110,29 @@ def install_config_switch_guard(adapter):
     @wraps(original_reload)
     async def reload_layer(self, *args, **kwargs):
         result = await original_reload(self, *args, **kwargs)
-        if org_context.get() is not None:
+        if copy_context.get() is not None:
             # Original reload released its locks. Do not queue on them, or take
-            # them across switch_profile, which synchronously acquires them again.
+            # them across a profile rebuild, which acquires them again.
             await quiescent_config(self)
         return result
 
-    backend._commit_org_config = commit_org
+    backend._commit_org_config = copying_context(original_org)
+    # Catalog commits use the same deferred builder/copy boundary as org policy.
+    if hasattr(backend, "_commit_model_catalog"):
+        backend._commit_model_catalog = copying_context(backend._commit_model_catalog)
+
+    # New/rescanned and saved-session plugin switches copy the same live layers.
+    from vibe.app_server import _plugins
+    if hasattr(_plugins, "_with_current_files"):
+        original_files = _plugins._with_current_files
+
+        @wraps(original_files)
+        async def current_files(orchestrator):
+            if orchestrator is not None:
+                await quiescent_config(orchestrator)
+            return await original_files(orchestrator)
+
+        _plugins._with_current_files = current_files
     DeferredConfiguration.commit = commit
     ConfigOrchestrator.reload_layer = reload_layer
 
@@ -152,6 +175,24 @@ def install_plugin_hook_guard():
         return hooks, issues
 
     _runtime._runnable_plugin_hooks = runnable
+
+
+def install_builtin_skill_filter():
+    """Hide the CLI-home import workflow until the app offers its own import flow."""
+    from functools import wraps
+    from vibe.core.plugins._native import PluginResolver
+    from vibe.core.skills.models import SkillScope
+
+    original = PluginResolver._load_skills
+
+    @wraps(original)
+    def load_skills(self, plugin):
+        skills = original(self, plugin)
+        if plugin.scope == SkillScope.BUILTIN:
+            skills.pop("vibe:import", None)
+        return skills
+
+    PluginResolver._load_skills = load_skills
 
 
 def install_process_start_guard():
@@ -226,7 +267,7 @@ def install_process_start_guard():
 def install():
     # These releases share the guarded runtime boundaries. Keep the previous pin
     # usable during upgrades; a new release still needs its own compatibility audit.
-    if importlib.metadata.version("mistral-vibe") not in {"3.0.4", "3.1.0"}:
+    if importlib.metadata.version("mistral-vibe") not in {"3.0.4", "3.1.0", "3.1.1", "3.1.2"}:
         return
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild
@@ -234,8 +275,16 @@ def install():
 
     install_config_switch_guard(adapter)
     install_plugin_hook_guard()
+    install_builtin_skill_filter()
+    install_mcp_projection_guard(adapter)  # noqa: F821 - launch.rs prepends vibe_mcp_projection.py
+    install_skill_cleanup_guard()  # noqa: F821 - launch.rs prepends vibe_skill_cleanup.py
+    install_restored_turn_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
+    install_resumed_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
+    install_macos_keychain_guard()  # noqa: F821 - launch.rs prepends vibe_keychain_guard.py
+    install_bundled_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_plugin_enablement.py
     install_process_start_guard()
     install_process_tracking()  # noqa: F821 - launch.rs prepends vibe_process_tracking.py
+    install_process_output()  # noqa: F821 - launch.rs prepends vibe_process_output.py
     original = adapter.UnifiedHarnessBackendAdapter.interrupt_turn
 
     async def interrupt_turn(self, params):
@@ -259,7 +308,7 @@ def install():
             # Exactly the host's interrupt_running_children operation (controller.py:497-562),
             # with only this owned child's id and generation. Its receipt survives a restart.
             operation = f"host-interrupt:{child.child_session_id}:{child.state.active.generation}"
-            output = await controller._interrupt_on_host_behalf(name, operation, "Stopped by the person")
+            output = await controller._interrupt_on_host_behalf(name, operation, "Stopped by the user")
             # The child can settle while the operation waits for its name/graph locks.
             settled = controller._subagents().children.get(name)
             ended = (

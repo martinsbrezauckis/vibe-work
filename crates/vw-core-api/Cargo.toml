@@ -12,21 +12,17 @@ publish = false
 workspace = true
 
 [features]
-# Optional context breakdown; absent from the default build.
-context-composition = ["vw-gate/context-composition"]
 # Optional agent capture directly into the vault. Off in default builds.
 agent-vault = ["vw-agent-tools/agent-vault", "vw-browser/agent-vault", "vw-keys/agent-vault", "vw-ask/agent-vault", "dep:windows"]
-click-marker = ["vw-browser/click-marker"]
 # Upstream proxy transports, enabled by the app default features.
 proxy-transports = ["vw-netguard/proxy-transports", "vw-mistral/proxy-transports", "vw-gate/proxy-transports"]
-feedback = ["vw-agent-tools/feedback"]
 video = ["dep:vw-video", "vw-agent-tools/video"]
 linux-video = ["video", "vw-agent-tools/linux-video"]
 video-test = ["video", "vw-video/helper"]
 # Browser modules selected by the app; Firefox remains off by default.
 your-firefox = []
 your-edge = []
-your-safari = []
+your-safari = ["vw-platform/safari-input"]
 # TypeScript bindings for the UI (ui/src/protocol/core/), written by the gen-core-ts binary and
 # checked for drift by scripts/public/check.sh. Off in the app build.
 # The vault test switch (three locks: this feature, a run-time switch, an isolated test profile). Its source is
@@ -41,105 +37,110 @@ path = "src/bin/gen_core_ts.rs"
 required-features = ["ts"]
 
 [dependencies]
+vw-video-types = { workspace = true }
 vw-video = { path = "../vw-video", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-vw-ask = { path = "../vw-ask" }
+vw-ask = { workspace = true }
 vw-proposals = { path = "../vw-proposals" }
 vw-logscan = { path = "../vw-logscan" }
 # Guessable Vault values must never reach the session-log comparison engine.
 zxcvbn = "3"
-walkdir = "2"
+walkdir = { workspace = true }
 # Shared Files/agent matching and gitignore parsing (no OS search commands).
-regex = "1"
+regex = { workspace = true }
 globset = "0.4"
 ignore = "0.4"
-notify = "8.2.0"
-vw-vocabulary = { path = "../vw-vocabulary" }
+notify = { workspace = true }
+vw-vocabulary = { workspace = true }
 # The Vibe install at setup (`vibe` commands) and the deferred first server start.
-vw-vibe-install = { path = "../vw-vibe-install" }
+vw-vibe-install = { workspace = true }
 # Stored secret values register here so the Debug API never returns them.
-vw-secrets = { path = "../vw-secrets" }
-vw-keys = { path = "../vw-keys" }
-vw-keyproxy = { path = "../vw-keyproxy" }
-vw-vault = { path = "../vw-vault" }
-vw-mistral = { path = "../vw-mistral" }
-vw-documents = { path = "../vw-documents" }
+vw-secrets = { workspace = true }
+vw-keys = { workspace = true }
+vw-keyproxy = { workspace = true }
+vw-vault = { workspace = true }
+vw-mistral = { workspace = true }
+vw-documents = { workspace = true }
 # The Tools marketplace: catalog, installer, store.
 vw-market = { path = "../vw-market" }
 vw-skills = { path = "../vw-skills" }
 # `documents/takePicture` answers image bytes as base64.
 base64 = "0.23"
 # Random dictation stream ids; already in the lock file through vw-documents.
-getrandom = "0.3"
-zeroize = "1.8"
+getrandom = { workspace = true }
+zeroize = { workspace = true }
 # Fixed-size process receipt credentials, checked before allocating a client task.
-subtle = "2.6"
-vw-gate = { path = "../vw-gate" }
-vw-session = { path = "../vw-session" }
-vw-supervisor = { path = "../vw-supervisor" }
+subtle = { workspace = true }
+vw-gate = { workspace = true }
+vw-session = { workspace = true }
+vw-supervisor = { workspace = true }
 vw-terminal = { path = "../vw-terminal" }
-vw-rpc = { path = "../vw-rpc" }
-vw-protocol = { path = "../vw-protocol" }
-vw-procmon = { path = "../vw-procmon" }
+vw-rpc = { workspace = true }
+vw-protocol = { workspace = true }
+vw-procmon = { workspace = true }
 # Session-scoped agent tools: credentials, kill parser types, agent spawn.
-vw-agent-tools = { path = "../vw-agent-tools" }
+vw-agent-tools = { workspace = true }
 # User-only files (hook endpoint, launch records).
-vw-platform = { path = "../vw-platform" }
-vw-changes = { path = "../vw-changes" }
+vw-platform = { workspace = true }
+vw-changes = { workspace = true }
 # Worktree per session: base branches, session branch, preflight, inspection, records.
-vw-worktrees = { path = "../vw-worktrees" }
+vw-worktrees = { workspace = true }
 # The outer git loop: branch bar, commit, push, pull requests, PR card, bring a copy in.
 vw-git = { path = "../vw-git" }
 # The PR card's public GitHub API reads with vw-mistral's HTTPS client (same version and TLS setup).
-reqwest = { version = "0.13.5", default-features = false }
+reqwest = { workspace = true }
 # Preview pane model and engine seam.
-vw-preview = { path = "../vw-preview" }
+vw-preview = { workspace = true }
 # The agent browser's network guard: loopback answers, Vibe Work's own ports.
-vw-netguard = { path = "../vw-netguard" }
+vw-netguard = { workspace = true }
 # The agent browser: observe, act, receipts, prompt guard, Stop and the action log.
 vw-browser = { path = "../vw-browser" }
 # Project Pages: hub, page server, comments, viewer, the vw-plan profile.
-vw-pages = { path = "../vw-pages" }
+vw-pages = { workspace = true }
 # The user's project groups: store, filing rules, reconcile.
 vw-projects = { path = "../vw-projects" }
-cap-std = "4.0.3"
-cap-fs-ext = "4.0.3"
-pulldown-cmark = { version = "0.13.5", default-features = false }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }  # exact float parsing for durationMs and similar values
-thiserror = "2"
+# Spreadsheet exports reuse the document reader's pinned ZIP implementation.
+zip = { workspace = true, features = ["deflate"] }
+cap-std = { workspace = true }
+cap-fs-ext = { workspace = true }
+pulldown-cmark = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] } # exact float parsing for durationMs and similar values
+thiserror = { workspace = true }
 # The MCP servers of Vibe Work's own Vibe config (`connectors_config.rs`, read-only) and
 # addresses without their query part. Both already in Cargo.lock (toml 1.1.7 through tauri, url through vw-platform).
-toml = "1"
+toml = { workspace = true }
 # Adds and re-ports Vibe Work's own MCP entries in Vibe's config.toml, keeping the rest of the file as the
 # user or Vibe wrote it (`mcp_keys_config.rs`). Already in Cargo.lock (0.25.16 through proc-macro-crate).
-toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+toml_edit = { workspace = true, features = ["parse", "display"] }
 # Line diffs for the Markdown export; already in the lock file through vw-changes.
-similar = "3.2.0"
-url = "2"
-tokio = { version = "1.53", features = ["macros", "rt", "sync", "time", "net", "io-util", "process"] }
-tracing = "0.1"
+similar = { workspace = true }
+url = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "net", "io-util", "process"] }
+tracing = { workspace = true }
 # Generates the TypeScript declarations for the command API.
-ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 # A secret_run consent binds to the content of the program and the files its arguments name.
-blake3 = "1.8"
+blake3 = { workspace = true }
 # Release helper identity is pinned to the final signed executable bytes.
 sha2 = "0.10"
 # A timed-out `gh auth` call stops every process gh started, as the supervisor and vibe-install contain their
 # children: process group on Unix, kill-on-close Job Object on Windows (same version and features as those crates).
-process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
+process-wrap = { workspace = true, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
+rustix = { workspace = true, features = ["std", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
 # Optional private command capture starts its kill-on-close job without a console window.
-windows = { version = "0.62", features = ["Win32_System_Threading"], optional = true }
-# Atomic external-extension registration and conditional cleanup; already in Cargo.lock.
-winreg = { version = "0.56", features = ["transactions"] }
+windows = { workspace = true, features = ["Win32_System_Threading"], optional = true }
 # Rust-only BLAKE3 on Windows (same output), as vw-vault: no C/asm build in the msvc cross lint.
-blake3 = { version = "1.8", features = ["pure"] }
+blake3 = { workspace = true, features = ["pure"] }
 
 [dev-dependencies]
-tempfile = "3"
-tokio = { version = "1.53", features = ["test-util"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+# Native Windows registry acceptance uses disposable test keys.
+[target.'cfg(windows)'.dev-dependencies]
+winreg = { workspace = true, features = ["transactions"] }

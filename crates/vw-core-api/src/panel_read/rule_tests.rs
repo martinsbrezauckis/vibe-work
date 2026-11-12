@@ -87,7 +87,7 @@ fn withheld(editor: &Value, path: &str) {
     assert_eq!(editor["status"], "withheld");
     assert_eq!(
         editor["reason"],
-        "Withheld by the person's file read rules. Do not read this file through another tool."
+        "Withheld by the user's file read rules. Do not read this file through another tool."
     );
 }
 

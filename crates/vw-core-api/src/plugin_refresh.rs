@@ -259,9 +259,11 @@ impl Core {
 
     /// Called under the same chat lock as ordinary sends and resumes.
     pub(crate) async fn refresh_removed_plugins(&self, id: &str) -> Result<(), CoreError> {
-        if self.shared.channels.has_channel(id)
-            && self.shared.channels.has_removed_plugins(id).await
-        {
+        if !self.shared.channels.has_channel(id) {
+            return Ok(());
+        }
+        let switched = self.native_plugin_switches_changed(id).await?;
+        if self.shared.channels.has_removed_plugins(id).await || switched {
             self.refresh_plugins_held(id).await?;
         }
         Ok(())
@@ -323,6 +325,17 @@ impl Core {
                 .to_owned(),
             );
             return Err(failure);
+        }
+        // Vibe can acknowledge a reload while parking it. Verify native OFF before
+        // reopening (which itself inspects pins), so a stale set cannot recurse or be admitted.
+        if self.shared.channels.has_removed_plugins(id).await
+            || self.native_plugin_switches_changed(id).await?
+        {
+            self.shared.plugin_refresh.request(id);
+            return Err(CoreError::new(
+                ErrorCode::ServerError,
+                "Plugin refresh did not finish: a removed or disabled plugin is still attached. Reopen the chat before sending.",
+            ));
         }
         if unstarted {
             return Ok(());

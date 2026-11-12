@@ -114,7 +114,7 @@ pub(super) fn answer(
     if origin != Origin::Ui {
         let mut error = CoreError::new(
             ErrorCode::Denied,
-            "The vault save needs the person's answer; answer it in Vibe Work's window.",
+            "The vault save needs the user's answer. Ask the user to answer it in Vibe Work's window.",
         );
         error.server_code = Some(crate::vault_scope::VAULT_USER_ONLY.into());
         return Err(error);

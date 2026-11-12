@@ -18,9 +18,17 @@ impl ChromeControl {
             .unwrap_or_else(PoisonError::into_inner)
             .edge
     }
+    pub(super) fn firefox_enabled(&self) -> bool {
+        self.switches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .firefox
+    }
     pub(crate) fn any_enabled(&self) -> bool {
         let switches = self.switches.lock().unwrap_or_else(PoisonError::into_inner);
-        switches.chrome || (cfg!(feature = "your-edge") && switches.edge)
+        switches.chrome
+            || (cfg!(feature = "your-edge") && switches.edge)
+            || (cfg!(feature = "your-firefox") && switches.firefox)
     }
     pub(crate) fn set_enabled(&self, enabled: bool) -> Result<(), String> {
         self.set_browser_enabled(Browser::Chrome, enabled)
@@ -34,6 +42,8 @@ impl ChromeControl {
         let mut next = *saved;
         let target = if browser == Browser::Edge {
             &mut next.edge
+        } else if browser == Browser::Firefox {
+            &mut next.firefox
         } else {
             &mut next.chrome
         };
@@ -49,17 +59,26 @@ impl ChromeControl {
                 self.owner.approvals.cancel_browser(browser);
                 let generation = if browser == Browser::Edge {
                     &self.edge_generation
+                } else if browser == Browser::Firefox {
+                    &self.firefox_generation
                 } else {
                     &self.chrome_generation
                 };
                 generation.fetch_add(1, Ordering::SeqCst);
+                if browser == Browser::Firefox {
+                    self.local_documents
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clear();
+                }
             }
         }
         Ok(())
     }
     pub(super) fn browser_generation(&self, browser: Browser) -> u64 {
         match browser {
-            Browser::Chrome | Browser::Firefox => &self.chrome_generation,
+            Browser::Chrome => &self.chrome_generation,
+            Browser::Firefox => &self.firefox_generation,
             Browser::Edge => &self.edge_generation,
             Browser::Safari => &self.safari_generation,
         }
@@ -69,12 +88,21 @@ impl ChromeControl {
 
 pub(super) fn payload(shared: &Shared) -> Value {
     let chrome = &shared.chrome_control;
-    let switches = chrome
+    let switches = *chrome
         .switches
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    json!({"chrome":switches.chrome,"edge":cfg!(feature = "your-edge") && switches.edge,
-        "safari":super::safari::enabled(shared),"generation":chrome.switch_generation.load(Ordering::SeqCst)})
+    let disabled = chrome
+        .profiles
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .disabled();
+    let mut payload = json!({"chrome":switches.chrome,"edge":cfg!(feature = "your-edge") && switches.edge,
+        "safari":super::safari::enabled(shared),"firefox":cfg!(feature = "your-firefox") && switches.firefox,"generation":chrome.switch_generation.load(Ordering::SeqCst)});
+    if !disabled.is_empty() {
+        payload["disabledProfiles"] = json!(disabled);
+    }
+    payload
 }
 
 pub(super) async fn synchronize(shared: &Shared, pipe: &mut super::pipe::Pipe) -> Result<(), ()> {
@@ -111,13 +139,12 @@ pub(super) fn stop_work(shared: &Shared, browser: Browser) {
     let chrome = &shared.chrome_control;
     let active = {
         let mut tasks = chrome.tasks.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut ended = chrome
-            .turn_ended
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
         let mut work = chrome.work.lock().unwrap_or_else(PoisonError::into_inner);
         let selected = |id: &str| {
             work.profile_of(id)
+                .map(str::to_owned)
+                .or_else(|| super::profile_bindings::session_profile(chrome, id))
+                .as_deref()
                 .is_some_and(|profile| browser.owns_profile(profile))
         };
         let active: Vec<_> = tasks
@@ -125,9 +152,6 @@ pub(super) fn stop_work(shared: &Shared, browser: Browser) {
             .filter(|(id, _)| selected(id))
             .map(|(id, chat)| (id.clone(), chat.clone()))
             .collect();
-        for ids in ended.values_mut() {
-            ids.retain(|id| !selected(id));
-        }
         for (id, chat) in &active {
             tasks.remove(id);
             work.ask_stop(id, chat);
@@ -154,19 +178,21 @@ impl Core {
             .map_err(|reason| super::commands::invalid(&reason))?;
         if !enabled {
             stop_work(&self.shared, browser);
-            let enrollment = if browser == Browser::Edge {
-                super::enroll_browser::Browser::Edge
-            } else {
-                super::enroll_browser::Browser::Chrome
-            };
-            enrollment
-                .requested(&self.shared)
-                .store(false, Ordering::SeqCst);
-            enrollment
-                .enroll(&self.shared)
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .connection_ended(enrollment);
+            if matches!(browser, Browser::Chrome | Browser::Edge) {
+                let enrollment = if browser == Browser::Edge {
+                    super::enroll_browser::Browser::Edge
+                } else {
+                    super::enroll_browser::Browser::Chrome
+                };
+                enrollment
+                    .requested(&self.shared)
+                    .store(false, Ordering::SeqCst);
+                enrollment
+                    .enroll(&self.shared)
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .connection_ended(enrollment);
+            }
         }
         let delivered = deliver(&self.shared).await;
         if chrome.any_enabled() || super::safari::enabled(&self.shared) {

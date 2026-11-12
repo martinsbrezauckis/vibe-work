@@ -63,7 +63,7 @@ pub(super) fn check(layout: &Layout, real: &Path, access: Access, own: &str) -> 
     let data = layout.vibe_home.parent()?;
     if !matches!(access, Access::Read | Access::Context) && contains(real, data) {
         return Some(format!(
-            "Not run: this folder contains Vibe Work's own app data ({}); the agent does not read or change it. {own} Work only in your own folder.",
+            "Not run: this folder contains Vibe Work's own app data ({}); the agent does not read or change it. {own} Use your own folder for this.",
             shown::shown(real)
         ));
     }
@@ -78,7 +78,7 @@ pub(super) fn check(layout: &Layout, real: &Path, access: Access, own: &str) -> 
         return None;
     }
     Some(format!(
-        "Not run: Vibe Work's own app data ({}); the agent does not read or change it. {own} Work only in your own folder.",
+        "Not run: Vibe Work's own app data ({}); the agent does not read or change it. {own} Use your own folder for this.",
         shown::shown(real)
     ))
 }

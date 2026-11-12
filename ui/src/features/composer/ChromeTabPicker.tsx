@@ -4,12 +4,13 @@
  * `.chrome-tabs .it` resets the browser's button look. Depends on the composer store and chromeTabs; called by
  * Composer. The menu fits between the chat header and footer, resizing its scrollable list as the window changes.
  */
+import { pickBuiltinTab } from "./builtinTabs";
 import { Button } from "../../components/Controls";
 import { Tabs, Tab } from "../../components/Tabs";
 import { usableBrowsers, openBrowserTabs } from "./browserTabs";
 import { useCoreState } from "../shell/hooks";
 import { Icon } from "../../components/Icon";
-import { type ReactElement, useLayoutEffect, useRef, useState } from "react";
+import { type ReactElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../shell/AppContext";
 import { useComposerState } from "./hooks";
 import { pickChromeTab } from "./chromeTabs";
@@ -22,6 +23,10 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
   const element = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<{ up: boolean; maxHeight?: number }>({ up: true });
   const open = picker?.sessionId === sessionId;
+  useEffect(() => {
+    if (picker?.sessionId === sessionId && !browsers.includes(picker.browser ?? "Chrome"))
+      app.composer.setChromePicker(null);
+  }, [app, picker, sessionId, browsers]);
   useLayoutEffect(() => {
     if (!open) return;
     const composer = element.current?.closest(".composer");
@@ -109,12 +114,28 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
         <div className="slash-empty" role="status">
           Loading…
         </div>
-      ) : picker.rows.length === 0 ? (
+      ) : picker.rows.length === 0 && (picker.builtinRows?.length ?? 0) === 0 ? (
         <div className="slash-empty" role="status">
           No tabs are open in {browser}.
         </div>
       ) : null}
       <div className="slash-list">
+        {picker.builtinRows?.map((tab) => (
+          <Button
+            type="button"
+            appearance="menu-option"
+            key={tab.pageKey}
+            data-testid="composer.builtin-tab-pick"
+            data-item-id={tab.pageKey}
+            disabled={picker.loading}
+            onClick={() => {
+              void pickBuiltinTab(app, sessionId, tab.pageKey);
+            }}
+          >
+            <span className="chrome-tab-title">{tab.preview?.title || tab.preview?.url}</span>
+            <span className="ui-help">{tab.preview?.url}</span>
+          </Button>
+        ))}
         {picker.rows.map((tab) => (
           <Button
             type="button"

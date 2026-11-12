@@ -1,5 +1,7 @@
 //! Settings removal for one browser. Uses the owner-only signed unpair, per-browser fences and setup receipt;
 //! shared helper and credential are released only after their last user is removed.
+//! Depends on: signed owner unpair and setup receipts.
+//! Called by: browser Settings removal commands.
 use super::{PairingState, agent_browser::Browser, commands::invalid, setup};
 use crate::{CommandResult, Core, CoreError};
 use serde_json::json;
@@ -8,12 +10,16 @@ use std::sync::{PoisonError, atomic::Ordering};
 /// A removed browser must not regain pairing facts from the other browser's shared helper.
 pub(super) fn is_removed(shared: &crate::core::Shared, browser: Browser) -> bool {
     let chrome = &shared.chrome_control;
-    (browser == Browser::Chrome || (browser == Browser::Edge && cfg!(feature = "your-edge")))
+    (browser == Browser::Chrome
+        || (browser == Browser::Edge && cfg!(feature = "your-edge"))
+        || (browser == Browser::Firefox && cfg!(feature = "your-firefox")))
         && !browser.enabled(shared)
         && !setup::registered(
             &chrome.config,
             chrome.dir(),
-            if browser == Browser::Edge {
+            if browser == Browser::Firefox {
+                "Mozilla Firefox"
+            } else if browser == Browser::Edge {
                 "Microsoft Edge"
             } else {
                 "Google Chrome"
@@ -27,7 +33,7 @@ pub(super) fn filter_observation(
     shared: &crate::core::Shared,
     data: &mut serde_json::Value,
 ) -> bool {
-    let removed: Vec<_> = [Browser::Chrome, Browser::Edge]
+    let removed: Vec<_> = [Browser::Chrome, Browser::Edge, Browser::Firefox]
         .into_iter()
         .filter(|browser| is_removed(shared, *browser))
         .collect();

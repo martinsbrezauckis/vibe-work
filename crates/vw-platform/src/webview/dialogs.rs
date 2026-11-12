@@ -1,5 +1,7 @@
 //! Held native dialogs: thread-safe metadata for the tool and UI-thread continuations for each native engine.
 //! Called only for agent-owned pages; ordinary user pages retain their native dialog UI.
+//! Depends on: serde and synchronized native continuations.
+//! Called by: native engine dialog adapters.
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,

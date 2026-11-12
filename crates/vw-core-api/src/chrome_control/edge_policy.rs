@@ -65,8 +65,7 @@ fn policy() -> Vec<Value> {
     values
 }
 
-#[path = "edge_policy_platform.rs"]
-mod platform;
+use vw_platform::edge_policy as platform;
 
 #[cfg(test)]
 mod tests {

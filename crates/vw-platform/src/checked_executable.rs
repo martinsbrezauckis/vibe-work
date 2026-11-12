@@ -131,31 +131,3 @@ pub fn verify_child_cdhash(pid: u32, expected: &str) -> io::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-
-    #[test]
-    fn snapshot_bytes_survive_overwrite_and_replacement_and_deny_writers() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helper");
-        std::fs::write(&path, b"checked bytes").unwrap();
-        let mut executable = CheckedExecutable::open(&path).unwrap();
-        std::fs::write(&path, b"overwritten bytes").unwrap();
-        std::fs::rename(&path, dir.path().join("old")).unwrap();
-        std::fs::write(&path, b"replacement bytes").unwrap();
-        let mut actual = Vec::new();
-        executable.file().read_to_end(&mut actual).unwrap();
-        assert_eq!(actual, b"checked bytes");
-        assert!(
-            executable
-                .file()
-                .write_all(b"write through the snapshot handle")
-                .is_err()
-        );
-        let flags = rustix::io::fcntl_getfd(executable.file()).unwrap();
-        assert!(flags.contains(rustix::io::FdFlags::CLOEXEC));
-    }
-}

@@ -4,6 +4,7 @@
  * Depends on: hooks, model, MarketCard, MarketDetail, ToolsTabs. Called by: Content.
  * Invariants: components render, the marketplace controller decides; no vendor logos.
  */
+import { useErrorText } from "../../state/errorDetail";
 import { ChromeCard } from "../settings/chrome/ChromeConnection";
 import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
@@ -87,6 +88,7 @@ export function MarketplacePage(): ReactElement {
   const servers = useServers();
   const shown = marketGroups(view, filter, search, servers);
   const problem = error ?? view?.error ?? null;
+  const errorMessage = useErrorText(problem ?? "");
   return (
     <div
       className={`cpage ${selected === null ? "" : "has-detail"}`}
@@ -103,9 +105,8 @@ export function MarketplacePage(): ReactElement {
         </div>
         <Toolbar />
         {problem === null ? null : (
-          <p className="server-note" role="status">
-            <span className="px warn" aria-hidden="true" />
-            <span>{problem}</span>
+          <p className="key-problem" role="alert">
+            Could not read the marketplace: {errorMessage.replace(/\.$/, "")}. Try again.
           </p>
         )}
         {view === null && loading ? <p className="cmuted">Reading the marketplace…</p> : null}

@@ -75,9 +75,14 @@ fn range_end_outside_video_is_refused_even_when_samples_are_inside() {
     ] {
         for output in ["contact_sheet", "metadata"] {
             let error = extract(&job(&selection, output)).unwrap_err();
-            assert!(error.contains("range_outside_video"), "{error}");
-            assert!(error.contains("4000"), "{error}");
-            assert!(error.contains("Choose"), "{error}");
+            assert_eq!(
+                error.code,
+                vw_video_types::Code::OutsideDuration {
+                    duration_ns: 4_000_000_000
+                }
+            );
+            assert!(error.agent().contains("4000"), "{error}");
+            assert!(error.agent().contains("Choose"), "{error}");
         }
     }
 }
@@ -142,7 +147,12 @@ fn scene_metadata_and_single_frame_preserve_counts_and_reject_forged_coverage() 
 fn scene_ranges_outside_video_and_unsampled_cuts_are_explicit() {
     for (start, end) in [(0, 4500), (4000, 4500), (5000, 6000)] {
         let error = extract(&job(&scenes(start, end, 24), "contact_sheet")).unwrap_err();
-        assert!(error.contains("range_outside_video"), "{error}");
+        assert_eq!(
+            error.code,
+            vw_video_types::Code::OutsideDuration {
+                duration_ns: 4_000_000_000
+            }
+        );
     }
     let mut selection = scenes(0, 4000, 24);
     selection["step_ms"] = json!(1500);

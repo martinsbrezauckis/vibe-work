@@ -135,15 +135,13 @@ fn keys(shared: &Shared) -> Result<&Arc<vw_keys::KeyService>, String> {
         .config
         .keys
         .as_ref()
-        .ok_or_else(|| "Vibe Work has no vault connected, so no secret can be used".to_owned())
+        .ok_or_else(|| vw_vocabulary::texts::AGENT_VAULT_MISSING.to_owned())
 }
 
 async fn secrets(shared: &Shared) -> Result<Vec<ProjectSecret>, String> {
     keys(shared)?.project_secrets().await.map_err(|e| {
         if vw_keys::is_locked(&e) {
-            "the user's vault is locked: ask the user to unlock it in Vibe Work (Settings > Account), then try \
-             again"
-                .to_owned()
+            vw_vocabulary::texts::AGENT_VAULT_LOCKED.to_owned()
         } else {
             format!("the vault could not be read ({e})")
         }
@@ -177,7 +175,7 @@ pub(crate) async fn visible_logins(
     let mut visible = Vec::new();
     let logins = keys.logins().await.map_err(|e| {
         if vw_keys::is_locked(&e) {
-            "the user's vault is locked: ask the user to unlock it in Vibe Work (Settings > Account)".to_owned()
+            vw_vocabulary::texts::AGENT_VAULT_LOCKED.to_owned()
         } else {
             "the vault could not be read".to_owned()
         }
@@ -273,7 +271,11 @@ fn find_secret<'a>(secrets: &'a [ProjectSecret], wanted: &str) -> Option<&'a Pro
 
 fn missing_secret(name: &str) -> String {
     format!(
-        "no secret named '{}'; ask the user to add it in Vibe Work (Settings > Project secrets)",
+        concat!(
+            "no secret named '{}'; ask the user to add it in Vibe Work (",
+            vw_vocabulary::settings_path!("Project secrets"),
+            ")"
+        ),
         name.chars().take(60).collect::<String>()
     )
 }

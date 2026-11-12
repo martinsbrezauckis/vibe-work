@@ -38,12 +38,14 @@ impl Browser {
         by: Actor,
     ) -> Result<PageAnswer, ActError> {
         let Action::Upload {
-            reference, files, ..
+            reference,
+            paths,
+            files,
         } = action
         else {
             return Err(failed("not an upload"));
         };
-        if files.is_empty() {
+        if files.is_empty() && !paths.is_empty() {
             return Err(refused(
                 "Not run: no file was loaded for this upload. Name files in this chat's folders with \"paths\".",
             ));

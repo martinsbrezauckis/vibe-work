@@ -74,6 +74,7 @@ pub(super) fn selection(
         url: url.into(),
         text: text.into(),
         model_text: marked["structuredContent"].to_string(),
+        kind: None,
     })
 }
 pub(super) async fn read(
@@ -104,6 +105,17 @@ pub(super) async fn pick(
     tab_id: u32,
     session_id: Option<&str>,
 ) -> Result<crate::CommandResult, CoreError> {
+    pick_expected(shared, chrome, profile_id, tab_id, session_id, None).await
+}
+
+pub(super) async fn pick_expected(
+    shared: &crate::core::Shared,
+    chrome: &super::ChromeControl,
+    profile_id: &str,
+    tab_id: u32,
+    session_id: Option<&str>,
+    expected: Option<Value>,
+) -> Result<crate::CommandResult, CoreError> {
     let browser = super::agent_browser::Browser::from_profile(profile_id);
     if !browser.enabled(shared) {
         return Err(CoreError::new(
@@ -117,13 +129,27 @@ pub(super) async fn pick(
         return Err(CoreError::not_loaded(session));
     }
     let mut target = json!({"profileId":profile_id,"tabId":tab_id});
-    if let Some(session) = session_id {
+    super::profiles::check(chrome, profile_id)
+        .map_err(|reason| super::commands::invalid(&reason))?;
+    let switching = session_id.is_some_and(|chat| {
+        !super::profile_bindings::selected(chrome, chat)
+            .is_some_and(|old| super::profile_ids::same(&old, profile_id))
+    });
+    if let Some(session) = session_id.filter(|_| !switching) {
         target["clientSessionId"] = json!(session);
     }
+    if let Some(expected) = expected {
+        target["expected"] = expected;
+    }
     let generation = chrome.browser_generation(browser);
-    let reply = chrome
+    let profile_generation = chrome
+        .profiles
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .generation(profile_id);
+    let mut reply = chrome
         .owner
-        .call("chrome_status", json!({"_tabContext":target}))
+        .call("chrome_status", json!({"_tabContext":target.clone()}))
         .await
         .into_value();
     if !browser.enabled(shared) || generation != chrome.browser_generation(browser) {
@@ -131,6 +157,48 @@ pub(super) async fn pick(
             ErrorCode::InvalidCommand,
             "Browser tab read was stopped by its switch",
         ));
+    }
+    if let Some(session) = session_id
+        && !crate::new_chat::known_owner(shared, session)
+    {
+        return Err(CoreError::not_loaded(session));
+    }
+    if reply["structuredContent"]["error"]["code"] == "STALE_CONTEXT" {
+        return Err(CoreError::new(
+            ErrorCode::InvalidCommand,
+            "The shared page changed. Choose Ask Vibe Work on that page again.",
+        ));
+    }
+    let _verified = selection(&reply, profile_id, tab_id)?;
+    super::profiles::observed_tab(chrome, profile_id);
+    if let Some(chat) = session_id.filter(|_| switching) {
+        super::profile_selection::select(shared, chat, profile_id)
+            .await
+            .map_err(|reason| super::commands::invalid(&reason))?;
+        target["clientSessionId"] = json!(chat);
+        reply = chrome
+            .owner
+            .call("chrome_status", json!({"_tabContext":target}))
+            .await
+            .into_value();
+    }
+    super::profiles::check(chrome, profile_id)
+        .map_err(|reason| super::commands::invalid(&reason))?;
+    if generation != chrome.browser_generation(browser)
+        || profile_generation
+            != chrome
+                .profiles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .generation(profile_id)
+    {
+        return Err(super::commands::invalid(
+            "This profile's tab read was stopped. Select a connected profile before trying again.",
+        ));
+    }
+    if let Some(chat) = session_id {
+        super::profile_bindings::check(chrome, chat, profile_id)
+            .map_err(|reason| super::commands::invalid(&reason))?;
     }
     let picked = selection(&reply, profile_id, tab_id)?;
     Ok(crate::CommandResult::ChromeSelection {

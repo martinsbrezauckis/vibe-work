@@ -7,7 +7,7 @@
  * Invariants: renders only; every page text (titles, statuses, descriptions, finding messages) is plain text; the
  * creation and first-plan requests send user messages; other notices prepare context chips. No action writes files.
  */
-import { Badge, Button } from "../../components/Controls";
+import { Badge, Button, LinkButton } from "../../components/Controls";
 import { type ReactElement, useState } from "react";
 
 import type { Finding, Hub as HubData } from "../../protocol/core";
@@ -97,10 +97,9 @@ export function Hub({
       </div>
       {manifest?.description != null && <p className="pages-summary">{manifest.description}</p>}
       {!hub.truncated && !hub.groups.some((g) => g.pages.some((p) => p.kind === "plan")) && (
-        <button
+        <LinkButton
           data-testid="pages.hub-ask-plan"
-          type="button"
-          className="pages-plan-link"
+
           onClick={(event) => {
             askPlan(event.nativeEvent.isTrusted);
           }}
@@ -108,7 +107,7 @@ export function Hub({
           title={requestBusy ? requestTooltip : undefined}
         >
           Ask Vibe to write a plan page
-        </button>
+        </LinkButton>
       )}
       {indexText !== null && (
         <div className="server-note" role="status" data-notice={hub.index}>

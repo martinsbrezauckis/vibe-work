@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
 };
+use vw_video_types::{Code, Error};
 #[derive(Default)]
 struct Turn {
     id: String,
@@ -27,15 +28,15 @@ impl Budget {
         owner: &str,
         state: &Value,
         image: bool,
-    ) -> Result<Reservation<'_>, String> {
+    ) -> Result<Reservation<'_>, Error> {
         let (turn, observed) = usage(state)?;
         let mut turns = self.turns.lock().unwrap_or_else(PoisonError::into_inner);
         if turns.values().filter(|t| t.active).count() >= 2 {
-            return Err("limit_exceeded: two video jobs are active".into());
+            return Err(Error::new(Code::Busy, "two video jobs are active"));
         }
         let entry = turns.entry(owner.into()).or_default();
         if entry.active {
-            return Err("limit_exceeded: this chat already has a video job".into());
+            return Err(Error::new(Code::Busy, "this chat already has a video job"));
         }
         if entry.id != turn {
             *entry = Turn {
@@ -44,7 +45,10 @@ impl Budget {
             };
         }
         if image && entry.spent.saturating_add(observed) >= vw_gate::MAX_IMAGES {
-            return Err("limit_exceeded: this user turn's image allowance is used".into());
+            return Err(Error::new(
+                Code::ImageAllowance,
+                "this user turn's image allowance is used",
+            ));
         }
         // Pending image deliveries may not yet appear in history. Conservatively count both.
         entry.spent += usize::from(image);
@@ -64,7 +68,7 @@ impl Budget {
     }
 }
 impl Reservation<'_> {
-    pub(super) fn sent(&mut self, state: &Value, image: bool) -> Result<(), String> {
+    pub(super) fn sent(&mut self, state: &Value, image: bool) -> Result<(), Error> {
         let (turn, observed) = usage(state)?;
         let turns = self
             .budget
@@ -73,15 +77,18 @@ impl Reservation<'_> {
             .unwrap_or_else(PoisonError::into_inner);
         let entry = turns
             .get(&self.owner)
-            .ok_or("cancelled: video turn ended")?;
+            .ok_or(Error::new(Code::Cancelled, "video turn ended"))?;
         if entry.id != turn {
-            return Err("cancelled: video turn ended".into());
+            return Err(Error::new(Code::Cancelled, "video turn ended"));
         }
         if image && !self.image {
-            return Err("limit_exceeded: no image was reserved".into());
+            return Err(Error::new(Code::InvalidReply, "no image was reserved"));
         }
         if image && entry.spent.saturating_add(observed) > vw_gate::MAX_IMAGES {
-            return Err("limit_exceeded: this user turn's image allowance is used".into());
+            return Err(Error::new(
+                Code::ImageAllowance,
+                "this user turn's image allowance is used",
+            ));
         }
         self.sent = image;
         Ok(())
@@ -103,17 +110,17 @@ impl Drop for Reservation<'_> {
         }
     }
 }
-fn usage(state: &Value) -> Result<(&str, usize), String> {
+fn usage(state: &Value) -> Result<(&str, usize), Error> {
     let history = state["history"]
         .as_array()
-        .ok_or("limit_exceeded: no user turn image budget")?;
+        .ok_or(Error::new(Code::NoImageTurn, "no user turn image budget"))?;
     let start = history
         .iter()
         .rposition(|e| e["type"] == "message" && e["role"] == "user" && e["source"] != "harness")
-        .ok_or("limit_exceeded: no user turn image budget")?;
+        .ok_or(Error::new(Code::NoImageTurn, "no user turn image budget"))?;
     let turn = history[start]["turnId"]
         .as_str()
-        .ok_or("limit_exceeded: no user turn image budget")?;
+        .ok_or(Error::new(Code::NoImageTurn, "no user turn image budget"))?;
     let observed = history[start..].iter().map(images).sum::<usize>();
     Ok((turn, observed))
 }

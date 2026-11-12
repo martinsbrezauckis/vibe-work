@@ -210,8 +210,8 @@ def generate():
     levels = classes["ModelConfigView"].model_fields["thinking_levels"].get_default(call_default_factory=True)
     output[CRATE / "tests/fixtures/thinking-levels.json"] = json.dumps(levels) + "\n"
     protocol = modules[0]
-    skill = {"name": "review", "description": "Review code", "prompt": "Review the changes.", "source": "registry", "registry": {"skillId": "skill-review", "version": 2}}
-    project = {**skill, "description": "Project review", "scope": "project", "registry": {"skillId": "skill-project-review", "version": 3}}
+    skill = {"name": "review", "description": "Review code", "prompt": "Review the changes.", "source": "registry", "registry": {"skillId": "skill-review", "version": 2}, "active": False}
+    project = {**skill, "active": True, "description": "Project review", "scope": "project", "registry": {"skillId": "skill-project-review", "version": 3}}
     disabled = {"name": "draft", "description": "Write a draft", "prompt": "Draft text.", "enabled": False}
     builtin = {"name": "vibe", "description": "Vibe guidance", "prompt": "Use Vibe.", "source": "builtin", "scope": "builtin", "locked": True}
     plugin = {"name": "plugin:notes", "description": "Plugin notes", "prompt": "Read notes.", "source": "plugin", "locked": True}

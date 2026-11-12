@@ -1,5 +1,7 @@
 //! Browser session grants bind the owning tool, browser lease and tier. Descriptions reuse the card's verbs.
 //! Called only for core-created Ask cards; native vault grants remain independent.
+//! Depends on: browser classification and Ask grant matching.
+//! Called by: core-created browser permission cards.
 use super::grants::Scopeable;
 use serde_json::{Value, json};
 use vw_ask::{CoversPart, GrantPermission, SessionGrant, chrome::Tier};

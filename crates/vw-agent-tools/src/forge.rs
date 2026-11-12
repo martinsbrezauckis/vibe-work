@@ -27,11 +27,12 @@
 //! Invariant: pure functions over names; no I/O.
 
 /// The refusal text the agent reads: the outcome first, then what to do (same voice as `hook::PUSH_REASON`).
-pub const CONNECTOR_REASON: &str = "Not run: changing a repository through a connector (pushing files, creating or \
+pub const CONNECTOR_REASON: &str = vw_gh_broker::remote_change_refusal!(
+    "Not run: changing a repository through a connector (pushing files, creating or \
                                     merging pull requests, branches, issues, comments or repositories) is the \
                                     user's step in Vibe Work, like git push. Reading through the connector still \
-                                    works. Commit your work and name its folder for the user: select that folder in \
-                                    the Changes tab, then press Push or Create PR.";
+                                    works."
+);
 
 /// Names that make a connector a code forge, in normalized form ([`normalize`]: lower case, words joined by one
 /// `_`). Matched as whole words anywhere in the normalized name, multi-word entries included (`azure_devops`).

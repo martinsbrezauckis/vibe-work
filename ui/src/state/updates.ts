@@ -141,7 +141,7 @@ export function noticeFor(view: UpdateView): NoticeModel | null {
         tone: "ask",
         headline: `Vibe Work ${phase.version} is ready to install.`,
         detail:
-          "Vibe Work will restart. Your sessions and unsent drafts are kept; a turn that is running is interrupted.",
+          "Vibe Work will restart. Your chats and unsent drafts are kept; a turn that is running is interrupted.",
         progress: null,
         actions: ["install", "later"],
         key: `ready:${phase.version}`,

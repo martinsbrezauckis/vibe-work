@@ -40,11 +40,21 @@ impl Core {
         if let Some(id) = params["sessionId"].as_str().filter(|_| opening) {
             let mut reply = None;
             self.bounded_open(id, async {
+                let mut model_hold = crate::resume_models::begin(
+                    &self.shared,
+                    id,
+                    self.shared.config.reopen_timeout,
+                )?;
                 let mut opened = call
                     .await
                     .map_err(|e| crate::config_validation::from_gate(&self.shared, method, &e))?;
-                crate::interrupted_send::stop_recovered(&self.shared, id, &mut opened.result)
-                    .await?;
+                crate::interrupted_send::stop_recovered(
+                    &self.shared,
+                    id,
+                    &mut opened.result,
+                    &mut model_hold,
+                )
+                .await?;
                 reply = Some(opened);
                 Ok(())
             })
@@ -54,7 +64,6 @@ impl Core {
         }
         match call.await {
             Ok(reply) => {
-                #[cfg(feature = "context-composition")]
                 if method == "session/context/read" {
                     crate::context_composition::validate(&reply.result)?;
                 }

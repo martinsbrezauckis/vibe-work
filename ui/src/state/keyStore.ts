@@ -171,9 +171,15 @@ export function createKeys(
     store.set((s) => ({ ...s, ...patch }));
   };
   let running = 0;
+  let mutating = 0;
+  let loadVersion = 0;
+  let testVersion = 0;
 
   /** Sends one request; `null` plus `problem` set when it fails. */
   const send = async (request: KeyRequest): Promise<CommandResult | null> => {
+    // A mutation invalidates status and metadata reads started before it.
+    loadVersion += 1;
+    mutating += 1;
     running += 1;
     set({ busy: true, problem: null, notice: null });
     try {
@@ -189,18 +195,20 @@ export function createKeys(
       }
       return null;
     } finally {
+      mutating -= 1;
       running -= 1;
       if (running === 0) set({ busy: false });
     }
   };
 
-  const readStatus = async (): Promise<KeyStatusView | null> => {
+  const readStatus = async (version: number): Promise<KeyStatusView | null> => {
     try {
       const result = await core.run({ type: "keys", request: { op: "readStatus" } });
       if (result.type !== "keyStatus")
         throw new Error("The key status response was not understood.");
       return result.status;
     } catch (thrown) {
+      if (version !== loadVersion || mutating > 0) return null;
       const error = toCallError(thrown).error;
       const none = error.code === "keyService" && error.serverCode === "notConfigured";
       if (none) set({ availability: "none", status: null });
@@ -218,9 +226,27 @@ export function createKeys(
     }
   };
 
-  const load = async (): Promise<void> => {
-    const status = await readStatus();
-    if (status === null) return;
+  /** Continue only after both the tested key and its current status are ready. */
+  const finishWorkingSetup = (): void => {
+    const s = store.get();
+    if (
+      s.resultPending &&
+      s.test.phase === "ok" &&
+      s.status?.keyState === "ready" &&
+      s.removable === null &&
+      s.status.rememberNote === null
+    ) {
+      const created = s.notice === "Created a new vault for Vibe Work.";
+      set({ resultPending: false, dismissed: false, notice: null });
+      notify(`${created ? "Vault created. " : ""}Key works.`);
+    }
+  };
+
+  const load = async (): Promise<KeyStatusView | null> => {
+    const version = ++loadVersion;
+    const beforeTest = testVersion;
+    const status = await readStatus(version);
+    if (status === null) return null;
     const step = stepOf(status);
     const unlocked = status.vaultState === "unlocked";
     const keyReady = status.keyState === "ready";
@@ -238,6 +264,9 @@ export function createKeys(
         .catch(() => null);
       if (found?.type === "vibeKeys") vibeKeys = found.found;
     }
+    // Metadata may finish after a newer ready status. Never route setup backwards or publish
+    // a snapshot taken during a mutation; its caller will refresh after the command completes.
+    if (version !== loadVersion || mutating > 0) return status;
     if (keyReady) saveDone();
     // Local setup history cannot unlock the core's persisted selection. Ask on the first status,
     // before a request needs the key; an unsuccessful remembered unlock needs the same recovery.
@@ -252,7 +281,9 @@ export function createKeys(
       status,
       mistralKeys,
       test:
-        s.status?.keyItemId === status.keyItemId
+        s.status?.keyItemId === status.keyItemId ||
+        beforeTest !== testVersion ||
+        s.test.phase === "running"
           ? s.test
           : recordedKeyTest(mistralKeys.find((key) => key.inUse)?.lastTest),
       vibeKeys,
@@ -264,27 +295,26 @@ export function createKeys(
           ? null
           : s.need,
     }));
+    finishWorkingSetup();
+    return status;
   };
 
   /** Runs the test call and records the outcome (the key is in use already). */
-  const testKey = async (created = false): Promise<boolean> => {
+  const testKey = async (): Promise<boolean> => {
+    testVersion += 1;
     set({ test: { phase: "running" } });
     running += 1;
     set({ busy: true, problem: null });
     try {
       const result = await core.run({ type: "keys", request: { op: "testKey" } });
       if (result.type !== "keyTest") throw new Error("unexpected test result");
+      testVersion += 1;
       set({ test: { phase: "ok", models: result.modelCount } });
-      const s = store.get();
-      if (s.resultPending && s.removable === null && s.status?.rememberNote == null) {
-        // The toast replaces the result screen, so its one-time notice ("Created a new vault…") is said there and
-        // must not linger into Settings > Mistral key later.
-        set({ resultPending: false, dismissed: false, notice: null });
-        notify(`${created ? "Vault created. " : ""}Key works.`);
-      }
+      finishWorkingSetup();
       return true;
     } catch (thrown) {
       const error = toCallError(thrown).error;
+      testVersion += 1;
       set({ test: { phase: "failed", reason: reasonOf(error), text: describeProblem(error) } });
       return false;
     } finally {
@@ -302,7 +332,7 @@ export function createKeys(
     if (result === null) return false;
     // Record the import before testing: its removal offer must survive even a successful test.
     if (request.op === "importVibeKey") set({ removable: request.source });
-    if (test && fromSetup) set({ resultPending: true });
+    if (test && fromSetup) set({ resultPending: true, test: { phase: "running" } });
     await load();
     if (test) await testKey();
     return true;
@@ -324,8 +354,12 @@ export function createKeys(
     store,
     step: () => stepOf(store.get().status),
     covers: () => covering(),
-    start: load,
-    load,
+    start: async () => {
+      await load();
+    },
+    load: async () => {
+      await load();
+    },
     async createWithKey(password, how, unlockMethod = "system") {
       const created = await send({ op: "createVault", passphrase: password, unlockMethod });
       if (created === null) return false;
@@ -335,12 +369,16 @@ export function createKeys(
           : { op: "importVibeKey", source: how.importFrom },
       );
       if (stored !== null) {
-        set({ resultPending: true, notice: "Created a new vault for Vibe Work." });
+        set({
+          resultPending: true,
+          test: { phase: "running" },
+          notice: "Created a new vault for Vibe Work.",
+        });
         if ("importFrom" in how) set({ removable: how.importFrom });
       }
       await load();
       if (stored === null) return false;
-      await testKey(true);
+      await testKey();
       return true;
     },
     async unlock(password, vault, unlockMethod) {
@@ -352,12 +390,12 @@ export function createKeys(
         ...(unlockMethod === undefined ? {} : { unlockMethod }),
       });
       if (result === null) return false;
-      if (fromSetup) set({ resultPending: true });
-      await load();
+      if (fromSetup) set({ resultPending: true, test: { phase: "running" } });
+      const status = await load();
       // A vault that already holds the key: prove it works right away.
       if (fromSetup) {
-        if (store.get().status?.keyState === "ready") await testKey();
-        else set({ resultPending: false });
+        if (status?.keyState === "ready") await testKey();
+        else set({ resultPending: false, test: { phase: "idle" } });
       }
       return true;
     },
@@ -400,6 +438,8 @@ export function createKeys(
       set({ dismissed: true });
     },
     finish: () => {
+      const s = store.get();
+      if (s.resultPending && s.test.phase === "ok" && s.status?.keyState !== "ready") return;
       // Leaving the result screen ends its notice too; Settings shows only notices of its own actions.
       set({ resultPending: false, dismissed: false, notice: null });
     },

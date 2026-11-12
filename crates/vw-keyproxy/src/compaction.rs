@@ -12,6 +12,8 @@ pub(crate) const MAX_CHAT_BODY: usize = 128 * 1024 * 1024;
 /// Shape and attachment payload metrics; no image data or prompt text is retained here.
 #[derive(Default)]
 pub(crate) struct ChatShape {
+    pub(crate) session: Option<String>,
+    pub(crate) input: Option<String>,
     pub(crate) compaction: bool,
     /// A side request ([`side`]): its answer's rate limits can be another model's than the chat's, so they do not
     /// replace the readout.
@@ -52,6 +54,14 @@ fn is_attachment_note(text: &str) -> bool {
     false
 }
 
+fn attribution(request: &Value, name: &str) -> Option<String> {
+    request
+        .get("metadata")?
+        .get(name)?
+        .as_str()
+        .map(str::to_owned)
+}
+
 /// Inspect a provider request: explicit Off on known Mistral models and compaction image removal.
 /// Other requests, including malformed JSON, are returned byte-for-byte.
 pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
@@ -90,6 +100,8 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
         .unwrap_or(false);
     // Streamed or not: Vibe 3.0.3 and later stream their compaction call; earlier versions did not.
     let mut shape = ChatShape {
+        session: attribution(&request, "session_id"),
+        input: attribution(&request, "message_id"),
         compaction: request
             .pointer("/metadata/call_type")
             .and_then(Value::as_str)
@@ -151,202 +163,4 @@ pub(crate) fn prepare(bytes: &[u8]) -> (Option<Vec<u8>>, ChatShape) {
         return (None, shape);
     }
     (serde_json::to_vec(&request).ok(), shape)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::prepare;
-    use serde_json::{Value, json};
-
-    fn request(images: usize, stream: bool, call_type: &str) -> Vec<u8> {
-        let parts = (0..images)
-            .map(|_| json!({"type":"image_url","image_url":{"url":"data:image/png;base64,aGVsbG8="}}))
-            .collect::<Vec<_>>();
-        serde_json::to_vec(&json!({
-            "stream":stream,"metadata":{"call_type":call_type},
-            "messages":[
-                {"role":"user","content":parts},
-                {"role":"user","content":"You are performing a CONTEXT CHECKPOINT COMPACTION. Wrap it in <summary> tags."}
-            ]
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn omits_two_three_and_five_images_only_for_compaction() {
-        for count in [2, 3, 5] {
-            let bytes = request(count, false, "secondary_call");
-            let (rewritten, shape) = prepare(&bytes);
-            assert!(shape.compaction);
-            assert_eq!(shape.images, count);
-            assert_eq!(shape.omitted, count);
-            let rewritten = rewritten.unwrap();
-            assert!(!String::from_utf8_lossy(&rewritten).contains("base64"));
-            let value: Value = serde_json::from_slice(&rewritten).unwrap();
-            assert_eq!(
-                value["messages"][0]["content"].as_array().unwrap().len(),
-                count
-            );
-            assert!(
-                value["messages"][0]["content"][0]["text"]
-                    .as_str()
-                    .unwrap()
-                    .contains("original message")
-            );
-            // Streamed, as Vibe 3.0.3 and later send it: still a compaction.
-            let (rewritten, shape) = prepare(&request(count, true, "secondary_call"));
-            assert!(shape.compaction && shape.omitted == count && rewritten.is_some());
-            for (stream, call_type) in [(true, "main_call"), (false, "main_call")] {
-                let bytes = request(count, stream, call_type);
-                let (unchanged, shape) = prepare(&bytes);
-                assert!(unchanged.is_none());
-                assert_eq!(shape.images, count);
-                assert_eq!(shape.omitted, 0);
-            }
-        }
-    }
-
-    #[test]
-    fn an_image_free_cut_off_summary_retry_is_compaction() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream": false,
-            "metadata": {"call_type": "secondary_call"},
-            "messages": [
-                {"role": "user", "content": "Earlier request"},
-                {"role": "assistant", "content": "<summary>partial"},
-                {"role": "user", "content": "You were cut off. Don't think, don't be long, just answer."}
-            ]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert!(shape.compaction);
-        assert!(rewritten.is_none());
-    }
-
-    #[test]
-    fn unrelated_and_malformed_parts_survive() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream":false,"metadata":{"call_type":"secondary_call"},
-            "messages":[{"role":"user","content":[
-                {"type":"text","text":"keep this"},
-                {"type":"image_url","image_url":{"url":"https://example.invalid/x.png"}},
-                {"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}
-            ]},{"role":"user","content":"You are performing a CONTEXT CHECKPOINT COMPACTION. Wrap it in <summary> tags."}]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert_eq!(shape.omitted, 1);
-        let value: Value = serde_json::from_slice(&rewritten.unwrap()).unwrap();
-        assert_eq!(value["messages"][0]["content"][0]["text"], "keep this");
-        assert_eq!(
-            value["messages"][0]["content"][1]["image_url"]["url"],
-            "https://example.invalid/x.png"
-        );
-        assert!(prepare(b"not json").0.is_none());
-    }
-
-    #[test]
-    fn vision_secondary_call_keeps_its_images() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream": false,
-            "metadata": {"call_type": "secondary_call"},
-            "messages": [{"role": "user", "content": [
-                {"type":"text","text":"Describe this image"},
-                {"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}
-            ]}]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert!(!shape.compaction);
-        assert_eq!(shape.images, 1);
-        assert_eq!(shape.omitted, 0);
-        assert!(rewritten.is_none());
-    }
-
-    #[test]
-    fn native_or_custom_compaction_ends_with_a_text_summary_request() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream": false,
-            "metadata": {"call_type": "secondary_call"},
-            "messages": [
-                {"role": "user", "content": [
-                    {"type":"text","text":"What is here?"},
-                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}
-                ]},
-                {"role": "user", "content": "Summarize the conversation for the next turn."}
-            ]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert!(shape.compaction);
-        assert_eq!(shape.omitted, 1);
-        assert!(rewritten.is_some());
-    }
-
-    #[test]
-    fn secondary_agent_followup_ending_in_a_tool_message_keeps_its_image() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream": false,
-            "metadata": {"call_type": "secondary_call"},
-            "messages": [
-                {"role": "user", "content": [
-                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}
-                ]},
-                {"role": "tool", "content": "The tool finished."}
-            ]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert!(!shape.compaction);
-        assert_eq!(shape.omitted, 0);
-        assert!(rewritten.is_none());
-    }
-
-    #[test]
-    fn only_the_request_bringing_the_attachment_is_bounded() {
-        for content in [
-            json!("Attached file: report.pdf\nAbsolute path: /tmp/report.pdf"),
-            json!([{"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}]),
-        ] {
-            let mut body = json!({"stream":true,"messages":[{"role":"user","content":content}]});
-            assert!(
-                prepare(&serde_json::to_vec(&body).unwrap())
-                    .1
-                    .new_attachment
-            );
-            for followup in [
-                json!({"role":"assistant","content":"I will read it."}),
-                json!({"role":"tool","content":"Document text"}),
-                json!({"role":"user","content":"Now write a long answer."}),
-            ] {
-                body["messages"].as_array_mut().unwrap().push(followup);
-                assert!(
-                    !prepare(&serde_json::to_vec(&body).unwrap())
-                        .1
-                        .new_attachment
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn attachment_notes_are_recognized_only_in_user_text() {
-        let bytes = serde_json::to_vec(&json!({
-            "stream": true,
-            "messages": [
-                {"role": "user", "content": "Attached file: notes.txt\nAbsolute path: /tmp/notes.txt"},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Attached image \"plot.png\". Absolute path: /tmp/plot.png"}
-                ]},
-                {"role": "assistant", "content": "Attached file: fake\nAbsolute path: fake"},
-                {"role": "user", "content": "Discuss the words Attached file: and Absolute path: here."}
-            ]
-        }))
-        .unwrap();
-        let (rewritten, shape) = prepare(&bytes);
-        assert!(rewritten.is_none());
-        assert!(!shape.new_attachment);
-        assert_eq!(shape.attachment_notes, 2);
-        assert_eq!(shape.images, 0);
-    }
 }

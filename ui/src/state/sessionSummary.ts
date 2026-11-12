@@ -21,7 +21,7 @@ export const BADGE_LABEL: Record<Badge, string> = {
   done: "Complete",
   idle: "Idle",
   failed: "Failed",
-  stuck: "Vibe can't reopen this session right now",
+  stuck: "Vibe can't reopen this chat right now",
 };
 
 /** Stuck sessions (the core's `sessionStuck` events): id -> the session it was continued in. */

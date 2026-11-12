@@ -77,7 +77,7 @@ export function panelContext(
     add(
       node.path,
       node.kind === "copy"
-        ? `Session copy: ${node.name}${node.branch ? ` · ${node.branch}` : ""}`
+        ? `Chat copy: ${node.name}${node.branch ? ` · ${node.branch}` : ""}`
         : node.name,
       node.outsideProject && !node.sessionId,
     );

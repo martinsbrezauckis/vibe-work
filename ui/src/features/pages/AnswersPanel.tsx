@@ -9,7 +9,7 @@
  * Invariants: renders only; questions and option labels are page text shown as plain text; every change calls
  * `answer` (the core checks it against the page file); rank moves are buttons, so they work from the keyboard.
  */
-import { Button } from "../../components/Controls";
+import { Button, IconButton } from "../../components/Controls";
 import { type ReactElement, memo, useId, useState } from "react";
 
 import { Selector } from "../../components/Selector";
@@ -78,11 +78,11 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
         {on.map((id, index) => (
           <li data-item-id={`${input.id}:${id}`} key={id} data-option={id}>
             <span>{labelOf(item, id)}</span>
-            <button
+            <IconButton
+              icon="arrow-up"
               data-testid="pages.answers-panel-send"
               type="button"
-              className="ibtn"
-              aria-label={`Move “${labelOf(item, id)}” up`}
+              label={`Move “${labelOf(item, id)}” up`}
               disabled={index === 0}
               onClick={() => {
                 send(
@@ -93,14 +93,12 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
                   ),
                 );
               }}
-            >
-              ↑
-            </button>
-            <button
+            />
+            <IconButton
+              icon="arrow-down"
               data-testid="pages.answers-panel-send-2"
               type="button"
-              className="ibtn"
-              aria-label={`Move “${labelOf(item, id)}” down`}
+              label={`Move “${labelOf(item, id)}” down`}
               disabled={index === on.length - 1}
               onClick={() => {
                 send(
@@ -111,9 +109,7 @@ function Options({ item, answer }: { item: InputAnswer; answer: Answer }): React
                   ),
                 );
               }}
-            >
-              ↓
-            </button>
+            />
           </li>
         ))}
       </ol>

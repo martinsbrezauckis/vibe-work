@@ -1,6 +1,10 @@
 # Contributing
 
-Thank you for helping. Bug reports, ideas and pull requests are welcome.
+Thank you for helping. Bug reports, suggestions and feature requests are welcome.
+
+Pull requests are not accepted for now. Vibe Work is developed in a private repository and published here with each
+release, so a pull request here cannot be merged. If you have a fix in mind, open an issue and describe it; a code
+snippet in the issue is welcome.
 
 ## Reporting a bug
 
@@ -12,15 +16,14 @@ About). A screenshot helps. For security problems, follow `SECURITY.md` instead 
 Post what you want Vibe Work to do in [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions),
 category Ideas: the task, how you would use it, and an example. Requests there shape the next releases.
 
-## Making a change
+## Building it yourself
 
 1. Set up a development build as described in `README.md` (Develop).
 2. Keep the change focused on one thing. Logic belongs in `crates/`; `app/` only wires the Tauri commands and
    events to it.
 3. Run `scripts/public/check.sh`. It runs formatting, a production UI build, Clippy with warnings as errors, Rust
    and UI tests, UI lint, type check and format, generated-code and vocabulary drift checks, and size, colour and
-   public-paths guards. A pull request must pass it.
-4. Open a pull request that says what changed, why, and how you tested it.
+   public-paths guards.
 
 ## Code style
 
@@ -32,7 +35,7 @@ category Ideas: the task, how you would use it, and an example. Requests there s
   only through the typed command client.
 - Files stay small (a size check enforces a ceiling).
 - The protocol types in `crates/vw-protocol/src/generated/` and `ui/src/protocol/generated/` come from pinned Vibe
-  3.1.0; `ui/src/protocol/core/` comes from Rust core API types. Change the generator or source types and regenerate
+  3.1.2; `ui/src/protocol/core/` comes from Rust core API types. Change the generator or source types and regenerate
   as described in `AGENTS.md`; never edit generated files by hand.
 
 ## License

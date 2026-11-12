@@ -32,14 +32,12 @@ compile_error!(
 #[cfg(all(feature = "e2e-script", not(debug_assertions)))]
 compile_error!("the e2e-script feature is for debug test builds only");
 
-#[cfg(all(not(debug_assertions), feature = "your-firefox"))]
-compile_error!("Firefox is not available in release builds");
-
 mod access;
 mod agent_access;
 pub(crate) mod agent_tools;
 mod app_context;
 mod app_settings;
+mod approval_notice;
 mod attachment_save;
 mod audio_output;
 mod background_output;
@@ -49,17 +47,26 @@ mod browser_auth;
 mod browser_capture;
 mod browser_clipboard;
 mod browser_consent;
+mod browser_data;
 mod browser_delegation;
+mod browser_dialogs;
+pub use browser_dialogs::BrowserDialog;
 mod browser_delegation_receipts;
 mod browser_fill;
 mod browser_guard;
+mod browser_handover;
+mod browser_local;
+mod browser_outcomes;
 mod browser_popups;
+mod browser_recording;
 mod browser_secret;
+mod browser_settings;
 mod browser_shields;
 mod browser_tab_tools;
 mod browser_tabs;
 mod browser_upload;
 mod browser_view;
+pub use browser_settings::{BrowserPreferences, ComposerBrowser};
 mod browser_windows;
 mod changes;
 mod changes_children;
@@ -73,12 +80,14 @@ mod channels;
 mod chrome_control;
 mod clock;
 mod command;
+mod command_result;
 mod read_exclusions;
 #[cfg(test)]
 mod release_modules_tests;
 pub use chrome_control::{
-    BROWSER_PAIRING_DIALOG_METHOD, ChromeControlConfig, ChromeControlRequest, ChromeControlView,
-    ChromeSelection, ChromeSetupView, ChromeTab, ChromeWorkView, SafariView,
+    BROWSER_PAIRING_DIALOG_METHOD, BrowserProfile, ChatBrowserProfile, ChromeControlConfig,
+    ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeSetupView, ChromeShareKind,
+    ChromeTab, ChromeWorkView, ProfileState, SafariView,
 };
 mod command_decode;
 mod config_validation;
@@ -88,7 +97,6 @@ mod connectors;
 mod connectors_config;
 mod connectors_project;
 mod connectors_view;
-#[cfg(feature = "context-composition")]
 mod context_composition;
 mod core;
 mod core_config;
@@ -148,6 +156,7 @@ mod interrupted_send;
 mod model_check;
 mod model_choices;
 mod model_facts;
+mod resume_models;
 mod saved_documents;
 mod turn_start;
 pub use guard_refusals::GuardKind;
@@ -195,6 +204,7 @@ mod network_test;
 mod network_view;
 mod on_demand;
 mod one_ask;
+mod own_skill_reads;
 mod pages;
 mod pages_answers;
 mod pages_data;
@@ -502,12 +512,10 @@ mod video_image;
 #[cfg(feature = "video")]
 mod video_files;
 
-#[cfg(all(test, feature = "feedback"))]
-mod feedback_screenshot_tests;
-#[cfg(all(test, feature = "feedback"))]
+#[cfg(test)]
 mod feedback_tests;
 
-#[cfg(all(test, feature = "feedback"))]
+#[cfg(test)]
 mod feedback_redaction_tests;
 
 mod feedback;

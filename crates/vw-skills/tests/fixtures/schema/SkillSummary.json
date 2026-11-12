@@ -1,6 +1,11 @@
 {
   "additionalProperties": false,
   "properties": {
+    "active": {
+      "default": true,
+      "title": "Active",
+      "type": "boolean"
+    },
     "description": {
       "title": "Description",
       "type": "string"

@@ -65,13 +65,6 @@
 /* The chip's Preview button is a text button, not the 18 px icon button of `.ctxchip button`. */
 .ctxchip.docctx button.mini {
   width: auto;
-  height: auto;
-  display: inline-flex;
-  padding: 1px 7px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  font-size: var(--text-11);
 }
 .doc-preview .d {
   font-size: var(--text-12-5);
@@ -139,10 +132,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.sources-chip[aria-expanded="true"] {
-  background: var(--active);
-  color: var(--text);
 }
 .sources-panel {
   position: absolute;

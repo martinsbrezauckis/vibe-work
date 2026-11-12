@@ -3,6 +3,7 @@
 //! Each test owns its subprocess, storage and page; page scripts are the production scripts.
 #![allow(dead_code)]
 mod faults;
+mod frame_load;
 mod pointer;
 mod readiness;
 mod screenshot;
@@ -79,11 +80,14 @@ pub struct PageEngine {
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub on_click: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub native_clicks: AtomicU64,
+    /// Model native adapters that move the pointer before submitting a button sequence.
+    pub move_before_click: AtomicBool,
     pub focus_required: AtomicBool,
     pub input_markers: Mutex<Vec<vw_preview::action_tracking::ActionMarker>>,
     pub reverse_frames: AtomicBool,
     pub after_verify: Mutex<Option<String>>,
     pub after_point_validation: Mutex<Option<String>>,
+    pub after_point_mark: Mutex<Option<String>>,
     pub user_click_before_dispatch: AtomicBool,
     pub user_click_after_mark: AtomicBool,
     pub after_receipt_poll: Mutex<Option<String>>,
@@ -136,7 +140,7 @@ pub struct PageEngine {
 }
 
 impl PageEngine {
-    fn new() -> Arc<Self> {
+    fn new(isolated: bool) -> Arc<Self> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut command = Command::new("node");
         command
@@ -145,6 +149,7 @@ impl PageEngine {
                 "/tests/support/page.mjs"
             ))
             .env("VW_BROWSER_UI_PACKAGE", root.join("ui/package.json"))
+            .env("VW_BROWSER_ISOLATED", if isolated { "1" } else { "0" })
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -172,18 +177,20 @@ impl PageEngine {
             on_pin: Mutex::new(None),
             on_click: Mutex::new(None),
             native_clicks: AtomicU64::new(0),
+            move_before_click: AtomicBool::new(false),
             focus_required: AtomicBool::new(false),
             input_markers: Mutex::default(),
             reverse_frames: AtomicBool::new(false),
             after_verify: Mutex::new(None),
             after_point_validation: Mutex::new(None),
+            after_point_mark: Mutex::new(None),
             user_click_before_dispatch: AtomicBool::new(false),
             user_click_after_mark: AtomicBool::new(false),
             after_receipt_poll: Mutex::new(None),
             user_click_after_dispatch: AtomicBool::new(false),
             user_click_after_poll: Mutex::new(None),
             page_world: AtomicBool::new(false),
-            isolate_scripts: AtomicBool::new(false),
+            isolate_scripts: AtomicBool::new(isolated),
             unreadable_receipt: AtomicBool::new(false),
             unaddressed_children: AtomicBool::new(false),
             unaddressed_main: AtomicU64::new(0),
@@ -251,12 +258,43 @@ impl PageEngine {
             .unwrap();
     }
 
+    /// Reads independent page-world effects in each frame without relying on asynchronous frame messages.
+    pub async fn frame_page_values(&self, script: &str) -> Value {
+        self.rpc(json!({"op":"framesPageWorld", "script":script}))
+            .await
+            .unwrap()
+    }
+
     /// The person clicks the page with the real pointer (Chromium input, outside page script).
     pub async fn person_click(&self, x: f64, y: f64) {
         // A real engine sees the press and the release on the native view before the page does.
         self.person.observed();
         self.person.observed();
         self.rpc(json!({"op":"click", "x":x, "y":y})).await.unwrap();
+    }
+
+    /// The protocol's real creation timestamp survives queued delivery, as in the Windows pointer adapter.
+    pub async fn timestamped_click(&self, timestamp: f64, button: &str, count: u8) {
+        for click_count in 1..=count {
+            for kind in ["mousePressed", "mouseReleased"] {
+                self.rpc(json!({"op":"cdp","session":"","method":"Input.dispatchMouseEvent",
+                    "params":{"type":kind,"x":50,"y":40,"button":button,"clickCount":click_count,"timestamp":timestamp}}))
+                    .await.unwrap();
+            }
+        }
+    }
+
+    async fn person_during_mark(
+        &self,
+        point: vw_preview::NativeClickPoint,
+    ) -> Result<(), EngineError> {
+        if self.person_click_after_mark.swap(false, Ordering::Relaxed) {
+            self.person_click(point.x, point.y).await;
+            if self.registry_lag.load(Ordering::Relaxed) {
+                self.rpc(json!({"op":"frameCoverReady"})).await?;
+            }
+        }
+        Ok(())
     }
 
     pub fn hooks(&self) -> Arc<dyn PreviewHooks> {
@@ -399,7 +437,6 @@ impl PageEngine {
 }
 
 impl PreviewEngine for PageEngine {
-    #[cfg(feature = "click-marker")]
     fn show_input_marker(
         &self,
         _: &MountId,
@@ -439,6 +476,7 @@ impl PreviewEngine for PageEngine {
                 return Err(EngineError::FocusRequired);
             }
             self.person.arm(&guard.person);
+            let prepared = std::time::Instant::now();
             if let Some(script) = &guard.validation {
                 if let Ok(request) = serde_json::from_str::<Value>(script) {
                     let answers = self
@@ -491,17 +529,17 @@ impl PreviewEngine for PageEngine {
                 vw_preview::validate_frame_point(&request, &answers)
                     .map_err(EngineError::Platform)?;
             }
+            let after_mark = self.after_point_mark.lock().unwrap().take();
+            if let Some(script) = after_mark {
+                self.rpc(json!({"op":"evaluate", "script":script})).await?;
+            }
             if self.user_click_after_mark.swap(false, Ordering::Relaxed) {
                 self.rpc(json!({"op":"click", "x":point.x, "y":point.y}))
                     .await?;
                 self.rpc(json!({"op":"frameCoverReady"})).await?;
             }
-            if self.person_click_after_mark.swap(false, Ordering::Relaxed) {
-                self.person_click(point.x, point.y).await;
-                if self.registry_lag.load(Ordering::Relaxed) {
-                    self.rpc(json!({"op":"frameCoverReady"})).await?;
-                }
-            }
+            self.person_during_mark(point).await?;
+            vw_preview::validate_point_dispatch_age(prepared).map_err(EngineError::Platform)?;
             self.person
                 .admit(
                     &guard.person,
@@ -617,6 +655,10 @@ pub struct Rig {
 
 impl Rig {
     pub async fn new() -> Self {
+        Self::new_in_world(false).await
+    }
+
+    pub async fn new_in_world(isolated: bool) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::var_os("VW_TEST_ROOT")
             .map_or_else(std::env::temp_dir, PathBuf::from)
@@ -626,7 +668,7 @@ impl Rig {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
         std::fs::create_dir_all(&dir).unwrap();
-        let engine = PageEngine::new();
+        let engine = PageEngine::new(isolated);
         let mut config = PreviewConfig::new(dir.join("preview"));
         config.engine_timeout = Duration::from_secs(120);
         config.name_resolver = Some(Arc::new(|_| Ok(vec!["93.184.215.14".parse().unwrap()])));
@@ -698,7 +740,7 @@ impl PageEngine {
                 self.hooks()
                     .act_refused(&label, vw_preview::ActRefusal::FilePicker);
             }
-            if script.contains("JSON.stringify(state.result)") {
+            if script.contains("if (req.clear) state.clear()") {
                 let after_poll = self.after_receipt_poll.lock().unwrap().take();
                 if let Some(script) = after_poll {
                     self.rpc(json!({"op":"evaluate", "script":script})).await?;
@@ -735,7 +777,7 @@ impl PageEngine {
                 self.capture_pin().await?;
             }
             self.observe_faults(frame.is_none(), &script, &mut answers)?;
-            if script.contains("JSON.stringify(state.result)")
+            if script.contains("if (req.clear) state.clear()")
                 && self.unreadable_receipt.load(Ordering::Relaxed)
             {
                 for answer in &mut answers {

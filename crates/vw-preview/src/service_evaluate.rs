@@ -6,6 +6,20 @@ use std::sync::Arc;
 use crate::{EngineError, MountId, PreviewError, PreviewService};
 
 impl PreviewService {
+    /// Reads native request observations without evaluating page code.
+    ///
+    /// # Errors
+    /// Replaced mount, unsupported engine or native read failure.
+    pub async fn network_records(&self, id: &MountId) -> Result<serde_json::Value, PreviewError> {
+        let _activity = self.session_lock(&id.session_id).await;
+        if self.page_mount(&id.session_id).as_ref() != Some(id) {
+            return Err(EngineError::NotMounted.into());
+        }
+        Ok(self
+            .bounded("read requests", self.engine.network_records(id))
+            .await?)
+    }
+
     /// Prints only the current authorized mount; released pages are never recreated.
     ///
     /// # Errors

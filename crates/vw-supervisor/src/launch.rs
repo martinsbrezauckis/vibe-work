@@ -19,6 +19,10 @@ use crate::config::{SupervisorConfig, SupervisorError};
 use crate::env::{EnvPlan, SecretProvider, build_env};
 use crate::handshake::handshake;
 
+#[cfg(test)]
+#[path = "launch_command_tests.rs"]
+mod command_tests;
+
 /// One running, initialized server.
 pub(crate) struct Running {
     /// The lobby channel of the multiplexed process.
@@ -30,10 +34,11 @@ pub(crate) struct Running {
 }
 
 /// Spawns a server (`program`: the canonical executable; `config.program` is only the configured value),
-/// connects and runs the handshake.
+/// connects and runs the handshake, waiting up to `handshake_timeout` for its answer.
 pub(crate) async fn launch(
     config: &SupervisorConfig,
     program: &std::path::Path,
+    handshake_timeout: Duration,
     secrets: &dyn SecretProvider,
     pid_slot: &std::sync::Mutex<Option<u32>>,
     ids: &crate::live_ids::LiveIds,
@@ -56,7 +61,7 @@ pub(crate) async fn launch(
         mcp_token: mcp_token.as_ref(),
     })?;
     crate::shell_env::prepare(&config.vibe_home)?;
-    let mut argv = server_argv(config, program);
+    let mut argv = server_argv(config, program)?;
     let program = argv.remove(0);
     let launch = Launch {
         program: program.clone(),
@@ -96,7 +101,7 @@ pub(crate) async fn launch(
             });
         }
     };
-    match handshake(&conn, &config.initialize, config.handshake_timeout).await {
+    match handshake(&conn, &config.initialize, handshake_timeout).await {
         Ok(response) => {
             tracing::info!(pid = child.pid(), server = %response.server_info.name, version = %response.server_info.version, "vibe-app-server ready");
             Ok(Running {
@@ -143,17 +148,29 @@ pub(crate) async fn open_channel(
     }
 }
 
-/// The Stop, configuration-switch and plugin-hook guards, passed to the environment's Python with `-c`.
+/// The Stop, configuration-switch and plugin-hook guards, delivered through a private adapter file.
 pub const CHILD_STOP_ADAPTER: &str = concat!(
     include_str!("vibe_process_identity.py"),
     "\n",
     include_str!("vibe_process_tracking.py"),
     "\n",
+    include_str!("vibe_process_output.py"),
+    "\n",
+    include_str!("vibe_plugin_enablement.py"),
+    "\n",
+    include_str!("vibe_mcp_projection.py"),
+    "\n",
+    include_str!("vibe_skill_cleanup.py"),
+    "\n",
+    include_str!("vibe_resume_guard.py"),
+    "\n",
+    include_str!("vibe_keychain_guard.py"),
+    "\n",
     include_str!("vibe_child_stop.py")
 );
 
 /// The interpreter the server is started with when `program` (canonical) runs through [`CHILD_STOP_ADAPTER`]:
-/// the spawned command is then `<python> -P -c <adapter> <program> <mode args>...`, so the spawned process is that
+/// the spawned command uses a fixed-size isolated loader and a verified adapter file, so the spawned process is that
 /// Python, not `program`. `None` when `program` itself is spawned. The ownership check (vw-core-api `own_server`)
 /// uses the same answer: on Windows the environment's `python.exe` is a launcher that starts the base Python as a
 /// child, and that child is the process Vibe reports as a session's lease holder.
@@ -170,25 +187,32 @@ pub fn adapter_python(program: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// Build the server command inside any sandbox/recorder launcher.
-fn server_argv(config: &SupervisorConfig, program: &std::path::Path) -> Vec<OsString> {
+fn server_argv(
+    config: &SupervisorConfig,
+    program: &std::path::Path,
+) -> Result<Vec<OsString>, SupervisorError> {
     let mut argv: Vec<OsString> = config.launcher.clone();
     // Run the exact selected environment with our version-pinned adapter; launchers (sandbox/recorder) still wrap
     // the entire server process.
     if let Some(python) = adapter_python(program) {
-        // `-P`: `python -c` would put the working folder (the app's `work` folder, where helper chats work) first
-        // on the import path, so a planted `json.py` there would run in the server at the next start. The console
-        // script it replaces only searched its own `bin`/`Scripts` folder.
+        let adapter = crate::adapter_file::prepare(&config.vibe_home)?;
+        // -I excludes cwd, script directory, user site and PYTHON* overrides. -u preserves the
+        // unbuffered RPC pipes: isolated Python ignores the previous PYTHONUNBUFFERED setting.
+        // Stdin remains the multiplexed RPC input, so it cannot carry the adapter source.
         argv.extend([
             python.into_os_string(),
-            "-P".into(),
+            "-I".into(),
+            "-u".into(),
             "-c".into(),
-            CHILD_STOP_ADAPTER.into(),
+            crate::ADAPTER_BOOTSTRAP.into(),
+            adapter.into_os_string(),
+            crate::adapter_digest().into(),
         ]);
     }
     argv.push(program.as_os_str().to_owned());
     argv.push("--multiplex".into());
     argv.extend(config.extra_args.iter().cloned());
-    argv
+    Ok(argv)
 }
 
 #[cfg(all(test, unix))]
@@ -204,12 +228,12 @@ mod tests {
         std::fs::write(bin.join("python"), "").unwrap();
         let program = bin.join("vibe-app-server");
         let config = SupervisorConfig::new(program.clone(), root.join("home"), root.join("work"));
-        let argv = server_argv(&config, &program);
+        let argv = server_argv(&config, &program).unwrap();
         let python = std::fs::canonicalize(&bin).unwrap().join("python");
         assert_eq!(argv[0], python.as_os_str());
-        assert_eq!(argv[1], "-P");
-        assert_eq!(argv[2], "-c");
-        assert_eq!(argv[4], program.as_os_str());
+        assert_eq!(argv[1], "-I");
+        assert_eq!(argv[2], "-u");
+        assert_eq!(argv[7], program.as_os_str());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

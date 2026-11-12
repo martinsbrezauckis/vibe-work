@@ -36,7 +36,6 @@ pub(crate) fn reveal_main_window<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri
 pub(crate) fn menu(app: &AppHandle, id: &str) -> Result<(), String> {
     match id {
         OPEN => reveal_main_window(app).map_err(|error| error.to_string()),
-        #[cfg(feature = "feedback")]
         "feedback" => {
             crate::feedback_entry::open(app);
             Ok(())
@@ -98,7 +97,6 @@ fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             let _ = reveal_main_window(&open);
         }),
     )];
-    #[cfg(feature = "feedback")]
     {
         let feedback = app.clone();
         actions.push((
@@ -124,7 +122,6 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, QUIT, texts::QUIT_VIBE_WORK, true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open])?;
-    #[cfg(feature = "feedback")]
     menu.append(&MenuItem::with_id(
         app,
         "feedback",

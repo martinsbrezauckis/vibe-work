@@ -9,19 +9,12 @@ input:not([type="range"]),
 textarea,
 select,
 .ui-selector-trigger,
-.tb-btn[data-shape="outlined"],
+.tb-btn[data-shape="outlined"]:not(.primary),
 .switch {
   border-color: var(--control-line);
 }
 .switch {
   box-shadow: 0 0 0 1px var(--control-line);
-}
-:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-:root[data-contrast="more"] :focus-visible {
-  outline-width: 3px;
 }
 :root[data-motion="reduce"] *,
 :root[data-motion="reduce"] *::before,

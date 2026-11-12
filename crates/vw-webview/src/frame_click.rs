@@ -44,6 +44,7 @@ pub(crate) fn click(
     // Before the validation script arms the receipt: from here to its final collection, any press or release
     // of the person's in this view means the click is not confirmed.
     person.arm(&interval);
+    let prepared = std::time::Instant::now();
     let (script, dispatch) = (script.to_owned(), dispatch.to_owned());
     let view = native.inner();
     #[cfg(target_os = "linux")]
@@ -89,14 +90,27 @@ pub(crate) fn click(
                         if reply.is_closed() {
                             return;
                         }
+                        if let Err(reason) = vw_preview::validate_point_dispatch_age(prepared) {
+                            let _ = reply.send(Err(reason));
+                            return;
+                        }
                         if allowed.as_ref().is_some_and(|check| !check()) {
                             let _ = reply.send(Err(
                                 "Not run: browser permission changed before native input".into(),
                             ));
                             return;
                         }
-                        let result =
-                            dispatch_native(&native, point, &sent, options, &person, &interval);
+                        let result = dispatch_native(
+                            &native,
+                            point,
+                            &sent,
+                            (
+                                options,
+                                request.get("keyboard").filter(|value| value.is_object()),
+                            ),
+                            &person,
+                            &interval,
+                        );
                         let _ = reply.send(result);
                     };
                     // WebKit (GTK and macOS) floors DOM event times and the mark's clock to whole
@@ -197,6 +211,7 @@ pub(crate) fn click(
     // The view's current place for the pointer watch, then the interval starts before the receipt is armed.
     vw_platform::native_click::person::refresh(&native.controller());
     person.arm(&interval);
+    let prepared = std::time::Instant::now();
     let native = std::rc::Rc::new(native);
     let view = native.clone();
     crate::frames_win::evaluate(
@@ -242,16 +257,24 @@ pub(crate) fn click(
                         ));
                         return;
                     }
+                    if let Err(reason) = vw_preview::validate_point_dispatch_age(prepared) {
+                        let _ = reply.send(Err(reason));
+                        return;
+                    }
                     dispatch_windows(
                         &native,
                         (point, css),
-                        options,
+                        (
+                            options,
+                            request.get("keyboard").filter(|value| value.is_object()),
+                        ),
                         Input {
                             sent,
                             allowed,
                             person,
                             interval,
                         },
+                        prepared + vw_preview::POINT_DISPATCH_LIMIT,
                         reply,
                     );
                 }),
@@ -279,7 +302,7 @@ fn dispatch_native(
     native: &PlatformWebview,
     point: (f64, f64),
     sent: &AtomicBool,
-    options: vw_preview::ClickOptions,
+    (options, keyboard): (vw_preview::ClickOptions, Option<&serde_json::Value>),
     person: &PersonPointer,
     interval: &PersonInterval,
 ) -> Result<(), String> {
@@ -291,7 +314,19 @@ fn dispatch_native(
         vw_platform::native_click::person::holding(view),
         vw_platform::native_click::person::recent(),
     )?;
-    let options = (options.button, options.count, options.modifiers);
+    if let Some(keyboard) = keyboard {
+        let input = vw_platform::native_click::keyboard::Keyboard::parse(keyboard)?;
+        #[cfg(target_os = "linux")]
+        return vw_platform::native_click::keyboard::linux_send(view, &input, sent);
+        #[cfg(target_os = "macos")]
+        return vw_platform::native_click::keyboard::macos_send(view, point, &input, sent);
+    }
+    let options = (
+        options.button,
+        options.count,
+        options.modifiers,
+        options.wheel,
+    );
     #[cfg(target_os = "linux")]
     return vw_platform::native_click::linux_click_options(view, point, sent, options);
     #[cfg(target_os = "macos")]
@@ -302,8 +337,9 @@ fn dispatch_native(
 fn dispatch_windows(
     native: &PlatformWebview,
     points: ((f64, f64), (f64, f64)),
-    options: vw_preview::ClickOptions,
+    (options, keyboard): (vw_preview::ClickOptions, Option<&serde_json::Value>),
     input: Input,
+    deadline: std::time::Instant,
     reply: crate::platform::Reply<()>,
 ) {
     let (point, css) = points;
@@ -328,7 +364,24 @@ fn dispatch_windows(
         let _ = reply.send(Err(reason));
         return;
     }
-    if options == vw_preview::ClickOptions::default() {
+    if let Some(keyboard) = keyboard {
+        let keyboard = match vw_platform::native_click::keyboard::Keyboard::parse(keyboard) {
+            Ok(input) => input,
+            Err(reason) => {
+                let _ = reply.send(Err(reason));
+                return;
+            }
+        };
+        vw_platform::native_click::keyboard::windows_send(
+            &controller,
+            point,
+            keyboard,
+            &sent,
+            &allowed,
+            deadline,
+            reply,
+        );
+    } else if options == vw_preview::ClickOptions::default() {
         let _ = reply.send(vw_platform::native_click::windows_click(
             &controller,
             point,
@@ -341,9 +394,15 @@ fn dispatch_windows(
         vw_platform::native_click::windows_click_options(
             &controller,
             (point, css),
-            (options.button, options.count, options.modifiers),
+            (
+                options.button,
+                options.count,
+                options.modifiers,
+                options.wheel,
+            ),
             sent,
             allowed,
+            deadline,
             reply,
         );
     }

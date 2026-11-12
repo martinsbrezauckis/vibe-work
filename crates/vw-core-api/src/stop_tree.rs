@@ -161,7 +161,7 @@ pub(crate) async fn descendants(shared: &Shared, session: &str) -> Result<(), Co
             .gate
             .call(
                 METHOD,
-                json!({"sessionId":session,"reason":"Stopped by the person"}),
+                json!({"sessionId":session,"reason":"Stopped by the user"}),
                 None,
             )
             .await

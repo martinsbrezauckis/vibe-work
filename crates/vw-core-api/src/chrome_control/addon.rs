@@ -327,90 +327,82 @@ pub(crate) fn view_for(
     use AddonAction as A;
     use AddonState as S;
     let (label, action, instruction): (&str, Option<A>, &str) = match state {
-        S::Unavailable => (
-            package_text,
-            None,
-            "This Vibe Work has no {browser} connection. Tell the person {yourBrowser} needs a Vibe Work build that includes it.",
-        ),
+        S::Unavailable => (package_text, None, super::browser_text::UNAVAILABLE),
         S::NotSetUp => (
             "Not connected",
             Some(A::Connect),
-            "{yourBrowser} is not set up. Ask the person to click Connect {browser}.",
+            "{yourBrowser} is not set up. Ask the user to click Connect {browser}.",
         ),
         S::ChromeMissing => (
             "{fullBrowser} is not installed",
             None,
-            "{fullBrowser} is not installed. Ask the person to install {fullBrowser} from {download}.",
+            "{fullBrowser} is not installed. Ask the user to install {fullBrowser} from {download}.",
         ),
         S::ChromeSandboxed => (
             "Snap or Flatpak {browser} is unsupported",
             None,
-            "{browser} here is a Snap or Flatpak package, which cannot reach Vibe Work. Ask the person to install {fullBrowser} from {download}.",
+            "{browser} here is a Snap or Flatpak package, which cannot reach Vibe Work. Ask the user to install {fullBrowser} from {download}.",
         ),
         S::OtherBrowser => (
             "{fullBrowser} required",
             None,
-            "Only another Chromium browser was found; {yourBrowser} needs {fullBrowser}. Ask the person to install {fullBrowser} from {download}.",
+            "Only another Chromium browser was found; {yourBrowser} needs {fullBrowser}. Ask the user to install {fullBrowser} from {download}.",
         ),
-        S::SwitchedOff => (
-            "Off",
-            Some(A::TurnOn),
-            "{yourBrowser} is switched off in Vibe Work. Ask the person to turn it on in Settings, Browser, {yourBrowser}.",
-        ),
+        S::SwitchedOff => ("Off", Some(A::TurnOn), super::browser_text::SWITCHED_OFF),
         S::InReview => (
             "Extension in review",
             None,
-            "The Vibe Work extension is in Google's review and cannot be added yet. Tell the person {yourBrowser} works once it is listed.",
+            "The Vibe Work extension is in Google's review and cannot be added yet. Tell the user {yourBrowser} works once it is listed.",
         ),
         S::OtherOwner => (
             "Paired with another Vibe Work",
             Some(A::OpenPairingPage),
-            "{browser} is paired with another Vibe Work. Ask the person to click Open pairing page and choose Replace paired Vibe Work in {browser}.",
+            "{browser} is paired with another Vibe Work. Ask the user to click Open pairing page and choose Replace paired Vibe Work in {browser}.",
         ),
         S::Connecting => (
             "Connecting",
             None,
-            "{browser} is connecting to Vibe Work. Ask the person to wait a few seconds, then try again.",
+            "{browser} is connecting to Vibe Work. Ask the user to wait a few seconds, then try again.",
         ),
         S::NotPaired => (
             "Pair in {browser}",
             Some(A::OpenPairingPage),
-            "The Vibe Work extension waits to be paired. Ask the person to click Pair Vibe Work on its page in {browser} after checking that the code matches the one in Vibe Work.",
+            "The Vibe Work extension waits to be paired. Ask the user to click Pair Vibe Work on its page in {browser} after checking that the code matches the one in Vibe Work.",
         ),
         S::AccessBlocked => (
             "Blocked by macOS",
             Some(A::Connect),
-            "macOS blocked access. Ask the person to open System Settings > Privacy & Security > Files & Folders > Vibe Work, allow {fullBrowser} if listed, then retry Connect {browser}.",
+            "macOS blocked access. Ask the user to open System Settings > Privacy & Security > Files & Folders > Vibe Work, allow {fullBrowser} if listed, then retry Connect {browser}.",
         ),
         S::HelperSetupRequired => (
             "Helper setup required",
             Some(A::SetupAgain),
-            "{browser}'s helper registration is missing or changed and could not be repaired. Ask the person to click Set up again in Settings, Browser, {yourBrowser}.",
+            "{browser}'s connection setup is missing or changed and could not be repaired. Ask the user to click Set up again in Settings > Browser > {yourBrowser}.",
         ),
         S::OwnerCredentialMissing => (
             "Browser credential missing",
             Some(A::Remove),
-            "Vibe Work's browser credential is missing. Ask the person to click Remove… in Settings, Browser, then Connect {browser}.",
+            "Vibe Work's browser credential is missing. Ask the user to click Remove… in Settings > Browser, then Connect {browser}.",
         ),
         S::HelperNotRunning => (
             "Not running",
             Some(A::Connect),
-            "Vibe Work's {browser} helper is not running. Ask the person to click Connect {browser}.",
+            "Vibe Work's connection to {browser} is not running. Ask the user to click Connect {browser}.",
         ),
         S::TurnedOffInChrome => (
             "Turn on in {browser}",
             None,
-            "The Vibe Work extension is turned off in {browser}, for example after an update that asked for new permissions. Ask the person to turn it on in {browser}'s Extensions page.",
+            "The Vibe Work extension is turned off in {browser}, for example after an update that asked for new permissions. Ask the user to turn it on in {browser}'s Extensions page.",
         ),
         S::RestartChrome => (
             "Restart {browser}",
             None,
-            "{browser} must restart to find the extension. Ask the person to quit and reopen {browser}.",
+            "{browser} must restart to find the extension. Ask the user to quit and reopen {browser}.",
         ),
         S::UpdateNeeded => (
             "Update the extension",
             None,
-            "The Vibe Work extension in {browser} is older than this Vibe Work needs. Ask the person to update it: {browser} updates extensions by itself within a few hours, or at once with Update on {browser}'s Extensions page in Developer mode.",
+            "The Vibe Work extension in {browser} is older than this Vibe Work needs. Ask the user to update it: {browser} updates extensions by itself within a few hours, or at once with Update on {browser}'s Extensions page in Developer mode.",
         ),
         S::ChromeClosed => (
             "Connected when {browser} is open",
@@ -420,17 +412,17 @@ pub(crate) fn view_for(
         S::EnableInChrome => (
             "Enable in {browser}",
             None,
-            "{browser} asks to enable the newly added Vibe Work extension. Ask the person to click Enable extension in {browser}.",
+            "{browser} asks to enable the newly added Vibe Work extension. Ask the user to click Enable extension in {browser}.",
         ),
         S::ExtensionNotInstalled => (
             "Add to {browser}",
             Some(A::Connect),
-            "The Vibe Work extension is not in {browser} yet. Ask the person to click Connect {browser} and add the extension in {browser}.",
+            "The Vibe Work extension is not in {browser} yet. Ask the user to click Connect {browser} and add the extension in {browser}.",
         ),
         S::NotConnected => (
             "Not connected",
             Some(A::Connect),
-            "{browser} is not connected to Vibe Work, perhaps because {browser} is closed. Ask the person to open {fullBrowser} or click Connect {browser}.",
+            "{browser} is not connected to Vibe Work, perhaps because {browser} is closed. Ask the user to open {fullBrowser} or click Connect {browser}.",
         ),
         S::Connected => ("Connected", None, "{yourBrowser} is connected."),
     };
@@ -451,12 +443,13 @@ pub(crate) fn view_for(
         _ => None,
     };
     let instruction = match state {
+        S::Unavailable => super::browser_text::unavailable(browser, package_text),
         S::EnableInChrome => format!(
-            "{{browser}} asks to enable the newly added Vibe Work extension. Ask the person to follow this step: {}",
+            "{{browser}} asks to enable the newly added Vibe Work extension. Ask the user to follow this step: {}",
             step.as_deref().unwrap_or_default()
         ),
         S::RestartChrome => format!(
-            "{{browser}} must restart to find the extension. Ask the person to follow this step: {}",
+            "{{browser}} must restart to find the extension. Ask the user to follow this step: {}",
             step.as_deref().unwrap_or_default()
         ),
         _ => instruction.to_owned(),
@@ -465,7 +458,7 @@ pub(crate) fn view_for(
         state,
         extension_version: None,
         step,
-        label: browser.words(label),
+        label: super::browser_text::label(browser, &browser.words(label)),
         action,
         // Names come from the vocabulary (one source for the card, the agent and the docs).
         instruction: browser.words(&instruction),
@@ -482,7 +475,7 @@ pub(super) fn reconnecting_for(
     if paired_once && view.state == AddonState::Connecting {
         view.label = browser.words("Turn on in {browser}");
         view.action = None;
-        view.instruction = browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the person to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.");
+        view.instruction = browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.");
         view.step = Some(browser.words("Open {browser} extensions → Vibe Work"));
     }
 }

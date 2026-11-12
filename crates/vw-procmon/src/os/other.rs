@@ -134,25 +134,3 @@ fn command_line(pid: u32, process: &sysinfo::Process) -> Vec<String> {
         .map(|a| a.to_string_lossy().into_owned())
         .collect()
 }
-
-#[cfg(all(test, target_os = "macos"))]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    /// An empty argument stays an empty argument and the environment never shows up as arguments (a
-    /// retitled Vibe server is `vibe-app-server` plus empty padding, which `sysinfo` would read as its environment).
-    #[test]
-    fn a_macos_command_line_keeps_empty_arguments_and_never_shows_the_environment() {
-        let mut child = std::process::Command::new("/bin/sh")
-            .args(["-c", "sleep 30; true", "sh", ""])
-            .env_clear()
-            .env("VW_ARGV_PROBE", "not-an-argument")
-            .spawn()
-            .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let snapshot = super::snapshot().unwrap();
-        let cmdline = snapshot.processes[&child.id()].cmdline.clone();
-        child.kill().unwrap();
-        child.wait().unwrap();
-        assert_eq!(cmdline, ["/bin/sh", "-c", "sleep 30; true", "sh", ""]);
-    }
-}

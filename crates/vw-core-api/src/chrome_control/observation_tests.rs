@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 fn observation_catalog_includes_find_and_optional_arguments() {
     let catalog = output_tests::catalog();
     let rows = catalog["actions"].as_array().unwrap();
-    assert_eq!(rows.len(), 66);
+    assert_eq!(rows.len(), 85);
     for (action, keys) in [
         (
             "page.read",
@@ -19,6 +19,7 @@ fn observation_catalog_includes_find_and_optional_arguments() {
         ("page.click", vec!["observation"]),
         ("page.type", vec!["observation"]),
         ("page.select", vec!["observation"]),
+        ("window.close", vec!["windowId"]),
     ] {
         let row = rows.iter().find(|r| r["id"] == action).unwrap();
         for key in keys {

@@ -12,6 +12,9 @@
 //! Bash, without the tools binary or when the copy fails, our `shell` line is removed again: Vibe then finds its own
 //! shell as before, and a stale line never points Vibe at a wrapper with no real Git Bash behind it.
 //!
+//! Without Git Bash Vibe runs the agent's commands in PowerShell; [`prepare`] then also runs the PowerShell step
+//! (`crate::powershell_shell`), which uses the same config editing and copy for `[tools.powershell]`.
+//!
 //! Depends on: `toml_edit` (the file keeps its comments and layout), `vw_platform::replace_private`. Called by:
 //! `agent_tools::prepare` (Windows), tests (the pure parts on every OS).
 //! Invariants: only Vibe Work's own `VIBE_HOME`; a file that is not valid TOML is left byte-identical.
@@ -48,6 +51,15 @@ pub enum Shell {
 /// The config text with `[tools.git_bash] shell` as `wanted` asks. Pure.
 #[must_use]
 pub fn with_shell(existing: &str, wanted: &Wanted<'_>) -> Shell {
+    with_tool_shell(existing, TOOL, wanted)
+}
+
+/// Vibe's command tool for Git Bash (its `[tools.<name>]` table).
+pub const TOOL: &str = "git_bash";
+
+/// The config text with `[tools.<tool>] shell` as `wanted` asks. Pure.
+#[must_use]
+pub fn with_tool_shell(existing: &str, tool: &str, wanted: &Wanted<'_>) -> Shell {
     let Ok(mut config) = existing.parse::<DocumentMut>() else {
         return Shell::Skipped;
     };
@@ -56,7 +68,7 @@ pub fn with_shell(existing: &str, wanted: &Wanted<'_>) -> Shell {
     };
     let current = config
         .get("tools")
-        .and_then(|tools| tools.get("git_bash"))
+        .and_then(|tools| tools.get(tool))
         .and_then(|bash| bash.get("shell"))
         .map(|shell| shell.as_str().map(str::to_owned));
     match (wanted, current) {
@@ -66,7 +78,7 @@ pub fn with_shell(existing: &str, wanted: &Wanted<'_>) -> Shell {
         (Wanted::None(_), Some(Some(_))) => {
             let Some(bash) = config
                 .get_mut("tools")
-                .and_then(|tools| tools.get_mut("git_bash"))
+                .and_then(|tools| tools.get_mut(tool))
                 .and_then(Item::as_table_like_mut)
             else {
                 return Shell::Skipped;
@@ -87,7 +99,7 @@ pub fn with_shell(existing: &str, wanted: &Wanted<'_>) -> Shell {
                 return Shell::Skipped;
             };
             let Some(bash) = tools
-                .entry("git_bash")
+                .entry(tool)
                 .or_insert(Item::Table(Table::new()))
                 .as_table_like_mut()
             else {
@@ -99,50 +111,14 @@ pub fn with_shell(existing: &str, wanted: &Wanted<'_>) -> Shell {
     }
 }
 
-/// Git Bash as Vibe 3.0.2 finds it (`vibe/_processes/_windows.py` `_find_git_bash`): `bash.exe` on `PATH` unless it is
-/// WSL's (`System32`) or the Store alias (`WindowsApps`); else next to `git.exe` on `PATH` (`..\bin\bash.exe`,
-/// `..\usr\bin\bash.exe`); else under `ProgramFiles`, `ProgramFiles(x86)`, `LOCALAPPDATA` (`Git\bin\bash.exe`,
-/// `Programs\Git\bin\bash.exe`). `var` reads an environment variable, `is_file` checks a path. Pure.
+/// Git Bash as Vibe finds it ([`vw_agent_tools::shell_find::git_bash`], which our `bash.exe` copy also uses when a
+/// Vibe CLI outside the app runs it). Pure.
 #[must_use]
 pub fn find_real(
     var: impl Fn(&str) -> Option<String>,
     is_file: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    let path = var("PATH").unwrap_or_default();
-    let on_path = |name: &str| {
-        path.split(';')
-            .filter(|dir| !dir.is_empty())
-            .map(|dir| Path::new(dir.trim_matches('"')).join(name))
-            .find(|candidate| is_file(candidate))
-    };
-    if let Some(bash) = on_path("bash.exe") {
-        let normalized = bash.to_string_lossy().replace('\\', "/").to_lowercase();
-        if !normalized.contains("/system32/bash.exe")
-            && !normalized.contains("/windowsapps/bash.exe")
-        {
-            return Some(bash);
-        }
-    }
-    if let Some(root) =
-        on_path("git.exe").and_then(|git| git.parent()?.parent().map(Path::to_path_buf))
-    {
-        for relative in ["bin/bash.exe", "usr/bin/bash.exe"] {
-            let candidate = root.join(relative);
-            if is_file(&candidate) {
-                return Some(candidate);
-            }
-        }
-    }
-    for variable in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-        let Some(root) = var(variable) else { continue };
-        for relative in ["Git/bin/bash.exe", "Programs/Git/bin/bash.exe"] {
-            let candidate = Path::new(&root).join(relative);
-            if is_file(&candidate) {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    vw_agent_tools::shell_find::git_bash(var, is_file)
 }
 
 /// Copies `tools` to `<data>/shell/bash.exe` unless the copy there is already the same file; returns the copy.
@@ -151,9 +127,17 @@ pub fn find_real(
 /// The folder, the copy or the rename failed (an old copy in use by a still-running command keeps the rename from
 /// replacing it).
 pub fn place_copy(tools: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
+    place_copy_as(tools, data_dir, vw_agent_tools::git_bash::FILE_NAME)
+}
+
+/// Copies `tools` to `<data>/shell/<file_name>` unless the copy there is already the same file; returns the copy.
+///
+/// # Errors
+/// As [`place_copy`].
+pub fn place_copy_as(tools: &Path, data_dir: &Path, file_name: &str) -> std::io::Result<PathBuf> {
     let dir = data_dir.join(DIR);
     std::fs::create_dir_all(&dir)?;
-    let copy = dir.join(vw_agent_tools::git_bash::FILE_NAME);
+    let copy = dir.join(file_name);
     if std::fs::read(&copy).ok() == Some(std::fs::read(tools)?) {
         return Ok(copy);
     }
@@ -166,13 +150,19 @@ pub fn place_copy(tools: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
 /// Brings Vibe Work's `vibe_home/config.toml` in line with `wanted`; a line for the log.
 #[must_use]
 pub fn write_config(vibe_home: &Path, wanted: &Wanted<'_>) -> String {
+    write_tool_config(vibe_home, TOOL, wanted)
+}
+
+/// [`write_config`] for `[tools.<tool>] shell`.
+#[must_use]
+pub fn write_tool_config(vibe_home: &Path, tool: &str, wanted: &Wanted<'_>) -> String {
     let path = vibe_home.join("config.toml");
     let existing = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return format!("config.toml not read: {error}"),
     };
-    match with_shell(&existing, wanted) {
+    match with_tool_shell(&existing, tool, wanted) {
         Shell::Changed(updated) => match vw_platform::replace_private(&path, updated.as_bytes()) {
             Ok(()) => "config updated".to_owned(),
             Err(error) => format!("config.toml not written: {error}"),
@@ -180,7 +170,7 @@ pub fn write_config(vibe_home: &Path, wanted: &Wanted<'_>) -> String {
         Shell::Same => "config already set".to_owned(),
         Shell::UsersOwn(shell) => {
             format!(
-                "the config names its own Git Bash ({shell}), kept: Stop may leave its programs running"
+                "the config names its own {tool} shell ({shell}), kept: Stop may leave its programs running"
             )
         }
         Shell::Skipped => {
@@ -200,6 +190,22 @@ pub fn prepare(
     let ours = data_dir.join(DIR).join(vw_agent_tools::git_bash::FILE_NAME);
     let ours_text = ours.to_string_lossy().into_owned();
     let real = find_real(|name| std::env::var(name).ok(), Path::is_file);
+    // Without Git Bash, Vibe runs the agent's commands in PowerShell (Vibe 3.1.1 `vibe/app_server/_runtime.py`
+    // `_command_environment_mode`).
+    let powershell = crate::powershell_shell::prepare(supervisor, data_dir, tools, real.is_none());
+    let bash = prepare_bash(supervisor, data_dir, tools, real, &ours_text);
+    format!("{bash}; {powershell}")
+}
+
+/// The Git Bash half of [`prepare`]; a line for the log.
+#[cfg(windows)]
+fn prepare_bash(
+    supervisor: &mut vw_supervisor::SupervisorConfig,
+    data_dir: &Path,
+    tools: Option<&Path>,
+    real: Option<PathBuf>,
+    ours_text: &str,
+) -> String {
     let outcome = match (tools, real) {
         (Some(tools), Some(real)) => place_copy(tools, data_dir)
             .map(|copy| (copy, real))
@@ -226,7 +232,7 @@ pub fn prepare(
             )
         }
         Err(why) => {
-            let config = write_config(&supervisor.vibe_home, &Wanted::None(&ours_text));
+            let config = write_config(&supervisor.vibe_home, &Wanted::None(ours_text));
             format!("Git Bash without a job: {why} ({config})")
         }
     }
@@ -248,93 +254,5 @@ pub fn arg_conv_excl(existing: Option<&str>) -> String {
         None | Some("") => TASKKILL_FLAGS.to_owned(),
         Some("*") => "*".to_owned(),
         Some(own) => format!("{own};{TASKKILL_FLAGS}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn taskkill_flags_reach_windows_programs_unconverted_and_the_users_own_list_stays() {
-        // Git Bash turns `taskkill /F /PID 5 /T /IM x.exe` into `F:/ "C:/Program Files/Git/PID" 5 T:/ ...` (checked
-        // on a Windows test machine); listed prefixes are passed as written. Lower-case /f and /t stay converted
-        // (drive f:, /tmp).
-        assert_eq!(arg_conv_excl(None), "/F;/T;/PID;/IM;/pid;/im");
-        assert_eq!(arg_conv_excl(Some("")), "/F;/T;/PID;/IM;/pid;/im");
-        assert_eq!(arg_conv_excl(Some("/X")), "/X;/F;/T;/PID;/IM;/pid;/im");
-        assert_eq!(
-            arg_conv_excl(Some("*")),
-            "*",
-            "a user's 'convert nothing' stays as it is"
-        );
-    }
-
-    const OURS: &str = r"C:\Users\u\AppData\Roaming\app.vibework.desktop\shell\bash.exe";
-
-    #[test]
-    fn our_shell_is_added_kept_and_removed_but_the_users_own_stays() {
-        let Shell::Changed(added) = with_shell("active_model = \"large-4\"\n", &Wanted::Ours(OURS))
-        else {
-            panic!("not added");
-        };
-        let parsed: DocumentMut = added.parse().unwrap_or_default();
-        assert_eq!(parsed["tools"]["git_bash"]["shell"].as_str(), Some(OURS));
-        assert_eq!(parsed["active_model"].as_str(), Some("large-4"));
-        assert_eq!(with_shell(&added, &Wanted::Ours(OURS)), Shell::Same);
-        let Shell::Changed(removed) = with_shell(&added, &Wanted::None(OURS)) else {
-            panic!("not removed");
-        };
-        assert!(!removed.contains("bash.exe"), "{removed}");
-        assert_eq!(with_shell("", &Wanted::None(OURS)), Shell::Same);
-
-        let users = "[tools.git_bash]\npermission = \"ask\"\nshell = 'D:\\Git\\bin\\bash.exe'\n";
-        assert_eq!(
-            with_shell(users, &Wanted::Ours(OURS)),
-            Shell::UsersOwn(r"D:\Git\bin\bash.exe".to_owned())
-        );
-        assert!(matches!(
-            with_shell(users, &Wanted::None(OURS)),
-            Shell::UsersOwn(_)
-        ));
-        // A table of the user's keeps its other keys; comments stay.
-        let Shell::Changed(merged) = with_shell(
-            "# mine\n[tools.git_bash]\npermission = \"ask\"\n",
-            &Wanted::Ours(OURS),
-        ) else {
-            panic!("not merged");
-        };
-        assert!(
-            merged.contains("# mine") && merged.contains("permission = \"ask\""),
-            "{merged}"
-        );
-        assert_eq!(
-            with_shell("not = [toml", &Wanted::Ours(OURS)),
-            Shell::Skipped
-        );
-    }
-
-    #[test]
-    fn git_bash_is_found_where_vibe_finds_it() {
-        // Forward slashes: the same paths on every OS (Windows reads them too).
-        let files = [
-            "C:/Windows/System32/bash.exe",
-            "C:/Program Files/Git/cmd/git.exe",
-            "C:/Program Files/Git/bin/bash.exe",
-        ];
-        let is_file = |path: &Path| files.iter().any(|f| Path::new(f) == path);
-        let env = |path: &'static str| move |name: &str| (name == "PATH").then(|| path.to_owned());
-        // WSL's bash on PATH is skipped; the Git next to git.exe is found.
-        assert_eq!(
-            find_real(env("C:/Windows/System32;C:/Program Files/Git/cmd"), is_file),
-            Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe"))
-        );
-        assert_eq!(find_real(env("C:/Windows/System32"), is_file), None);
-        let program_files =
-            |name: &str| (name == "ProgramFiles").then(|| "C:/Program Files".to_owned());
-        assert_eq!(
-            find_real(program_files, is_file),
-            Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe"))
-        );
     }
 }

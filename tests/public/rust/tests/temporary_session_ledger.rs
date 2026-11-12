@@ -445,7 +445,11 @@ async fn record_that_is_no_list_keeps_nothing_and_is_still_preserved() {
     assert!(logged_error(&log, "temporary"), "{}", log.text());
     assert!(temporary_ids(&r).await.is_empty());
     // Nothing was guessed: both stored sessions are still there.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::pause();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::task::yield_now().await;
+    tokio::time::resume();
     assert_eq!(listed(&r).await, {
         let mut ids = vec![r.id("keep"), r.id("left-temp")];
         ids.sort();

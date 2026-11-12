@@ -4,6 +4,7 @@
 use crate::protocol::Frame;
 use serde::{Deserialize, Serialize};
 use vw_agent_tools::video::{Request, Selection};
+use vw_video_types::{Code, Error};
 
 /// Completed fixed-step scan, including work that produced no returned image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +26,7 @@ pub struct Scan {
     pub omitted_changes: usize,
 }
 impl Scan {
-    pub(crate) fn planned(request: &Request) -> Result<Option<Self>, String> {
+    pub(crate) fn planned(request: &Request) -> Result<Option<Self>, Error> {
         let Selection::SceneChanges {
             start_ms,
             end_ms,
@@ -46,8 +47,8 @@ impl Scan {
             omitted_changes: 0,
         }))
     }
-    pub(crate) fn validate(&self, request: &Request) -> Result<usize, String> {
-        let invalid = || "decode_failed: invalid scene scan accounting".to_owned();
+    pub(crate) fn validate(&self, request: &Request) -> Result<usize, Error> {
+        let invalid = || Error::new(Code::InvalidReply, "invalid scene scan accounting");
         let mut expected = Self::planned(request)?.ok_or_else(invalid)?;
         let cap = request.frame_limit()?;
         if self.detected_changes >= self.samples {
@@ -78,8 +79,9 @@ impl Scan {
 pub(crate) fn select(
     decoder: &mut vw_platform::video::Decoder,
     request: &Request,
-) -> Result<(Vec<Frame>, Scan), String> {
-    let mut scan = Scan::planned(request)?.ok_or("decode_failed: missing scene selection")?;
+) -> Result<(Vec<Frame>, Scan), Error> {
+    let mut scan =
+        Scan::planned(request)?.ok_or(Error::new(Code::DecodeFailed, "missing scene selection"))?;
     let cap = request.frame_limit()?;
     let mut previous: Option<vw_platform::video::Frame> = None;
     let mut selected = Vec::new();
@@ -90,10 +92,10 @@ pub(crate) fn select(
                 || before.height != frame.height
                 || before.pixels.len() != frame.pixels.len()
             {
-                return Err(
-                    "decode_failed: changing scene geometry. Request explicit timestamps instead."
-                        .into(),
-                );
+                return Err(Error::new(
+                    Code::SceneGeometry,
+                    "changing scene geometry. Request explicit timestamps instead.",
+                ));
             }
             // Integer RGB mean absolute difference, alpha excluded. A fixed threshold avoids model,
             // floating-point or host-tuning dependence. This is a cut heuristic, not semantic analysis.

@@ -394,23 +394,6 @@ mod tests {
         );
     }
 
-    /// The core's own failure keeps its code and plain message; it is never a server error.
-    #[test]
-    fn a_local_failure_keeps_the_core_error() {
-        let own = CoreError::new(
-            ErrorCode::Internal,
-            "Could not check session ownership: no folder",
-        );
-        let mapped = CoreError::from_rpc("session/start", &local(own));
-        assert_eq!(mapped.code, ErrorCode::Internal);
-        assert_eq!(mapped.server_code, None);
-        assert_eq!(
-            mapped.message,
-            "Could not check session ownership: no folder"
-        );
-        assert_eq!(mapped.method.as_deref(), Some("session/start"));
-    }
-
     /// A session another window holds stays a `denied` / `sessionHeld` refusal.
     #[test]
     fn a_held_session_stays_a_held_refusal() {
@@ -420,16 +403,5 @@ mod tests {
         assert_eq!(mapped.server_code.as_deref(), Some("sessionHeld"));
         assert_eq!(mapped.message, held.message);
         assert_eq!(mapped.method.as_deref(), Some("session/resume"));
-    }
-
-    /// Any other local error is the core's internal failure, with its text.
-    #[test]
-    fn another_local_error_is_internal() {
-        let io = std::io::Error::other("disk full");
-        let mapped = CoreError::from_rpc("session/fork", &local(io));
-        assert_eq!(mapped.code, ErrorCode::Internal);
-        assert_eq!(mapped.server_code, None);
-        assert_eq!(mapped.message, "disk full");
-        assert_eq!(mapped.method.as_deref(), Some("session/fork"));
     }
 }

@@ -387,22 +387,35 @@ async fn approval_discovery_does_not_stall_unrelated_core_commands() {
             .set(&folder, Some(name))
             .unwrap();
     }
-    let started = std::time::Instant::now();
-    let (discovery, elapsed) = tokio::join!(
+    let approvals = core.shared.plugin_approvals.clone();
+    let (ready, waiting) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let watchdog = std::thread::spawn(move || {
+        let _guard = approvals.hold_sweep();
+        ready.send(()).unwrap();
+        held.recv_timeout(Duration::from_secs(10)).is_ok()
+    });
+    waiting.await.expect("sweep lock held");
+    let (discovery, command) = tokio::join!(
         biased;
         core.discover_plugins(None, None),
         async {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            core.execute(crate::Origin::Ui, crate::Command::PromptHistory { text: None }).await.unwrap();
-            started.elapsed()
+            let command = core.execute(crate::Origin::Ui, crate::Command::PromptHistory { text: None }).await;
+            let released_before_watchdog = release.send(()).is_ok();
+            (command, released_before_watchdog)
         }
     );
     core.shutdown().await;
-    assert!(discovery.is_ok(), "{discovery:?}");
     assert!(
-        elapsed < Duration::from_millis(250),
-        "unrelated command stalled for {elapsed:?}"
+        watchdog.join().unwrap(),
+        "the unrelated command did not release the held sweep before its watchdog"
     );
+    assert!(command.0.is_ok(), "{:?}", command.0);
+    assert!(
+        command.1,
+        "the sweep blocked the async worker until forced release"
+    );
+    assert!(discovery.is_ok(), "{discovery:?}");
 }
 
 #[test]

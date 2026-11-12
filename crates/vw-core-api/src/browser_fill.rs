@@ -293,7 +293,7 @@ async fn authorize(
     let keys = shared.config.keys.as_ref().ok_or_else(|| {
         fail(
             "vault",
-            "Vibe Work has no vault connected, so no login can be filled".to_owned(),
+            vw_vocabulary::texts::AGENT_VAULT_MISSING.to_owned(),
         )
     })?;
     let folders =

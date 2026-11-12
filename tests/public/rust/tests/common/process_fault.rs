@@ -11,10 +11,11 @@ pub fn install(config: &mut SupervisorConfig, dir: &Path, mut plan: Value) -> Pa
     {
         plan["childLaunchFile"] = json!(pair[1].to_string_lossy());
     }
-    if plan["onRequest"]
-        .as_array()
-        .is_some_and(|rules| rules.iter().any(|rule| rule["readDelayMs"].is_number()))
-    {
+    if plan["onRequest"].as_array().is_some_and(|rules| {
+        rules
+            .iter()
+            .any(|rule| rule["readDelayMs"].is_number() || rule["readUntil"].is_string())
+    }) {
         let python = vw_supervisor::server_python(&super::shared_real_vibe::server_bin())
             .expect("the pinned Vibe's Python");
         config

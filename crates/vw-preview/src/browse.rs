@@ -64,7 +64,27 @@ impl PreviewService {
     /// secret fill: every screenshot of the session's preview is refused until it shows another document (its load
     /// count moves).
     pub fn block_shots_on_this_document(&self, session_id: &str) {
+        let _ = self.protect_document(session_id, false);
+    }
+
+    /// Atomically excludes agent scripts before a vault password enters the document.
+    ///
+    /// # Errors
+    /// Page code already ran in this document and could observe a later fill.
+    pub fn admit_vault_fill(&self, session_id: &str) -> Result<(), String> {
+        self.protect_document(session_id, true)
+    }
+
+    fn protect_document(&self, session_id: &str, exclude_scripts: bool) -> Result<(), String> {
         let mut state = self.inner.lock();
+        if exclude_scripts
+            && state
+                .entries
+                .get(session_id)
+                .is_some_and(|entry| entry.scripted_at == Some(*entry.loads.borrow()))
+        {
+            return Err("Vault fill is blocked because page JavaScript ran in this document and may retain a password listener; reload or navigate to a new document before filling.".into());
+        }
         let owner = state.owner_of(session_id);
         if let Some(tabs) = state.tabs.get_mut(&owner) {
             tabs.snapshots.remove(session_id);
@@ -75,6 +95,7 @@ impl PreviewService {
                 protected().insert(mount.label.clone());
             }
         }
+        Ok(())
     }
 
     /// True while [`PreviewService::block_shots_on_this_document`] holds for the session.
@@ -340,8 +361,8 @@ impl PreviewService {
             })
     }
 
-    /// Resolves and pins media addresses when the captured page's current host has only private-network
-    /// answers. Such a page may fetch media from other private-network hosts too. Public pages use
+    /// Resolves and pins media addresses only when the main document committed with wholly private/CGNAT
+    /// connection evidence. Later DNS and child frames cannot grant access. Public or unproven loads use
     /// the fetcher's public-only resolver. Loopback, link-local and reserved answers are always refused.
     /// `None` retains the public-only rule; `Some` contains every checked destination address, with no second lookup.
     pub async fn lan_media_addresses(
@@ -350,63 +371,29 @@ impl PreviewService {
         url: &url::Url,
     ) -> Option<Result<Vec<std::net::SocketAddr>, String>> {
         use vw_netguard::ip::{IpClass, classify};
-        let own = {
+        let document = {
             let state = self.inner.lock();
-            let entry = state.entries.get(session_id)?;
-            entry.ready_mount()?;
-            entry.url.as_ref()?.host_str()?.to_owned()
+            let mount = state.entries.get(session_id)?.ready_mount()?;
+            (
+                mount.label.clone(),
+                mount.navigation.load_addresses.private_generation()?,
+            )
         };
-        let resolver = self.inner.names.resolver();
-        let own_answers = match resolve_media_host(resolver.clone(), &own).await {
+        let host = url.host_str()?;
+        let port = url.port_or_known_default()?;
+        let answers = match resolve_media_host(self.inner.names.resolver(), host).await {
             Ok(answers) => answers,
             Err(error) => return Some(Err(error)),
         };
-        if let Some(bad) = own_answers.iter().find(|ip| {
-            !matches!(
-                classify(**ip),
-                IpClass::Public | IpClass::Private | IpClass::SharedCgnat | IpClass::Loopback
-            )
-        }) {
-            return Some(Err(format!(
-                "{own} resolves to {bad}, {}",
-                classify(*bad).describe()
-            )));
-        }
-        // Use the current document's host answers, never the mount's legacy Lan flag.
-        if !own_answers
-            .iter()
-            .any(|ip| matches!(classify(*ip), IpClass::Private | IpClass::SharedCgnat))
         {
-            return None;
-        }
-        if let Some(bad) = own_answers.iter().find(|ip| {
-            !matches!(
-                classify(**ip),
-                IpClass::Public | IpClass::Private | IpClass::SharedCgnat
-            )
-        }) {
-            return Some(Err(format!(
-                "{own} resolves to {bad}, {}",
-                classify(*bad).describe()
-            )));
-        }
-        // Mixed public/private answers cannot establish that the captured page is on the private network.
-        if own_answers
-            .iter()
-            .any(|ip| classify(*ip) == IpClass::Public)
-        {
-            return None;
-        }
-        let host = url.host_str()?;
-        let port = url.port_or_known_default()?;
-        let answers = if host.eq_ignore_ascii_case(&own) {
-            own_answers
-        } else {
-            match resolve_media_host(resolver, host).await {
-                Ok(answers) => answers,
-                Err(error) => return Some(Err(error)),
+            let state = self.inner.lock();
+            let mount = state.entries.get(session_id)?.ready_mount()?;
+            if mount.label != document.0
+                || mount.navigation.load_addresses.private_generation() != Some(document.1)
+            {
+                return None;
             }
-        };
+        }
         if let Some(bad) = answers.iter().find(|ip| {
             !matches!(
                 classify(**ip),

@@ -6,6 +6,9 @@ use cap_std::fs::{Dir, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path};
 
+#[path = "setup_files_retry.rs"]
+mod retry;
+
 fn refused() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
@@ -167,14 +170,23 @@ pub(super) fn write(
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        if read_at(&dir, name, before.map_or(1024 * 1024, <[u8]>::len))?.as_deref() != before {
-            return Err(refused());
-        }
+        let unchanged = || {
+            if read_at(&dir, name, before.map_or(1024 * 1024, <[u8]>::len))?.as_deref() != before {
+                return Err(refused());
+            }
+            Ok(())
+        };
         if before.is_none() {
+            unchanged()?;
             dir.hard_link(&temp, &dir, name)?;
             dir.remove_file(&temp)
         } else {
-            dir.rename(&temp, &dir, name)
+            retry::replace(
+                cfg!(windows),
+                unchanged,
+                || dir.rename(&temp, &dir, name),
+                std::thread::sleep,
+            )
         }
     })();
     if result.is_err() {

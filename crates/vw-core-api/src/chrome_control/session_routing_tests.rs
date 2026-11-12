@@ -26,6 +26,8 @@ async fn both(name: &str) -> crate::Core {
                 "chrome-task"
             };
             json!({"structuredContent":{"sessionId":id,"profileId":args["profileId"],"state":"active"}})
+        } else if tool == "chrome_session" && args["action"] == "resume" {
+            json!({"structuredContent":{"sessionId":args["sessionId"],"state":"active"}})
         } else {
             json!({"structuredContent":{"sessionId":args["sessionId"],"status":"completed","data":{}}})
         }
@@ -43,9 +45,10 @@ async fn both(name: &str) -> crate::Core {
     )
     .unwrap();
     for profile in [CHROME, EDGE] {
+        super::test_support::chat(&core.shared, profile);
         gateway::call(
             &core.shared,
-            "s",
+            profile,
             "chrome_session",
             json!({"action":"open","profileId":profile}),
         )
@@ -79,7 +82,7 @@ async fn calls_by_id_keep_both_browsers_and_their_own_refusals() {
         assert_eq!(
             super::agent_browser::selected(
                 &core.shared,
-                "s",
+                profile,
                 "chrome_execute",
                 &json!({"sessionId":id})
             ),
@@ -98,7 +101,9 @@ async fn calls_by_id_keep_both_browsers_and_their_own_refusals() {
             ("chrome_session", json!({"sessionId":id,"action":"cancel"})),
             ("chrome_session", json!({"sessionId":id,"action":"stop"})),
         ] {
-            let result = gateway::call(&core.shared, "s", tool, args).await.unwrap();
+            let result = gateway::call(&core.shared, profile, tool, args)
+                .await
+                .unwrap();
             assert!(!result.to_string().contains("addon"), "{id}: {result}");
         }
         let refused = gateway::call(
@@ -124,7 +129,7 @@ async fn calls_by_id_keep_both_browsers_and_their_own_refusals() {
     );
     let answer = gateway::call(
         &core.shared,
-        "s",
+        CHROME,
         "chrome_execute",
         json!({"sessionId":"chrome-task","action":"page.read","args":{}}),
     )
@@ -156,19 +161,23 @@ async fn an_idle_chat_keeps_the_stopped_browsers_state_separate() {
         );
         let refused = gateway::call(
             &core.shared,
-            "s",
+            stopped_profile,
             "chrome_session",
             json!({"action":"open","profileId":stopped_profile}),
         )
         .await
         .unwrap_err();
         assert!(
-            refused.contains(&format!("the person pressed Stop in Your {name}")),
+            refused.contains(&format!("the user pressed Stop in Your {name}")),
             "{refused}"
         );
         let result = gateway::call(
             &core.shared,
-            "s",
+            if stopped_profile == CHROME {
+                EDGE
+            } else {
+                CHROME
+            },
             "chrome_execute",
             json!({"sessionId":other,"action":"page.read","args":{}}),
         )
@@ -180,23 +189,20 @@ async fn an_idle_chat_keeps_the_stopped_browsers_state_separate() {
 }
 
 #[tokio::test]
-async fn turn_ended_ids_reopen_their_own_browser_after_switching() {
+async fn retained_ids_resume_their_own_browser_in_simultaneous_chats() {
     let core = both("session-browser-reopen").await;
-    super::end_turn(&core.shared, "s");
+    super::end_turn(&core.shared, CHROME);
+    super::end_turn(&core.shared, EDGE);
     for (id, profile) in [("chrome-task", CHROME), ("edge-task", EDGE)] {
         let result = gateway::call(
             &core.shared,
-            "s",
+            profile,
             "chrome_execute",
             json!({"sessionId":id,"action":"page.read","args":{}}),
         )
         .await
         .unwrap();
-        assert_eq!(
-            body(&result)["sessionReopened"]["sessionId"],
-            id,
-            "{profile}: {result}"
-        );
+        assert_eq!(body(&result)["sessionId"], id, "{profile}: {result}");
     }
     core.shutdown().await;
 }
@@ -252,7 +258,7 @@ async fn identity_mismatch_survives_empty_status_polls_for_both_browsers() {
         for (setup, browser) in [(view.setup, "Chrome"), (*view.edge.unwrap(), "Edge")] {
             let addon = setup.addon.unwrap();
             assert_eq!(addon.state, AddonState::OtherOwner, "{browser}: {addon:?}");
-            assert!(addon.instruction.contains(&format!("another Vibe Work. Ask the person to click Open pairing page and choose Replace paired Vibe Work in {browser}")), "{addon:?}");
+            assert!(addon.instruction.contains(&format!("another Vibe Work. Ask the user to click Open pairing page and choose Replace paired Vibe Work in {browser}")), "{addon:?}");
             assert_eq!(addon.step, None);
         }
     }

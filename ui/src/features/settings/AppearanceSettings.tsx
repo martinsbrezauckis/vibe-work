@@ -42,7 +42,7 @@ export function AppearanceSettings(): ReactElement {
         <span>
           Show usage in the status bar
           <span className="d">
-            How full the open session&apos;s context is, as &quot;Context 42%&quot;. A click opens
+            How full the open chat&apos;s context is, as &quot;Context 42%&quot;. A click opens
             Usage and plan.
           </span>
         </span>
@@ -107,7 +107,7 @@ export function AppearanceSettings(): ReactElement {
         <span>
           Show thinking expanded
           <span className="d">
-            Open thinking in the session by default. You can still close each block yourself.
+            Open thinking in the chat by default. You can still close each block yourself.
           </span>
         </span>
         <Switch

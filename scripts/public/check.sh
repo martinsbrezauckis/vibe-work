@@ -72,7 +72,7 @@ step() {
 # Regenerates the protocol types in a scratch directory and fails on any difference from the
 # committed files. Needs a Python with the pinned mistral-vibe installed: $VIBE_PYTHON, else the
 # repo's versioned runtime (linked worktrees find the main checkout's data/ through the git common dir).
-generated_code_check() {
+pinned_python() {
   local python="${VIBE_PYTHON:-}" main pin
   pin="$(cat tools/public/codegen/vibe.pin)"
   if [ -z "$python" ]; then
@@ -85,7 +85,21 @@ generated_code_check() {
     echo "no Python with mistral-vibe found: set VIBE_PYTHON (see tools/public/codegen/vibe.pin)" >&2
     return 1
   fi
+  printf '%s\n' "$python"
+}
+
+generated_code_check() {
+  local python
+  python="$(pinned_python)" || return 1
   "$python" "$1" --check
+}
+
+# The generator's formatter batching under Windows command-line limits (tests/public/python). The other file there,
+# test_plugin_reads.py, already runs inside `cargo test` (vw-core-api pinned_plugin_read_regressions).
+codegen_python_tests() {
+  local python
+  python="$(pinned_python)" || return 1
+  "$python" -I -m unittest discover -s tests/public/python -p test_codegen_format.py
 }
 
 # A fresh checkout or worktree has no node_modules; say so instead of failing deep inside tsc.
@@ -107,6 +121,9 @@ step "rust: clippy" capped cargo clippy --workspace --all-targets -- -D warnings
 # The TypeScript generator is behind the `ts` feature, which the workspace build leaves off.
 step "rust: clippy (core TS generator)" capped cargo clippy -p vw-core-api --all-targets --features ts -- -D warnings
 step "rust: test" capped cargo test --workspace --no-fail-fast
+# The worker and its integration tests are feature-gated; default workspace tests do not compile them.
+step "rust: clippy (video helper)" capped cargo clippy -p vw-video --all-targets --features helper -- -D warnings
+step "rust: test (video helper)" capped cargo test -p vw-video --all-targets --features helper --no-fail-fast
 step "ui: typecheck" pnpm --filter vibe-work-ui typecheck
 step "ui: lint" pnpm --filter vibe-work-ui lint
 step "ui: format" pnpm --filter vibe-work-ui format:check
@@ -116,6 +133,7 @@ step "colour check (tokens only)" node scripts/public/check_colors.mjs
 step "macOS minimum and preview network guard" node scripts/public/check_macos_minimum.mjs
 step "public-paths scan" node scripts/public/check_public_paths.mjs
 step "generated-code check" generated_code_check tools/public/codegen/generate.py
+step "generator Python tests" codegen_python_tests
 step "skills generated-code check" generated_code_check crates/vw-skills/tools/generate.py
 step "vocabulary reference drift" node tools/public/codegen/vocabulary.mjs --check
 # ui/src/protocol/core/ is generated from the Rust core API types (crates/vw-core-api, ts-rs).

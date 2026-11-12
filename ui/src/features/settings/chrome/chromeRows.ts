@@ -91,7 +91,7 @@ export function edgeUsable(view: ChromeControlView | null | undefined): boolean 
 export function firefoxUsable(view: ChromeControlView | null | undefined): boolean {
   return (
     view?.firefox !== undefined &&
-    view.enabled &&
+    (view.firefoxEnabled ?? view.enabled) &&
     view.firefox.package &&
     view.firefox.state === "extensionAdded" &&
     view.firefox.pairingState === "windowOpen"

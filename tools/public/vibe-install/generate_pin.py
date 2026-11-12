@@ -24,8 +24,12 @@ a Vibe tag locks the fixed version itself. Because `mistral-vibe`'s own metadata
 `--no-deps`: this file is the complete install set (the check above proves it names every package the wheel
 requires), so nothing is resolved and nothing outside it can be installed. Every package keeps `--require-hashes`.
 
-Usage: python3 -I generate_pin.py --vibe 3.1.0 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
-Needs: git, uv, network. Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
+Usage: python3 -I generate_pin.py --vibe 3.1.2 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+For a dependency-removal-only bump, --reuse-pin <previous pin dir> uses only PyPI: the previous
+requirements hash is checked, every retained dependency (including its marker) must match both published
+releases exactly, and the already-reviewed uv assets are reused. Added or changed dependencies require
+a fresh lock export. The supplied source commit is provenance, not reverified in this mode.
+Needs: git, uv, network (only PyPI with --reuse-pin). Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
 Called by: maintainers when bumping Vibe (with tools/public/codegen/vibe.pin, regenerated types, bench, gate).
 """
 
@@ -128,6 +132,33 @@ def check_consistency(export: str, requires_dist: list[str]) -> None:
                          f"versions {[k for k in pinned.keys() & locked.keys() if pinned[k] != locked[k]]}")
 
 
+def reused_export(previous: str, old_requires: list[str], new_requires: list[str]) -> str:
+    """Reuse reviewed hashes only when the published exact pins and markers have not changed."""
+    def required(items):
+        return {norm(item.split("==", 1)[0]): item for item in items if "extra ==" not in item}
+
+    old, new = required(old_requires), required(new_requires)
+    if any(old.get(name) != item for name, item in new.items()):
+        raise SystemExit("dependencies changed or were added: regenerate from the tag's lock")
+    blocks = re.split(r"(?=^[a-z0-9_.-]+==)", previous, flags=re.M)
+    export = "".join(block for block in blocks if norm(block.split("==", 1)[0]) in new)
+    check_consistency(export, new_requires)
+    return export
+
+
+def reuse_pin(directory: Path, pypi: dict, uv: str, python: str) -> tuple[str, dict]:
+    """Validate the old requirements file and compare both releases' PyPI metadata."""
+    pin = json.loads((directory / "vibe-install.json").read_text())
+    previous = (directory / pin["vibe"]["requirements"]).read_bytes()
+    if hashlib.sha256(previous).hexdigest() != pin["vibe"]["requirementsSha256"]:
+        raise SystemExit("previous requirements checksum differs from its pin")
+    if pin["uv"]["version"] != uv or SECURITY_OVERRIDES:
+        raise SystemExit("reuse requires unchanged uv and no security overrides")
+    old = json.loads(fetch(f"https://pypi.org/pypi/mistral-vibe/{pin['vibe']['version']}/json"))
+    check_python(python, pypi["info"]["requires_python"], old["info"]["requires_python"])
+    return reused_export(previous.decode(), old["info"]["requires_dist"], pypi["info"]["requires_dist"]), pin["uv"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--vibe", required=True)
@@ -136,25 +167,30 @@ def main() -> int:
     parser.add_argument("--python", required=True)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--work", type=Path)
+    parser.add_argument("--reuse-pin", type=Path)
     args = parser.parse_args()
-    work = args.work or Path(tempfile.mkdtemp(prefix="vibe-pin-"))
-    tag_dir = work / f"mistral-vibe-{args.vibe}"
-    if not tag_dir.exists():
-        subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "-q", "--depth", "1", "--branch", f"v{args.vibe}",
-                        VIBE_REPO, str(tag_dir)], check=True)
-    head = subprocess.run(["git", "-C", str(tag_dir), "rev-parse", "HEAD"], check=True, capture_output=True,
-                          text=True).stdout.strip()
-    if head != args.commit:
-        raise SystemExit(f"tag v{args.vibe} is {head}, expected {args.commit}")
-
     pypi = json.loads(fetch(f"https://pypi.org/pypi/mistral-vibe/{args.vibe}/json"))
-    lock = tomllib.loads((tag_dir / "uv.lock").read_text(encoding="utf-8"))
-    check_python(args.python, pypi["info"]["requires_python"], lock["requires-python"])
-    uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
-    if uv_version != args.uv:
-        raise SystemExit(f"run the generator with uv {args.uv}, found {uv_version}")
-    export = exported(tag_dir)
-    check_consistency(export, pypi["info"]["requires_dist"] or [])
+    reused_uv = None
+    if args.reuse_pin:
+        export, reused_uv = reuse_pin(args.reuse_pin, pypi, args.uv, args.python)
+    else:
+        work = args.work or Path(tempfile.mkdtemp(prefix="vibe-pin-"))
+        tag_dir = work / f"mistral-vibe-{args.vibe}"
+        if not tag_dir.exists():
+            subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "-q", "--depth", "1", "--branch", f"v{args.vibe}",
+                            VIBE_REPO, str(tag_dir)], check=True)
+        head = subprocess.run(["git", "-C", str(tag_dir), "rev-parse", "HEAD"], check=True, capture_output=True,
+                              text=True).stdout.strip()
+        if head != args.commit:
+            raise SystemExit(f"tag v{args.vibe} is {head}, expected {args.commit}")
+
+        lock = tomllib.loads((tag_dir / "uv.lock").read_text(encoding="utf-8"))
+        check_python(args.python, pypi["info"]["requires_python"], lock["requires-python"])
+        uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
+        if uv_version != args.uv:
+            raise SystemExit(f"run the generator with uv {args.uv}, found {uv_version}")
+        export = exported(tag_dir)
+        check_consistency(export, pypi["info"]["requires_dist"] or [])
     pypi_files = {name: json.loads(fetch(f"https://pypi.org/pypi/{name}/{version}/json"))["urls"]
                   for name, (version, _advisories) in SECURITY_OVERRIDES.items()}
     export = apply_overrides(export, SECURITY_OVERRIDES, pypi_files)
@@ -167,26 +203,30 @@ def main() -> int:
         wheels[target] = {"filename": found[0]["filename"], "bytes": found[0]["size"],
                           "sha256": found[0]["digests"]["sha256"], "url": found[0]["url"]}
     hashes = " \\\n".join(f"    --hash=sha256:{w['sha256']}" for w in sorted(wheels.values(), key=lambda w: w["filename"]))
+    origin = ("previous reviewed lock export, checked against both published releases"
+              if args.reuse_pin else "`uv export --frozen --no-dev --no-emit-project` of the tag's uv.lock")
     requirements = (f"# Generated by tools/public/vibe-install/generate_pin.py: mistral-vibe {args.vibe} (tag v{args.vibe},"
-                    f" commit {args.commit}).\n# Dependencies: `uv export --frozen --no-dev --no-emit-project` of the tag's"
-                    f" uv.lock; mistral-vibe: Mistral's published wheels on PyPI.\n# Security overrides (generate_pin.py"
+                    f" commit {args.commit}).\n# Dependencies: {origin}; mistral-vibe: Mistral's published wheels on PyPI.\n# Security overrides (generate_pin.py"
                     f" SECURITY_OVERRIDES): {overridden or 'none'}.\n# Installed with --require-hashes --only-binary :all:"
                     f" --no-deps (this file is the complete set). Do not edit by hand.\nmistral-vibe=={args.vibe} \\\n{hashes}\n{export}")
 
-    release = json.loads(fetch(f"https://api.github.com/repos/astral-sh/uv/releases/tags/{args.uv}"))
-    by_name = {a["name"]: a for a in release["assets"]}
-    uv_assets = {}
-    for target, (suffix, _tag) in TARGETS.items():
-        name = f"uv-{suffix}"
-        asset, sums = by_name.get(name), by_name.get(f"{name}.sha256")
-        if not asset or not sums:
-            raise SystemExit(f"uv {args.uv} has no {name} (+ .sha256)")
-        stated = fetch(sums["browser_download_url"]).decode().split()[0].lower()
-        digest = (asset.get("digest") or "").removeprefix("sha256:").lower()
-        if not re.fullmatch(r"[0-9a-f]{64}", stated) or stated != digest:
-            raise SystemExit(f"{name}: the .sha256 file ({stated}) and the release digest ({digest}) disagree")
-        uv_assets[target] = {"url": asset["browser_download_url"], "bytes": asset["size"], "sha256": stated,
-                             "archive": "zip" if name.endswith(".zip") else "tar.gz"}
+    if reused_uv:
+        uv_assets = reused_uv["assets"]
+    else:
+        release = json.loads(fetch(f"https://api.github.com/repos/astral-sh/uv/releases/tags/{args.uv}"))
+        by_name = {a["name"]: a for a in release["assets"]}
+        uv_assets = {}
+        for target, (suffix, _tag) in TARGETS.items():
+            name = f"uv-{suffix}"
+            asset, sums = by_name.get(name), by_name.get(f"{name}.sha256")
+            if not asset or not sums:
+                raise SystemExit(f"uv {args.uv} has no {name} (+ .sha256)")
+            stated = fetch(sums["browser_download_url"]).decode().split()[0].lower()
+            digest = (asset.get("digest") or "").removeprefix("sha256:").lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", stated) or stated != digest:
+                raise SystemExit(f"{name}: the .sha256 file ({stated}) and the release digest ({digest}) disagree")
+            uv_assets[target] = {"url": asset["browser_download_url"], "bytes": asset["size"], "sha256": stated,
+                                 "archive": "zip" if name.endswith(".zip") else "tar.gz"}
 
     req_name = "vibe.requirements.txt"  # fixed name: the crate embeds it with include_str!
     data = {

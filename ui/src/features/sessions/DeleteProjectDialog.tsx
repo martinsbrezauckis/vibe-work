@@ -43,9 +43,9 @@ export function DeleteProjectDialog() {
         <section>
           <p data-testid="delete-project-text">
             {n === 0
-              ? "It holds no sessions."
+              ? "It holds no chats."
               : `Its ${String(n)} session${n === 1 ? "" : "s"} move${n === 1 ? "s" : ""} to “Not in a project”.`}{" "}
-            No session is deleted.
+            No chat is deleted.
           </p>
         </section>
         <footer className="modal-actions">

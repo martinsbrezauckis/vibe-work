@@ -14,7 +14,7 @@ import { useStore } from "../../state/createStore";
 import { type SessionProcesses, processTitle } from "../../state/sessionProcesses";
 
 const KIND_TEXT: Record<string, string> = {
-  vibe: "Vibe's background process: it ends when Vibe or this session's connection ends.",
+  vibe: "Vibe's background process: it ends when Vibe or this chat's connection ends.",
   started:
     "Started for the agent by Vibe Work: it keeps running until you stop it, also after you quit.",
 };
@@ -96,10 +96,10 @@ export function SessionProcessesSection({ procs }: { procs: SessionProcesses }):
     <section className="proc-section" data-testid="session-processes">
       <h3>{TEXT.thisSession}</h3>
       {state.sessionId === null ? (
-        <p className="d">Open a session to see its processes.</p>
+        <p className="d">Open a chat to see its processes.</p>
       ) : state.items.length === 0 ? (
         <p className="d" data-testid="session-processes-empty">
-          No dev servers or long commands are running for this session.
+          No dev servers or long commands are running for this chat.
         </p>
       ) : (
         <ul className="left-running-list">

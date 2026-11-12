@@ -34,12 +34,8 @@ const NATIVE: &[&str] = &[
     "mcp/login",
     "mcp_catalog/add",
     "mcp_catalog/login",
-    "projectLinks/create",
     "projectLinks/inspectRoot",
-    "projectLinks/link",
     "projectLinks/list",
-    "projectLinks/picker/load",
-    "projectLinks/picker/loadMore",
     "projectLinks/resolveRoot",
     "projectLinks/save",
     "projectLinks/unlink",
@@ -47,16 +43,6 @@ const NATIVE: &[&str] = &[
     "skills/import",
     "skills/setLatest",
     "skills/setVersion",
-    "vibeCode/projects/cancel",
-    "vibeCode/projects/create",
-    "vibeCode/projects/loadMore",
-    "vibeCode/projects/open",
-    "vibeCode/projects/recover",
-    "vibeCode/projects/select",
-    "vibeCode/projects/unlink",
-    "vibeCode/teleport/cancel",
-    "vibeCode/teleport/push/respond",
-    "vibeCode/teleport/start",
     "session/agent/update",
     "config/write",
     "session/start",
@@ -155,4 +141,32 @@ pub fn policy(kind: &str) -> Option<Policy> {
             .find(|(kind, _)| *kind == key)
             .map(|(_, setting)| *setting),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn retired_transfers_and_experimental_moves_have_no_permission_surface() {
+        for method in [
+            "vibeCode/projects/cancel",
+            "vibeCode/projects/create",
+            "vibeCode/projects/loadMore",
+            "vibeCode/projects/open",
+            "vibeCode/projects/recover",
+            "vibeCode/projects/select",
+            "vibeCode/projects/unlink",
+            "vibeCode/teleport/cancel",
+            "vibeCode/teleport/push/respond",
+            "vibeCode/teleport/start",
+            "session/move",
+            "plugins/local/list",
+            "plugins/local/setEnabled",
+            "projectLinks/create",
+            "projectLinks/link",
+            "projectLinks/picker/load",
+            "projectLinks/picker/loadMore",
+        ] {
+            assert!(super::policy(method).is_none(), "{method}");
+        }
+    }
 }

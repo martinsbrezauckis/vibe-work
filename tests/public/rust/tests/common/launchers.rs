@@ -44,7 +44,7 @@ pub fn interpreter(pid: u32) -> u32 {
 /// - an entry point (`vibe-app-server.exe`) or CPython's venv `python.exe`: the child names `program` itself as its
 ///   first or second argument (`<python> <entry point> ...`; CPython's venv launcher keeps the spelled `argv[0]`);
 /// - uv's venv `python.exe` (a `uv venv` environment): the child is `<base python>` followed by exactly the parent's
-///   arguments; only `argv[0]` changes. The supervisor starts Vibe as `<env python> -P -c <adapter> <entry point>`,
+///   arguments; only `argv[0]` changes. The supervisor starts Vibe as `<env python> -I -u -c <verifier> <file> <digest> <entry point>`,
 ///   so there no argument names the started program.
 #[must_use]
 pub fn relaunches(program: &str, parent: &[String], child: &[String]) -> bool {

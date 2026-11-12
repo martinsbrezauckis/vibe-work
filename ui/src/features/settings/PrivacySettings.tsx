@@ -24,7 +24,7 @@ import { useCoreState, useShellState } from "../shell/hooks";
 const SETTERS: Record<string, string> = {
   environment: "Vibe Work for this run",
   admin: "your administrator",
-  overrides: "a setting of this session",
+  overrides: "a setting of this chat",
 };
 
 /** The section (renders nothing without a running Vibe). */
@@ -49,7 +49,9 @@ export function PrivacySettings() {
       })
       .catch((thrown: unknown) => {
         if (live)
-          setError(thrown instanceof Error ? thrown.message : "Could not read the switches.");
+          setError(
+            `Could not read privacy settings: ${thrown instanceof Error ? thrown.message.replace(/\.$/, "") : "No error details were returned"}. Try again.`,
+          );
       });
     return () => {
       live = false;
@@ -68,7 +70,9 @@ export function PrivacySettings() {
         setView(v);
       })
       .catch((thrown: unknown) => {
-        setError(thrown instanceof Error ? thrown.message : "Could not change the switch.");
+        setError(
+          `Could not update privacy settings: ${thrown instanceof Error ? thrown.message.replace(/\.$/, "") : "No error details were returned"}. Try again.`,
+        );
       })
       .finally(() => {
         setSaving(null);
@@ -108,9 +112,7 @@ export function PrivacySettings() {
     <section aria-labelledby="privacy-settings-title">
       <h3 id="privacy-settings-title">Privacy</h3>
       {via === null && (
-        <p className="key-line">
-          Needs a session: Vibe reads and saves these switches through one.
-        </p>
+        <p className="key-line">Needs a chat: Vibe reads and saves these switches through one.</p>
       )}
       {via !== null && view === null && error === null && (
         <p className="key-line">Reading the switches…</p>

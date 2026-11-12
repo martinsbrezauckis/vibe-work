@@ -54,7 +54,7 @@ export function MistralKeys() {
 
   return (
     <section ref={root} aria-labelledby="mistral-keys-title" data-setting="mistral-keys">
-      <h3 id="mistral-keys-title">Mistral keys</h3>
+      <h3 id="mistral-keys-title">Saved Mistral keys</h3>
       {!unlocked ? (
         <>
           <p className="key-line">Unlock your vault to see your Mistral keys.</p>

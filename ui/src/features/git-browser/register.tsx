@@ -125,7 +125,7 @@ function BrowserPanel({
       placeKey={placeKey}
       legacy={
         <details className="fx-places">
-          <summary data-testid="explorer.repositories">Repositories and session copies</summary>
+          <summary data-testid="explorer.repositories">Repositories and chat copies</summary>
           {chooser}
           <GitBrowser
             inHistory

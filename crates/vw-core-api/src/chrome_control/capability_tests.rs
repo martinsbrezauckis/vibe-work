@@ -10,6 +10,106 @@ const ACTIONS: &[&str] = &[
     "files.wait_download",
 ];
 
+#[test]
+fn window_close_uses_the_same_cumulative_browsing_tier_in_every_browser() {
+    let args = json!({"action":"window.close","args":{}});
+    assert_eq!(
+        super::mapping::required("chrome_execute", &args),
+        Some(Tier::Ask)
+    );
+    assert_eq!(
+        super::builtin::required(&json!({"action":"window.close"})),
+        Some(Tier::Ask)
+    );
+    for mode in ["ask", "accept-edits", "auto-approve"] {
+        assert_eq!(
+            super::mapping::approval_tier(Some(mode), "chrome_execute", &args),
+            None
+        );
+    }
+    for profile in ["chrome:p", "edge:p", "safari:p", "firefox:agent"] {
+        let mut data = json!({"profileId":profile,"connected":true,"features":["window.close"]});
+        assert!(super::capabilities::supports(&data, "window.close"));
+        data["features"] = json!([]);
+        assert!(!super::capabilities::supports(&data, "window.close"));
+    }
+}
+
+#[test]
+fn clipboard_readback_requires_the_mode_itself_to_be_full() {
+    for action in [
+        "clipboard.write_rich",
+        "clipboard.read_rich",
+        "clipboard.write",
+    ] {
+        let args = json!({"action":action,"args":{"mime":"text/html","text":"<p>Note</p>"}});
+        for mode in ["ask", "accept-edits"] {
+            assert!(
+                super::mapping::check_full(Some(mode), "chrome_execute", &args).is_err(),
+                "{mode} {action} returns actual clipboard content"
+            );
+            assert_eq!(
+                super::mapping::approval_tier(Some(mode), "chrome_execute", &args),
+                None
+            );
+        }
+        assert!(super::mapping::check_full(Some("auto-approve"), "chrome_execute", &args).is_ok());
+    }
+}
+
+#[test]
+fn group_titles_use_the_shared_data_entry_tier() {
+    for action in ["tabs.group", "tabs.group_update"] {
+        let args = json!({"action":action,"args":{"title":"Research"}});
+        assert_eq!(
+            super::mapping::approval_tier(Some("ask"), "chrome_execute", &args),
+            Some(Tier::AcceptEdits),
+            "{action}"
+        );
+        for mode in ["accept-edits", "auto-approve"] {
+            assert_eq!(
+                super::mapping::approval_tier(Some(mode), "chrome_execute", &args),
+                None,
+                "{mode} {action}"
+            );
+        }
+    }
+    for args in [json!({}), json!({"groupId":12})] {
+        assert_eq!(
+            super::mapping::approval_tier(
+                Some("ask"),
+                "chrome_execute",
+                &json!({"action":"tabs.group","args":args})
+            ),
+            None
+        );
+    }
+}
+
+#[test]
+fn open_tab_context_is_a_shared_read_and_requires_live_helper_support() {
+    assert_eq!(
+        super::mapping::required(
+            "chrome_execute",
+            &json!({"action":"tabs.pin","args":{"pinned":true}})
+        ),
+        Some(Tier::Ask)
+    );
+    assert_eq!(
+        super::mapping::required(
+            "chrome_execute",
+            &json!({"action":"tabs.context","args":{}})
+        ),
+        Some(Tier::Ask)
+    );
+    for profile in ["chrome:p", "edge:p", "safari:p", "firefox:agent"] {
+        let mut data = json!({"profileId":profile,"connected":true,"features":["tabs.context"]});
+        assert!(super::capabilities::supports(&data, "tabs.context"));
+        data["features"] = json!([]);
+        assert!(!super::capabilities::supports(&data, "tabs.context"));
+    }
+}
+
 #[tokio::test]
 async fn extension_actions_are_offered_only_by_a_connected_supporting_profile() {
     let fixture = crate::feature_test_core::Fixture::new().await;
@@ -34,23 +134,6 @@ async fn extension_actions_are_offered_only_by_a_connected_supporting_profile() 
         );
     }
     fixture.finish().await;
-}
-
-#[test]
-fn clipboard_reads_and_writes_need_full_access_like_desktop_clipboard_work() {
-    for (action, tier) in [
-        ("clipboard.read", Tier::FullAccess),
-        ("clipboard.write", Tier::FullAccess),
-        ("network.intercept", Tier::FullAccess),
-        ("tabs.emulate", Tier::AcceptEdits),
-        ("files.wait_download", Tier::AcceptEdits),
-    ] {
-        assert_eq!(
-            super::mapping::required("chrome_execute", &json!({"action":action,"args":{}})),
-            Some(tier),
-            "{action}"
-        );
-    }
 }
 
 #[tokio::test]
@@ -233,4 +316,30 @@ fn another_connected_profile_does_not_offer_actions_for_this_chats_old_extension
         result["structuredContent"]["profiles"][1]["features"],
         json!(ACTIONS)
     );
+}
+
+#[test]
+fn helper_screenshot_options_survive_the_app_catalog_overlay() {
+    let row = json!({"action":"capture.screenshot","inputSchema":{"type":"object","properties":{"format":{"enum":["png","jpeg"]},"labels":{"type":"boolean"}}}});
+    let mut result = json!({"structuredContent":{"profiles":[],"capabilities":{"actions":[row]}}});
+    super::capabilities::filter(&mut result, None);
+    assert_eq!(
+        result["structuredContent"]["capabilities"]["actions"][0]["inputSchema"]["properties"]["labels"]
+            ["type"],
+        "boolean"
+    );
+}
+
+#[test]
+fn rich_clipboard_read_and_write_are_full_in_the_shared_policy() {
+    for action in ["clipboard.read_rich", "clipboard.write_rich"] {
+        assert_eq!(
+            super::mapping::required(
+                "chrome_execute",
+                &json!({"action":action,"args":{"mime":"text/html"}})
+            ),
+            Some(Tier::FullAccess),
+            "{action}"
+        );
+    }
 }

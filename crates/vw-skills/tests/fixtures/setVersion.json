@@ -36,9 +36,11 @@
         "logLevel": null,
         "disableWelcomeBannerAnimation": false,
         "cursorBlink": true,
+        "vimKeybindings": false,
         "showGreeting": false,
         "autocopyToClipboard": false,
         "enableMouseCapture": true,
+        "enableStickyPrompt": true,
         "enableFileAutocomplete": true,
         "fileWatcherForAutocomplete": false,
         "askConfirmationOnExit": false,
@@ -54,6 +56,7 @@
         "enableTelemetry": true,
         "experimentalEnableRegistrySkills": false,
         "experimentalEnableLocalProjects": false,
+        "enablePrMonitoring": true,
         "models": [],
         "transcribeModels": [],
         "ttsModels": [],
@@ -107,7 +110,8 @@
             "alias": null
           },
           "enabled": true,
-          "locked": false
+          "locked": false,
+          "active": true
         },
         {
           "name": "vibe",
@@ -118,7 +122,8 @@
           "scope": "builtin",
           "registry": null,
           "enabled": true,
-          "locked": true
+          "locked": true,
+          "active": true
         },
         {
           "name": "plugin:notes",
@@ -129,7 +134,8 @@
           "scope": "global",
           "registry": null,
           "enabled": true,
-          "locked": true
+          "locked": true,
+          "active": true
         }
       ],
       "tools": [],

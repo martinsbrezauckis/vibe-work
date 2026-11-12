@@ -58,7 +58,7 @@ pub enum OcrError {
         reason: String,
     },
     /// HTTP 401.
-    #[error("Mistral did not accept the API key (401). Check it in Settings.")]
+    #[error("{}", crate::status_text::KEY_REJECTED)]
     Unauthorized,
     /// HTTP 402/403.
     #[error("This key may not use OCR ({0}). Check the workspace's plan and permissions.")]
@@ -72,19 +72,19 @@ pub enum OcrError {
     )]
     Rejected(u16),
     /// HTTP 429.
-    #[error("Mistral is rate-limiting this key right now (429). Try again in a minute.")]
+    #[error("{}", crate::status_text::RATE_LIMITED)]
     RateLimited,
     /// HTTP 5xx.
-    #[error("Mistral's OCR had a problem ({0}). Try again later.")]
+    #[error("{}", crate::status_text::service_problem(*.0, "Mistral's OCR"))]
     Server(u16),
     /// Any other status.
-    #[error("Mistral answered with an unexpected status ({0}).")]
+    #[error("{}", crate::status_text::unexpected(*.0))]
     Unexpected(u16),
     /// No answer, or an answer that could not be read.
     #[error("Could not reach Mistral OCR: {0}.")]
     Network(String),
     /// The key cannot be put in a header.
-    #[error("The stored key contains characters a key cannot have.")]
+    #[error("{}", crate::status_text::MALFORMED_STORED_KEY)]
     MalformedKey,
 }
 

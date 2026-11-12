@@ -5,7 +5,7 @@ import type { App } from "../shell/AppContext";
 import { arrivedText, cardIdOf, waitingCards } from "./waiting";
 
 /** How long after arrival the focus is checked: the card has been drawn and took the focus if it could (ms). */
-const ARRIVAL_CHECK_MS = 400;
+export const ARRIVAL_CHECK_MS = 400;
 
 /** True when the focus is inside card `id` (`AskCard`'s `data-card-id`). */
 function focusIn(id: string): boolean {

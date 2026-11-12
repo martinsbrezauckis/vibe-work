@@ -300,13 +300,7 @@ mod tests {
             names.display_title(&store, "with-preview"),
             "Check the weather"
         );
-        assert_eq!(
-            names.display_title(&store, "without-name"),
-            "Untitled session"
-        );
-        assert_eq!(
-            names.display_title(&store, "not-listed"),
-            "Untitled session"
-        );
+        assert_eq!(names.display_title(&store, "without-name"), "Untitled chat");
+        assert_eq!(names.display_title(&store, "not-listed"), "Untitled chat");
     }
 }

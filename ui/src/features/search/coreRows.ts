@@ -16,7 +16,7 @@ export function coreRows(app: App, results: CoreResults): { message: Result[]; f
     title: hit.snippet,
     path: messagePath(hit),
     detail: hit.snippet,
-    opens: "Opens the session at this message, with find in this session",
+    opens: "Opens the chat at this message, with find in this chat",
     run: () => void openMessage(app, hit, results.query),
   }));
   const file: Result[] = results.files.map((hit) => ({
@@ -35,7 +35,7 @@ export function coreRows(app: App, results: CoreResults): { message: Result[]; f
           app.toasts.push({
             kind: "warn",
             bellKind: "failure",
-            text: "That file can't be opened here: no session works in its folder any more.",
+            text: "That file can't be opened here: no chat works in its folder any more.",
           });
       });
     },
@@ -47,7 +47,7 @@ export function coreRows(app: App, results: CoreResults): { message: Result[]; f
 export function indexNote(results: CoreResults): string | null {
   const index = results.index;
   if (index === null) return null;
-  if (index.error !== null) return `Older sessions could not be searched: ${index.error}`;
+  if (index.error !== null) return `Older chats could not be searched: ${index.error}`;
   if (!index.filling) return null;
-  return `Searching older sessions… (${String(index.indexed)} of ${String(index.total)})`;
+  return `Searching older chats… (${String(index.indexed)} of ${String(index.total)})`;
 }

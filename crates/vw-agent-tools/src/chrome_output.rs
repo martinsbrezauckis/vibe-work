@@ -10,10 +10,14 @@ pub(crate) fn catalog() -> Vec<Value> {
         if tool["name"] == "chrome_execute" {
             let description = tool["description"].as_str().unwrap_or_default();
             tool["description"] = json!(format!("{description}{DESCRIPTION}"));
-            tool["inputSchema"]["properties"]["saveTo"] = json!({
-                "enum":["inline","file"], "default":"inline",
-                "description":"Single page.read only. file saves this read result to a new JSON file in the chat folder; no filename or shell command is needed. Saving requires a mode that allows file writes."
-            });
+            if let Some(properties) = tool["inputSchema"]["properties"].as_object_mut() {
+                properties.extend(crate::browser_data::properties(true));
+            }
+            tool["description"] = json!(format!(
+                "{}{}",
+                tool["description"].as_str().unwrap_or_default(),
+                crate::browser_data::DESCRIPTION
+            ));
         }
     }
     tools

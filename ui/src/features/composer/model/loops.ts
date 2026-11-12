@@ -121,15 +121,15 @@ export function modeClause(modeId: string | null, label: string | null): string 
   if (modeId === "auto-approve")
     return `${label ?? term("accessModes", "auto-approve").name} is on: its steps run without asking you.`;
   return label === null
-    ? "It uses this session's access mode."
-    : `It uses this session's access mode (${label}).`;
+    ? "It uses this chat's access mode."
+    : `It uses this chat's access mode (${label}).`;
 }
 
 /** The note written after `/loop <interval> <prompt>` made a loop. */
 export function createdNote(row: LoopRow, nowSeconds: number, mode: string): string {
   return [
     `Loop ${row.id} added: "${shortPrompt(row.prompt)}" ${everyText(row)}, next run ${nextText(row, nowSeconds)}.`,
-    "It starts turns by itself while this session is open and idle.",
+    "It starts turns by itself while this chat is open and idle.",
     mode,
     `Stop it with /loop cancel ${row.id} or Delete in the Loops list.`,
   ].join(" ");
@@ -138,6 +138,6 @@ export function createdNote(row: LoopRow, nowSeconds: number, mode: string): str
 /** The note for `/loop list` (also written when the list is empty). */
 export function listedNote(count: number): string {
   return count === 0
-    ? "No loops in this session. Add one: /loop 5m <what to repeat>."
-    : `${loopCount(count)} in this session: see the Loops list above the message box.`;
+    ? "No loops in this chat. Add one: /loop 5m <what to repeat>."
+    : `${loopCount(count)} in this chat: see the Loops list above the message box.`;
 }

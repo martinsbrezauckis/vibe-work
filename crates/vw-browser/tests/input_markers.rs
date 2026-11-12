@@ -16,9 +16,64 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 #[tokio::test]
-async fn typing_feedback_follows_the_build_feature_without_changing_the_page() {
+async fn successful_click_still_marks_the_same_node_after_its_label_changes() {
     let rig = Rig::new().await;
-    #[cfg(feature = "click-marker")]
+    rig.engine.eval("document.body.innerHTML='<button>Mark receipt</button>';document.querySelector('button').onclick=function(){this.textContent='Receipt marked'}").await;
+    let mut events = rig.service.action_tracker().subscribe();
+    let (before, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    let button = before
+        .refs
+        .iter()
+        .find(|r| r.name == "Mark receipt")
+        .unwrap();
+    rig.browser
+        .act(
+            SESSION,
+            vw_browser::parse(&json!({"action":"click","ref":button.id})).unwrap(),
+            Actor::Agent,
+            &NoNavigation,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rig.engine
+            .eval("document.querySelector('button').textContent")
+            .await,
+        "Receipt marked"
+    );
+    let (after, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    let changed = after
+        .refs
+        .iter()
+        .find(|r| r.name == "Receipt marked")
+        .unwrap();
+    assert_eq!(changed.node, button.node, "the clicked DOM node survived");
+    assert_ne!(
+        changed.id, button.id,
+        "the reference changed with its label"
+    );
+    assert_eq!(
+        rig.engine.input_markers.lock().unwrap().len(),
+        1,
+        "completed click needs visible feedback after a label change"
+    );
+    assert_eq!(
+        events.try_recv().unwrap().kind,
+        vw_preview::action_tracking::ActionKind::Click
+    );
+}
+
+#[tokio::test]
+async fn typing_feedback_is_permanent_without_changing_the_page() {
+    let rig = Rig::new().await;
     let mut events = rig.service.action_tracker().subscribe();
     rig.engine.eval("document.body.innerHTML='<label style=\"position:absolute;top:500px;left:20px\">Message<input id=message></label>';window.extraEvents=0;document.addEventListener('pointerdown',()=>extraEvents++);").await;
     let nodes = rig
@@ -41,7 +96,6 @@ async fn typing_feedback_follows_the_build_feature_without_changing_the_page() {
         .await
         .unwrap();
     let markers = rig.engine.input_markers.lock().unwrap().clone();
-    #[cfg(feature = "click-marker")]
     {
         let event = events
             .try_recv()
@@ -53,23 +107,16 @@ async fn typing_feedback_follows_the_build_feature_without_changing_the_page() {
         );
         assert!(event.geometry.target_box.is_some());
     }
-    assert_eq!(
-        markers.len(),
-        usize::from(cfg!(feature = "click-marker")),
-        "typing feedback must follow the build feature"
-    );
+    assert_eq!(markers.len(), 1, "typing feedback is permanent");
     let state = rig.engine.eval("JSON.stringify({nodes:document.querySelectorAll('*').length,events:extraEvents,value:document.querySelector('input').value,box:(()=>{let r=document.querySelector('input').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()})").await;
     let state: serde_json::Value = serde_json::from_str(state.as_str().unwrap()).unwrap();
     assert_eq!(state["events"], 0);
     assert_eq!(state["value"], "Hello");
     assert_eq!(state["nodes"], nodes);
-    #[cfg(feature = "click-marker")]
     assert!((markers[0].point.0 * 300.0 - state["box"][0].as_f64().unwrap()).abs() < 1.0);
-    #[cfg(feature = "click-marker")]
     assert!((markers[0].point.1 * 200.0 - state["box"][1].as_f64().unwrap()).abs() < 1.0);
 }
 
-#[cfg(feature = "click-marker")]
 #[tokio::test(flavor = "multi_thread")]
 async fn confirmed_native_clicks_share_the_timeline_but_person_input_and_failures_do_not() {
     use vw_preview::action_tracking::{ActionKind, ActionPoint};
@@ -104,7 +151,7 @@ async fn confirmed_native_clicks_share_the_timeline_but_person_input_and_failure
         }
         assert!(
             events.try_recv().is_err(),
-            "a person's click or duplicate feedback entered the timeline"
+            "the user's click or duplicate feedback entered the timeline"
         );
     }
     let (model, _, _) = rig

@@ -102,22 +102,17 @@ impl Core {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<Vec<u8>, String>> + Send + 'static,
     {
-        if cfg!(feature = "feedback") {
-            let _ = self
-                .shared
-                .feedback
-                .capture
-                .set(Box::new(move || Box::pin(capture())));
-        }
+        let _ = self
+            .shared
+            .feedback
+            .capture
+            .set(Box::new(move || Box::pin(capture())));
     }
     pub(crate) async fn feedback(
         &self,
         origin: Origin,
         request: FeedbackRequest,
     ) -> Result<FeedbackView, CoreError> {
-        if !cfg!(feature = "feedback") {
-            return Err(invalid("Feedback is unavailable in this build."));
-        }
         if !matches!(
             request,
             FeedbackRequest::Read | FeedbackRequest::Open { .. }
@@ -125,7 +120,7 @@ impl Core {
         {
             return Err(CoreError::new(
                 ErrorCode::Denied,
-                "Feedback needs the person's review and Send click in the window. Offer a draft and wait for their decision.",
+                "Feedback needs the user's review and Send click in the window. Offer a draft and wait for their decision.",
             ));
         }
         crate::title_guard::refresh(&self.shared).await;
@@ -206,16 +201,16 @@ impl Core {
     }
 }
 
-#[cfg(all(test, not(feature = "feedback")))]
+#[cfg(test)]
 #[tokio::test]
-async fn feedback_default_build_refuses_commands_and_omits_the_tool() {
-    let core = crate::offline_core::start("feedback-disabled").await;
+async fn feedback_default_build_reads_commands_and_lists_the_tool() {
+    let core = crate::offline_core::start("feedback-enabled").await;
     assert!(
         core.feedback(Origin::Ui, FeedbackRequest::Read)
             .await
-            .is_err()
+            .is_ok()
     );
-    assert!(!vw_agent_tools::wire::tools::SESSION_TOOLS.contains(&"feedback_draft"));
+    assert!(vw_agent_tools::wire::tools::SESSION_TOOLS.contains(&"feedback_draft"));
     core.shutdown().await;
 }
 /// The only feedback operation offered to agents: redacted prose, no system fields, no send capability.
@@ -235,6 +230,6 @@ pub(crate) async fn offer(
         .await
         .map_err(|error| error.message)?;
     Ok(
-        serde_json::json!({"status":"draftOffered", "message":"The person can edit and review this draft in Vibe Work. Nothing has been sent. Wait for their Send decision; do not submit it through another channel."}),
+        serde_json::json!({"status":"draftOffered", "message":"The user can edit and review this draft in Vibe Work. Nothing has been sent. Wait for their Send decision; do not submit it through another channel."}),
     )
 }

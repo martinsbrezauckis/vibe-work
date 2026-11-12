@@ -1,9 +1,15 @@
 //! Host-owned chat titles for the helper's optional session title contract. Called when opening Chrome sessions.
 //! Older helpers/extensions retain the original arguments; website text and model arguments cannot supply the chat title.
+use super::agent_browser::Browser;
 use crate::core::Shared;
 use serde_json::{Value, json};
 
-pub(super) async fn apply(shared: &Shared, session: &str, args: &mut Value) -> Result<(), String> {
+pub(super) async fn apply(
+    shared: &Shared,
+    session: &str,
+    browser: Browser,
+    args: &mut Value,
+) -> Result<(), String> {
     let generation = crate::stops::generation(shared, session);
     let turn = super::person_stop::active_turn(shared, session);
     let status = shared
@@ -15,10 +21,11 @@ pub(super) async fn apply(shared: &Shared, session: &str, args: &mut Value) -> R
         || turn != super::person_stop::active_turn(shared, session)
         || shared.store.view(session).is_none()
     {
-        return Err("Not run: this chat's browser work ended while checking helper support. Start a new turn before opening the browser again.".into());
+        return Err(super::person_stop::ended(browser));
     }
     let status = &status.value()["structuredContent"];
-    super::profile_ids::resolve_browser(args, status)?;
+    super::profile_seeding::resolve(shared, session, args, status)?;
+    super::profile_agent::fresh(shared, args, status)?;
     let profile = args["profileId"].as_str().and_then(|selected| {
         status["profiles"].as_array()?.iter().find(|profile| {
             profile["profileId"]
@@ -165,7 +172,7 @@ mod tests {
             &json!({"agentName":"auto-approve"}),
         );
         for (case, supported, profiles, expected) in title_support_cases() {
-            let seen = super::super::test_support::answering(&core.shared, move |tool, _| {
+            let seen = super::super::test_support::answering(&core.shared, move |tool, args| {
                 if tool == "chrome_status" {
                     let mut status =
                         json!({"structuredContent":{"supportsSessionTitle":supported}});
@@ -174,17 +181,32 @@ mod tests {
                     }
                     status
                 } else {
-                    json!({"structuredContent":{"sessionId":"t","profileId":"p","state":"active"}})
+                    json!({"structuredContent":{"sessionId":"t","profileId":args["profileId"],"state":"active"}})
                 }
             });
+            let unavailable = matches!(
+                case,
+                "disconnected" | "unknown profile" | "empty profiles" | "Edge is distinct"
+            );
             let result = super::super::gateway::call(
                 &core.shared,
                 "s",
                 "chrome_session",
                 json!({"action":"open","profileId":PROFILE,"purpose":"Model task"}),
             )
-            .await
-            .unwrap();
+            .await;
+            if unavailable {
+                assert!(result.is_err(), "{case}: {result:?}");
+                assert!(
+                    !seen
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|(tool, _)| tool == "chrome_session")
+                );
+                continue;
+            }
+            let result = result.unwrap();
             assert_eq!(result["vwMcpResult"]["structuredContent"]["sessionId"], "t");
             let calls = seen.lock().unwrap();
             let args = &calls

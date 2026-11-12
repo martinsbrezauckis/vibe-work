@@ -1,5 +1,5 @@
-//! App-owned associations between observed paired IDs and unambiguous extension folders. Installation uses
-//! these only for diagnosis and launching; they grant no pairing authority and never read extension identities.
+//! Legacy profile history migration. The frozen hello has no filesystem association, so old inferred folders
+//! are discarded. Installation may retain observed IDs, but cannot use a directory to choose an account.
 use super::{ChromeControl, agent_browser::Browser};
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 pub(super) struct History(BTreeMap<String, Option<PathBuf>>);
 
 impl History {
+    #[cfg(all(test, feature = "your-edge"))]
     pub(super) fn contains(&self, path: &std::path::Path) -> bool {
         self.0.values().flatten().any(|folder| folder == path)
     }
@@ -22,15 +23,18 @@ fn record(chrome: &ChromeControl, browser: Browser) -> Option<PathBuf> {
 }
 
 pub(super) fn load(chrome: &ChromeControl, browser: Browser) -> History {
-    record(chrome, browser)
+    let mut history: History = record(chrome, browser)
         .and_then(|path| super::probe::read_regular(&path, 64 * 1024))
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for folder in history.0.values_mut() {
+        *folder = None;
+    }
+    history
 }
 
-/// A sole new connected ID and sole unclaimed eligible folder establish an association. Multiple unknown
-/// folders remain ambiguous; never assign a random extension ID by directory order or browser display name.
-pub(super) fn observe(chrome: &ChromeControl, browser: Browser, eligible: &[PathBuf]) {
+/// Preserve observed IDs without guessing an association from counts, names or directory order.
+pub(super) fn observe(chrome: &ChromeControl, browser: Browser) {
     let Some(record) = record(chrome, browser) else {
         return;
     };
@@ -49,14 +53,6 @@ pub(super) fn observe(chrome: &ChromeControl, browser: Browser, eligible: &[Path
     }
     for id in &live {
         history.0.entry(id.clone()).or_default();
-    }
-    let unknown: Vec<_> = live.iter().filter(|id| history.0[*id].is_none()).collect();
-    let folders: Vec<_> = eligible
-        .iter()
-        .filter(|path| !history.contains(path))
-        .collect();
-    if let ([id], [folder]) = (unknown.as_slice(), folders.as_slice()) {
-        history.0.insert((*id).clone(), Some((*folder).clone()));
     }
     let Ok(bytes) = serde_json::to_vec(&history) else {
         return;

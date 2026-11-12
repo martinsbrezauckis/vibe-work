@@ -14,7 +14,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `smart-approve` | Smart approve | A model checks each tool call: the calls it judges low-risk run, the others ask. | Use Smart approve access mode |
 | `accept-edits` | Accept edits | File edits run. Commands and anything outside the folder ask. | Use Accept edits access mode |
 | `ask` | Ask | Asks before tool use. | Use Ask access mode |
-| `plan` | Plan first | Retired in Vibe 3. Saved sessions reopen in Ask; use Plan on a page to plan. | Plan first was retired in Vibe 3 |
+| `plan` | Plan first | Retired in Vibe 3. Saved chats reopen in Ask; use Plan on a page to plan. | Plan first was retired in Vibe 3 |
 | `vw-plan` | Plan on a page | Plans first and writes the plan as a page in the project's handbook (docs/handbook/plans/). Other file writes are refused; shell commands still run. | Use Plan on a page access mode |
 | `explore` | Explore | Explore the project with Vibe's configured profile. | Use Explore access mode |
 
@@ -48,19 +48,19 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
-| `agentPause` | Pause agent access to secrets | Agent access to secrets is paused. Sessions keep working. | Pause the agent's access to secrets. Sessions keep working. |
-| `agentResume` | Resume agent access to secrets | Agent access to secrets is available. Sessions keep working. | Resume the agent's access to secrets. Sessions keep working. |
-| `vaultLock` | Lock vault | The vault is locked. Sessions stop until you unlock. | Lock the vault. Sessions stop until you unlock. |
-| `vaultUnlock` | Unlock vault | The vault is unlocked. Sessions can work again. | Unlock the vault. Sessions can work again. |
+| `agentPause` | Pause agent access to secrets | Agent access to secrets is paused. Chats keep working. | Pause the agent's access to secrets. Chats keep working. |
+| `agentResume` | Resume agent access to secrets | Agent access to secrets is available. Chats keep working. | Resume the agent's access to secrets. Chats keep working. |
+| `vaultLock` | Lock vault | The vault is locked. Chats stop until you unlock. | Lock the vault. Chats stop until you unlock. |
+| `vaultUnlock` | Unlock vault | The vault is unlocked. Chats can work again. | Unlock the vault. Chats can work again. |
 
-## Projects and sessions
+## Projects and chats
 
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
 | `projectTab` | Project | The side panel tab for the project's handbook. | Open Project tab |
 | `handbook` | handbook | A project's documentation, shown in the Project tab. | Open the project handbook |
 | `page` | page | One document in a project's handbook. | Open handbook page |
-| `session` | Session | Existing work with its messages, history and settings, saved in the session list. | Open session |
+| `session` | Chat | Existing work with its messages, history and settings, saved in the chat list. | Open chat |
 | `chat` | chat | Starting an interaction with Vibe, as in New chat or voice chat. | Start a chat |
 | `yourChrome` | Your Chrome | Use your Google Chrome from Vibe Work. | Set up Your Chrome |
 | `yourEdge` | Your Edge | Use your Microsoft Edge from Vibe Work. | Set up Your Edge |
@@ -79,6 +79,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
 | `vibe:create-plugin` | Create a plugin | Helps Vibe build a plugin with skills, tools and other features. | Helps Vibe build a plugin with skills, tools and other features. |
+| `vibe:import` | Import agent settings | Brings settings from other coding agents into Vibe. | Brings settings from other coding agents into Vibe. |
 | `vibe:skill-creator` | Create a skill | Helps Vibe create and update reusable skills for your tasks. | Helps Vibe create and update reusable skills for your tasks. |
 | `vibe:vibe` | Vibe setup and help | Helps Vibe explain and change its own setup. | Helps Vibe explain and change its own setup. |
 | `vibe:worktree` | Work in a separate copy | Helps Vibe create and manage separate working copies of a Git project. | Helps Vibe create and manage separate working copies of a Git project. |

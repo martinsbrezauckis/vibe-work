@@ -2,7 +2,7 @@
 """Generate the Rust and TypeScript protocol types from the installed Mistral Vibe package.
 
 Role: single entry point of the generator. Run it with the interpreter that has Vibe
-installed (data/vibe-3.1.0/venv/bin/python, or the one named by $VIBE_PYTHON).
+installed (data/vibe-3.1.2/venv/bin/python, or the one named by $VIBE_PYTHON).
   --write   regenerate crates/vw-protocol/src/generated and ui/src/protocol/generated
   --check   regenerate into a scratch directory and fail on any difference (CI drift gate)
 Fails loudly when: the installed Vibe version differs from vibe.pin; method_map.json is out of
@@ -66,6 +66,15 @@ def verify_against_json_schema(intro: Introspector, schema: Schema) -> None:
         d = schema.defs[name]
         assert isinstance(d, ModelDef)
         js = TypeAdapter(cls).json_schema(by_alias=True, mode="serialization")
+        # This model's wrap serializer preserves required JSON null input but its
+        # return annotation erases the property schema. Verify its concrete output
+        # as well as the validation schema instead of accepting an opaque dict.
+        if name == "ClientToolCallParams":
+            sample = {"callId": "call", "name": "tool", "input": None,
+                      "toolCallId": "tool-call", "caller": {"sessionId": "s", "rootSessionId": "s"}}
+            if cls.model_validate(sample).model_dump(by_alias=True, exclude_none=True) != sample:
+                raise GenerationError(f"{name}: required-null serializer changed")
+            js = TypeAdapter(cls).json_schema(by_alias=True, mode="validation")
         props = set(js.get("properties", {}))
         mine = {f.wire for f in d.fields}
         if props != mine:

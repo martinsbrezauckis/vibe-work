@@ -95,9 +95,7 @@ export function TerminalPanel({ terminals }: { terminals: Terminals }) {
 
   if (sessionId === null) {
     return (
-      <div className="empty">
-        Open a session to use its terminal (it starts in the session folder).
-      </div>
+      <div className="empty">Open a chat to use its terminal (it starts in the chat folder).</div>
     );
   }
   const tabs = list ?? [];

@@ -18,10 +18,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_XBUTTON1, VK_XBUTTON2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetCursorPos, GetMessageW, HC_ACTION, IsChild,
-    IsWindowVisible, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW, TranslateMessage, WH_MOUSE_LL,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_XBUTTONDOWN, WM_XBUTTONUP, WindowFromPoint,
+    CallNextHookEx, DispatchMessageW, GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow,
+    GetMessageW, HC_ACTION, IsChild, IsWindowVisible, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW,
+    TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, WindowFromPoint,
 };
 use windows::core::Interface;
 
@@ -110,6 +111,25 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION.cast_signed() {
+        let message = u32::try_from(wparam.0).unwrap_or_default();
+        let press = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
+        if press || matches!(message, WM_KEYUP | WM_SYSKEYUP) {
+            // SAFETY: reads only the foreground window; no keyboard content is collected.
+            let active = unsafe { GetForegroundWindow() };
+            let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+            watched.retain(|entry| {
+                // SAFETY: queries the owning top-level window; a stale handle yields no matching window.
+                let host = unsafe { GetAncestor(HWND(entry.host as *mut _), GA_ROOT) };
+                host != active || (entry.observed)(press)
+            });
+        }
+    }
+    // SAFETY: passes the keyboard event on unchanged; only its occurrence was observed.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
 fn start() -> Result<(), String> {
     HOOK.get_or_init(|| {
         let (ready, started) = std::sync::mpsc::channel();
@@ -120,7 +140,13 @@ fn start() -> Result<(), String> {
                 // messages so Windows can call the hook; the hook procedure lives for the process.
                 let installed = unsafe {
                     GetModuleHandleW(None).and_then(|module| {
-                        SetWindowsHookExW(WH_MOUSE_LL, Some(hook), Some(module.into()), 0)
+                        SetWindowsHookExW(WH_MOUSE_LL, Some(hook), Some(module.into()), 0)?;
+                        SetWindowsHookExW(
+                            WH_KEYBOARD_LL,
+                            Some(keyboard_hook),
+                            Some(module.into()),
+                            0,
+                        )
                     })
                 };
                 let _ = ready.send(installed.map(drop).map_err(|e| e.to_string()));
@@ -178,6 +204,13 @@ fn down(key: VIRTUAL_KEY) -> bool {
 /// Whether a mouse button is down right now with the pointer over this webview.
 #[must_use]
 pub fn holding(controller: &ICoreWebView2Controller) -> bool {
+    if place(controller).is_ok_and(|(host, _)| {
+        // SAFETY: compares native window ownership; no keyboard data leaves this predicate.
+        unsafe { GetAncestor(HWND(host as *mut _), GA_ROOT) == GetForegroundWindow() }
+    }) && (8..=255).any(|key| down(VIRTUAL_KEY(key)))
+    {
+        return true;
+    }
     if ![VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2]
         .into_iter()
         .any(down)

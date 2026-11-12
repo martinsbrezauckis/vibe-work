@@ -122,7 +122,7 @@ function haystack(...parts: (string | null | undefined)[]): string {
 function grantCovers(g: SessionGrant): CoversPart[] {
   if (g.covers.length > 0) return [...g.covers];
   if (g.everyCall)
-    return [words("every call of "), words(toolText(g.tool, g.tool)), words(" in this session")];
+    return [words("every call of "), words(toolText(g.tool, g.tool)), words(" in this chat")];
   return [words(toolText(g.tool, g.labels.join(", ") || g.tool))];
 }
 

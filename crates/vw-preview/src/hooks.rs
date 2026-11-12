@@ -138,6 +138,14 @@ impl Hooks {
         if entry.ended_canaries.contains(url) {
             return Pre::Done(Err(None));
         }
+        if !pinned_app
+            && entry
+                .local_document
+                .as_ref()
+                .is_some_and(|approved| crate::same_local_document(approved, url))
+        {
+            return Pre::Done(Ok(()));
+        }
         if pinned_app
             && matches!(
                 self.0.policy.classify(url),
@@ -146,7 +154,7 @@ impl Hooks {
         {
             return Pre::Done(Err(Some((
                 session,
-                "the App preview opens only this session's local servers".to_owned(),
+                "the App preview opens only this chat's local servers".to_owned(),
             ))));
         }
         let (class, lan_host) = (entry.mount_class(), entry.mount_lan_host());
@@ -479,6 +487,9 @@ impl PreviewHooks for Hooks {
                     entry.title = None;
                 } else if entry.pending_previous_url.as_ref() == Some(&url) {
                     return true;
+                }
+                if let Some(mount) = &mut entry.mount {
+                    mount.navigation.load_addresses.commit(&url);
                 }
                 entry.reset_console();
                 entry.favicon = None;

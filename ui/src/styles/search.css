@@ -135,10 +135,6 @@
   font-size: var(--text-12-5);
   color: var(--text-2);
 }
-.temp-chip {
-  font-size: var(--text-11-5);
-  color: var(--text-2);
-}
 
 /* The Processes panel: this session's processes, their live output. */
 .proc-section {

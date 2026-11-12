@@ -78,7 +78,7 @@ fn in_other_folder(folders: &[PathBuf], path: &str) -> bool {
             .any(|folder| named.starts_with(folder))
 }
 
-fn read(
+pub(crate) fn read(
     folders: &[PathBuf],
     path: &str,
     room: usize,

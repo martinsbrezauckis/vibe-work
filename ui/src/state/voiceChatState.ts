@@ -1,5 +1,13 @@
 /** Voice-chat view state shared by the controller, controls and scripted tests. No I/O. */
 import type { VoiceLatency } from "../features/voice/voiceLatency";
+import type { Accessibility } from "./accessibility";
+import type { Player } from "../features/voice/audioPlayer";
+import type { PrepareCapture } from "../features/voice/pcmCapture";
+import type { Composer } from "./composer";
+import type { CoreController } from "./coreStore";
+import type { Toasts } from "./toastStore";
+import type { VoiceSettingsStore } from "./voiceSettings";
+import type { SpeechResult } from "../protocol/core";
 
 /** Where voice chat is. `error`: stopped with a reason, waiting for a press (the mode stays on). */
 export type VoiceChatPhase =
@@ -47,4 +55,34 @@ export const VOICE_CHAT_OFF: VoiceChatState = {
   note: null,
   error: null,
   latency: null,
+};
+
+/** Existing controller dependencies; type-only references create no runtime ownership. */
+export interface VoiceChatDeps {
+  accessibility?: Accessibility;
+  promptBlocked?: () => boolean;
+  core: CoreController;
+  composer: Composer;
+  settings: VoiceSettingsStore;
+  toasts: Toasts;
+  prepare: PrepareCapture;
+  player: Player;
+  canUseKey?: (() => boolean) | undefined;
+  /** True while a dictation runs (voice chat then cannot start). */
+  dictating: () => boolean;
+  /** Called when voice chat starts (narration stops). */
+  onStart: () => void;
+  /** A session's title for messages. */
+  titleOf: (sessionId: string) => string;
+  now?: () => number;
+}
+
+/** One queued utterance and its optional prefetched speech result. */
+export type VoiceChatUtterance = {
+  text: string;
+  kind: SpokenKind;
+  turnId?: string;
+  callbackId?: string;
+  repeat?: boolean;
+  ready?: Promise<SpeechResult>;
 };

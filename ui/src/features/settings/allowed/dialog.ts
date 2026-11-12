@@ -39,13 +39,13 @@ function wordsFor(
   if (leaf.key === "earlier")
     return {
       title: `Revoke ${all} earlier “Always allow” ${n === 1 ? "rule" : "rules"}?`,
-      body: "Vibe asks you again before each of these, in every project. They cannot be added back. Sessions that are open now keep them until they end.",
+      body: "Vibe asks you again before each of these, in every project. They cannot be added back. Chats that are open now keep them until they end.",
       confirm: `Revoke ${plural(n, "rule")}`,
     };
   if (leaf.key.startsWith("sessions/"))
     return {
       title: `Revoke ${all} ${n === 1 ? "answer" : "answers"} in ${leaf.title}?`,
-      body: "Vibe asks you again before each of these in this session.",
+      body: "Vibe asks you again before each of these in this chat.",
       confirm: `Revoke ${plural(n, "answer")}`,
     };
   if (leaf.key === "vault/fills")

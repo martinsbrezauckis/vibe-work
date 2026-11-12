@@ -26,8 +26,7 @@ use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
 
 /// The refusal of a `git init` or `git commit` when the person gave no name and email.
-pub(crate) const NO_IDENTITY: &str =
-    "Not run: No Git identity. The user did not give the name and email Git writes into commits.";
+pub(crate) const NO_IDENTITY: &str = "Not run: no Git identity: the user did not give a name and email. Continue without committing and tell the user.";
 
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 

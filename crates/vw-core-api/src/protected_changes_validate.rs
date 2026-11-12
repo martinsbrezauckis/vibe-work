@@ -47,13 +47,12 @@ pub(super) fn capture(
                 root.display()
             ));
         }
+        // Only the size is checked here, before `vw_proposals` reads the whole existing file. Links in the path are
+        // refused by `vw_proposals` itself, at capture and again before apply, with the same message.
         let mut target = root.to_owned();
         for part in &parts {
             target.push(part);
             match std::fs::symlink_metadata(&target) {
-                Ok(m) if m.file_type().is_symlink() => {
-                    return Err(format!("symlink in proposal path: {}", file.path));
-                }
                 Ok(m) if target == root.join(path) && m.len() > MAX_BYTES => {
                     return Err(format!("{} is over 1 MB", file.path));
                 }
@@ -137,5 +136,24 @@ mod tests {
             error.contains("relative") && error.contains("skills/<name>/SKILL.md"),
             "{error}"
         );
+    }
+
+    /// The link refusal comes from `vw_proposals` (capture and apply walk every component), not from a copy here.
+    #[cfg(unix)]
+    #[test]
+    fn a2_38_symlinked_folder_in_a_proposal_is_refused_with_the_link_message() {
+        let dir = tempfile::tempdir().unwrap();
+        // Resolved: macOS temp folders sit under the /var -> /private/var link.
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("vibe-home");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(root.join("skills")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("skills/linked")).unwrap();
+        let error = capture(&root, "session", serde_json::json!({
+            "reason":"Add a skill", "changes":[{"path":"skills/linked/SKILL.md", "kind":"add", "content":"demo"}]
+        })).err().unwrap();
+        assert_eq!(error, "symlink in proposal path: skills/linked/SKILL.md");
+        assert!(!outside.join("SKILL.md").exists());
     }
 }

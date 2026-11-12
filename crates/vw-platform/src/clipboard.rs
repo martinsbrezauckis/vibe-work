@@ -5,6 +5,12 @@
 //! Depends on: the native clipboard API, Tokio for async replies, and zeroizing storage.
 //! Called by: core vault copy commands. No UI event carries the copied value.
 
+#[path = "clipboard_content.rs"]
+pub mod content;
+#[path = "clipboard_html.rs"]
+#[allow(unsafe_code)]
+mod html;
+
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -23,6 +29,9 @@ const COPY_WAIT: Duration = Duration::from_secs(5);
 /// A clipboard failure without secret content in its representation.
 #[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
+    /// This platform clipboard transport does not expose the requested representation.
+    #[error("{0}")]
+    Unsupported(&'static str),
     /// The platform clipboard could not be opened or written.
     #[error("clipboard operation failed")]
     Operation,
@@ -38,6 +47,25 @@ pub enum ClipboardError {
 ///
 /// Implementations must not log or persist the text passed to `set_text`.
 pub trait ClipboardBackend: Send + 'static {
+    /// Reads an ordinary HTML or PNG representation.
+    /// # Errors
+    /// The representation is unsupported or unavailable.
+    fn get_content(
+        &mut self,
+        _format: crate::clipboard_content::ClipboardFormat,
+    ) -> Result<crate::clipboard_content::ClipboardContent, ClipboardError> {
+        Err(ClipboardError::Operation)
+    }
+    /// Writes ordinary HTML or PNG content.
+    /// # Errors
+    /// The representation is unsupported, invalid or unavailable.
+    fn set_content(
+        &mut self,
+        _content: &crate::clipboard_content::ClipboardContent,
+    ) -> Result<(), ClipboardError> {
+        Err(ClipboardError::Operation)
+    }
+
     /// Replaces the clipboard with sensitive text.
     ///
     /// # Errors
@@ -58,6 +86,16 @@ pub trait ClipboardBackend: Send + 'static {
 }
 
 enum Request {
+    CheckPaste(oneshot::Sender<Result<(), ClipboardError>>),
+    ReadContent(
+        content::ClipboardFormat,
+        oneshot::Sender<Result<content::ClipboardContent, ClipboardError>>,
+    ),
+    WriteContent(
+        content::ClipboardContent,
+        Arc<AtomicBool>,
+        oneshot::Sender<Result<content::ClipboardContent, ClipboardError>>,
+    ),
     Read(oneshot::Sender<Result<String, ClipboardError>>),
     Copy(
         Zeroizing<String>,
@@ -75,6 +113,20 @@ pub struct ClipboardService {
 }
 
 impl ClipboardService {
+    /// Refuses native Paste while a vault copy still protects any clipboard representation.
+    /// The owner checks this before and after reading formats; it never exposes the copied value.
+    /// # Errors
+    /// A vault copy is still active, the worker is unavailable, or the check timed out.
+    pub async fn check_paste(&self) -> Result<(), ClipboardError> {
+        let (reply, response) = oneshot::channel();
+        self.sender
+            .send(Request::CheckPaste(reply))
+            .map_err(|_| ClipboardError::Unavailable)?;
+        tokio::time::timeout(COPY_WAIT, response)
+            .await
+            .map_err(|_| ClipboardError::TimedOut)?
+            .map_err(|_| ClipboardError::Unavailable)?
+    }
     /// Reads ordinary clipboard text, withholding a still-live vault copy.
     ///
     /// # Errors
@@ -203,6 +255,29 @@ fn run_worker(
             receiver.recv().ok()
         };
         match request {
+            Some(Request::CheckPaste(reply)) => {
+                let result = if current.is_some() {
+                    Err(ClipboardError::Operation)
+                } else {
+                    Ok(())
+                };
+                let _ = reply.send(result);
+            }
+            Some(Request::ReadContent(format, reply)) => {
+                if !reply.is_closed() {
+                    let result = if current.is_some() {
+                        Err(ClipboardError::Operation)
+                    } else {
+                        backend.get_content(format)
+                    };
+                    let _ = reply.send(result);
+                }
+            }
+            Some(Request::WriteContent(value, cancelled, reply)) => {
+                if content::write(backend.as_mut(), &value, &cancelled, reply) {
+                    current = None;
+                }
+            }
             Some(Request::Read(reply)) => {
                 if reply.is_closed() {
                     continue;
@@ -278,6 +353,15 @@ impl NativeClipboard {
 }
 
 impl ClipboardBackend for NativeClipboard {
+    fn get_content(
+        &mut self,
+        format: content::ClipboardFormat,
+    ) -> Result<content::ClipboardContent, ClipboardError> {
+        content::native_read(self, format)
+    }
+    fn set_content(&mut self, value: &content::ClipboardContent) -> Result<(), ClipboardError> {
+        content::native_write(self, value)
+    }
     fn set_text(&mut self, text: &str) -> Result<(), ClipboardError> {
         let clipboard = self.clipboard()?;
         #[cfg(target_os = "linux")]

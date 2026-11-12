@@ -12,8 +12,29 @@ const PROFILE: &str = if cfg!(feature = "your-edge") {
 
 fn groups() -> BTreeMap<String, Vec<String>> {
     let mut groups = BTreeMap::<String, Vec<String>>::new();
-    for row in output_tests::catalog()["actions"].as_array().unwrap() {
-        let (group, name) = row["id"].as_str().unwrap().split_once('.').unwrap();
+    let catalog = output_tests::catalog();
+    // The frozen fixture contains extension actions; the helper also composes or adapts these.
+    let actions = catalog["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .chain([
+            "page.add_style",
+            "console.clear",
+            "page.inspect",
+            "page.errors.clear",
+        ]);
+    for action in actions {
+        let (group, name) = action.split_once('.').unwrap();
+        groups.entry(group.into()).or_default().push(name.into());
+    }
+    for action in super::page_plan_catalog::NAMES
+        .iter()
+        .chain(super::extension_state::NAMES)
+        .chain(super::page_capture::NAMES)
+    {
+        let (group, name) = action.split_once('.').unwrap();
         groups.entry(group.into()).or_default().push(name.into());
     }
     for names in groups.values_mut() {
@@ -56,7 +77,9 @@ async fn unknown_actions_return_only_grouped_correction() {
                 .lines()
                 .any(|line| line == format!("{group}: {}", names.join(",")))
         });
-        if compact > 1200
+        // The correction is the full list of valid action names (all needed facts); it grows with each
+        // browser action, so the bound leaves room for the merged 0.1.10 set (1212 compact) and a little more.
+        if compact > 1400
             || text.chars().count() > 1200
             || body["error"]["code"] != "UNKNOWN_ACTION"
             || !complete
@@ -101,6 +124,12 @@ fn receipt(action: &str) -> Value {
             "url":"https://demoqa.com/automation-practice-form","title":"Practice Form",
             "page":{"tabId":7,"documentId":"document-a","url":"https://demoqa.com/automation-practice-form",
             "delta":true,"text":"","refs":refs,"removedRefs":[]}});
+    }
+    if action == "files.upload" {
+        let files = json!([{"name":"report.txt","size":8}]);
+        body["data"]["files"] = files.clone();
+        body["data"]["currentFiles"] = files;
+        body["data"]["resultObserved"] = json!(true);
     }
     let text_path = if action == "page.read" {
         "/data/text"

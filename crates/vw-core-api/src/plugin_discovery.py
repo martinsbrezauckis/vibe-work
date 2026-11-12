@@ -5,6 +5,7 @@ project. Only public inventory leaves; preflight precedes detection, with no wri
 """
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -50,6 +51,17 @@ files = HarnessFilesManager(sources=("user", "project")).for_session(cwd, worksp
 VibeConfigSchema.check_layer_keys = lambda self, *args, **kwargs: None
 
 
+def load_plugin_switches():
+    # The server loads this home dotenv before building its environment layer.
+    # Inventory needs only these switches, never provider keys or executable settings.
+    from dotenv import dotenv_values
+    env_file = home / ".env"
+    if env_file.is_file():
+        for key, value in dotenv_values(env_file).items():
+            if key.upper() in {"VIBE_DISABLED_PLUGINS", "VIBE_ENABLED_PLUGINS"} and value and not os.environ.get(key):
+                os.environ[key] = value
+
+
 async def inspection_config():
     # Same layer precedence as the pinned default builder, without its persistent
     # migrations or SSL initialization. The resolver only reads configured MCP names.
@@ -65,6 +77,8 @@ async def inspection_config():
     )
 
 
+install_bundled_plugin_guard([Path(p) for p in options.get("builtinRoots", [])], refuse_missing=False)  # noqa: F821 - shared launcher guard.
+load_plugin_switches()
 config = asyncio.run(inspection_config())
 resolver = ToolsReader.from_harness_files(
     files, builtin_roots=builtins,
@@ -75,35 +89,54 @@ resolution = resolver.resolve()
 
 def project(result, off=False):
     rows = []
-    for plugin in result.plugins:
+    installed = getattr(result, "installed", ())
+    if not installed:
+        installed = [SimpleNamespace(descriptor=plugin, status="loaded", **{  # noqa: F821 - read guard.
+            key: getattr(result, key) for key in ["skills", "mcp_servers", "knowledge", "agents", "libraries",
+                                                "connectors", "runtime_hooks"]}) for plugin in result.plugins]
+    for entry in installed:
+        plugin = entry.descriptor
         components = []
-        for name, skill in result.skills.items():
-            if name.partition(":")[0] == plugin.namespace:
+        # Skills use the manifest name; only MCP tools use the tool namespace.
+        for name in entry.skills:
+            if name.partition(":")[0] == plugin.name:
                 components.append({"kind": "skill", "name": name, "status": None})
         for kind, collection, field in (
-            ("mcp_server", result.mcp_servers, "source_id"),
-            ("knowledge", result.knowledge, "name"),
-            ("agent", result.agents, "name"),
-            ("library", result.libraries, "alias"),
-            ("connector", result.connectors, "source_id"),
-            ("hook", result.runtime_hooks, "declared_name"),
+            ("mcp_server", entry.mcp_servers, "source_id"),
+            ("knowledge", entry.knowledge, "name"),
+            ("agent", entry.agents, "name"),
+            ("library", entry.libraries, "alias"),
+            ("connector", entry.connectors, "source_id"),
+            ("hook", entry.runtime_hooks, "declared_name"),
         ):
             for item in collection:
                 if getattr(item, "plugin_name", None) == plugin.name:
                     components.append({"kind": kind, "name": getattr(item, field), "status": None})
+        native_enabled = entry.status != "disabled"
         issues = [issue.message for issue in result.issues if issue.file.is_relative_to(plugin.root)]
         issues.extend(item.reason for item in result.unsupported_components if item.plugin_name == plugin.name)
+        if not native_enabled:
+            if plugin.name in config.config.disabled_plugins:
+                from vibe.core.plugins import PluginToggles
+                own = config.get_layer(UserConfigLayer.NAME).cached_data
+                switches = PluginToggles(config.config, getattr(own, "disabled_plugins", []) or [])
+                if switches.locked(plugin):
+                    issues.append("Off in Vibe and fixed by another config layer. Remove this name from disabled_plugins in that layer to enable it.")
+                else:
+                    issues.append("Off in Vibe: disabled_plugins. Remove this name from your Vibe config to enable it.")
+            else:
+                issues.append("Off by default in Vibe. Add this name to enabled_plugins to enable it.")
         rows.append({"name": plugin.name, "description": plugin.description,
                      "version": plugin.version, "author": plugin.author,
                      "path": str(plugin.root), "scope": plugin.scope.value,
-                     "off": off, "available": not off, "components": components, "issues": issues,
+                     "off": off, "nativeEnabled": native_enabled, "available": not off and entry.status == "loaded", "components": components, "issues": issues,
                      "servers": [{"name": item.source_id, "group": plugin_mcp_group_name(plugin.namespace, item.source_id)}
-                                 for item in result.mcp_servers if item.plugin_name == plugin.name]})
+                                 for item in entry.mcp_servers if item.plugin_name == plugin.name]})
     return rows
 
 
 rows = project(resolution) + unreadable_rows(resolver)  # noqa: F821 - plugin_read_guard.py is prepended by Rust.
-selected = {plugin.root for plugin in resolution.plugins}
+selected = {Path(row["path"]) for row in rows}
 # Full resolution owns precedence. Resolve its remaining discovered folders
 # independently only to describe valid plugins it shadowed or collided with.
 candidates = (

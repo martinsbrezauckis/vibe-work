@@ -23,7 +23,6 @@ struct Rig {
     proxy: ProxyHandle,
     token: String,
     seen: Seen,
-    #[cfg(feature = "plan-usage")]
     status: Arc<AtomicU16>,
     upstream: tokio::task::JoinHandle<()>,
 }
@@ -101,7 +100,6 @@ async fn rig(missing: bool) -> Rig {
         proxy,
         token,
         seen,
-        #[cfg(feature = "plan-usage")]
         status,
         upstream,
     }
@@ -131,14 +129,7 @@ async fn only_the_two_reads_reach_upstream_with_the_current_token() {
             .send()
             .await
             .unwrap();
-        assert_eq!(
-            response.status(),
-            if cfg!(feature = "plan-usage") {
-                200
-            } else {
-                403
-            }
-        );
+        assert_eq!(response.status(), 200);
         for method in ["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"] {
             assert_eq!(
                 client
@@ -177,7 +168,7 @@ async fn only_the_two_reads_reach_upstream_with_the_current_token() {
         );
     }
     let seen = rig.seen.lock().unwrap().clone();
-    assert_eq!(seen.len(), if cfg!(feature = "plan-usage") { 2 } else { 0 });
+    assert_eq!(seen.len(), 2);
     for (method, path, auth) in seen {
         assert_eq!(method, "GET");
         assert!(["/v1/billing/subscription", "/v1/billing/budget"].contains(&path.as_str()));
@@ -198,7 +189,6 @@ async fn only_the_two_reads_reach_upstream_with_the_current_token() {
     rig.upstream.abort();
 }
 
-#[cfg(feature = "plan-usage")]
 #[tokio::test]
 async fn billing_errors_and_redirects_pass_through_without_being_followed() {
     let rig = rig(false).await;
@@ -223,7 +213,6 @@ async fn billing_errors_and_redirects_pass_through_without_being_followed() {
     rig.upstream.abort();
 }
 
-#[cfg(feature = "plan-usage")]
 #[tokio::test]
 async fn billing_discovery_never_waits_for_a_locked_key() {
     let rig = rig(true).await;
@@ -247,9 +236,8 @@ async fn billing_discovery_never_waits_for_a_locked_key() {
     rig.upstream.abort();
 }
 
-#[cfg(feature = "plan-usage")]
 #[tokio::test]
-#[ignore = "needs installed Vibe 3.1.0: source the lane environment and run with --ignored"]
+#[ignore = "needs installed Vibe 3.1.2: set VIBE_PYTHON and VW_TEST_ROOT and run with --ignored"]
 async fn installed_vibe_reads_billing_through_the_proxy() {
     let python = std::env::var_os("VIBE_PYTHON").expect("set VIBE_PYTHON to the pinned runtime");
     let root = std::env::var_os("VW_TEST_ROOT")
@@ -290,7 +278,7 @@ async fn installed_vibe_reads_billing_through_the_proxy() {
             String::from_utf8_lossy(&output.stderr)
         );
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        println!("Vibe 3.1.0 billing fixture {code} {mode}: {value}");
+        println!("Vibe 3.1.2 billing fixture {code} {mode}: {value}");
         if code == 200 {
             assert_eq!(value["subscription"]["vibe_payg_enabled"], true);
             if mode == "both" {

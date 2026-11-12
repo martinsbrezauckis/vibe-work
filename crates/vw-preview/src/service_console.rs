@@ -8,6 +8,41 @@ use super::{PreviewError, PreviewService};
 use crate::console::{ConsoleEntry, MAX_RETURNED};
 
 impl PreviewService {
+    /// Snapshot or clear one diagnostic buffer after draining the current page.
+    /// `page_errors` selects exceptions, promise rejections and resource failures; false selects console calls.
+    /// A clear returns the removed count and an empty snapshot; later messages belong to the next read.
+    ///
+    /// # Errors
+    /// A missing page or native drain failure, before anything is cleared.
+    pub async fn diagnostic_records(
+        &self,
+        session_id: &str,
+        page_errors: bool,
+        clear: bool,
+    ) -> Result<(Vec<ConsoleEntry>, usize, u64), PreviewError> {
+        let _activity = self.session_lock(session_id).await;
+        self.drain_to_host(session_id, true).await?;
+        let mut state = self.inner.lock();
+        let entry = state
+            .entries
+            .get_mut(session_id)
+            .ok_or(PreviewError::NothingOpen)?;
+        let matches = |item: &&ConsoleEntry| item.level.is_page_error() == page_errors;
+        let count = entry.console.iter().filter(matches).count();
+        if clear {
+            entry
+                .console
+                .retain(|item| item.level.is_page_error() != page_errors);
+            Ok((Vec::new(), count, entry.console_dropped))
+        } else {
+            Ok((
+                entry.console.iter().filter(matches).cloned().collect(),
+                0,
+                entry.console_dropped,
+            ))
+        }
+    }
+
     /// Recent console errors and warnings (at most `limit`, at most [`MAX_RETURNED`]), newest last, and how many
     /// older ones were dropped from the current document's host ring.
     ///

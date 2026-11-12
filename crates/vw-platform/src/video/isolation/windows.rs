@@ -6,6 +6,7 @@
     reason = "Win32 process types and constants form this module's API surface"
 )]
 use std::{io, path::Path};
+use vw_video_types::{Code, Error};
 use windows::{
     Win32::{
         Foundation::*,
@@ -155,8 +156,14 @@ fn spawn(helper: &Path, input: &Path, sid: PSID, job: &Owned) -> io::Result<Owne
 /// Refuses direct worker invocation unless Windows confirms both `AppContainer` and hard Job limits.
 /// # Errors
 /// An unrestricted token, absent limits or failed OS query. Called before stdin or media is parsed.
-pub fn verify() -> Result<(), String> {
-    verify_native().map_err(|_| "backend_unavailable: Windows media sandbox is not active".into())
+pub fn verify() -> Result<(), Error> {
+    verify_native().map_err(|error| {
+        Error::at(
+            Code::WorkerIsolation,
+            "Windows media sandbox is not active",
+            error,
+        )
+    })
 }
 fn verify_native() -> io::Result<()> {
     // SAFETY: GetTokenInformation and QueryInformationJobObject write to their correctly sized stack structures.

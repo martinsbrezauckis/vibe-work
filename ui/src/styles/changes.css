@@ -8,7 +8,7 @@
 }
 .chg {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 @container (min-width: 640px) {
@@ -215,7 +215,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .files li > button:not(.row-more) {
-    transition: background 0.12s ease;
+    transition: background var(--t-hover-fast) var(--ease-native);
   }
 }
 .shared-note {

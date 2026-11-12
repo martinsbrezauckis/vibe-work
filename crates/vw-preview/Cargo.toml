@@ -12,41 +12,39 @@ publish = false
 workspace = true
 
 [features]
-# Optional native feedback after agent input.
-click-marker = []
 # TypeScript bindings for the UI (through vw-core-api's gen-core-ts).
 ts = ["dep:ts-rs"]
 # Test fixture only: exact loopback origin may exercise the shared browser profile.
 e2e-script = []
 
 [dependencies]
-vw-vocabulary = { path = "../vw-vocabulary" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-zeroize = "1.8"
-thiserror = "2"
-tokio = { version = "1.53", features = ["sync", "time", "macros", "rt"] }
-tracing = "0.1"
-url = "2"
+vw-vocabulary = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
+tracing = { workspace = true }
+url = { workspace = true }
 # Stable per-session storage identifiers (already used by vw-changes).
-sha2 = "0.10.9"
+sha2 = { workspace = true }
 # Screenshot shaping: decode, downscale, re-encode (0.18.1 is already in the lockfile through tauri).
-png = "0.18"
+png = { workspace = true }
 # Screenshots travel as base64 in command results and MCP image content (0.22.1 already in the lockfile).
-base64 = "0.22"
+base64 = { workspace = true }
 # Random name of the in-page console accessor (same version as the other crates).
-getrandom = "0.3"
-ts-rs = { version = "12.0.1", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
+getrandom = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 # Screenshots captured in a display colour space (WebView2 tags them with an ICC profile) are converted to
 # sRGB before the re-encode drops the tag. Pure Rust, BSD-3-Clause OR Apache-2.0.
 moxcms = "0.9"
 # Address classes of literal hosts and the canary suffix.
-vw-netguard = { path = "../vw-netguard" }
-sysinfo = { version = "=0.38.4", default-features = false, features = ["system"] }
+vw-netguard = { workspace = true }
+sysinfo = { workspace = true, features = ["system"] }
 # ABP parsing and ordered WebKit content-rule conversion; filter data is downloaded only for Strict.
 adblock = { version = "=0.13.5", default-features = false, features = ["content-blocking"] }
 
 # Indexed evaluation of the same WebKit JSON for WebView2 (already transitive dependencies).
-regex = "1"
+regex = { workspace = true }
 regex-syntax = "0.8"
 aho-corasick = "1"

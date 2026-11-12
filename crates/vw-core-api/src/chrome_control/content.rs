@@ -27,7 +27,11 @@ pub(super) fn mark(result: &mut Value) {
     }
     super::session_title_output::strip(&mut payload);
     let text = payload.to_string();
-    let verdict = vw_browser::guard::check([("Chrome page".to_owned(), text.as_str())]);
+    let channel = payload["profileId"].as_str().map_or_else(
+        || "Browser page".to_owned(),
+        |profile| super::agent_browser::Browser::from_profile(profile).words("{browser} page"),
+    );
+    let verdict = vw_browser::guard::check([(channel, text.as_str())]);
     let diagnostic = helper_error(&payload);
     let mut body = json!({
         "untrustedPageContent":payload,
@@ -85,21 +89,32 @@ fn helper_error(receipt: &Value) -> Option<Value> {
         "UNKNOWN_ACTION" => "Unknown browser action. Choose a supported action.",
         "EXTENSION_UPDATE_REQUIRED" => {
             return Some(json!({"code":code,"message":format!(
-                "The browser extension needs an update. Ask the person to update {} before trying again.",
+                "The browser extension needs an update. Ask the user to update {} before trying again.",
                 vw_vocabulary::label("workNames", "chromeExtension")
             )}));
         }
         "DOWNLOAD_AMBIGUOUS" => {
-            "The download could not be identified for this chat. Use a downloadId from this chat's download receipt, or ask the person to select the file."
+            "The download could not be identified for this chat. Use a downloadId from this chat's download receipt, or ask the user to select the file."
         }
         "SESSION_NOT_READY" => {
             "The browser session is not ready. Check its status before trying again."
         }
         "CONTROL_SUSPENDED" => {
-            "Browser control is paused. Wait, or ask the person to press Resume before trying again."
+            "Browser control is paused. Wait, or ask the user to press Resume before trying again."
         }
         "UNSUPPORTED_TARGET" => {
             "This browser target cannot be controlled. Choose a supported tab or page."
+        }
+        "stale_ref" => {
+            "The element reference is stale or belongs to another document. Read the page again before acting."
+        }
+        "stale_document" => {
+            "The page changed since it was read. Read the page again before acting."
+        }
+        "TARGET_CLOSED" => crate::browser_outcomes::TARGET_UNAVAILABLE,
+        "window_closed" => crate::browser_outcomes::SESSION_UNAVAILABLE,
+        "chrome_permission_required" => {
+            "The browser extension lacks permission for this target or action. Ask the user to grant the required extension permission, then try again."
         }
         _ => return None,
     };
@@ -140,6 +155,10 @@ mod tests {
             "SESSION_NOT_READY",
             "CONTROL_SUSPENDED",
             "UNSUPPORTED_TARGET",
+            "stale_ref",
+            "stale_document",
+            "TARGET_CLOSED",
+            "chrome_permission_required",
         ] {
             let marked = for_model(Answer::Helper(json!({"structuredContent": {
                 "status":"failed", "error":{"code":code,"message":injected}
@@ -167,6 +186,10 @@ mod tests {
             "SESSION_NOT_READY",
             "CONTROL_SUSPENDED",
             "UNSUPPORTED_TARGET",
+            "stale_ref",
+            "stale_document",
+            "TARGET_CLOSED",
+            "chrome_permission_required",
         ] {
             let mut result = json!({"structuredContent":{"status":"failed",
                 "error":{"code":code,"message":"A fixed helper diagnosis.","details":{"text":"PAGE WORDS"}},

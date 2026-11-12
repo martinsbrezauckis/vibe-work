@@ -62,7 +62,7 @@ pub struct Voice {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SpeechError {
     /// HTTP 401.
-    #[error("Mistral did not accept the API key (401). Check it in Settings.")]
+    #[error("{}", crate::status_text::KEY_REJECTED)]
     Unauthorized,
     /// HTTP 403: plan, permission or Mistral's content moderation (the TTS docs answer 403 for refused text).
     #[error(
@@ -79,19 +79,19 @@ pub enum SpeechError {
     #[error("Mistral says the audio is too large (413).")]
     TooLarge,
     /// HTTP 429.
-    #[error("Mistral is rate-limiting this key right now (429). Try again in a minute.")]
+    #[error("{}", crate::status_text::RATE_LIMITED)]
     RateLimited,
     /// HTTP 5xx.
-    #[error("Mistral's speech service had a problem ({0}). Try again later.")]
+    #[error("{}", crate::status_text::service_problem(*.0, "Mistral's speech service"))]
     Server(u16),
     /// Any other status (incl. a redirect, which is never followed).
-    #[error("Mistral answered with an unexpected status ({0}).")]
+    #[error("{}", crate::status_text::unexpected(*.0))]
     Unexpected(u16),
     /// No answer, or an answer that could not be read.
     #[error("Could not reach Mistral: {0}.")]
     Network(String),
     /// The key cannot be put in a header.
-    #[error("The stored key contains characters a key cannot have.")]
+    #[error("{}", crate::status_text::MALFORMED_STORED_KEY)]
     MalformedKey,
 }
 

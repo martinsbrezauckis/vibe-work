@@ -1,4 +1,5 @@
 /** Protects ask cards from window-activation clicks. Uses capture listeners; installed by shell wiring and removed on unmount. */
+import type { DesktopClient } from "../../protocol/client/types";
 
 // A click that activates the window arrives within moments of the window's focus; a press later than this after
 // the window came back (a native dialog closed, a switch with the keyboard) is an ordinary click.
@@ -37,16 +38,22 @@ export function isAccessibilityPress(p: {
   );
 }
 
-export function guardActivationClick(): () => void {
+export function guardActivationClick(subscribeFocus?: DesktopClient["subscribeFocus"]): () => void {
   let activating = false;
   let focusedAt: number | null = null;
   let blocked = false;
+  let native = false;
+  let live = true;
+  let stopFocus: (() => void) | undefined;
   const blur = () => {
+    // A native browser child can take first responder without deactivating the desktop window.
+    if (native) return;
     activating = true;
     focusedAt = null;
   };
-  const focus = (event: Event) => {
-    focusedAt = event.timeStamp;
+  const focus = () => {
+    if (native) return;
+    focusedAt = performance.now();
   };
   const cancel = (event: Event) => {
     event.preventDefault();
@@ -61,7 +68,7 @@ export function guardActivationClick(): () => void {
     blocked = isActivationPress({
       activating,
       focusedAt,
-      now: event.timeStamp,
+      now: performance.now(),
       onApproval: event.target instanceof Element && event.target.closest(".approval") !== null,
     });
     activating = false;
@@ -90,7 +97,29 @@ export function guardActivationClick(): () => void {
   window.addEventListener("contextmenu", finish, true);
   window.addEventListener("keydown", key, true);
   window.addEventListener("pointercancel", cancelled, true);
+  if (subscribeFocus !== undefined) {
+    void subscribeFocus((focused) => {
+      if (!live) return;
+      // The first native sample supersedes DOM blur events received while the channel was opening.
+      if (!native) activating = !focused;
+      native = true;
+      if (focused) focusedAt = performance.now();
+      else {
+        activating = true;
+        focusedAt = null;
+      }
+    })
+      .then((off) => {
+        if (live) stopFocus = off;
+        else off();
+      })
+      .catch(() => {
+        native = false;
+      });
+  }
   return () => {
+    live = false;
+    stopFocus?.();
     window.removeEventListener("blur", blur);
     window.removeEventListener("focus", focus);
     window.removeEventListener("pointerdown", down, true);

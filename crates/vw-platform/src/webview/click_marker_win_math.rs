@@ -1,5 +1,7 @@
 //! Physical-pixel placement and diagnostic text for the Windows marker. No native calls.
 //! Used by the popup renderer and its window-free regression tests; preserves the child renderer's rounding.
+//! Depends on: physical-pixel coordinates.
+//! Called by: the Windows click-marker renderer and its unit tests.
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Position {

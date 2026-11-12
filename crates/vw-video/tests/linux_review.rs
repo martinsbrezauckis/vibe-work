@@ -7,7 +7,7 @@ use std::path::Path;
 async fn review(path: &Path, selection: Value) -> Result<vw_video::protocol::Reply, String> {
     let path = path.canonicalize().map_err(|error| error.to_string())?;
     let source = std::fs::File::open(&path).map_err(|error| error.to_string())?;
-    let input = vw_video::input::Input::copy(source, &path)?;
+    let input = vw_video::input::Input::copy(source, &path).map_err(|e| e.to_string())?;
     let helper = std::env::var_os("VW_VIDEO_HELPER").map_or_else(
         || env!("CARGO_BIN_EXE_vw-video-helper").into(),
         std::path::PathBuf::from,
@@ -18,7 +18,9 @@ async fn review(path: &Path, selection: Value) -> Result<vw_video::protocol::Rep
             "output":"contact_sheet","max_edge":960}))
         .map_err(|error| error.to_string())?,
     };
-    vw_video::sandbox::extract(&helper, input, job).await
+    vw_video::sandbox::extract(&helper, input, job)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tokio::test]

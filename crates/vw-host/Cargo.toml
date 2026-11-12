@@ -12,44 +12,44 @@ publish = false
 workspace = true
 
 [dependencies]
-vw-vocabulary = { path = "../vw-vocabulary" }
-vw-mistral = { path = "../vw-mistral" }
-vw-core-api = { path = "../vw-core-api" }
+vw-vocabulary = { workspace = true }
+vw-mistral = { workspace = true }
+vw-core-api = { workspace = true }
 # The guard names and matchers of the hooks.toml block.
-vw-agent-tools = { path = "../vw-agent-tools" }
-vw-debug-api = { path = "../vw-debug-api" }
-vw-gate = { path = "../vw-gate" }
-vw-platform = { path = "../vw-platform" }
-vw-supervisor = { path = "../vw-supervisor" }
+vw-agent-tools = { workspace = true }
+vw-debug-api = { workspace = true }
+vw-gate = { workspace = true }
+vw-platform = { workspace = true }
+vw-supervisor = { workspace = true }
 # Vibe is installed at setup (the installer the user build hands to the core).
-vw-vibe-install = { path = "../vw-vibe-install" }
-vw-keys = { path = "../vw-keys" }
+vw-vibe-install = { workspace = true }
+vw-keys = { workspace = true }
 # The user-build launch (product.rs) builds the key service config: vault location and
 # device store, proxy upstreams.
-vw-vault = { path = "../vw-vault" }
-vw-keyproxy = { path = "../vw-keyproxy" }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }
-thiserror = "2"
-tokio = { version = "1.53", features = ["macros", "process", "rt", "sync", "time"] }
-tracing = "0.1"
+vw-vault = { workspace = true }
+vw-keyproxy = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt", "sync", "time"] }
+tracing = { workspace = true }
 # Random instance ids (`instance.rs`): getrandom 0.3 is already in the
 # lock file (vw-gate, vw-debug-api, ...).
-getrandom = "0.3"
+getrandom = { workspace = true }
 # URL parsing for the navigation guard; already in the tree through tauri (MIT/Apache-2.0).
-url = "2"
+url = { workspace = true }
 # Update packages kept on disk are verified again by us before they are offered or installed: the
 # plugin verifies only right after its own download. minisign-verify 0.2.5 (MIT, zero dependencies; the plugin uses
 # the same crate), base64 0.22 and sha2 0.10.9 (RustCrypto) and semver 1 are already in the tree.
-minisign-verify = "0.2.5"
-base64 = "0.22"
-sha2 = "0.10.9"
-semver = "1"
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+semver = { workspace = true }
 # Session titles: reads Vibe Work's own config.toml to decide whether to add a title model; toml 1 is
 # already in the tree (vw-core-api, tauri).
-toml = "1"
-toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+toml = { workspace = true }
+toml_edit = { workspace = true, features = ["parse", "display"] }
 
 [dev-dependencies]
 # Scratch folders for the hand-over checks (`hand_over_tests.rs`); already in the lockfile.
-tempfile = "3"
+tempfile = { workspace = true }

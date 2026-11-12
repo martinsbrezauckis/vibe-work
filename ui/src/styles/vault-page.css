@@ -7,12 +7,11 @@
   padding: var(--space-toolbar-block) 0;
 }
 .vault-toolbar > .ui-selector,
-.vault-toolbar > .tb-btn,
 .vault-toolbar > .ibtn {
   flex: none;
 }
 .vault-toolbar > .tb-btn {
-  min-height: var(--control-height-search);
+  flex: none;
 }
 .vault-toolbar > .set-search {
   flex: 1 1 10ch;
@@ -153,33 +152,4 @@
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-}
-.vault-unlock-choice input[type="radio"] {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  flex: 0 0 14px;
-  border: 1px solid var(--control-line);
-  border-radius: var(--radius-round);
-  background: var(--bg);
-  display: inline-grid;
-  place-content: center;
-}
-.vault-unlock-choice input:checked {
-  border-color: var(--orange);
-}
-.vault-unlock-choice input:checked::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-  background: var(--orange);
-}
-.vault-unlock-choice:disabled {
-  opacity: 0.5;
-}
-
-.vault-unlock-choice label:has(input[disabled]) {
-  opacity: 0.5;
 }

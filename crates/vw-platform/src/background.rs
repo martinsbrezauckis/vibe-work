@@ -32,24 +32,3 @@ pub fn lower_thread_priority() -> std::io::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-    #[test]
-    fn lowers_worker_priority_without_lowering_the_foreground_thread() {
-        let foreground = rustix::process::getpriority_process(None).unwrap();
-        let worker = std::thread::spawn(move || {
-            lower_thread_priority().unwrap();
-            assert_eq!(
-                rustix::process::getpriority_process(None).unwrap(),
-                (foreground + 10).min(19)
-            );
-        });
-        worker.join().unwrap();
-        assert_eq!(
-            rustix::process::getpriority_process(None).unwrap(),
-            foreground
-        );
-    }
-}

@@ -90,3 +90,7 @@ fn remove_deletes_the_empty_extension_key_that_connect_created() {
     assert_eq!(removed, Ok(true));
     assert!(!left, "Remove left the empty key it created: {key}");
 }
+
+#[cfg(windows)]
+#[path = "registry_removal_tests.rs"]
+mod removal;

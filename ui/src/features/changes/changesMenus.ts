@@ -130,7 +130,7 @@ export function hunkMenu(
               label: `Change · ${file.path} ${range}`,
               source: "git",
               text:
-                `A change in ${file.path} (${range}) among this session's changes, not committed yet:\n` +
+                `A change in ${file.path} (${range}) among this chat's changes, not committed yet:\n` +
                 `\`\`\`diff\n${diff}\n\`\`\`` +
                 (hunk.lines.length > 400 ? "\n(cut: read the file for the rest)" : ""),
             });

@@ -70,9 +70,12 @@ impl Records {
             git_dir,
         })
         .map_err(|e| WorktreeError::io("encode rename", &path, std::io::Error::other(e)))?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, bytes).map_err(|e| WorktreeError::io("write rename", &tmp, e))?;
-        std::fs::rename(&tmp, &path).map_err(|e| WorktreeError::io("replace rename", &path, e))
+        vw_platform::atomic_file::replace_file(
+            &path,
+            &bytes,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|e| WorktreeError::io("replace rename", &path, e))
     }
 
     pub(super) fn follow_rename(&self, mut record: Record) -> Result<Record, WorktreeError> {

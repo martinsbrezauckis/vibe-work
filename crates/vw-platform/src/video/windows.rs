@@ -2,6 +2,7 @@
 //! Normalizes the initial presentation offset, clips padded RGB rows and never uses decode timestamps.
 use super::{Frame, Metadata, geometry};
 use std::path::Path;
+use vw_video_types::{Code, Error};
 #[allow(
     clippy::wildcard_imports,
     reason = "Media Foundation constants and interfaces form the native API surface"
@@ -36,6 +37,35 @@ struct Position {
 /// extra decoding to one second of video when a key frame sits between the position and the target.
 const FORWARD: i64 = 10_000_000;
 struct Com;
+impl Com {
+    fn start() -> Result<Self, Error> {
+        // SAFETY: startup and its matching shutdown stay on this worker thread; a failed startup unwinds COM.
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED)
+                .ok()
+                .map_err(|error| {
+                    Error::at(
+                        Code::MediaInitialization {
+                            media: vw_video_types::Media::MediaFoundation,
+                        },
+                        "COM initialization",
+                        error,
+                    )
+                })?;
+            if let Err(e) = MFStartup(MF_VERSION, MFSTARTUP_FULL) {
+                CoUninitialize();
+                return Err(Error::at(
+                    Code::MediaInitialization {
+                        media: vw_video_types::Media::MediaFoundation,
+                    },
+                    "Media Foundation startup",
+                    e,
+                ));
+            }
+            Ok(Self)
+        }
+    }
+}
 impl Drop for Com {
     fn drop(&mut self) {
         // SAFETY: matched to successful startup on this same helper thread.
@@ -49,28 +79,26 @@ impl Drop for Com {
     clippy::needless_pass_by_value,
     reason = "map_err consumes the native error"
 )]
-fn failure(e: windows::core::Error) -> String {
+fn failure(e: windows::core::Error) -> Error {
     super::native_values::media_foundation(e.code().0)
 }
 impl Decoder {
     /// Opens the authorized private source with only its video stream selected.
     /// # Errors
     /// Missing Media Foundation/codec, malformed source or excessive geometry.
-    pub fn open(path: &Path, _edge: u32) -> Result<Self, String> {
+    pub fn open(path: &Path, _edge: u32) -> Result<Self, Error> {
         super::container::check(path)?;
         // SAFETY: all COM calls use owned interfaces, initialized on this helper thread; strings are NUL terminated.
         unsafe {
-            CoInitializeEx(None, COINIT_MULTITHREADED)
-                .ok()
-                .map_err(failure)?;
-            if let Err(e) = MFStartup(MF_VERSION, MFSTARTUP_FULL) {
-                CoUninitialize();
-                return Err(failure(e));
-            }
-            let com = Com;
+            let com = Com::start()?;
             let mut attrs = None;
             MFCreateAttributes(&raw mut attrs, 2).map_err(failure)?;
-            let attrs = attrs.ok_or("backend_unavailable: Media Foundation attributes")?;
+            let attrs = attrs.ok_or(Error::new(
+                Code::MediaUnavailable {
+                    media: vw_video_types::Media::MediaFoundation,
+                },
+                "Media Foundation attributes",
+            ))?;
             attrs
                 .SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1)
                 .map_err(failure)?;
@@ -98,11 +126,11 @@ impl Decoder {
                 .unwrap_or((1u64 << 32) | 1);
             let rotation = native.GetUINT32(&MF_MT_VIDEO_ROTATION).unwrap_or(0);
             if ![0, 90, 180, 270].contains(&rotation) {
-                return Err("unsupported_codec: video rotation".into());
+                return Err(Error::new(Code::Rotation, "video rotation"));
             }
             let transfer = native.GetUINT32(&MF_MT_TRANSFER_FUNCTION).unwrap_or(0);
             if [15, 16, 18].contains(&transfer) {
-                return Err("unsupported_codec: HDR conversion unavailable".into());
+                return Err(Error::new(Code::Hdr, "HDR conversion unavailable"));
             }
             let subtype = native.GetGUID(&MF_MT_SUBTYPE).map_err(failure)?;
             let duration = reader
@@ -115,7 +143,7 @@ impl Decoder {
                 .map_err(failure)?
                 .checked_mul(100)
                 .filter(|n| *n > 0 && *n <= 7_200_000_000_000)
-                .ok_or("limit_exceeded: duration")?;
+                .ok_or(Error::new(Code::Duration, "duration"))?;
             let mt = MFCreateMediaType().map_err(failure)?;
             mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(failure)?;
@@ -139,32 +167,38 @@ impl Decoder {
                 position: None,
                 _com: com,
             };
-            d.offset = d.sample()?.ok_or("decode_failed: empty video")?.0;
+            d.offset = d
+                .sample()?
+                .ok_or(Error::new(Code::DecodeFailed, "empty video"))?
+                .0;
             Ok(d)
         }
     }
     /// Source metadata on the visible timeline.
     /// # Errors
     /// No error after a successful open.
-    pub fn metadata(&self) -> Result<Metadata, String> {
+    pub fn metadata(&self) -> Result<Metadata, Error> {
         Ok(self.meta.clone())
     }
     /// Reads the sample covering the requested normalized presentation time.
     /// # Errors
     /// EOF, missing sample or a failed native decoder.
-    pub fn frame(&mut self, ns: u64, edge: u32) -> Result<Frame, String> {
+    pub fn frame(&mut self, ns: u64, edge: u32) -> Result<Frame, Error> {
         if ns >= self.meta.duration_ns {
-            return Err("decode_failed: requested time is at or after EOF".into());
+            return Err(Error::new(
+                Code::FrameMissing,
+                "requested time is at or after EOF",
+            ));
         }
         let target = i64::try_from(ns / 100)
-            .map_err(|_| "limit_exceeded: timestamp")?
+            .map_err(|error| Error::at(Code::DecodeLimit, "timestamp", error))?
             .checked_add(self.offset)
-            .ok_or("limit_exceeded: timestamp")?;
+            .ok_or(Error::new(Code::DecodeLimit, "timestamp"))?;
         // Media Foundation refuses a seek past its duration (MF_E_INVALID_POSITION). With a presentation
         // offset (B-frame delay) the last frames lie beyond it, so seek no further than the duration and decode
         // forward: the seek lands on a key frame at or before `target` either way.
         let last = i64::try_from(self.meta.duration_ns / 100)
-            .map_err(|_| "limit_exceeded: timestamp")?
+            .map_err(|error| Error::at(Code::DecodeLimit, "timestamp", error))?
             .saturating_sub(1);
         let seek = target.min(last.max(0));
         let (pts, sample) = match self.position.take() {
@@ -197,9 +231,9 @@ impl Decoder {
         };
         let pixels = self.pixels(&sample)?;
         let pts_ns = u64::try_from(pts - self.offset)
-            .map_err(|_| "decode_failed: PTS before visible timeline")?
+            .map_err(|error| Error::at(Code::DecodeFailed, "PTS before visible timeline", error))?
             .checked_mul(100)
-            .ok_or("limit_exceeded: PTS")?;
+            .ok_or(Error::new(Code::DecodeLimit, "PTS"))?;
         geometry::display(
             &Frame {
                 pts_ns,
@@ -217,7 +251,7 @@ impl Decoder {
         &mut self,
         mut previous: Option<(i64, IMFSample)>,
         target: i64,
-    ) -> Result<(i64, IMFSample), String> {
+    ) -> Result<(i64, IMFSample), Error> {
         // `None` while the bound is not reached: neither EOF nor a later sample was seen, so keep no position.
         let mut ended = None;
         for _ in 0..100_000 {
@@ -231,7 +265,7 @@ impl Decoder {
             }
             previous = Some((pts, sample));
         }
-        let covering = previous.ok_or("decode_failed: no covering sample")?;
+        let covering = previous.ok_or(Error::new(Code::FrameMissing, "no covering sample"))?;
         if let Some(next) = ended {
             self.position = Some(Position {
                 covering: covering.clone(),
@@ -240,7 +274,7 @@ impl Decoder {
         }
         Ok(covering)
     }
-    fn sample(&self) -> Result<Option<(i64, IMFSample)>, String> {
+    fn sample(&self) -> Result<Option<(i64, IMFSample)>, Error> {
         for _ in 0..1024 {
             let (mut flags, mut pts, mut sample) = (0, 0, None);
             // SAFETY: output pointers are valid stack storage and the reader is initialized.
@@ -257,7 +291,7 @@ impl Decoder {
                     .map_err(failure)?;
             }
             if flags & MF_SOURCE_READERF_ERROR.0.cast_unsigned() != 0 {
-                return Err("decode_failed: native decoder failure".into());
+                return Err(Error::new(Code::DecodeFailed, "native decoder failure"));
             }
             if flags & MF_SOURCE_READERF_ENDOFSTREAM.0.cast_unsigned() != 0 {
                 return Ok(None);
@@ -266,26 +300,26 @@ impl Decoder {
                 return Ok(Some((pts, sample)));
             }
         }
-        Err("limit_exceeded: sample events".into())
+        Err(Error::new(Code::DecodeLimit, "sample events"))
     }
-    fn pixels(&self, sample: &IMFSample) -> Result<Vec<u8>, String> {
+    fn pixels(&self, sample: &IMFSample) -> Result<Vec<u8>, Error> {
         // SAFETY: all interfaces are owned; the borrowed native pointer is used only while its buffer is locked.
         unsafe {
             let mt = self.reader.GetCurrentMediaType(VIDEO).map_err(failure)?;
             // After the first decoded frame the reader can switch to a decoder format its video processor cannot
             // convert (10-bit VP9 becomes P010, with empty buffers). That video is unsupported, not a layout fault.
             if mt.GetGUID(&MF_MT_SUBTYPE).map_err(failure)? != MFVideoFormat_RGB32 {
-                return Err(
-                    "unsupported_codec: Media Foundation cannot convert this video's pixel format"
-                        .into(),
-                );
+                return Err(Error::new(
+                    Code::DisplayConversion,
+                    "Media Foundation cannot convert this video's pixel format",
+                ));
             }
             let packed = mt.GetUINT64(&MF_MT_FRAME_SIZE).map_err(failure)?;
             let w = (packed >> 32) as u32;
             let h = (packed & 0xffff_ffff) as u32;
             geometry::geometry(w, h)?;
             if w < self.meta.width || h < self.meta.height {
-                return Err("decode_failed: changed video geometry".into());
+                return Err(Error::new(Code::DecodeFailed, "changed video geometry"));
             }
             let stride = mt
                 .GetUINT32(&MF_MT_DEFAULT_STRIDE)
@@ -297,7 +331,7 @@ impl Decoder {
                 .map_err(failure)?;
             let result = (|| {
                 if ptr.is_null() {
-                    return Err("decode_failed: invalid RGB32 layout".into());
+                    return Err(Error::new(Code::DecodeFailed, "invalid RGB32 layout"));
                 }
                 let bytes = std::slice::from_raw_parts(ptr, len as usize);
                 super::native_values::rgb32(

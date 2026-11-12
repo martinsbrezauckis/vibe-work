@@ -60,7 +60,7 @@ export function CliSharingSettings() {
       <h3 id="cli-sharing-title">Vibe command line</h3>
       <div className="check" data-setting="cli-sharing">
         <span>
-          Keep Vibe Work sessions separate from the CLI
+          Keep Vibe Work chats separate from the CLI
           <span className="d">Applies after restart</span>
           {view !== null && !view.cliHomeFound && (
             <span className="d" data-testid="cli-sharing-nohome">
@@ -70,7 +70,7 @@ export function CliSharingSettings() {
         </span>
         <Switch
           data-testid="settings.cli-sharing-settings-switch"
-          aria-label="Keep Vibe Work sessions separate from the CLI"
+          aria-label="Keep Vibe Work chats separate from the CLI"
           aria-checked={view !== null && !view.share}
           disabled={view === null || saving}
           onClick={flip}

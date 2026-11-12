@@ -85,6 +85,21 @@ export function createSendActions(deps: {
     const e = entry(id);
     return runningTurnId(e?.state ?? null, e?.session);
   };
+  const queuedEntries = (sessionId: string, queueItemId: string): JsonValue[] | null => {
+    const state = entry(sessionId)?.state;
+    const queue = state?.["turnQueue"];
+    const items =
+      typeof queue === "object" && queue !== null && !Array.isArray(queue) ? queue["items"] : null;
+    const item = Array.isArray(items)
+      ? items.find(
+          (i) =>
+            typeof i === "object" && i !== null && !Array.isArray(i) && i["id"] === queueItemId,
+        )
+      : undefined;
+    const old =
+      typeof item === "object" && item !== null && !Array.isArray(item) ? item["entries"] : null;
+    return Array.isArray(old) ? old : null;
+  };
   /** True when the session's history holds a user entry with our anchor id (the send arrived). */
   const delivered = (id: string, anchor: string): boolean => {
     const history = entry(id)?.state?.["history"];
@@ -405,22 +420,9 @@ export function createSendActions(deps: {
         );
         return false;
       }
-      const state = entry(sessionId)?.state;
-      const queue = state?.["turnQueue"];
-      const items =
-        typeof queue === "object" && queue !== null && !Array.isArray(queue)
-          ? queue["items"]
-          : null;
-      const item = Array.isArray(items)
-        ? items.find(
-            (i) =>
-              typeof i === "object" && i !== null && !Array.isArray(i) && i["id"] === queueItemId,
-          )
-        : undefined;
-      const old =
-        typeof item === "object" && item !== null && !Array.isArray(item) ? item["entries"] : null;
+      const old = queuedEntries(sessionId, queueItemId);
       if (!Array.isArray(old)) {
-        composer.restoreQueueEdit(sessionId, text);
+        composer.restoreQueueEdit(sessionId, text, queueItemId);
         composer.note(
           sessionId,
           "This queued message is no longer waiting. Your edit is in the message box.",
@@ -442,7 +444,15 @@ export function createSendActions(deps: {
         composer.setEditing(null);
         return true;
       } catch (thrown) {
-        fail(sessionId, "queue", toCallError(thrown));
+        if (queuedEntries(sessionId, queueItemId) === null) {
+          composer.restoreQueueEdit(sessionId, text, queueItemId);
+          composer.note(
+            sessionId,
+            "This queued message is no longer waiting. Your edit is in the message box.",
+          );
+        } else {
+          fail(sessionId, "queue", toCallError(thrown));
+        }
         return false;
       }
     },

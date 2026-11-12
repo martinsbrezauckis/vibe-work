@@ -148,8 +148,11 @@ async fn unsupported_and_malformed_pairing_requests_do_not_prompt() {
         .chrome_control
         .owner
         .answering(|_, _| Value::Null);
-    for browser in ["safari", "firefox", "unknown", "Chrome"] {
+    for browser in ["safari", "unknown", "Chrome"] {
         notify(&core, ID, browser);
+    }
+    if !cfg!(feature = "your-firefox") {
+        notify(&core, ID, "firefox");
     }
     notify(&core, "invalid", "chrome");
     settle().await;
@@ -258,4 +261,128 @@ async fn edge_has_its_own_confirmation_and_disabling_chrome_cancels_only_chrome(
         )]
     );
     core.shared.chrome_control.owner.stop().await;
+}
+
+#[cfg(feature = "your-firefox")]
+#[tokio::test]
+async fn firefox_pairing_uses_the_same_person_only_confirmation() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "firefox-pairing-native",
+        |_, _| {},
+        Presenter(send),
+    )
+    .await;
+    let calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|_, _| json!({"approved":true}));
+    notify(&core, ID, "firefox");
+    let (request, answer) = prompt(&mut receive).await;
+    assert_eq!(request.method, "chrome/control/pair");
+    assert!(request.summary.starts_with("Connect Firefox to Vibe Work?"));
+    assert!(core.asks()[0].person_only);
+    answer.send(Confirmation::Approved).unwrap();
+    settle().await;
+    assert_eq!(
+        calls.lock().unwrap()[0],
+        (
+            "owner.pairing.approve".into(),
+            json!({"requestId":ID,"approved":true})
+        )
+    );
+    core.shared.chrome_control.owner.stop().await;
+}
+
+#[tokio::test]
+async fn an_explicitly_removed_profile_can_pair_again_only_after_a_new_native_approval() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "pairing-removed-profile",
+        |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+        },
+        Presenter(send),
+    )
+    .await;
+    core.shared.chrome_control.set_enabled(true).unwrap();
+    let profile = format!("chrome:{PROFILE}");
+    super::test_support::observe_status(
+        &core.shared,
+        &json!({"profiles":[{"profileId":profile,"connected":true}]}),
+    );
+    let calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|tool, _| match tool {
+            "owner.profileUnpair" => json!({"unpaired":true}),
+            "owner.pairing.approve" => json!({"approved":true}),
+            _ => json!({"applied":true}),
+        });
+    core.chrome_control(
+        crate::Origin::Ui,
+        super::ChromeControlRequest::RemoveProfile {
+            profile_id: profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    notify(&core, ID, "chrome");
+    let (_, answer) = prompt(&mut receive).await;
+    assert!(
+        !calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(tool, _)| tool == "owner.pairing.approve")
+    );
+    answer.send(Confirmation::Approved).unwrap();
+    settle().await;
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(tool, args)| tool == "owner.pairing.approve" && args["approved"] == true)
+    );
+    assert!(
+        super::profiles::view(&core.shared)
+            .iter()
+            .any(|row| row.profile_id == profile && row.enabled)
+    );
+    core.shutdown().await;
+}
+
+#[cfg(feature = "your-safari")]
+#[tokio::test]
+async fn safari_repair_approval_uses_the_same_person_only_card() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "safari-native-pairing",
+        |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+        },
+        Presenter(send),
+    )
+    .await;
+    let dir = core.shared.chrome_control.dir().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("safari-enabled.json"), b"true").unwrap();
+    let calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|_, _| json!({"approved":true}));
+    notify(&core, ID, "safari");
+    let (request, answer) = prompt(&mut receive).await;
+    assert_eq!(request.method, super::BROWSER_PAIRING_DIALOG_METHOD);
+    assert!(request.summary.contains("Safari needs your approval"));
+    assert!(core.asks().iter().all(|ask| ask.person_only));
+    assert!(calls.lock().unwrap().is_empty());
+    answer.send(Confirmation::Approved).unwrap();
+    settle().await;
+    assert!(calls.lock().unwrap().iter().any(|(method, params)| method == "owner.pairing.approve" && params["approved"] == true));
+    core.shutdown().await;
 }

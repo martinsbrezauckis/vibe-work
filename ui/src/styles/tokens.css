@@ -106,6 +106,7 @@
   --z-scrim: 40;
   --z-dialog: 50;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus);
+  --focus-ring-inset: inset 0 0 0 2px var(--focus);
   --space-control-gap: 8px;
   --space-card-gap: 16px;
   --space-card-inline: 16px;
@@ -124,6 +125,21 @@
   --t-ui: 200ms; /* tabs, segmented thumbs, switches, chevrons, the theme cross-fade */
   --t-panel: 240ms; /* the side panel, toasts, list rows moving */
   --t-arrive: 320ms; /* cards that arrive (approval, question) */
+  --t-hover-fast: 120ms;
+  --t-fade: 150ms;
+  --t-release: 160ms;
+  --t-layout: 220ms;
+  --t-toast: 250ms;
+  --t-follow-delay: 60ms;
+  --t-attention-delay: 260ms;
+  --t-feedback: 900ms;
+  --t-highlight: 1500ms;
+  --t-busy-slow: 1600ms;
+  --t-busy: 1400ms;
+  --t-busy-fast: 1200ms;
+  --ease-native: ease; /* existing short disclosures and switches */
+  --ease-native-out: ease-out; /* existing toast arrival */
+  --ease-pulse: ease-in-out; /* smooth working indicators */
   --ease-std: cubic-bezier(0.4, 0, 0.2, 1); /* colour changes: the curve Mistral's sites use */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* anything that arrives or follows the hand */
   --ease-in: cubic-bezier(0.5, 0, 0.75, 0); /* exits */
@@ -290,6 +306,30 @@ input[type="checkbox"]:checked::before {
   border-width: 0 0 2px 2px;
   transform: translateY(-1px) rotate(-45deg);
 }
+/* Native radio lists share their ring and checked dot across the app. */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: 0 0 14px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-round);
+  background: var(--bg);
+  display: inline-grid;
+  place-content: center;
+}
+input[type="radio"]:checked {
+  border-color: var(--orange);
+}
+input[type="radio"]:checked::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--orange);
+}
 /* Keyboard focus: a 2 px gap in the page colour, then the blue ring, following each element's own corners
    (the old outline forced a 6 px radius on everything). Only for keyboard focus. */
 :focus-visible {
@@ -321,4 +361,5 @@ input[type="checkbox"]:checked::before {
   --line-2: var(--control-line);
   --line-3: var(--control-line);
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 5px var(--focus);
+  --focus-ring-inset: inset 0 0 0 3px var(--focus);
 }

@@ -4,7 +4,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod support;
 use serde_json::json;
-use std::sync::atomic::Ordering;
 use support::{Rig, SESSION};
 use vw_browser::{Actor, ReadOptions};
 
@@ -16,8 +15,7 @@ impl vw_browser::Navigate for NoNavigation {
 }
 
 async fn prepared() -> Rig {
-    let rig = Rig::new().await;
-    rig.engine.isolate_scripts.store(true, Ordering::Relaxed);
+    let rig = Rig::new_in_world(true).await;
     let html = serde_json::to_string(include_str!("fixtures/pointer.html")).unwrap();
     rig.engine
         .eval(&format!(
@@ -36,7 +34,9 @@ async fn prepared() -> Rig {
 }
 
 async fn act(rig: &Rig, args: serde_json::Value) {
-    rig.engine.eval("document.body.dataset.events = '[]'").await;
+    rig.engine
+        .eval("document.body.dataset.events = document.body.dataset.pointerEvents = '[]'")
+        .await;
     let result = rig
         .browser
         .act(
@@ -58,13 +58,17 @@ async fn assert_event(rig: &Rig, event: &str, target: &str) {
         .engine
         .eval("JSON.parse(document.body.dataset.events)")
         .await;
+    let sequence = rig
+        .engine
+        .eval("JSON.parse(document.body.dataset.pointerEvents)")
+        .await;
     assert!(
         events
             .as_array()
             .unwrap()
             .iter()
             .any(|e| e["type"] == event && e["target"] == target && e["trusted"] == true),
-        "missing {event} on {target}: {events}"
+        "missing {event} on {target}: {events}; pointer sequence: {sequence}"
     );
     assert_eq!(
         rig.engine.eval("document.body.dataset.appMenus").await,
@@ -111,4 +115,113 @@ async fn coordinate_variants_accept_non_controls_with_pointer_handlers() {
         act(&rig, json!({"action":action,"x":50,"y":120})).await;
         assert_event(&rig, event, "cell").await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinate_middle_click_survives_ref_double_click_in_the_same_document() {
+    let rig = prepared().await;
+    let (model, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    for (action, event, by_ref) in [
+        ("page.middle_click", "auxclick", false),
+        ("page.double_click", "dblclick", false),
+        ("page.middle_click", "auxclick", false),
+        ("page.double_click", "dblclick", true),
+        ("page.middle_click", "auxclick", false),
+        ("page.middle_click", "auxclick", true),
+        ("page.middle_click", "auxclick", false),
+    ] {
+        let (name, node, y) = if event == "auxclick" {
+            ("Aux target", "aux", 170)
+        } else {
+            ("Cell A1", "cell", 120)
+        };
+        let target = model.refs.iter().find(|r| r.name == name).unwrap();
+        let args = if by_ref {
+            json!({"action":action,"ref":target.id})
+        } else {
+            json!({"action":action,"x":50,"y":y})
+        };
+        act(&rig, args).await;
+        assert_event(&rig, event, node).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinate_middle_click_survives_the_ref_then_coordinate_sequence() {
+    let rig = prepared().await;
+    let (model, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    for by_ref in [true, false] {
+        for (action, event, name, node, y) in [
+            (
+                "page.right_click",
+                "contextmenu",
+                "Menu button",
+                "target",
+                40,
+            ),
+            ("page.double_click", "dblclick", "Cell A1", "cell", 120),
+            ("page.middle_click", "auxclick", "Aux target", "aux", 170),
+        ] {
+            let target = model.refs.iter().find(|r| r.name == name).unwrap();
+            let args = if by_ref {
+                json!({"action":action,"ref":target.id})
+            } else {
+                json!({"action":action,"x":50,"y":y})
+            };
+            act(&rig, args).await;
+            assert_event(&rig, event, node).await;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinate_middle_click_after_ref_double_click_on_scrollable_page() {
+    let rig = prepared().await;
+    rig.engine
+        .eval("document.body.style.height = '2000px'")
+        .await;
+    let (model, _, _) = rig
+        .browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    let target = model.refs.iter().find(|r| r.name == "Cell A1").unwrap();
+    act(&rig, json!({"action":"page.double_click","ref":target.id})).await;
+    assert_event(&rig, "dblclick", "cell").await;
+    act(&rig, json!({"action":"page.middle_click","x":50,"y":170})).await;
+    assert_event(&rig, "auxclick", "aux").await;
+    rig.engine.eval("document.body.dataset.events = '[]'").await;
+    rig.engine.person_middle_click(50.0, 170.0).await;
+    assert_eq!(
+        rig.engine
+            .eval("JSON.parse(document.body.dataset.events)")
+            .await,
+        json!([]),
+        "the collected agent receipt must leave the user's autoscroll default alone"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn checked_middle_click_keeps_the_links_new_tab_default() {
+    let rig = prepared().await;
+    rig.engine.eval("document.body.style.height = '2000px'; document.querySelector('#aux').outerHTML = '<a id=aux href=https://example.test/middle onauxclick=record(event)>Aux target</a>'").await;
+    rig.browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    act(&rig, json!({"action":"page.middle_click","x":50,"y":170})).await;
+    assert_event(&rig, "auxclick", "aux").await;
+    assert_eq!(
+        rig.engine.page_count().await,
+        2,
+        "middle click must still open the link's new tab"
+    );
 }

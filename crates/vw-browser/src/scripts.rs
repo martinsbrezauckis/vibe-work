@@ -29,6 +29,8 @@ fn assemble(body: &str, request: &Value) -> String {
     let context = include_str!("js/choice_context.js");
     let prelude = format!("const REQ = {request};\n{COMMON}\n{labels}\n{context}");
     body.replace("__VW_COMMON__", &prelude)
+        .replace("__VW_SELECTORS__", include_str!("js/selectors.js"))
+        .replace("__VW_EXTRACT__", include_str!("js/extract.js"))
 }
 
 /// Adds isolated-frame state and a document guard to an existing browser script.
@@ -51,6 +53,39 @@ pub fn in_frame(script: &str, request: &Value) -> String {
 #[must_use]
 pub fn observe(page: &str, max_refs: usize, max_text: usize, text_offset: usize) -> String {
     observe_focused(page, max_refs, max_text, text_offset, None, None)
+}
+
+/// Finds structured matches before the ref cap, preserving DOM order within each frame.
+#[must_use]
+pub fn observe_selector(
+    page: &str,
+    max_refs: usize,
+    max_text: usize,
+    selector: &crate::Selector,
+) -> String {
+    assemble(
+        OBSERVE,
+        &json!({"page":page,"maxRefs":max_refs,"maxText":max_text,"textOffset":0,"selector":selector}),
+    )
+}
+
+/// Extracts rendered datasets through the ordinary document/frame reader.
+#[must_use]
+pub fn observe_extraction(page: &str, options: &crate::extraction::ExtractOptions) -> String {
+    assemble(
+        OBSERVE,
+        &json!({"page":page,"maxRefs":0,"maxText":0,"textOffset":0,"extract":options}),
+    )
+}
+
+/// Reads one retained DOM subtree, with the host-observed node identity and document nonce.
+#[must_use]
+pub(crate) fn observe_subtree(page: &str, limits: (usize, usize, usize), scope: &Value) -> String {
+    let (max_refs, max_text, offset) = limits;
+    assemble(
+        OBSERVE,
+        &json!({"page":page,"maxRefs":max_refs,"maxText":max_text,"textOffset":offset,"scope":scope}),
+    )
 }
 
 /// A text match marker in a minimal model for the native frame validator; contains no control refs.
@@ -96,12 +131,16 @@ pub fn observe_focused(
 /// The act script for one page action (`request` = the act request with `page` set).
 #[must_use]
 pub fn act(request: &Value) -> String {
+    if request["scrollMotion"] == true {
+        return assemble(include_str!("js/scroll_motion.js"), request);
+    }
     assemble(ACT, request)
         .replace("__VW_SENDING__", include_str!("js/sending.js"))
         .replace("__VW_NATIVE_CLICK__", NATIVE_CLICK)
         .replace("__VW_DRAG__", include_str!("js/drag.js"))
         .replace("__VW_WIDGET_DATES__", include_str!("js/widget_dates.js"))
         .replace("__VW_FORM_VALUES__", include_str!("js/form_values.js"))
+        .replace("__VW_CONTROL__", include_str!("js/control.js"))
 }
 
 /// Final boolean validation, evaluated in the OS engine's UI callback. Repeats authority, hit test and geometry;
@@ -224,13 +263,17 @@ pub fn point_validation(request: &Value) -> String {
     assemble(include_str!("js/point.js"), request)
         .replace("__VW_SENDING__", include_str!("js/sending.js"))
         .replace("__VW_POINT_RECEIPT__", include_str!("js/point_receipt.js"))
+        .replace(
+            "__VW_KEYBOARD_RECEIPT__",
+            include_str!("js/keyboard_receipt.js"),
+        )
 }
 
 /// Marks the isolated receipt immediately before native submission; a mark cannot be reused.
 #[must_use]
 pub fn point_dispatch(page: &str, token: &str) -> String {
     format!(
-        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token || state.result.dispatchedAt !== null) return null; state.result.dispatchedAt = performance.now(); return JSON.stringify({{ok:true, document:state.result.document, armed:state.token}}); }})()",
+        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token) return null; const ok = state.mark(); return JSON.stringify({{ok, reason:ok ? null : 'the page moved; read the page again', document:state.result.document, armed:state.token}}); }})()",
         json!({"page":page,"token":token})
     )
 }
@@ -239,7 +282,7 @@ pub fn point_dispatch(page: &str, token: &str) -> String {
 #[must_use]
 pub fn point_receipt(page: &str, token: &str, clear: bool) -> String {
     format!(
-        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token) return null; const result = JSON.stringify(state.result); if (req.clear) state.clear(); return result; }})()",
+        "(() => {{ const req = {}; const state = window[req.page + '_pointReceipt']; if (!state || state.token !== req.token) return null; const result = JSON.stringify(state.read ? state.read() : state.result); if (req.clear) state.clear(); return result; }})()",
         json!({"page":page,"token":token,"clear":clear})
     )
 }
@@ -249,4 +292,10 @@ pub fn point_receipt(page: &str, token: &str, clear: bool) -> String {
 #[must_use]
 pub fn agent_secret(request: &Value) -> String {
     assemble(include_str!("js/agent_secret.js"), request)
+}
+
+/// Read-only condition probe with the same frame and document guards as ordinary reads.
+#[must_use]
+pub(crate) fn wait_condition(request: &Value) -> String {
+    assemble(include_str!("js/wait_condition.js"), request)
 }

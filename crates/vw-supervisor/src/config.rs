@@ -42,8 +42,14 @@ pub struct SupervisorConfig {
     pub initialize: InitializeParams,
     /// Transport tuning (the key is added to its stderr redactions at each start).
     pub connection: ConnectionConfig,
-    /// Bound for the `initialize` answer.
+    /// Bound for the `initialize` answer of a restarted server (after a crash, the server's files are warm).
     pub handshake_timeout: Duration,
+    /// Bound for the `initialize` answer of the first server this supervisor starts ([`crate::Supervisor::start`],
+    /// [`crate::Supervisor::launch_installed`]). The first start after an install or a reboot reads every file of
+    /// the new environment cold, and antivirus software scans each one first: a fresh Windows 11 with Defender
+    /// real-time protection took 42.6 s where later starts took 0.2-2.2 s. The bound used is the larger of this
+    /// and `handshake_timeout` ([`SupervisorConfig::handshake_bound`]).
+    pub first_handshake_timeout: Duration,
     /// Restart policy.
     pub backoff: Backoff,
     /// After closing stdin, how long the server may take to exit before it is killed.
@@ -82,6 +88,7 @@ impl SupervisorConfig {
             initialize: default_initialize_params(),
             connection: ConnectionConfig::default(),
             handshake_timeout: Duration::from_secs(30),
+            first_handshake_timeout: Duration::from_secs(300),
             backoff: Backoff::default(),
             shutdown_grace: Duration::from_secs(5),
             watchdog_grace: Some(Duration::from_secs(5)),
@@ -90,6 +97,17 @@ impl SupervisorConfig {
             progress_interval: Duration::from_secs(1),
             handlers: Vec::new(),
             before_launch: None,
+        }
+    }
+
+    /// The `initialize` bound of a start: `first` is the first server of this supervisor (the app's start, or the
+    /// start right after an install); later starts are restarts. A first start never gets less than a restart.
+    #[must_use]
+    pub fn handshake_bound(&self, first: bool) -> Duration {
+        if first {
+            self.first_handshake_timeout.max(self.handshake_timeout)
+        } else {
+            self.handshake_timeout
         }
     }
 }
@@ -168,6 +186,14 @@ pub enum SupervisorError {
     /// An explicit environment variable was refused.
     #[error(transparent)]
     Env(#[from] EnvError),
+    /// The private, verified adapter file could not be prepared; no server is spawned.
+    #[error("preparing Vibe launch adapter {} failed: {source}", .path.display())]
+    AdapterFile {
+        /// The content-addressed adapter file.
+        path: PathBuf,
+        /// The privacy or integrity check that failed.
+        source: std::io::Error,
+    },
     /// The app-owned startup file for agent command shells could not be prepared.
     #[error("preparing agent shell startup {} failed: {source}", .path.display())]
     ShellStartup {
@@ -206,4 +232,22 @@ pub enum SupervisorError {
     /// A request on the current connection failed.
     #[error(transparent)]
     Rpc(#[from] RpcError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F1 (fresh Windows 11, Defender on): the first start after an install answered `initialize` after 42.6 s, and on
+    /// a fresh test VM after 100-120 s, so a first start waits up to 300 s while a restart keeps the 30 s bound;
+    /// raising the restart bound raises both.
+    #[test]
+    fn a_first_start_waits_longer_than_a_restart() {
+        let mut config = SupervisorConfig::new("/v".into(), "/h".into(), "/c".into());
+        assert_eq!(config.handshake_bound(true), Duration::from_secs(300));
+        assert_eq!(config.handshake_bound(false), Duration::from_secs(30));
+        config.handshake_timeout = Duration::from_secs(400);
+        assert_eq!(config.handshake_bound(true), Duration::from_secs(400));
+        assert_eq!(config.handshake_bound(false), Duration::from_secs(400));
+    }
 }

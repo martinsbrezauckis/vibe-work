@@ -17,16 +17,26 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tokio::task::JoinHandle;
 use vw_preview::{
-    EngineError, HistoryStep, OpenRequest, PreviewConfig, PreviewEngine, PreviewError,
-    PreviewService, PreviewView,
+    EngineError, OpenRequest, PreviewConfig, PreviewEngine, PreviewError, PreviewService,
+    PreviewView,
 };
 
-use crate::command::CommandResult;
-use crate::core::{Core, Shared};
+use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
-use crate::preview_ports::{busy_ports, busy_view, navigation_text, port_owner, session_ports};
-use crate::preview_view::{BrowserOverlayAction, PreviewRequest, PreviewResult};
+use crate::preview_ports::{navigation_text, port_owner, session_ports};
+#[path = "preview_commands.rs"]
+mod commands;
+#[path = "preview_maintenance.rs"]
+mod maintenance;
+
+#[cfg(test)]
+#[path = "previews_readonly_tests.rs"]
+mod readonly_tests;
+
+#[cfg(test)]
+#[path = "preview_maintenance_tests.rs"]
+mod maintenance_tests;
 
 /// The preview engine and settings the app hands to the core. `None` in `CoreConfig::preview`: no previews (the
 /// `preview` command and the agent tools answer that the preview is not available in this build).
@@ -64,6 +74,8 @@ pub(crate) struct PreviewHub {
     task: Mutex<Option<JoinHandle<()>>>,
     /// Re-checks the previews' ports.
     ports_task: Mutex<Option<JoinHandle<()>>>,
+    #[cfg(test)]
+    maintenance_counts: maintenance_tests::Counts,
 }
 
 impl Drop for PreviewHub {
@@ -96,6 +108,8 @@ pub(crate) fn open(setup: Option<PreviewSetup>) -> Option<Arc<PreviewHub>> {
         pending_wipes,
         task: Mutex::new(None),
         ports_task: Mutex::new(None),
+        #[cfg(test)]
+        maintenance_counts: maintenance_tests::Counts::default(),
     }))
 }
 
@@ -219,66 +233,9 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
     *hub.browser_task
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = Some(task);
-    // A stopped server or an ended lease leaves its session's preview ports within
-    // `PORTS_RECHECK`, so the URL rules and the request checks drop it promptly (an open adds ports; this only
-    // withdraws), and the URL rules follow every session's servers. One process scan per round, only while
-    // some preview is mounted or has ports.
-    let weak: Weak<Shared> = Arc::downgrade(shared);
-    let task = tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(PORTS_RECHECK).await;
-            let Some(shared) = weak.upgrade() else {
-                return;
-            };
-            let Some(hub) = shared.preview.clone() else {
-                return;
-            };
-            if let Err(error) = hub.service.reap_idle_browsers().await {
-                tracing::debug!(%error, "idle browser release failed");
-            }
-            let sessions = hub.service.sessions_with_ports();
-            if sessions.is_empty() && hub.service.mount_labels().is_empty() {
-                continue;
-            }
-            let mut owners: Vec<String> = sessions
-                .iter()
-                .filter_map(|page| hub.service.owner_session_id(page))
-                .collect();
-            owners.sort_unstable();
-            owners.dedup();
-            let scan = {
-                let (owned, list) = (shared.clone(), owners);
-                tokio::task::spawn_blocking(move || crate::preview_ports::live_ports(&owned, &list))
-                    .await
-            };
-            match scan {
-                Ok(Ok(live)) => {
-                    for page in &sessions {
-                        if let Some(owner) = hub.service.owner_session_id(page) {
-                            if let Some(port) = hub.service.local_server_port(page) {
-                                let listening = live
-                                    .listeners
-                                    .get(&owner)
-                                    .is_some_and(|ports| ports.contains(&port));
-                                let _ = hub
-                                    .service
-                                    .set_local_server_listening(page, port, listening);
-                            }
-                            let current = live.sessions.get(&owner).cloned().unwrap_or_default();
-                            let _ = hub.service.retain_allowed_ports(page, &current).await;
-                        }
-                    }
-                    hub.service.set_server_ports(live.servers).await;
-                }
-                // A failed scan withdraws nothing (the request-time checks still ask the owners themselves).
-                Ok(Err(error)) => tracing::debug!(%error, "preview port re-check skipped"),
-                Err(error) => tracing::debug!(%error, "preview port re-check failed"),
-            }
-        }
-    });
     *hub.ports_task
         .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
+        .unwrap_or_else(PoisonError::into_inner) = Some(maintenance::start(shared));
 }
 
 /// How often the previews' ports are re-checked.
@@ -400,6 +357,7 @@ pub(crate) async fn open_for_session(
         return Err(CoreError::not_loaded(&owner));
     }
     let text = navigation_text(url, port, path.as_deref())?;
+    let local = crate::browser_local::prepare(shared, &owner, session_id, &text).await?;
     let (shared_for_scan, id) = (shared.clone(), owner.clone());
     let ports = blocking(move || session_ports(&shared_for_scan, &id))
         .await?
@@ -419,15 +377,18 @@ pub(crate) async fn open_for_session(
         };
         CoreError::new(ErrorCode::Denied, message)
     };
-    let (url, destination) = hub
-        .service
-        .policy()
-        .check(
-            &text,
-            |p| port_owner(shared, &ports, &owner, p, strict),
-            allow_lan,
-        )
-        .map_err(|e| denied(e.to_string()))?;
+    let (url, destination) = if let Some(url) = local {
+        (url, vw_preview::Destination::Public)
+    } else {
+        hub.service
+            .policy()
+            .check(
+                &text,
+                |p| port_owner(shared, &ports, &owner, p, strict),
+                allow_lan,
+            )
+            .map_err(|e| denied(e.to_string()))?
+    };
     if session_id == owner
         && let vw_preview::Destination::Loopback { port } = destination
     {
@@ -466,7 +427,6 @@ pub(crate) async fn open_for_session(
         .map(|cwd| PathBuf::from(cwd).join("downloads"));
     // Other sessions' servers join the URL rules now, from this open's scan, not at the next re-check: a page's
     // first requests to them go out as it loads (macOS compiles the rules before that) and are not repeated.
-    hub.service.set_server_ports(ports.servers.clone()).await;
     let opened = hub
         .service
         .open(OpenRequest {
@@ -481,285 +441,3 @@ pub(crate) async fn open_for_session(
         .map_err(|e| core_error(&e))?;
     Ok(opened)
 }
-
-impl Core {
-    /// Executes one preview request (the same for every origin).
-    #[allow(clippy::too_many_lines)]
-    pub(crate) async fn preview(
-        &self,
-        request: PreviewRequest,
-    ) -> Result<CommandResult, CoreError> {
-        let shared = &self.shared;
-        let hub = hub(shared)?;
-        let service = &hub.service;
-        let err = |e: PreviewError| core_error(&e);
-        let result = match request {
-            PreviewRequest::List { session_id } => self.preview_list(&session_id).await?,
-            PreviewRequest::Open {
-                session_id,
-                url,
-                port,
-                path,
-            } => PreviewResult::Preview {
-                preview: Some(
-                    open_for_session(shared, &session_id, (url, port, path), false).await?,
-                ),
-            },
-            PreviewRequest::Back { session_id } => {
-                service
-                    .history(&session_id, HistoryStep::Back)
-                    .await
-                    .map_err(err)?;
-                PreviewResult::Preview {
-                    preview: service.view(&session_id),
-                }
-            }
-            PreviewRequest::Forward { session_id } => {
-                service
-                    .history(&session_id, HistoryStep::Forward)
-                    .await
-                    .map_err(err)?;
-                PreviewResult::Preview {
-                    preview: service.view(&session_id),
-                }
-            }
-            PreviewRequest::Reload { session_id } => {
-                if let Some(port) = service.local_server_port(&session_id) {
-                    let (shared_for_scan, owner) = (shared.clone(), session_id.clone());
-                    let ports = blocking(move || session_ports(&shared_for_scan, &owner))
-                        .await?
-                        .map_err(|e| {
-                            CoreError::new(ErrorCode::Internal, format!("process monitor: {e}"))
-                        })?;
-                    let listening = ports.targets.iter().any(|t| t.port == port && t.listening);
-                    let was_stopped = service
-                        .view(&session_id)
-                        .is_some_and(|v| v.state == vw_preview::PreviewState::Stopped);
-                    let _ = service.set_local_server_listening(&session_id, port, listening);
-                    if listening && was_stopped {
-                        let url = service.view(&session_id).and_then(|v| v.url);
-                        if let Some(url) = url {
-                            open_for_session(shared, &session_id, (Some(url), None, None), false)
-                                .await?;
-                        }
-                    } else if listening {
-                        service
-                            .history(&session_id, HistoryStep::Reload)
-                            .await
-                            .map_err(err)?;
-                    }
-                } else {
-                    service
-                        .history(&session_id, HistoryStep::Reload)
-                        .await
-                        .map_err(err)?;
-                }
-                PreviewResult::Preview {
-                    preview: service.view(&session_id),
-                }
-            }
-            PreviewRequest::SetWidth {
-                session_id,
-                tab_id,
-                width,
-            } => {
-                if !crate::new_chat::known_owner(shared, &session_id) {
-                    return Err(CoreError::not_loaded(&session_id));
-                }
-                let page = crate::browser_tabs::user_page(
-                    service,
-                    &session_id,
-                    Some(tab_id.as_deref().unwrap_or(&session_id)),
-                )?;
-                service.set_width(&page, width).await.map_err(err)?;
-                PreviewResult::Preview {
-                    preview: service.view(&page),
-                }
-            }
-            PreviewRequest::Layout {
-                session_id,
-                tab_id,
-                rect,
-            } => {
-                if let Some(owner) = session_id.as_deref()
-                    && !crate::new_chat::known_owner(shared, owner)
-                {
-                    return Err(CoreError::not_loaded(owner));
-                }
-                let page = match (session_id.as_deref(), tab_id) {
-                    (None, None) => None,
-                    (Some(owner), None) => Some(owner.to_owned()),
-                    (Some(owner), Some(key)) => {
-                        if service.owner_session_id(&key).as_deref() != Some(owner) {
-                            return Err(CoreError::new(
-                                ErrorCode::Denied,
-                                "tab does not belong to this session",
-                            ));
-                        }
-                        Some(key)
-                    }
-                    (None, Some(_)) => {
-                        return Err(CoreError::new(
-                            ErrorCode::InvalidParams,
-                            "tabId needs sessionId",
-                        ));
-                    }
-                };
-                service.report_tab_layout(page, rect).await.map_err(err)?;
-                PreviewResult::Done {}
-            }
-            PreviewRequest::Visibility { report } => {
-                service.report_view(report, |id| crate::new_chat::is_draft(shared, id));
-                PreviewResult::Done {}
-            }
-            PreviewRequest::NativeWindowVisibility { visible } => {
-                service.report_native_window_visibility(visible);
-                PreviewResult::Done {}
-            }
-            PreviewRequest::BrowserOverlay {
-                session_id,
-                tab_id,
-                action,
-            } => {
-                if !crate::new_chat::known_owner(shared, &session_id) {
-                    return Err(CoreError::not_loaded(&session_id));
-                }
-                let page = match tab_id {
-                    Some(key) => {
-                        if service.owner_session_id(&key).as_deref() != Some(session_id.as_str()) {
-                            return Err(CoreError::new(
-                                ErrorCode::Denied,
-                                "tab does not belong to this session",
-                            ));
-                        }
-                        key
-                    }
-                    None => session_id.clone(),
-                };
-                tracing::debug!(session = %session_id, page = %page, ?action, "browser overlay request");
-                match action {
-                    BrowserOverlayAction::Prepare => {
-                        match service.prepare_browser_overlay(&session_id, &page).await {
-                            Ok(prepared) => PreviewResult::Overlay {
-                                snapshot: prepared.snapshot,
-                                bounds: Some(prepared.bounds),
-                            },
-                            // A tab switch overtook the menu: nothing to park, the window closes its menus.
-                            Err(PreviewError::NotInView) => PreviewResult::Overlay {
-                                snapshot: None,
-                                bounds: None,
-                            },
-                            Err(error) => return Err(err(error)),
-                        }
-                    }
-                    BrowserOverlayAction::Show => {
-                        service
-                            .show_browser_overlay(&session_id, &page)
-                            .await
-                            .map_err(err)?;
-                        PreviewResult::Overlay {
-                            snapshot: None,
-                            bounds: None,
-                        }
-                    }
-                    BrowserOverlayAction::Close => {
-                        service
-                            .close_browser_overlay(&session_id, &page)
-                            .await
-                            .map_err(err)?;
-                        PreviewResult::Overlay {
-                            snapshot: None,
-                            bounds: None,
-                        }
-                    }
-                }
-            }
-            PreviewRequest::Close { session_id } => {
-                service.close(&session_id).await.map_err(err)?;
-                PreviewResult::Preview {
-                    preview: service.view(&session_id),
-                }
-            }
-            PreviewRequest::Screenshot { session_id } => {
-                let shot = service.screenshot(&session_id).await.map_err(err)?;
-                PreviewResult::Screenshot {
-                    png_base64: shot.base64(),
-                    width: shot.width,
-                    height: shot.height,
-                }
-            }
-            PreviewRequest::Console { session_id, limit } => {
-                let limit = limit.and_then(|l| usize::try_from(l).ok());
-                let (entries, dropped) = service.console(&session_id, limit).await.map_err(err)?;
-                PreviewResult::Console { entries, dropped }
-            }
-            PreviewRequest::Explain { session_id, port } => PreviewResult::Explanation {
-                explanation: self.explain_for_preview(&session_id, port).await?,
-            },
-            PreviewRequest::StopOwner { session_id, port } => {
-                self.stop_busy_owner(&session_id, port).await?;
-                PreviewResult::Done {}
-            }
-            PreviewRequest::Pick {
-                session_id,
-                target,
-                tab_id,
-            } => PreviewResult::Picked {
-                picked: crate::preview_pick::run(service, &session_id, target, tab_id).await?,
-            },
-            PreviewRequest::CancelPick { session_id } => {
-                crate::preview_pick::cancel(service, &session_id).await;
-                PreviewResult::Done {}
-            }
-            PreviewRequest::CopyText {
-                session_id,
-                tab_id,
-                target,
-            } => PreviewResult::Copied {
-                text: crate::preview_pick::copy_text(service, &session_id, &tab_id, &target)
-                    .await?,
-            },
-        };
-        Ok(CommandResult::Preview { result })
-    }
-
-    async fn preview_list(&self, session_id: &str) -> Result<PreviewResult, CoreError> {
-        if !crate::new_chat::known_owner(&self.shared, session_id) {
-            return Err(CoreError::not_loaded(session_id));
-        }
-        let hub = hub(&self.shared)?;
-        let (shared, id) = (self.shared.clone(), session_id.to_owned());
-        let (ports, busy) = blocking(move || {
-            session_ports(&shared, &id).map(|ports| (ports, busy_ports(&shared, &id)))
-        })
-        .await?
-        .map_err(|e| CoreError::new(ErrorCode::Internal, format!("process monitor: {e}")))?;
-        if let Some(port) = hub.service.local_server_port(session_id) {
-            let listening = ports.targets.iter().any(|t| t.port == port && t.listening);
-            let _ = hub
-                .service
-                .set_local_server_listening(session_id, port, listening);
-        }
-        // A list from the window keeps what the user may navigate to; it never widens an agent-opened preview's
-        // set beyond proven ports, because the set is replaced only by an open.
-        Ok(PreviewResult::Previews {
-            preview: hub.service.view(session_id),
-            targets: ports.targets,
-            leased_ports: ports.leased,
-            busy,
-        })
-    }
-
-    async fn explain_for_preview(
-        &self,
-        session_id: &str,
-        port: u16,
-    ) -> Result<crate::preview_view::BusyPortView, CoreError> {
-        let explanation = self.explain_port(Some(session_id.to_owned()), port).await?;
-        Ok(busy_view(&self.shared, session_id, &explanation, None))
-    }
-}
-
-#[cfg(test)]
-#[path = "previews_readonly_tests.rs"]
-mod readonly_tests;

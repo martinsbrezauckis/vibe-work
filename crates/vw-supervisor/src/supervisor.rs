@@ -97,7 +97,7 @@ impl Supervisor {
             .ok_or_else(|| SupervisorError::ProgramNotUsable(config.program.clone()))?;
         let program = config.program.clone();
         let inner = Inner::new(config, program, secrets, SupervisorState::Starting);
-        let running = inner.launch().await?;
+        let running = inner.launch(true).await?;
         inner.publish_ready(&running, 1, Vec::new());
         let (shutdown, shutdown_rx) = watch::channel(false);
         let monitor = tokio::spawn(monitor(inner.clone(), running, shutdown_rx));
@@ -165,7 +165,7 @@ impl Supervisor {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = canonical;
         self.inner.state.send_replace(SupervisorState::Starting);
-        match self.inner.launch().await {
+        match self.inner.launch(true).await {
             Ok(running) => {
                 self.inner.publish_ready(&running, 1, Vec::new());
                 let shutdown_rx = self.shutdown.subscribe();
@@ -193,6 +193,12 @@ impl Supervisor {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// The private adapter path this supervisor supplies to Python, for exact process ownership checks.
+    #[must_use]
+    pub fn adapter_path(&self) -> PathBuf {
+        crate::adapter_path(&self.inner.config.vibe_home)
     }
 
     /// The executables named in the configured launcher argv (canonical), when the server runs under one (a sandbox,
@@ -468,7 +474,8 @@ impl Inner {
         })
     }
 
-    async fn launch(&self) -> Result<Running, SupervisorError> {
+    /// `first`: the first server of this supervisor, which gets the longer first-start handshake bound.
+    async fn launch(&self, first: bool) -> Result<Running, SupervisorError> {
         let program = self
             .program
             .lock()
@@ -477,6 +484,7 @@ impl Inner {
         launch::launch(
             &self.config,
             &program,
+            self.config.handshake_bound(first),
             self.secrets.as_ref(),
             &self.pid,
             &self.live,
@@ -589,7 +597,7 @@ async fn monitor(inner: Arc<Inner>, mut running: Running, mut shutdown: watch::R
                     return;
                 }
             }
-            match inner.launch().await {
+            match inner.launch(false).await {
                 Ok(next) => {
                     running = next;
                     generation += 1;

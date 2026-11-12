@@ -7,12 +7,12 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
-/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelOf, labelledToggle, nativeClickPoint, observedTarget, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelledToggle, nativeClickPoint, observedTarget, privateField, privateLabel, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
   __VW_NATIVE_CLICK__;
-  /* global postsForm -- Inserted by the script assembler. */
+  /* global postsForm, implicitSubmission, submitWithOutcome -- Inserted by the script assembler. */
   // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
   __VW_SENDING__;
   const result = (status, extra) =>
@@ -52,6 +52,10 @@
     drag: ["visible", "stable", "enabled", "receivesEvents"],
     check: ["visible", "stable", "enabled", "receivesEvents"],
     type: ["visible", "stable", "enabled", "editable"],
+    highlight: ["visible", "stable"],
+    insert_text: ["visible", "stable", "enabled", "editable"],
+    focus: ["visible", "enabled"],
+    blur: [],
     select: ["visible", "stable", "enabled"],
     hover: ["visible", "stable", "receivesEvents"],
     press: ["visible", "enabled"],
@@ -75,8 +79,7 @@
   };
   // Files staged by `uploadChunk` (base64 parts per file), set on the field by `upload`.
   const uploadFiles = (field) => {
-    const staged = ENV.uploads?.get(REQ.token);
-    if (!staged) return null;
+    const staged = ENV.uploads?.get(REQ.token) || [];
     const View = viewOf(field);
     const transfer = new View.DataTransfer();
     for (const [i, file] of REQ.files.entries()) {
@@ -84,7 +87,7 @@
       if (parts.length !== file.parts) return null;
       transfer.items.add(new View.File(parts, file.name, { type: file.mime, lastModified: Date.now() }));
     }
-    ENV.uploads.delete(REQ.token);
+    ENV.uploads?.delete(REQ.token);
     return transfer.files;
   };
   const deepHit = (doc, x, y) => {
@@ -210,32 +213,48 @@
     const control = labelledToggle(el) || el;
     return control.localName === "input" ? Boolean(control.checked) : control.getAttribute("aria-checked") === "true";
   };
-  /* global requestedValue, rangeKey -- Inserted by the script assembler. */
+  /* global requestedValue, rangeKey, valueMatches -- Inserted by the script assembler. */
   // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
   __VW_WIDGET_DATES__;
   // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
   __VW_FORM_VALUES__;
-  const requestedOption = (el) => {
-    const want = String(REQ.value || ""), options = Array.from(el.options || []);
-    return options.find((o) => o.value === want) ||
-      options.find((o) => clip(o.label || o.text, 200) === clip(want, 200)) ||
-      options.find((o) => clip(o.label || o.text, 200).toLowerCase() === clip(want, 200).toLowerCase());
+  /* global controlAction, controlPostcondition -- Inserted by the script assembler. */
+  // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
+  __VW_CONTROL__;
+  const requestedOptions = (el) => {
+    const options = Array.from(el.options || []), wanted = REQ.values || [String(REQ.value || "")];
+    if (!el.multiple && wanted.length !== 1) return null;
+    const selected = [];
+    for (const want of wanted) {
+      let matches = options.filter(o => o.value === want);
+      if (!matches.length) matches = options.filter(o => (o.label || o.text) === want);
+      if (!matches.length) matches = options.filter(o => (o.label || o.text).toLowerCase() === want.toLowerCase());
+      if (matches.length !== 1 || matches[0].disabled || matches[0].parentElement?.disabled) return null;
+      selected.push(matches[0]);
+    }
+    return new Set(selected);
   };
   const postcondition = (el, target) => {
+    if (["focus", "blur", "insert_text", "highlight"].includes(REQ.action)) return controlPostcondition(el, target);
     if (REQ.action === "check") {
       const checked = checkedState(el);
       return result(checked === (REQ.checked !== false) ? "done" : "unmet", { target, checked });
     }
     if (REQ.action === "select") {
-      const option = requestedOption(el), selected = el.options?.[el.selectedIndex];
-      return result(option && selected === option ? "done" : "unmet", {
-        target, value: clip(selected?.label || selected?.text, 200),
+      const wanted = requestedOptions(el), selected = Array.from(el.selectedOptions || []);
+      return result(wanted && selected.length === wanted.size && selected.every(o => wanted.has(o)) ? "done" : "unmet", {
+        target, value: clip(selected.map(o => o.label || o.text).join(", "), 200),
       });
+    }
+    if (REQ.action === "upload") {
+      const field = fileField(el), held = Array.from(field?.files || []);
+      const matches = field && held.length === REQ.files.length && held.every((f,i) => f.name === REQ.files[i].name && f.size === REQ.files[i].size);
+      return result(matches ? "done" : "unmet", {target, uploaded:held.map(f => ({name:clip(f.name,200),size:f.size}))});
     }
     if (REQ.action === "type") {
       const actual = String(el.isContentEditable ? el.innerText : el.value);
       const wanted = requestedValue(el, String(REQ.text || ""));
-      return result(!wanted.status && actual === wanted.value ? "done" : "unmet", { target, value: clip(actual, 300) });
+      return result(!wanted.status && valueMatches(el, wanted.value) ? "done" : "unmet", { target, value: clip(actual, 300) });
     }
     return result("error", { message: "this action has no requested control state" });
   };
@@ -272,6 +291,7 @@
     ) {
       return false;
     }
+    let emittedInput = false;
     if (el.isContentEditable) {
       const doc = el.ownerDocument;
       const range = doc.createRange();
@@ -280,14 +300,16 @@
       selection.removeAllRanges();
       selection.addRange(range);
       let inserted;
+      const notice = () => { emittedInput = true; };
+      el.addEventListener("input", notice);
       try {
         inserted = doc.execCommand("insertText", false, text);
       } catch {
         inserted = false;
-      }
+      } finally { el.removeEventListener("input", notice); }
       if (!inserted) el.textContent = text;
     } else setValue(el, text);
-    fire(el, "input", "InputEvent", {
+    if (!emittedInput) fire(el, "input", "InputEvent", {
       bubbles: true,
       inputType: "insertText",
       data: text,
@@ -325,17 +347,17 @@
       const type = String(
         (el.getAttribute && el.getAttribute("type")) || "",
       ).toLowerCase();
+      const buttonControl = tag === "button" || tag === "input" && ["button", "submit", "reset", "image"].includes(el.type);
       const rangeEffect = rangeKey(el, key);
+      const submission = key === "Enter" && !init.shiftKey ? implicitSubmission(el) : null;
       if (rangeEffect !== null) {
         effect = rangeEffect;
-      } else if (key === "Enter" && !init.shiftKey && el.form && (tag === "input" || tag === "select")) {
-        if (el.form.requestSubmit) el.form.requestSubmit();
-        else el.form.submit();
-        effect = "submitted the form";
+      } else if (submission) {
+        effect = submitWithOutcome(submission);
       } else if (
         key === "Enter" && !init.shiftKey &&
         (tag === "a" ||
-          tag === "button" ||
+          buttonControl ||
           roleOf(el) === "button" ||
           roleOf(el) === "link")
       ) {
@@ -343,7 +365,7 @@
         effect = "activated";
       } else if (
         key === " " &&
-        (type === "checkbox" || type === "radio" || roleOf(el) === "button")
+        (type === "checkbox" || type === "radio" || buttonControl || roleOf(el) === "button")
       ) {
         el.click();
         effect = "toggled";
@@ -397,7 +419,13 @@
       el = found[0];
     } else if (REQ.ref) {
       // A scroll also brings a canvas or image region of the read into view (it sends no input to it).
-      const { found, target } = actionRef(REQ.ref, action === "scroll");
+      let { found, target } = actionRef(REQ.ref, action === "scroll");
+      // Focus may add a calendar and change this action's DOM path. Only its already observed node
+      // can continue preparation; a later action or an identical replacement gets no such authority.
+      if (!found.length && REQ.nativeKeyboard && REQ.nativePrepared &&
+          ENV.focusOwed?.isConnected && observedTarget(ENV.focusOwed, REQ.observedNode, REQ.observedName)) {
+        found = [ENV.focusOwed]; target = ENV.focusOwed;
+      }
       if (found.length === 0) return result("stale");
       if (!target) return result("ambiguous", { count: found.length });
       // A ref hash describes markup, not a node. Retention must never retarget an identical replacement;
@@ -409,9 +437,12 @@
       // Focus inside an open shadow root belongs to its active control, not the retargeted host.
       while (el.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
     } else return result("error", { message: "this action needs a ref" });
-    const target = { role: roleOf(el), name: labelOf(el) };
-    if (action === "type") {
-      const secret = secretKind(el);
+    const target = { role: roleOf(el), name: privateLabel(el) };
+    if (REQ.nativeKeyboard && typeof REQ.keyboardAttempt === "string" && ENV.keyboardAttempt !== REQ.keyboardAttempt) {
+      ENV.keyboardAttempt = REQ.keyboardAttempt; ENV.focusOwed = null; ENV.lastFocus = null;
+    }
+    if (["type", "insert_text"].includes(action)) {
+      const secret = secretKind(el) || secretKind(privateField(el)?.element || el);
       if (secret) return REQ.postconditionOnly ? result("verificationChanged") : result("secret", { kind: secret, target });
     }
     // A second host call reads the settled state. It sends no input, focus or scroll events.
@@ -434,15 +465,38 @@
         ["color", "date", "time", "datetime-local", "month", "week"].includes(el.type) &&
         !["Tab", "Escape"].includes(REQ.key) && (el.type === "color" || REQ.key !== "Enter"))
       return result("unsupportedNativeKey", { target });
-    if (el.scrollIntoView && !["press", "upload"].includes(action) && !REQ.nativeValidateOnly)
+    if (el.scrollIntoView && (!["press", "upload"].includes(action) || REQ.nativeKeyboard && action === "press") && !REQ.nativeValidateOnly)
       el.scrollIntoView({
         block: "center",
         inline: "center",
         behavior: "instant",
       });
+    if (REQ.nativeKeyboard && REQ.focusWait === false && ENV.focusOwed === el && deepActive(el.ownerDocument) !== el)
+      return result("nativeKeyboardFocus", { target });
     const { failed, covering, hitPoint, retryable } = checks(el, action);
     if (failed.length > 0)
       return result("notActionable", { failed, covering, target, retryable });
+    if (REQ.nativeKeyboard && action === "press" && el.localName === "select" &&
+        (["Enter", "Space", " "].includes(REQ.key) || REQ.modifiers?.altKey && ["ArrowDown", "ArrowUp"].includes(REQ.key)))
+      return result("unsupportedSelectKey", { target });
+    if (REQ.nativeKeyboard && action === "press" && (REQ.keyboard?.writes || REQ.keyboard?.editor) && secretKind(el))
+      return result("secret", { kind: secretKind(el), target });
+    if (REQ.nativeKeyboard && action === "insert_text" && String(REQ.text ?? "") === "" && editable(el)) {
+      ENV.insertExpected ||= new WeakMap(); ENV.insertExpected.set(el, String(el.isContentEditable ? el.textContent : el.value));
+      return controlPostcondition(el, target);
+    }
+    if (REQ.nativeKeyboard && (action === "press" || ["type", "insert_text"].includes(action) &&
+        (el.isContentEditable || el.localName === "textarea" || el.localName === "input" &&
+          ["text", "search", "email", "url", "tel", "number"].includes(el.type)) &&
+        !requestedValue(el, String(REQ.text || "")).widgetDate)) {
+      // WebKit may deliver cross-frame focus asynchronously. Prepare it before final native validation;
+      // this bounded wait never inserts text, and the event-time guard still requires the exact target.
+      if (!el.ownerDocument.hasFocus()) viewOf(el).focus();
+      if (REQ.focusWait !== false && !pageSawFocus(el)) return result("focusPending", { target });
+      const prepared = nativeClickPoint(el, hitPoint);
+      if (prepared.failed) return result("notActionable", { ...prepared, target });
+      return result("done", { ...prepared, target, ref: refOf(el) });
+    }
     if (action === "hover" || (REQ.nativeClick && ["click", "check"].includes(action))) {
       if (
         action === "check" &&
@@ -455,11 +509,12 @@
         return result("notActionable", { ...prepared, target });
       return result("done", { ...prepared, target });
     }
+    if (["focus", "blur", "insert_text", "highlight"].includes(action)) return controlAction(el, target);
     if (action === "drag") return dragTo(el, target, hitPoint);
     if (action === "upload") {
       const field = fileField(el);
       if (!field) return result("notFileField", { target });
-      const fieldTarget = { role: roleOf(field), name: labelOf(field) || target.name };
+      const fieldTarget = { role: roleOf(field), name: privateLabel(field) || target.name };
       if (!enabled(field)) return result("notActionable", { failed: ["enabled"], target: fieldTarget });
       if (REQ.files.length > 1 && !field.multiple) return result("notMultiple", { target: fieldTarget });
       const files = uploadFiles(field);
@@ -469,7 +524,9 @@
       fire(field, "input", "Event", { bubbles: true, composed: true });
       fire(field, "change", "Event", { bubbles: true });
       const held = Array.from(field.files || []);
-      return result(held.length === REQ.files.length ? "done" : "unmet", {
+      const confirmed = held.length === REQ.files.length && held.every((f, i) =>
+        f === files[i] && f.name === REQ.files[i].name && f.size === REQ.files[i].size);
+      return result(confirmed ? "done" : "unmet", {
         target: fieldTarget,
         uploaded: held.map((f) => ({ name: clip(f.name, 200), size: f.size })),
       });
@@ -514,8 +571,8 @@
           target,
         });
       const options = Array.from(el.options || []);
-      const option = requestedOption(el);
-      if (!option)
+      const wanted = requestedOptions(el);
+      if (!wanted)
         return result("noOption", {
           options: options
             .slice(0, 30)
@@ -523,7 +580,10 @@
           target,
         });
       if (el.focus) el.focus({ preventScroll: true });
-      setValue(el, option.value);
+      for (const option of options) {
+        const setter = Object.getOwnPropertyDescriptor(viewOf(el).HTMLOptionElement.prototype, "selected").set;
+        setter.call(option, wanted.has(option));
+      }
       fire(el, "input", "Event", { bubbles: true });
       fire(el, "change", "Event", { bubbles: true });
       return postcondition(el, target);
@@ -535,7 +595,7 @@
     }
     if (action === "press") {
       // A checked text submission still requires the same value at the instant Enter is dispatched.
-      if (REQ.expectedText !== undefined && String(el.isContentEditable ? el.innerText : el.value) !== REQ.expectedText)
+      if (REQ.expectedText !== undefined && !valueMatches(el, REQ.expectedText))
         return result("unmet", { target });
       const key = String(REQ.key || "Enter");
       return result("done", { target, effect: press(el, key), ref: refOf(el) });

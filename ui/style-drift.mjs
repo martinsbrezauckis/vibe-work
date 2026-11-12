@@ -36,7 +36,6 @@ const exactControlExtras = new Map([
   ["shell/StatusBar.tsx", new Set(["sb-rate"])],
   ["shell/LeftRunning.tsx", new Set(["sb-left"])],
 ]);
-const exactPillClasses = new Map([["shell/SidePanel.tsx", new Set(["ptab-pill"])]]);
 const pillName = /(?:^|-)(?:badge|chip|pill|tag)(?:$|-)/;
 const fontName = /^(?:font|font-family|font-size|font-weight)$/i;
 const typographyToken = /^var\(--(?:font-(?:ui|mono)|text-[a-z0-9-]+|weight-[a-z0-9-]+)\)$/;
@@ -164,12 +163,7 @@ function scanTsx(file, source, scopeName) {
         classes?.some((entry) =>
           entry
             .split(/\s+/)
-            .some(
-              (name) =>
-                pillName.test(name) &&
-                !exactPillClasses.get(scopeName)?.has(name) &&
-                !passiveClasses.get(scopeName)?.has(name),
-            ),
+            .some((name) => pillName.test(name) && !passiveClasses.get(scopeName)?.has(name)),
         )
       )
         report(node, "ad-hoc pill/tag needs Badge or a documented exact exception");
@@ -231,6 +225,21 @@ function scanCss(file, source) {
     if (/\d(?:px|%)/.test(match[2]) || (match[1] === "z-index" && /^-?\d/.test(match[2].trim())))
       findings.push(
         `${file}:${clean.slice(0, match.index).split("\n").length}: ${match[1]} needs a shared token`,
+      );
+  }
+  for (const match of clean.matchAll(
+    /(?:^|[;{}])\s*((?:transition|animation)(?:-(?:duration|delay|timing-function))?)\s*:\s*([^;{}]+)/gm,
+  )) {
+    const value = match[2];
+    // Stepped activity loops deliberately have their own cadence; zero-time visibility changes do not animate.
+    if (/steps\(/.test(value)) continue;
+    const literals = [...value.matchAll(/(-?\d*\.?\d+)(?:ms|s)\b/g)];
+    if (
+      literals.some((time) => Number(time[1]) !== 0) ||
+      /cubic-bezier\(|(?<![\w-])ease(?:-in-out|-in|-out)?\b/.test(value)
+    )
+      findings.push(
+        `${file}:${clean.slice(0, match.index).split("\n").length}: ${match[1]} needs shared motion tokens`,
       );
   }
   if (/0 0 0 4px var\(--focus\)/.test(clean))

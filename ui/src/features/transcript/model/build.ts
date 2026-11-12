@@ -36,7 +36,7 @@ import {
 } from "./entries";
 import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
-import { interruptedEntry } from "./settled";
+import { settledEntry } from "./settled";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
 const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
@@ -332,7 +332,8 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
   const settled = entries.map((entry) => {
     const turnId = turnIdOf(entry) ?? turnAt(table, createdAt(entry));
     const turn = turnId === null ? undefined : table.get(turnId);
-    if (turn?.turn["status"] === "interrupted") entry = interruptedEntry(entry);
+    const status = turn?.turn["status"];
+    if (status === "interrupted" || status === "failed") entry = settledEntry(entry, status);
     if (
       entryType(entry) !== "checkpoint" ||
       entry["kind"] !== "compaction" ||

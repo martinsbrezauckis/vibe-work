@@ -39,7 +39,3 @@
     flex-basis: 100%;
   }
 }
-
-.mistral-key-actions .link-btn.danger {
-  color: var(--red);
-}

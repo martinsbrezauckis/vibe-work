@@ -16,7 +16,7 @@ use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
 
 /// What the agent reads when an approval from before a Stop (or a turn that ended failed or interrupted) is used.
-pub(crate) const APPROVAL_ENDED: &str = "This approval ended when the chat was stopped or its turn ended. Do not run this action unless the person asks again.";
+pub(crate) const APPROVAL_ENDED: &str = "This approval ended when the chat was stopped or its turn ended. Do not run this action unless the user asks again.";
 
 #[derive(Default)]
 struct Chat {
@@ -92,6 +92,9 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
         crate::stop_tree::family(shared, session)
     });
     for id in &sessions {
+        if let Some(requests) = &shared.model_requests {
+            requests.stop(&shared.channels.canonical(id));
+        }
         stopped(shared, id);
     }
     sessions
@@ -99,8 +102,13 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
 
 /// Invalidate earlier decisions immediately and stop protected-change work.
 pub(crate) fn stopped(shared: &Shared, session: &str) {
-    crate::chrome_control::stop_chat(shared, session);
     let id = shared.channels.canonical(session);
+    crate::chrome_control::stop_chat(shared, session);
+    crate::browser::stop_for_chat(shared, session);
+    if id != session {
+        crate::chrome_control::stop_chat(shared, &id);
+        crate::browser::stop_for_chat(shared, &id);
+    }
     {
         let mut chats = shared.stops.chats();
         let chat = chats.entry(id.clone()).or_default();

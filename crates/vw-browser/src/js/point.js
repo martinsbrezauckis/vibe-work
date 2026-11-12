@@ -1,19 +1,22 @@
 // Final point guard, evaluated in native frames and consumed only by the native input callback.
 // Observed node, frame document, viewport, geometry and hit target must all still agree.
-/* global REQ, authorizationPage, consentSnapshot, armPointReceipt -- Supplied by the Rust assembler. */
+/* global REQ, authorizationPage, consentSnapshot, armPointReceipt, armKeyboardReceipt -- Supplied by the Rust assembler. */
 (() => {
   // eslint-disable-next-line no-undef -- Expanded by the script assembler.
   __VW_COMMON__
   // eslint-disable-next-line no-undef -- Expanded by the script assembler.
   __VW_POINT_RECEIPT__
+  // eslint-disable-next-line no-undef -- Expanded by the Rust assembler.
+  __VW_KEYBOARD_RECEIPT__
   /* global postsForm -- Inserted by the script assembler. */
   // eslint-disable-next-line no-undef -- Expanded by the Rust script assembler.
   __VW_SENDING__
   const request = REQ;
+  const arm = REQ.keyboard ? armKeyboardReceipt : armPointReceipt;
   const hover = request.click?.count === 0;
   const env = window[request.page];
   const check = request.checks.find(c => c.document === env?.frameDocument);
-  if (!check) { armPointReceipt(null, null); return null; }
+  if (!check) { if (!REQ.resolveOnly) arm(null, null); return null; }
   const fail = reason => JSON.stringify({ document:check.document, ok:false, reason });
   if (innerWidth !== check.viewport[0] || innerHeight !== check.viewport[1]) return fail("viewport changed");
   if (visualViewport && (visualViewport.scale !== 1 || visualViewport.offsetLeft || visualViewport.offsetTop)) return fail("visual viewport changed");
@@ -28,10 +31,10 @@
   for (let i = 0; target && env.nodeIdentities?.get(target) !== check.node && i < 64; i += 1)
     target = target.parentElement || target.getRootNode()?.host;
   if (!target || !check.node || env.nodeIdentities?.get(target) !== check.node) return fail("node or frame under point changed");
-  if (!hover && check.target && !REQ.nativeUser && REQ.allowSend === false && postsForm(hit))
+  if (!hover && check.target && !REQ.nativeUser && REQ.allowSend === false && (!REQ.keyboard || ["Enter", "Space"].includes(REQ.keyboard.key)) && postsForm(hit, REQ.keyboard?.key === "Enter"))
     return fail("browser send approval required");
   const control = hit.closest?.("label")?.control || hit;
-  if (!hover && check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
+  if (!hover && !REQ.keyboard && check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
     return fail("native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text");
   if (!hover && check.target && !REQ.nativeUser && (authorizationPage() || REQ.consent)) {
     if (!REQ.consent || REQ.consent.snapshot !== consentSnapshot(REQ.ref).snapshot) return fail("authorization changed");
@@ -47,6 +50,7 @@
       if (!matrix.is2D || matrix.a <= 0 || matrix.d <= 0 || Math.abs(matrix.b) > 0.00001 || Math.abs(matrix.c) > 0.00001) return fail("transformed target");
     }
   }
-  armPointReceipt(check, target);
+  if (REQ.resolveOnly) return JSON.stringify({ document:check.document, ok:true });
+  if (arm(check, target) === false) return fail("keyboard target cannot keep focus; read the page and choose its current ref");
   return JSON.stringify({ document:check.document, ok:true, armed:REQ.receipt });
 })()

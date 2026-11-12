@@ -42,6 +42,11 @@ pub fn available(test: &str, script: bool) -> bool {
             // Bypass harness capture so a normal cargo test run cannot hide this missing coverage.
             writeln!(std::io::stderr().lock(),
                 "SKIPPED: {test}: sandbox denies independent sealed-memfd execution ({error}); NOT RUN (not a pass)").unwrap();
+            // A gate host (VW_REQUIRE_ALL=1, set by check-all.sh and merge_check.sh) must be able to run it: fail there.
+            assert!(
+                !std::env::var("VW_REQUIRE_ALL").is_ok_and(|value| value == "1"),
+                "required test prerequisite is unavailable: {test}: sealed-memfd execution is denied ({error})"
+            );
             false
         }
         result => {

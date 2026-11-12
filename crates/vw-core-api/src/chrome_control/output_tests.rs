@@ -159,19 +159,24 @@ async fn overview_keeps_mode_exceptions_and_shared_profile_lists() {
         }
         assert_eq!(status["capabilities"]["permissions"]["total"], 31);
         let actions = &status["capabilities"]["actions"];
-        assert_eq!(actions.as_object().unwrap().len(), 66);
-        assert!(actions["page.read"].get("needs").is_none());
-        assert!(actions["page.type"].get("needs").is_none());
+        assert_eq!(actions.as_object().unwrap().len(), 85);
+        let capabilities = &status["capabilities"];
+        assert!(action_row(capabilities, "page.read").get("needs").is_none());
+        assert!(action_row(capabilities, "page.type").get("needs").is_none());
         assert_eq!(
-            actions["page.type"]["approvalRequired"] == true,
+            action_row(capabilities, "page.type")["approvalRequired"] == true,
             mode == "ask"
         );
         assert_eq!(
-            actions["raw.execute"]["approvalRequired"] == true,
+            action_row(capabilities, "raw.execute")
+                .get("needs")
+                .is_some(),
             mode != "auto-approve"
         );
         assert_eq!(
-            actions["cookies.read"].get("needs").is_some(),
+            action_row(capabilities, "cookies.read")
+                .get("needs")
+                .is_some(),
             mode != "auto-approve"
         );
     }
@@ -220,23 +225,25 @@ async fn full_session_records_keep_their_shared_context() {
         .await
         .unwrap();
     core.shutdown().await;
-    fits("status with full session records", &answer, 6000);
+    // 0.1.10: the merged browser actions (input, Firefox, Safari) put the compacted status at 6,160 characters.
+    fits("status with full session records", &answer, 6400);
     let status = &answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"];
     assert_eq!(status["sessionDefaults"]["clientSessionId"], "s");
     assert_eq!(status["sessions"].as_array().unwrap().len(), 2);
     let capabilities = &status["capabilities"];
     assert_catalog_features(status);
+    assert_ask_authority(capabilities);
     for action in ["history.read", "bookmarks.read"] {
         assert!(
-            capabilities["actions"][action]
+            action_row(capabilities, action)
                 .get("approvalRequired")
                 .is_none()
         );
-        assert!(capabilities["actions"][action].get("needs").is_none());
+        assert!(action_row(capabilities, action).get("needs").is_none());
     }
     for action in catalog()["actions"].as_array().unwrap() {
         let id = action["id"].as_str().unwrap();
-        let name = &capabilities["actions"][id]["capability"];
+        let name = &action_row(capabilities, id)["capability"];
         let name = if let Some(index) = name.as_u64() {
             &capabilities["capabilityNames"][usize::try_from(index).unwrap()]
         } else if name.is_null() {
@@ -259,16 +266,24 @@ async fn full_session_records_keep_their_shared_context() {
         .zip(expected_addons.as_array().unwrap())
     {
         let mut expected = expected.clone();
-        // Only the duplicate state label is omitted; diagnosis, instruction, identity and version stay exact.
+        // Duplicate state labels and unknown versions can be omitted; every known fact stays exact.
         assert_eq!(expected["label"], expected["state"]);
         expected.as_object_mut().unwrap().remove("label");
+        if expected["extensionVersion"].is_null() {
+            expected.as_object_mut().unwrap().remove("extensionVersion");
+        }
+        if let Some(sharing) = expected.get_mut("sharing").and_then(Value::as_object_mut)
+            && sharing.get("extensionVersion").is_some_and(Value::is_null)
+        {
+            sharing.remove("extensionVersion");
+        }
         assert_eq!(actual, &expected);
     }
     if cfg!(feature = "your-edge") {
         assert_eq!(addons[1]["stateCode"], "notSetUp");
         assert!(capabilities["capabilityNames"].is_array());
     }
-    if cfg!(all(feature = "your-safari", feature = "your-edge")) {
+    if status["profileDefaults"].is_object() {
         // Crowded optional builds retain all per-profile facts through the same explicit-defaults convention.
         for (index, profile) in status["profiles"].as_array().unwrap().iter().enumerate() {
             let mut restored = status["profileDefaults"].as_object().unwrap().clone();
@@ -423,7 +438,6 @@ fn small_receipt_control() {
     );
 }
 
-#[cfg(all(feature = "your-firefox", feature = "your-safari"))]
 #[tokio::test]
 async fn compact_catalog_reference_keeps_partial_profile_support_explicit() {
     let core = core("chrome-output-partial-features").await;
@@ -442,9 +456,12 @@ async fn compact_catalog_reference_keeps_partial_profile_support_explicit() {
         .unwrap();
     let status = &answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"];
     let lists = status["featureLists"].as_array().unwrap();
-    assert_eq!(lists[0], json!({"allActions":true}));
+    assert_catalog_features(status);
     let partial = lists[1].as_array().unwrap();
-    assert_eq!(partial.len(), 65);
+    assert_eq!(
+        partial.len(),
+        catalog()["actions"].as_array().unwrap().len() - 1
+    );
     assert!(!partial.contains(&json!("raw.execute")));
     for action in catalog()["actions"].as_array().unwrap() {
         assert_eq!(
@@ -453,6 +470,41 @@ async fn compact_catalog_reference_keeps_partial_profile_support_explicit() {
         );
     }
     core.shutdown().await;
+}
+
+fn action_row<'a>(capabilities: &'a Value, id: &str) -> &'a Value {
+    let row = &capabilities["actions"][id];
+    if let Some(index) = row.as_u64() {
+        assert!(
+            capabilities["availability"]
+                .as_str()
+                .unwrap()
+                .contains("actionRows")
+        );
+        &capabilities["actionRows"][usize::try_from(index).unwrap()]
+    } else {
+        row
+    }
+}
+
+fn assert_ask_authority(capabilities: &Value) {
+    assert_eq!(
+        action_row(capabilities, "page.type")["approvalRequired"],
+        true
+    );
+    assert_eq!(
+        action_row(capabilities, "page.key")["typingKeysApprovalRequired"],
+        true
+    );
+    for action in ["raw.execute", "cookies.read", "clipboard.read_rich"] {
+        let row = action_row(capabilities, action);
+        let mode = usize::try_from(row["needs"].as_u64().unwrap()).unwrap();
+        assert_eq!(
+            capabilities["modes"][mode],
+            vw_ask::chrome::Tier::FullAccess.label()
+        );
+        assert!(row.get("approvalRequired").is_none(), "{action}: {row}");
+    }
 }
 
 fn assert_catalog_features(status: &Value) {

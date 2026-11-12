@@ -8,7 +8,7 @@
 // - service workers are off : a worker outlives its page and could send requests later under
 //   another page's rights; the engine also clears registrations at every mount.
 // The accessor name is random per mount and non-enumerable: a collision guard, not a secret.
-/* global pageSelection */
+/* global pageSelection, pageShare */
 (() => {
   const NAME = __VW_NAME__;
   const TRUSTED = false;
@@ -84,6 +84,7 @@
     configurable: false,
     writable: false,
   });
+  __VW_SHARE__
   const localPage = () => /^https?:$/.test(location.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   window.addEventListener("contextmenu", (event) => {
     if (!TRUSTED) return;
@@ -97,6 +98,7 @@
     pointRange = null;
     pointChoice = null;
     pointIntent = false;
+    pageShare.reset();
     if (!event.isTrusted) return;
     // Native agent input is trusted too. Its isolated receipt owns this one right-click sequence;
     // cancel the engine's default menu, while allowing the page's contextmenu handlers to run.
@@ -133,7 +135,6 @@
       pointRange.selectNodeContents(contextTarget);
     }
     const saveable = !!value && value.length <= 4096;
-    if (!saveable && !pointRange) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     contextChoice = saveable ? value : "";
@@ -237,11 +238,15 @@
       closeContextMenu();
     }, true);
     if (saveable) menu.appendChild(item);
+    pageShare.append(menu, button, event, () => contextMenu === menu, closeContextMenu);
     const host = document.createElement("div");
     host.attachShadow({ mode: "closed" }).appendChild(menu);
     document.documentElement.appendChild(host);
     contextHost = host;
     contextMenu = menu;
+    const bounds = menu.getBoundingClientRect();
+    menu.style.left = Math.max(0, Math.min(event.clientX, window.innerWidth - bounds.width - 8)) + "px";
+    menu.style.top = Math.max(0, Math.min(event.clientY, window.innerHeight - bounds.height - 8)) + "px";
     menu.firstChild?.focus();
   }, true);
   window.addEventListener("pointerdown", (event) => {
@@ -277,6 +282,7 @@
   }
   const api = {
     selection: pageSelection,
+    takeShareChoice: pageShare.take,
     takePointChoice: () => {
       const choice = !pointChoice || performance.now() < pointExpires ? pointChoice : { node: null, quote: "" };
       pointChoice = null;

@@ -96,7 +96,7 @@ pub(super) fn open_edge(config: &ChromeControlConfig, url: &str) -> Result<(), S
     }
     launch(config, Browser::Edge, url, None)
 }
-/// Reopen the paired browser without visiting a page; a unique installed profile identifies the directory.
+/// Reopen the browser without visiting a page; authenticated reconnection still chooses the task identity.
 pub(super) fn open_paired(
     shared: &crate::core::Shared,
     browser: super::agent_browser::Browser,

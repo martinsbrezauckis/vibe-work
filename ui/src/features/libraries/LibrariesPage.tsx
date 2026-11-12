@@ -5,6 +5,7 @@
  * Depends on: hooks, AskPanel, LibraryDetail, TextViewer. Called by: Content.
  * Invariants: components render, the libraries controller decides; file content is text only.
  */
+import { useErrorText } from "../../state/errorDetail";
 import { Button } from "../../components/Controls";
 import { type ReactElement, type SyntheticEvent, useEffect, useRef, useState } from "react";
 
@@ -103,6 +104,7 @@ export function LibrariesPage(): ReactElement {
   }, [actions, blocked]);
   const costs = useLibraries((s) => s.costs);
   const error = useLibraries((s) => s.error);
+  const errorMessage = useErrorText(error ?? "");
   const note = useLibraries((s) => s.note);
   return (
     <div className="cpage lib-page" data-testid="libraries-page">
@@ -124,9 +126,8 @@ export function LibrariesPage(): ReactElement {
           <KeyNotice message="Libraries use your Mistral key, which is kept in the vault." />
         )}
         {blocked || error === null ? null : (
-          <p className="server-note" role="status">
-            <span className="px warn" aria-hidden="true" />
-            <span>{error}</span>
+          <p className="key-problem" role="alert">
+            Could not read your libraries: {errorMessage.replace(/\.$/, "")}. Try again.
           </p>
         )}
         {blocked || note === null ? null : (

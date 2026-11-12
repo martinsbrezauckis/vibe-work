@@ -71,7 +71,7 @@ fn strength_filter_uses_sixteen_log_guesses_instead_of_the_maximum_score() {
 #[test]
 fn startup_requires_loaded_list_and_thirty_idle_seconds_and_gives_way_to_turns() {
     assert!(!ready(false, Duration::from_secs(100), false, false));
-    assert!(!ready(true, Duration::from_secs(29), false, false));
+    assert!(!ready(true, Duration::from_millis(29_999), false, false));
     assert!(ready(true, Duration::from_secs(30), false, false));
     assert!(!ready(true, Duration::from_secs(100), true, false));
     assert!(!ready(false, Duration::ZERO, false, true));

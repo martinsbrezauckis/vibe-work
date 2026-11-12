@@ -13,14 +13,14 @@ publish = false
 workspace = true
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 form_urlencoded = "1"
-memchr = "2"
+memchr = { workspace = true }
 percent-encoding = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 sha2 = "0.10"
-tempfile = "3"
-thiserror = "2"
-walkdir = "2"
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
 zeroize = "1"

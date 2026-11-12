@@ -27,6 +27,20 @@ fn an_upload_never_exposes_the_editors_value_from_an_older_helper() {
 }
 
 #[test]
+fn upload_outcome_distinguishes_changed_selection_and_unavailable_readback() {
+    let replaced = finish(
+        "files.upload",
+        &json!({"files":[{"name":"requested.txt","size":10}],"currentFiles":[{"name":"changed.txt","size":8}]}),
+    );
+    assert_eq!(replaced["structuredContent"]["status"], "failed");
+    let unavailable = finish(
+        "files.upload",
+        &json!({"files":[{"name":"requested.txt","size":10}],"fieldReplaced":true,"resultObserved":false}),
+    );
+    assert_eq!(unavailable["structuredContent"]["status"], "unknown");
+}
+
+#[test]
 fn a_chooser_instruction_survives_the_final_app_budget() {
     let result = finish(
         "page.click",

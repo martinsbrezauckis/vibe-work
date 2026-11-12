@@ -199,12 +199,6 @@
   overflow: visible;
 }
 .q-tag {
-  font-size: var(--text-11);
-  font-weight: var(--weight-medium);
-  color: var(--text-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  padding: 0 6px;
   margin-right: 8px;
 }
 /* Answer options keep their natural height; only the long question above them scrolls. */
@@ -240,30 +234,8 @@
   align-self: start;
   margin: 3px 0 0;
 }
-.q-opt input[type="radio"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--control-line);
-  border-radius: var(--radius-round);
-  background: var(--bg);
-  display: inline-grid;
-  place-content: center;
-}
-.q-opt input[type="radio"]:checked {
-  border-color: var(--orange);
-}
-.q-opt input[type="radio"]:checked::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-  background: var(--orange);
-}
 .q-opt:has(input:disabled) {
   cursor: default;
-  opacity: 0.6;
 }
 .q-label {
   grid-column: 2;

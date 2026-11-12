@@ -44,7 +44,7 @@ impl Core {
                     session_id: id,
                     mode: ChangesMode::Uncommitted,
                     folder: Some(place.root.to_string_lossy().into_owned()),
-                    repo_root: Some(repo.root.to_string_lossy().into_owned()),
+                    repo_root: Some(crate::changes_view::display_root(&repo.root)),
                     scope: Some(repo.scope),
                     reason: None,
                     baseline_lost: false,

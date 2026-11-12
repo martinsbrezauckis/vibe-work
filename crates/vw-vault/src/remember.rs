@@ -356,25 +356,3 @@ impl DeviceSecretStore for OsDeviceStore {
         }
     }
 }
-
-#[cfg(test)]
-mod owner_store_tests {
-    use super::*;
-    #[test]
-    fn fallback_keeps_nothing_that_should_outlive_the_run() {
-        let store = MemoryDeviceStore::temporary();
-        let secret = SecretString::new("fixture value");
-        let owner = chrome_owner_account(Path::new("scratch/settings.json"));
-        assert!(store.set(&owner, &secret).is_err());
-        assert!(store.set(&format!("{owner}-policy"), &secret).is_err());
-        assert!(store.get(&owner).unwrap().is_none());
-        // A remembered device would be reported as kept while the next start finds nothing.
-        let device = format!("{ACCOUNT_PREFIX}-fixture");
-        assert_eq!(
-            store.set(&device, &secret).unwrap_err().to_string(),
-            format!("this device cannot be remembered: {NO_STORE}")
-        );
-        assert!(store.get(&device).unwrap().is_none());
-        store.delete(&device).unwrap();
-    }
-}

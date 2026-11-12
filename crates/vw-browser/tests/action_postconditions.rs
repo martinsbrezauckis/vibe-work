@@ -40,6 +40,7 @@ async fn install_controls(rig: &Rig) {
         <label>Text<input id="text"></label><label>Reverted text<input id="textRevert"></label>
         <label>Later text<input id="textLater"></label><label>Blocked text<input id="textBlocked"></label>
         <div contenteditable="true" role="textbox" aria-label="Reverted editor" id="editor"></div>
+        <button type="submit">Send form</button>
       </form>`;
       const byId = id => document.getElementById(id);
       for (const id of ['blocked', 'radioBlocked']) byId(id).addEventListener('click', e => e.preventDefault());

@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.0. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.2. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -221,29 +221,13 @@
       "params": "ProviderAuthReadParams",
       "result": "ProviderAuthReadResponse"
     },
-    "projectLinks/create": {
-      "params": "ProjectLinksCreateParams",
-      "result": "ProjectLinkMutationResponse"
-    },
     "projectLinks/inspectRoot": {
       "params": "ProjectLinksInspectRootParams",
       "result": "ProjectLinksInspectRootResponse"
     },
-    "projectLinks/link": {
-      "params": "ProjectLinksLinkParams",
-      "result": "ProjectLinkMutationResponse"
-    },
     "projectLinks/list": {
       "params": "ProjectLinksListParams",
       "result": "ProjectLinksListResponse"
-    },
-    "projectLinks/picker/load": {
-      "params": "ProjectLinksPickerLoadParams",
-      "result": "ProjectLinksPickerLoadResponse"
-    },
-    "projectLinks/picker/loadMore": {
-      "params": "ProjectLinksPickerLoadMoreParams",
-      "result": "ProjectLinksPickerLoadMoreResponse"
     },
     "projectLinks/resolveRoot": {
       "params": "ProjectLinksResolveRootParams",
@@ -529,46 +513,6 @@
       "params": "TurnSteerParams",
       "result": "TurnSteerResponse"
     },
-    "vibeCode/projects/cancel": {
-      "params": "VibeCodeProjectCancelParams",
-      "result": "EmptyResponse"
-    },
-    "vibeCode/projects/create": {
-      "params": "VibeCodeProjectCreateParams",
-      "result": "VibeCodeProjectCreateResponse"
-    },
-    "vibeCode/projects/loadMore": {
-      "params": "VibeCodeProjectsLoadMoreParams",
-      "result": "VibeCodeProjectsLoadMoreResponse"
-    },
-    "vibeCode/projects/open": {
-      "params": "VibeCodeProjectsOpenParams",
-      "result": "VibeCodeProjectsOpenResponse"
-    },
-    "vibeCode/projects/recover": {
-      "params": "VibeCodeProjectRecoverParams",
-      "result": "VibeCodeProjectRecoverResponse"
-    },
-    "vibeCode/projects/select": {
-      "params": "VibeCodeProjectSelectParams",
-      "result": "VibeCodeProjectSelectResponse"
-    },
-    "vibeCode/projects/unlink": {
-      "params": "VibeCodeProjectUnlinkParams",
-      "result": "VibeCodeProjectUnlinkResponse"
-    },
-    "vibeCode/teleport/cancel": {
-      "params": "TeleportCancelParams",
-      "result": "TeleportCancelResponse"
-    },
-    "vibeCode/teleport/push/respond": {
-      "params": "TeleportPushRespondParams",
-      "result": "EmptyResponse"
-    },
-    "vibeCode/teleport/start": {
-      "params": "TeleportStartParams",
-      "result": "TeleportStartResponse"
-    },
     "workspace/git/checkouts": {
       "params": "WorkspaceGitCheckoutsParams",
       "result": "WorkspaceGitCheckoutsResponse"
@@ -700,6 +644,18 @@
     "session/context/read": {
       "params": "SessionContextReadParams",
       "result": "SessionContextReadResponse"
+    },
+    "session/move": {
+      "params": "SessionMoveParams",
+      "result": "SessionMoveResponse"
+    },
+    "plugins/local/list": {
+      "params": "PluginsLocalListParams",
+      "result": "PluginsLocalListResponse"
+    },
+    "plugins/local/setEnabled": {
+      "params": "PluginsLocalSetEnabledParams",
+      "result": "PluginsLocalSetEnabledResponse"
     }
   },
   "notifications": {
@@ -726,7 +682,6 @@
     "connector_catalog/authRequired": "ConnectorAuthRequiredParams",
     "connector_catalog/authUrl": "ConnectorAuthUrlParams",
     "connector_catalog/authFailed": "ConnectorAuthFailedParams",
-    "vibeCode/teleport/event": "TeleportEventParams",
     "imports/updated": "ImportJobUpdatedParams",
     "artifacts/created": "ArtifactCreatedParams",
     "artifacts/updated": "ArtifactUpdatedParams"
@@ -767,6 +722,14 @@
     "session/peer/restore": {
       "params": "SessionPeerRestoreParams",
       "result": "SessionPeerRestoreResponse"
+    },
+    "session/peer/markSeen": {
+      "params": "SessionPeerMarkSeenParams",
+      "result": "SessionPeerMarkSeenResponse"
+    },
+    "tools/call": {
+      "params": "ClientToolCallParams",
+      "result": "ClientToolCallResponse"
     }
   }
 }

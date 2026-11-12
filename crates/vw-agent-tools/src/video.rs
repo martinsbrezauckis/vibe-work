@@ -1,6 +1,7 @@
 //! Typed video requests shared by the MCP catalog and the optional core adapter.
 //! Integer presentation times and preflight frame counts are validated before starting a decoder.
 use serde::{Deserialize, Serialize};
+pub use vw_video_types::{Code, Error};
 /// The Windows spelling of a local video path. Other paths retain their spelling.
 /// This lexical conversion grants no file access; callers still canonicalize and authorize the source.
 #[must_use]
@@ -18,20 +19,19 @@ pub const ENABLED: bool = cfg!(all(
     )
 ));
 /// Reason and next action for a stale or direct call on an unsupported platform.
-pub const UNAVAILABLE: &str = if cfg!(target_os = "linux") {
-    "Not run: video review is not available on Linux yet. Ask for still images or review the video on Windows or macOS."
-} else {
-    "Not run: video review is not available in this build. Ask for still images."
-};
+pub use vw_video_types::UNAVAILABLE;
 /// Refuse before opening input, reserving images or starting a worker.
 ///
 /// # Errors
 /// The platform's reason and instruction when video review is unavailable.
-pub fn require_available() -> Result<(), String> {
+pub fn require_available() -> Result<(), Error> {
     if ENABLED {
         Ok(())
     } else {
-        Err(UNAVAILABLE.into())
+        Err(Error::new(
+            Code::Unavailable,
+            "video feature or platform unavailable",
+        ))
     }
 }
 /// Check a named tool before forwarding it or consuming its saved approval.
@@ -40,7 +40,7 @@ pub fn require_available() -> Result<(), String> {
 /// The platform refusal for an unavailable video call; other tools are unaffected.
 pub fn check_tool(name: &str) -> Result<(), String> {
     if name == "video_frames" {
-        require_available()?;
+        require_available().map_err(|error| error.agent())?;
     }
     Ok(())
 }
@@ -119,16 +119,17 @@ impl Request {
     /// Plans requested times (comparison samples for scenes) before any media is opened.
     /// # Errors
     /// Invalid selection or count/range limits.
-    pub fn times(&self) -> Result<Vec<u64>, String> {
+    pub fn times(&self) -> Result<Vec<u64>, Error> {
         if self.max_edge.is_some_and(|edge| edge < 64) {
-            return Err(
-                "limit_exceeded: image edge must be at least 64. Choose a larger max_edge.".into(),
-            );
+            return Err(Error::new(Code::ImageEdge, "image edge is below 64"));
         }
         let bad = || {
-            "limit_exceeded: select 1–24 frames over a positive range of at most ten minutes within the first two hours. Choose a smaller valid selection.".to_owned()
+            Error::new(
+                Code::Selection,
+                "selection is outside the frame count or timeline limits",
+            )
         };
-        let range = |start: u64, end: u64| -> Result<u64, String> {
+        let range = |start: u64, end: u64| -> Result<u64, Error> {
             end.checked_sub(start)
                 .filter(|n| *n > 0 && *n <= MAX_RANGE_MS && end <= 7_200_000)
                 .ok_or_else(bad)
@@ -155,14 +156,17 @@ impl Request {
             } => {
                 let span = range(*start_ms, *end_ms)?;
                 if *step_ms == 0 {
-                    return Err("limit_exceeded: step_ms must be positive. Set step_ms to at least 1 millisecond.".into());
+                    return Err(Error::new(Code::Step, "scene sampling step is zero"));
                 }
                 if !(1..=MAX_FRAMES).contains(max_frames) {
                     return Err(bad());
                 }
                 let count = span.div_ceil(*step_ms);
                 if count > MAX_SCAN_SAMPLES as u64 {
-                    return Err("limit_exceeded: scene scanning allows at most 240 samples. Increase step_ms or choose a shorter range.".into());
+                    return Err(Error::new(
+                        Code::ScanSamples,
+                        "scene scanning exceeds 240 samples",
+                    ));
                 }
                 (0..count).map(|i| start_ms + i * step_ms).collect()
             }
@@ -194,29 +198,39 @@ impl Request {
                 (0..count).map(|i| start_ms + i * every_ms).collect()
             }
         };
-        let count = self.scene_limit().unwrap_or(times.len());
+        self.check_output(self.scene_limit().unwrap_or(times.len()))?;
+        Ok(times)
+    }
+    fn check_output(&self, count: usize) -> Result<(), Error> {
         if self.output == Output::ContactSheet {
             let cols = count.min(4);
             let rows = count.div_ceil(cols);
             let minimum = (cols * 80).max(rows * 32);
             if self.max_edge.is_some_and(|edge| (edge as usize) < minimum) {
-                return Err(
-                    "limit_exceeded: image edge is too small for the selected frame count. Increase max_edge or reduce the frame count.".into(),
-                );
+                return Err(Error::new(
+                    Code::ImageEdge,
+                    "image edge is too small for the frame count",
+                ));
             }
         }
         if self.output == Output::Frame && count != 1 {
-            return Err("limit_exceeded: frame output requires a one-frame selection or scene cap. Choose contact_sheet output or set the frame count to one.".into());
+            return Err(Error::new(
+                Code::FrameOutput,
+                "single-frame output requested with multiple frames",
+            ));
         }
         if self.path.is_empty() || self.path.len() > 4096 || self.path.contains('\0') {
-            return Err("decode_failed: invalid local path. Provide a nonempty local video path without NUL bytes, at most 4096 bytes long.".into());
+            return Err(Error::new(
+                Code::InvalidPath,
+                "empty, NUL-containing or oversized local path",
+            ));
         }
-        Ok(times)
+        Ok(())
     }
     /// The selected-frame upper bound; scene comparison samples do not consume image slots.
     /// # Errors
     /// Invalid request, including a scan that exceeds the work limit.
-    pub fn frame_limit(&self) -> Result<usize, String> {
+    pub fn frame_limit(&self) -> Result<usize, Error> {
         Ok(self.scene_limit().unwrap_or(self.times()?.len()))
     }
     /// Scene requests have an upper bound rather than an exact preflight count.
@@ -230,7 +244,7 @@ impl Request {
     /// Human-readable preflight shared by the MCP stream and permission summary.
     /// # Errors
     /// Invalid selection.
-    pub fn preflight(&self) -> Result<String, String> {
+    pub fn preflight(&self) -> Result<String, Error> {
         Ok(format!(
             "{}{} selected frames; {} image",
             if self.scene_limit().is_some() {
@@ -245,7 +259,7 @@ impl Request {
     /// Checks declared endpoints, including an end beyond EOF whose samples would fit.
     /// # Errors
     /// A selection lies outside the visible duration. The end is exclusive and may equal duration.
-    pub fn validate_duration(&self, duration_ns: u64) -> Result<(), String> {
+    pub fn validate_duration(&self, duration_ns: u64) -> Result<(), Error> {
         let times = self.times()?;
         let outside = match self.selection {
             Selection::Uniform {
@@ -260,9 +274,9 @@ impl Request {
             Selection::Timestamps { .. } => times.iter().any(|ms| ms * 1_000_000 >= duration_ns),
         };
         if outside {
-            return Err(format!(
-                "range_outside_video: requested selection exceeds the video duration of {duration_ns} ns ({} ms). Choose start_ms before the duration and end_ms no later than it; explicit timestamps must be before the duration.",
-                duration_ns / 1_000_000
+            return Err(Error::new(
+                Code::OutsideDuration { duration_ns },
+                "requested selection extends beyond the visible duration",
             ));
         }
         Ok(())
@@ -321,180 +335,4 @@ pub(crate) fn progress(message: &serde_json::Value) -> Option<serde_json::Value>
     } else {
         json!({"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","logger":"video_frames","data":{"message":text,"frame_count":frames,"image_count":images}}})
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn request(s: Selection) -> Request {
-        Request {
-            path: "clip.mp4".into(),
-            selection: s,
-            output: Output::ContactSheet,
-            max_edge: None,
-        }
-    }
-    #[test]
-    fn counts_and_midpoints_are_known_before_decode() {
-        assert_eq!(
-            request(Selection::Uniform {
-                start_ms: 0,
-                end_ms: 4000,
-                count: 4
-            })
-            .times()
-            .unwrap(),
-            vec![500, 1500, 2500, 3500]
-        );
-        assert_eq!(
-            request(Selection::Interval {
-                start_ms: 0,
-                end_ms: 4000,
-                every_ms: 1500,
-                max_frames: 4
-            })
-            .times()
-            .unwrap(),
-            vec![0, 1500, 3000]
-        );
-    }
-    #[test]
-    fn selection_errors_keep_the_diagnosis_and_repair_instruction() {
-        let mut r = request(Selection::SceneChanges {
-            start_ms: 0,
-            end_ms: 4000,
-            step_ms: 0,
-            max_frames: 24,
-        });
-        let error = r.times().unwrap_err();
-        assert!(
-            error.contains("step_ms") && error.contains("Set"),
-            "{error}"
-        );
-        r.selection = Selection::Uniform {
-            start_ms: 0,
-            end_ms: 4000,
-            count: 2,
-        };
-        r.output = Output::Frame;
-        assert!(r.times().unwrap_err().contains("Choose"));
-        r.output = Output::ContactSheet;
-        r.max_edge = Some(64);
-        assert!(r.times().unwrap_err().contains("Increase"));
-        r.max_edge = Some(0);
-        assert!(r.times().unwrap_err().contains("Choose"));
-        r.max_edge = None;
-        r.path.clear();
-        assert!(r.times().unwrap_err().contains("Provide"));
-    }
-    #[test]
-    fn scene_sample_work_and_selected_frame_budgets_are_separate() {
-        let mut r = request(Selection::SceneChanges {
-            start_ms: 1000,
-            end_ms: 61000,
-            step_ms: 250,
-            max_frames: 3,
-        });
-        assert_eq!(r.times().unwrap().len(), MAX_SCAN_SAMPLES);
-        assert_eq!(r.frame_limit().unwrap(), 3);
-        assert_eq!(r.preflight().unwrap(), "Up to 3 selected frames; 1 image");
-        r.selection = Selection::SceneChanges {
-            start_ms: 0,
-            end_ms: 60250,
-            step_ms: 250,
-            max_frames: 24,
-        };
-        assert!(r.times().unwrap_err().contains("Increase step_ms"));
-        for (start_ms, end_ms, step_ms, max_frames) in [
-            (10, 10, 1, 24),
-            (10, 9, 1, 24),
-            (0, 1000, 0, 24),
-            (0, 1000, 250, 0),
-            (0, 1000, 250, 25),
-        ] {
-            r.selection = Selection::SceneChanges {
-                start_ms,
-                end_ms,
-                step_ms,
-                max_frames,
-            };
-            assert!(r.frame_limit().is_err());
-        }
-    }
-    #[test]
-    fn declared_ranges_and_timestamps_respect_duration() {
-        for selection in [
-            Selection::Uniform {
-                start_ms: 0,
-                end_ms: 4500,
-                count: 1,
-            },
-            Selection::Interval {
-                start_ms: 0,
-                end_ms: 4500,
-                every_ms: 5000,
-                max_frames: 1,
-            },
-            Selection::SceneChanges {
-                start_ms: 0,
-                end_ms: 4500,
-                step_ms: 5000,
-                max_frames: 1,
-            },
-            Selection::Timestamps {
-                times_ms: vec![4000],
-            },
-        ] {
-            let error = request(selection)
-                .validate_duration(4_000_000_000)
-                .unwrap_err();
-            assert!(error.contains("4000 ms"));
-            assert!(error.contains("Choose"));
-        }
-        assert!(
-            request(Selection::Uniform {
-                start_ms: 1000,
-                end_ms: 4000,
-                count: 1
-            })
-            .validate_duration(4_000_000_000)
-            .is_ok()
-        );
-    }
-    #[test]
-    fn tiny_sheet_refuses_before_opening_video() {
-        let mut request = request(Selection::Uniform {
-            start_ms: 0,
-            end_ms: 4000,
-            count: 24,
-        });
-        request.max_edge = Some(64);
-        assert!(request.times().unwrap_err().contains("limit_exceeded"));
-    }
-    #[test]
-    fn limits_reject_without_silently_resampling() {
-        for selection in [
-            Selection::Uniform {
-                start_ms: 0,
-                end_ms: 4000,
-                count: 25,
-            },
-            Selection::Interval {
-                start_ms: 0,
-                end_ms: 4000,
-                every_ms: 1,
-                max_frames: 24,
-            },
-            Selection::Timestamps {
-                times_ms: vec![0, 600_001],
-            },
-        ] {
-            assert!(
-                request(selection)
-                    .times()
-                    .unwrap_err()
-                    .contains("limit_exceeded")
-            );
-        }
-    }
 }

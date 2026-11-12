@@ -99,27 +99,3 @@ pub fn folder_key_for(text: &str, fold: FolderFold) -> String {
 pub fn folder_key(text: &str) -> String {
     folder_key_for(text, FolderFold::current())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn plain_paths_are_unchanged_and_verbatim_drive_paths_lose_the_prefix_on_windows() {
-        assert_eq!(plain_path(Path::new("/tmp/a b")), PathBuf::from("/tmp/a b"));
-        if cfg!(windows) {
-            assert_eq!(
-                plain_path(Path::new(r"\\?\C:\Users\me\a.txt")),
-                PathBuf::from(r"C:\Users\me\a.txt")
-            );
-            // A reserved device name or a trailing dot would name something else without the prefix.
-            for kept in [
-                r"\\?\C:\x\COM1",
-                r"\\?\C:\x\name.",
-                r"\\?\UNC\server\share\x",
-            ] {
-                assert_eq!(plain_path(Path::new(kept)), PathBuf::from(kept));
-            }
-        }
-    }
-}

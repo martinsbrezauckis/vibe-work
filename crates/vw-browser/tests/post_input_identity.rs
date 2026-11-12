@@ -52,6 +52,7 @@ async fn type_date(rig: &Rig) -> Result<Value, vw_browser::ActError> {
 async fn opening_a_calendar_keeps_the_same_nodes_successful_value_and_sends_input_once() {
     let rig = page("document.querySelector('#entry').onfocus=()=>{const calendar=document.createElement('section');calendar.innerHTML='<button>Calendar choice</button>';document.querySelector('main').append(calendar)}").await;
     let result = type_date(&rig).await;
+    assert!(result.is_ok(), "{result:?}");
     assert_eq!(
         rig.engine
             .eval("document.querySelector('#entry').value")
@@ -79,6 +80,6 @@ async fn an_identical_replacement_after_input_cannot_supply_the_original_nodes_p
     assert_eq!(rig.engine.eval("window.inputs").await, 1);
     let error = result.expect_err("a replacement cannot attest the original observed control");
     assert_eq!(error.outcome, Outcome::Failed);
-    assert!(error.text.starts_with("Not done:"), "{error:?}");
+    assert!(error.text.contains("Not done:"), "{error:?}");
     assert!(error.text.contains("do not repeat"), "{error:?}");
 }

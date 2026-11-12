@@ -1,14 +1,17 @@
 //! Runtime-free native media values. Windows row layouts and macOS rational times are checked before use.
 //! Both adapters call these functions; their unit tests also run on Linux.
 
+use vw_video_types::{Code, Error};
 #[cfg(any(test, target_os = "macos"))]
-pub(super) fn time_ns(value: i64, scale: i32, epoch: i64, flags: u32) -> Result<u64, String> {
+pub(super) fn time_ns(value: i64, scale: i32, epoch: i64, flags: u32) -> Result<u64, Error> {
     if scale <= 0 || value < 0 || epoch != 0 || flags & 0x1d != 1 {
-        return Err("decode_failed: invalid native timeline".into());
+        return Err(Error::new(Code::DecodeFailed, "invalid native timeline"));
     }
-    let ns = u128::try_from(value).map_err(|_| "decode_failed: time")? * 1_000_000_000
-        / u128::try_from(scale).map_err(|_| "decode_failed: time scale")?;
-    u64::try_from(ns).map_err(|_| "limit_exceeded: time".into())
+    let ns = u128::try_from(value).map_err(|error| Error::at(Code::DecodeFailed, "time", error))?
+        * 1_000_000_000
+        / u128::try_from(scale)
+            .map_err(|error| Error::at(Code::DecodeFailed, "time scale", error))?;
+    u64::try_from(ns).map_err(|error| Error::at(Code::DecodeLimit, "time", error))
 }
 
 #[cfg(any(test, windows))]
@@ -17,7 +20,7 @@ pub(super) fn rgb32(
     encoded: (u32, u32),
     visible: (u32, u32),
     stride: i32,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, Error> {
     let (w, h) = encoded;
     let (width, height) = visible;
     super::geometry::geometry(w, h)?;
@@ -27,7 +30,7 @@ pub(super) fn rgb32(
         || stride.unsigned_abs() < w * 4
         || (bytes.len() as u64) < u64::from(stride.unsigned_abs()) * u64::from(h)
     {
-        return Err("decode_failed: invalid RGB32 layout".into());
+        return Err(Error::new(Code::DecodeFailed, "invalid RGB32 layout"));
     }
     let mut out = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {
@@ -44,11 +47,18 @@ pub(super) fn rgb32(
 /// Reason for a failed Media Foundation call. `E_OUTOFMEMORY` means the decoder needed more than the worker's Job
 /// memory, so it is a limit, not missing codec support.
 #[cfg(any(test, windows))]
-pub(super) fn media_foundation(code: i32) -> String {
+pub(super) fn media_foundation(code: i32) -> Error {
     if code.cast_unsigned() == 0x8007_000E {
-        return "limit_exceeded: video worker memory".into();
+        return Error::new(Code::Memory, "video worker memory");
     }
-    format!("unsupported_codec: Media Foundation decoder or media support unavailable ({code:#x})")
+    Error::new(
+        if code.cast_unsigned() == 0xC00D_5212 {
+            Code::UnsupportedCodec { codec: None }
+        } else {
+            Code::DecodeFailed
+        },
+        format!("Media Foundation error {code:#x}"),
+    )
 }
 
 #[cfg(test)]
@@ -58,12 +68,15 @@ mod tests {
     fn media_foundation_out_of_memory_is_the_worker_memory_limit() {
         // E_OUTOFMEMORY: the decoder ran out of the worker's Job memory, not of codec support.
         assert_eq!(
-            media_foundation(0x8007_000E_u32.cast_signed()),
-            "limit_exceeded: video worker memory"
+            media_foundation(0x8007_000E_u32.cast_signed()).code,
+            Code::Memory
         );
+        let missing = media_foundation(0xC00D_5212_u32.cast_signed());
+        assert_eq!(missing.code, Code::UnsupportedCodec { codec: None });
+        assert!(missing.detail.contains("0xc00d5212"));
         assert_eq!(
-            media_foundation(0xC00D_5212_u32.cast_signed()),
-            "unsupported_codec: Media Foundation decoder or media support unavailable (0xc00d5212)"
+            media_foundation(0x8000_4005_u32.cast_signed()).code,
+            Code::DecodeFailed
         );
     }
     #[test]

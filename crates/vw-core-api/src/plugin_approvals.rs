@@ -129,6 +129,12 @@ impl PluginApprovals {
         Ok(())
     }
 
+    /// Hold the real sweep lock while a concurrency test observes unrelated command progress.
+    #[cfg(test)]
+    pub(crate) fn hold_sweep(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lock.lock().unwrap()
+    }
+
     /// Move every unapproved child, including invalid or linked plugin folders, before Vibe sees the root.
     /// Any failed move stops the loading request; existing destinations are never overwritten.
     pub(crate) fn sweep(&self) -> Result<(), CoreError> {

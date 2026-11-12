@@ -1,0 +1,77 @@
+/* Shared metadata and tab visuals. Badge and Tabs keep feature layout hooks; tokens own the look. */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font: var(--weight-medium) var(--text-11)/var(--leading-helper) var(--font-ui);
+  white-space: nowrap;
+}
+button.ui-badge {
+  cursor: pointer;
+}
+button.ui-badge:hover:where(:not(:disabled)) {
+  background: var(--hover);
+  color: var(--text);
+}
+.ui-badge[data-tone="ok"] {
+  color: var(--green);
+}
+.ui-badge[data-tone="warn"] {
+  color: var(--orange-3);
+}
+.ui-badge[data-tone="bad"] {
+  color: var(--red);
+}
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-control-gap);
+  min-height: var(--control-height-small);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font: var(--weight-medium) var(--text-12-5)/var(--leading-ui) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui-tab:hover:where(:not(:disabled)) {
+  background: var(--hover);
+  color: var(--text);
+}
+.ui-tab[aria-selected="true"] {
+  background: var(--active);
+  color: var(--text);
+}
+.ui-tab-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: var(--text-14)/var(--leading-ui) var(--font-ui);
+  cursor: pointer;
+}
+.ui-tab-close:hover:where(:not(:disabled)) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.ptab-group[data-selected="true"],
+.browser-page-tab:has([aria-selected="true"]) {
+  background: var(--active);
+}

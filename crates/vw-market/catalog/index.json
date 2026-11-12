@@ -204,7 +204,7 @@
       "summary": "Current, version-specific library documentation and code examples for the agent.",
       "licence": "MIT",
       "homepage": "https://context7.com",
-      "review": "Vendor's own Agent Plugins skill, read in full (research 11: no scripts, no credentials, network only through the Context7 server).",
+      "review": "Vendor's own Agent Plugins skill, read in full (no scripts, no credentials, network only through the Context7 server).",
       "notes": [
         "The agent's documentation questions are sent to Context7 as search queries.",
         "Uses Context7's public server without an account (rate-limited)."
@@ -245,7 +245,7 @@
       "summary": "Six Jira and Confluence workflows: triage, status reports, specs to backlog, meeting notes to tasks, sprint dashboard, knowledge search.",
       "licence": "Apache-2.0",
       "homepage": "https://github.com/atlassian/atlassian-mcp-server",
-      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; checked for Vibe compatibility and licence.",
+      "review": "Listed in an official agent plugin marketplace: safety review accepted; checked for Vibe compatibility and licence.",
       "notes": [
         "Works with the Atlassian connector from your Mistral account (Connectors tab).",
         "Not yet tested with Mistral models (planned)."
@@ -353,7 +353,7 @@
       "summary": "How to use the Grafana Cloud MCP server well: dashboards, queries, alerts and incidents.",
       "licence": "Apache-2.0",
       "homepage": "https://grafana.com",
-      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; checked for Vibe compatibility and licence.",
+      "review": "Listed in an official agent plugin marketplace: safety review accepted; checked for Vibe compatibility and licence.",
       "notes": [
         "Add the Grafana Cloud server too (MCP servers group).",
         "Not yet tested with Mistral models (planned)."
@@ -391,7 +391,7 @@
       "summary": "Six Canva workflows: edit a design, brand check, bulk create, design feedback, apply feedback, resize for social media.",
       "licence": "Apache-2.0",
       "homepage": "https://www.canva.dev",
-      "review": "Listed in an official agent plugin marketplace (research 11): safety review accepted; folders renamed to the skill names so Vibe loads them.",
+      "review": "Listed in an official agent plugin marketplace: safety review accepted; folders renamed to the skill names so Vibe loads them.",
       "notes": [
         "Add the Canva server too (MCP servers group).",
         "Not yet tested with Mistral models (planned)."
@@ -454,7 +454,7 @@
       "summary": "Search models, datasets, Spaces and papers on the Hugging Face Hub.",
       "licence": "n/a",
       "homepage": "https://huggingface.co",
-      "review": "Connects Hugging Face's own server without an account (it answered anonymously on 2026-10-10); no vendor files installed.",
+      "review": "Connects Hugging Face's own server without an account (it answered anonymously); no vendor files installed.",
       "notes": [
         "Anonymous use: public Hub data only."
       ],
@@ -477,7 +477,7 @@
       "summary": "Search Cloudflare's developer documentation.",
       "licence": "n/a",
       "homepage": "https://developers.cloudflare.com",
-      "review": "Connects Cloudflare's own documentation server, which needs no account (answered anonymously on 2026-10-10); no vendor files installed.",
+      "review": "Connects Cloudflare's own documentation server, which needs no account (answered anonymously); no vendor files installed.",
       "pack": {
         "version": "2026-10-10",
         "mcpServers": {
@@ -496,7 +496,7 @@
       "category": "code",
       "summary": "Projects, issues, merge requests and pipelines.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://gitlab.com/api/v4/mcp",
@@ -513,7 +513,7 @@
       "category": "observability",
       "summary": "Errors, issues and releases.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.sentry.dev/mcp",
@@ -530,7 +530,7 @@
       "category": "data",
       "summary": "Projects, databases, SQL and edge functions.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [
         "It can change your databases: point it at a development project first."
       ],
@@ -549,7 +549,7 @@
       "category": "data",
       "summary": "Serverless Postgres projects, branches and queries.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.neon.tech/mcp",
@@ -566,7 +566,7 @@
       "category": "data",
       "summary": "Bases, tables and records.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.airtable.com/mcp",
@@ -583,7 +583,7 @@
       "category": "design",
       "summary": "Boards, diagrams and sticky notes.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.miro.com/",
@@ -600,7 +600,7 @@
       "category": "design",
       "summary": "Designs, brand kits and exports.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.canva.com/mcp",
@@ -617,7 +617,7 @@
       "category": "observability",
       "summary": "Dashboards, metrics, logs and alerts in Grafana Cloud.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.grafana.com/mcp",
@@ -634,7 +634,7 @@
       "category": "search",
       "summary": "Web search and extraction built for agents.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.tavily.com/mcp",
@@ -651,7 +651,7 @@
       "category": "design",
       "summary": "Design files, components and variables.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.figma.com/mcp",
@@ -670,7 +670,7 @@
       "category": "code",
       "summary": "Deployments, projects and logs.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.vercel.com",
@@ -689,7 +689,7 @@
       "category": "work",
       "summary": "Boards, items and updates.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.monday.com/mcp",
@@ -708,7 +708,7 @@
       "category": "files",
       "summary": "Files and folders in Dropbox.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.dropbox.com/mcp",
@@ -727,7 +727,7 @@
       "category": "work",
       "summary": "Tasks, projects and goals.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.asana.com/v2/mcp",
@@ -746,7 +746,7 @@
       "category": "work",
       "summary": "Contacts, companies and deals.",
       "licence": "n/a",
-      "review": "Address and sign-in checked against the live server on 2026-10-10 (no account used).",
+      "review": "Address and sign-in checked against the live server (no account used).",
       "notes": [],
       "server": {
         "url": "https://mcp.hubspot.com/",
@@ -765,7 +765,7 @@
       "category": "code",
       "summary": "Repositories, issues, pull requests and Actions.",
       "licence": "n/a",
-      "review": "Address checked against the live server on 2026-10-10 (no account used): it asks for an Authorization header.",
+      "review": "Address checked against the live server (no account used): it asks for an Authorization header.",
       "notes": [
         "Use a fine-grained personal access token limited to the repositories and permissions you want the agent to have."
       ],

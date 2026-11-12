@@ -1,5 +1,7 @@
 //! `WebKitGTK` script-dialog and HTTP Basic continuations, held by native references on the GTK thread.
 //! Uses the shared dialog hub; proxy/TLS/other authentication stays with the existing native handlers.
+//! Depends on: GTK references and the shared dialog hub.
+//! Called by: the Linux webview dialog adapter.
 use super::{Admit, Hub, hold};
 use glib::translate::{ToGlibPtr, ToGlibPtrMut};
 use serde_json::json;

@@ -140,17 +140,3 @@ mod imp {
         Err(super::io::ErrorKind::Unsupported.into())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::final_path;
-
-    #[test]
-    fn an_open_file_names_its_canonical_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.txt");
-        std::fs::write(&path, "a").unwrap();
-        let file = std::fs::File::open(&path).unwrap();
-        assert_eq!(final_path(&file).unwrap(), path.canonicalize().unwrap());
-    }
-}

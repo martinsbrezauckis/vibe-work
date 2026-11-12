@@ -5,7 +5,7 @@
 use super::{PreviewError, PreviewService};
 use crate::console;
 use crate::engine::{EngineError, MountId, MountSpec};
-use crate::layout::{self, Placement};
+use crate::layout::Placement;
 use crate::state::{BrowserMountState, Mount, MountState};
 use url::Url;
 
@@ -159,7 +159,7 @@ impl PreviewService {
                 mount.rules_offered = Some(rules.clone());
             }
             // hidden, it still lays out at the size it would have if shown now.
-            let parked = layout::parked(last_area, state.entry(session_id).width);
+            let parked = state.entry(session_id).parked(last_area);
             (label, parked, rules, class)
         };
         #[cfg(feature = "e2e-script")]
@@ -191,7 +191,7 @@ impl PreviewService {
             rules: Some(rules),
             no_peer_connections: false,
         };
-        if let Err(error) = self.bounded("mount", self.engine.mount(spec)).await {
+        if let Err(error) = self.bounded("mount", self.mount_with_color(spec)).await {
             self.revoke_failed_mount(session_id, &label);
             let id = MountId {
                 session_id: session_id.to_owned(),

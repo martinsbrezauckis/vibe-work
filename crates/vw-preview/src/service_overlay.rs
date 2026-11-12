@@ -53,7 +53,7 @@ impl PreviewService {
                 )
             })?
             .area;
-        let bounds = layout::place(area, entry.width)
+        let bounds = layout::place_viewport(area, entry.width, entry.viewport)
             .map_err(PreviewError::Layout)?
             .bounds;
         Ok((self.mount_id(page, mount), bounds))

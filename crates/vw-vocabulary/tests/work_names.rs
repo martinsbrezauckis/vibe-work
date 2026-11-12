@@ -7,7 +7,7 @@ fn project_and_session_names_are_shared() {
         ("projectTab", "Project"),
         ("handbook", "handbook"),
         ("page", "page"),
-        ("session", "Session"),
+        ("session", "Chat"),
     ] {
         assert_eq!(
             vw_vocabulary::term("workNames", id).map(|term| term.name),
@@ -15,4 +15,11 @@ fn project_and_session_names_are_shared() {
         );
     }
     assert_eq!(vw_vocabulary::text("newChat"), Some("New chat"));
+}
+
+#[test]
+fn identical_copy_keeps_both_lookup_keys() {
+    for id in ["accessDefaultDescription", "defaultThinkingDescription"] {
+        assert_eq!(vw_vocabulary::text(id), Some("Applies to new chats."));
+    }
 }

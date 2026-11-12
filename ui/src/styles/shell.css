@@ -61,9 +61,6 @@ kbd {
   position: absolute;
   right: 0;
   top: 0;
-  color: var(--accent-ink);
-  background: var(--orange-3);
-  border-color: var(--chrome);
 }
 .brand {
   display: flex;
@@ -112,24 +109,6 @@ kbd {
   text-overflow: ellipsis;
 }
 /* Setup-derived forms inside Settings share the same controls without changing first-run screens. */
-.tb-btn,
-.set-cat-body .btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: none;
-  color: var(--text-2);
-  padding: 5px 8px;
-  border-radius: var(--radius-7);
-  cursor: pointer;
-  font-size: var(--text-12-5);
-}
-.tb-btn:hover:where(:not(:disabled)),
-.set-cat-body .btn-primary:hover:where(:not(:disabled)) {
-  background: var(--hover);
-  color: var(--text);
-}
 .dbg {
   display: inline-flex;
   align-items: center;
@@ -157,7 +136,7 @@ kbd {
   display: grid;
   grid-template-columns: 56px 284px minmax(0, 1fr) 0;
   min-height: 0;
-  transition: grid-template-columns 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-columns var(--t-layout) var(--ease-std);
 }
 .body.no-col {
   grid-template-columns: 56px 0 minmax(0, 1fr) 0;
@@ -346,7 +325,7 @@ kbd {
   color: var(--text-3);
 }
 .proj-h .caret {
-  transition: transform 0.15s;
+  transition: transform var(--t-fade) var(--ease-native);
 }
 .proj[data-open="true"] .proj-h .caret {
   transform: rotate(90deg);

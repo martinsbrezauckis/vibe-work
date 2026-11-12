@@ -13,6 +13,7 @@ use crate::state::Entry;
 /// Distinct even for two attempts at the same URL. Mount labels also change on every remount.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Navigation {
+    pub(crate) load_addresses: crate::load_addresses::LoadAddresses,
     generation: u64,
     pub(crate) pending: Option<Url>,
 }

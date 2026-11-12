@@ -103,7 +103,7 @@ export function SessionList() {
       data-testid="shell.session-list-aside-surface-1"
       className={`column${drawerOpen ? " drawer-open" : ""}${settings ? " is-settings" : ""}`}
       id="column"
-      aria-label={settings ? "Settings" : "Sessions"}
+      aria-label={settings ? "Settings" : "Chats"}
       ref={root}
       onKeyDown={(event) => {
         if (
@@ -153,7 +153,7 @@ export function SessionList() {
             <IconButton
               data-testid="shell.fold-sessions"
               icon="panel-left"
-              label="Fold sessions"
+              label="Fold chats"
               onClick={() => {
                 if (layout.editorSplit) shell.actions.unfoldChat();
                 else shell.actions.toggleList(true);
@@ -182,8 +182,8 @@ export function SessionList() {
               <Icon name="search" />
               <input
                 data-testid="shell.session-list-set-filter"
-                aria-label="Filter sessions"
-                placeholder="Filter sessions"
+                aria-label="Filter chats"
+                placeholder="Filter chats"
                 value={filter}
                 onChange={(e) => {
                   shell.actions.setFilter(e.target.value);
@@ -193,9 +193,9 @@ export function SessionList() {
             <IconButton
               data-testid="shell.session-list-set-include-archived"
               icon="archive"
-              label="Show archived sessions"
+              label="Show archived chats"
               aria-pressed={index.includeArchived}
-              title={index.includeArchived ? "Hide archived sessions" : "Show archived sessions"}
+              title={index.includeArchived ? "Hide archived chats" : "Show archived chats"}
               onClick={() => void core?.setIncludeArchived(!index.includeArchived)}
             />
           </div>
@@ -271,15 +271,15 @@ export function SessionList() {
             {model.total === 0 && (index.loaded || needsInstall) && error === null && (
               <EmptyState glyph="chat" small className="col-note">
                 {loadingSavedChats
-                  ? "Loading saved sessions…"
+                  ? "Loading saved chats…"
                   : searching
-                    ? "No sessions match."
-                    : "No sessions yet."}
+                    ? "No chats match."
+                    : "No chats yet."}
               </EmptyState>
             )}
             {error !== null && (
               <div className="col-note error">
-                <p>Could not load your sessions.</p>
+                <p>Could not load your chats.</p>
                 <p className="ui-help">{error}</p>
                 <Button
                   data-testid="sessions.session-list-retry"
@@ -307,7 +307,7 @@ export function SessionList() {
                 disabled={index.loading}
                 onClick={() => void core?.loadMore()}
               >
-                {index.loading ? "Loading…" : searching ? "Search older sessions" : "Load more"}
+                {index.loading ? "Loading…" : searching ? "Search older chats" : "Load more"}
               </button>
             )}
           </div>

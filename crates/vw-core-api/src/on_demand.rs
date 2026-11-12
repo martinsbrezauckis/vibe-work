@@ -396,6 +396,10 @@ pub(crate) async fn switch(
         // A restart's interrupted projection can wake this turn-end worker. Its old channel died:
         // leave the switch pending for a person's next action instead of recovering the old turn.
         if wait && !shared.channels.has_channel(&id) {
+            tracing::debug!(
+                session_id = id,
+                "on-demand tools remain pending: the session channel closed; send a new message to apply them"
+            );
             return Ok(());
         }
         if ready(&shared, &id) {

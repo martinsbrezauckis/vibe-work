@@ -74,7 +74,7 @@ export function ModelSettings() {
       )}
       {list !== null && list.models.length > 0 && (
         <div className="check">
-          <span>New sessions start with</span>
+          <span>New chats start with</span>
           <Selector
             testId="setup.model-settings-pick"
             label={TEXT.defaultModel}
@@ -100,7 +100,7 @@ export function ModelSettings() {
       )}
       {saved !== null && error === null && (
         <p className="key-field-hint" role="status">
-          Saved. New sessions start with {savedLabel}.
+          Saved. New chats start with {savedLabel}.
         </p>
       )}
       {error !== null && (
@@ -108,29 +108,31 @@ export function ModelSettings() {
           {error}
         </p>
       )}
-      <SelectRow
-        id="default-thinking"
-        label={TEXT.defaultThinkingLevel}
-        detail={TEXT.defaultThinkingDescription}
-        value={level ?? ""}
-        options={[
-          {
-            value: "",
-            label: TEXT.modelDefaultThinking,
-            tooltip: TEXT.modelDefaultThinkingDescription,
-          },
-          ...levels.map((l) => ({
-            value: l,
-            label: thinkingTerm(l).name,
-            tooltip: thinkingTerm(l).tooltip,
-          })),
-        ]}
-        disabled={list === null || model === undefined || saving}
-        setBy={null}
-        onChange={(value) => {
-          composer.setDefaultReasoning(value === "" ? null : value);
-        }}
-      />
+      {list !== null && (
+        <SelectRow
+          id="default-thinking"
+          label={TEXT.defaultThinkingLevel}
+          detail={TEXT.defaultThinkingDescription}
+          value={level ?? ""}
+          options={[
+            {
+              value: "",
+              label: TEXT.modelDefaultThinking,
+              tooltip: TEXT.modelDefaultThinkingDescription,
+            },
+            ...levels.map((l) => ({
+              value: l,
+              label: thinkingTerm(l).name,
+              tooltip: thinkingTerm(l).tooltip,
+            })),
+          ]}
+          disabled={model === undefined || saving}
+          setBy={null}
+          onChange={(value) => {
+            composer.setDefaultReasoning(value === "" ? null : value);
+          }}
+        />
+      )}
       {savedLevel !== null && level === null && model !== undefined && (
         <p className="key-field-hint" role="status">
           {wording(TEXT.thinkingUnavailable, {

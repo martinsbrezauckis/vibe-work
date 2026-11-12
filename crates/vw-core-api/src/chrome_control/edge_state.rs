@@ -33,6 +33,13 @@ fn state(data: &Value, browser: &str) -> Option<PairingState> {
     {
         return PairingState::firefox_window(state);
     }
+    if browser == "firefox:"
+        && data["profileId"]
+            .as_str()
+            .is_some_and(|id| id != "firefox:agent")
+    {
+        return None;
+    }
     if let Some(profile) = data["profileId"].as_str()
         && !profile.starts_with(browser)
     {
@@ -44,12 +51,17 @@ fn state(data: &Value, browser: &str) -> Option<PairingState> {
         profiles.iter().any(|p| {
             p["connected"] == true
                 && (event
-                    || p["profileId"]
-                        .as_str()
-                        .is_some_and(|p| p.starts_with(browser)))
+                    || p["profileId"].as_str().is_some_and(|p| {
+                        if browser == "firefox:" {
+                            p == "firefox:agent"
+                        } else {
+                            p.starts_with(browser)
+                        }
+                    }))
         })
     });
-    if data.get("profiles").is_none() && code.is_empty() {
+    // Action failures describe one operation, not the helper's connection state.
+    if data.get("profiles").is_none() && !code.starts_with("OWNER_") {
         return None;
     }
     if browser == "firefox:" {
@@ -68,7 +80,7 @@ fn state(data: &Value, browser: &str) -> Option<PairingState> {
 
 pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
     let owner = &shared.chrome_control.owner;
-    let mut changed = false;
+    let mut changed = super::firefox_sharing::observe(shared, data);
     for (browser, pairing) in [
         ("edge:", &owner.edge_pairing),
         ("firefox:", &owner.firefox_pairing),
@@ -77,8 +89,10 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
             continue;
         };
         let mut current = pairing.lock().unwrap_or_else(PoisonError::into_inner);
-        if browser == "edge:"
-            && super::remove::is_removed(shared, super::agent_browser::Browser::Edge)
+        if (browser == "edge:"
+            && super::remove::is_removed(shared, super::agent_browser::Browser::Edge))
+            || (browser == "firefox:"
+                && super::remove::is_removed(shared, super::agent_browser::Browser::Firefox))
         {
             continue;
         }
@@ -128,6 +142,15 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn action_refusals_do_not_change_browser_connection_state() {
+        for browser in ["chrome:", "edge:", "firefox:"] {
+            for code in ["OUTCOME_UNKNOWN", "UNSUPPORTED_ACTION", "INVALID_ARGS"] {
+                let reply = json!({"profileId":format!("{browser}agent"),"error":{"code":code}});
+                assert_eq!(state(&reply, browser), None, "{browser} {code}");
+            }
+        }
+    }
     #[test]
     fn chrome_connecting_survives_browser_scoping() {
         assert_eq!(
@@ -200,7 +223,7 @@ mod firefox_tests {
     #[test]
     fn a_firefox_connection_never_pairs_chrome_or_edge() {
         let data = json!({"profiles":[{"profileId":"firefox:same","connected":true}]});
-        assert_eq!(state(&data, "firefox:"), Some(PairingState::WindowOpen));
+        assert_eq!(state(&data, "firefox:"), Some(PairingState::WindowClosed));
         assert_eq!(state(&data, "chrome:"), Some(PairingState::Disconnected));
         assert_eq!(state(&data, "edge:"), Some(PairingState::Disconnected));
     }

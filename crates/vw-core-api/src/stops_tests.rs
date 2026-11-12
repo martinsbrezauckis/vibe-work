@@ -1,6 +1,19 @@
 //! Stop generation rules on a core without Vibe: a Stop moves the generation before it waits for any lock, a turn
 //! that ends failed or interrupted invalidates old decisions; Stop settles cards after runtime cancellation.
-use std::time::Duration;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Waker},
+};
+
+/// Poll once while the test holds the lock, then retain the queued future until the lock is released.
+fn queued(future: Pin<&mut impl Future>) {
+    assert!(
+        future
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+}
 
 use serde_json::json;
 use vw_ask::{Choice, Outcome};
@@ -14,35 +27,28 @@ async fn stop_session_moves_the_generation_before_it_waits_for_the_chat_lock() {
     let core = crate::offline_core::start("stops-before-lock").await;
     let scheduled = super::generation(&core.shared, "s");
     let held = core.shared.plugin_refresh.lock("s").await;
-    let continuation = {
-        let core = core.clone();
-        tokio::spawn(async move {
-            core.forward_unless_stopped(
-                "turn/start",
-                json!({"sessionId":"s","message":[{"type":"text","text":"continue"}],"injected":true}),
-                scheduled,
-            )
-            .await
-        })
-    };
-    // The continuation is first in the lock's queue (tokio's mutex is fair), then the Stop arrives.
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let stop = {
-        let core = core.clone();
-        tokio::spawn(async move {
-            core.execute(
-                Origin::Ui,
-                Command::StopSession {
-                    session_id: "s".into(),
-                },
-            )
-            .await
-        })
-    };
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let continuation = core.forward_unless_stopped(
+        "turn/start",
+        json!({"sessionId":"s","message":[{"type":"text","text":"continue"}],"injected":true}),
+        scheduled,
+    );
+    tokio::pin!(continuation);
+    // Polling while the lock is held puts this continuation first in Tokio's fair mutex queue.
+    queued(continuation.as_mut());
+    let stop = core.execute(
+        Origin::Ui,
+        Command::StopSession {
+            session_id: "s".into(),
+        },
+    );
+    tokio::pin!(stop);
+    let stop_poll = stop.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+    assert_ne!(super::generation(&core.shared, "s"), scheduled);
     drop(held);
-    let sent = continuation.await.unwrap();
-    let _ = stop.await.unwrap();
+    let sent = continuation.await;
+    if stop_poll.is_pending() {
+        let _ = stop.await;
+    }
     let error = sent.expect_err("nothing may be sent after the Stop");
     assert!(
         error.code == crate::ErrorCode::Denied && error.message.contains("stopped"),
@@ -320,15 +326,13 @@ async fn a_secret_completion_queued_before_a_stop_is_not_sent() {
         vw_session::LoadKind::New,
     );
     let held = shared.plugin_refresh.lock("s").await;
-    let finished = tokio::spawn(crate::ask::continuation::secret_finished(
-        shared.clone(),
-        "s".into(),
-        "secret-1".into(),
-    ));
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let finished =
+        crate::ask::continuation::secret_finished(shared.clone(), "s".into(), "secret-1".into());
+    tokio::pin!(finished);
+    queued(finished.as_mut());
     super::stopped(&shared, "s");
     drop(held);
-    let sent = finished.await.unwrap().expect("a running turn is woken");
+    let sent = finished.await.expect("a running turn is woken");
     let error = sent.expect_err("nothing may be sent after the Stop");
     assert!(super::refused_as_stopped(&error), "{error:?}");
 }

@@ -43,7 +43,7 @@ function shownSession(app: App, given: unknown): string {
   if (typeof given === "string" && given !== "") return given;
   const s = app.shell.store.get();
   const id = s.selected ?? (s.newFolder ? `files-workspace:${s.newFolder}` : null);
-  if (id === null) throw new UiControlError("invalidParams", "no session is selected");
+  if (id === null) throw new UiControlError("invalidParams", "no chat is selected");
   return id;
 }
 
@@ -119,9 +119,9 @@ function openDocument(
 ): string {
   const view = files.workspace.of(sessionId);
   const file = optional && input["file"] === undefined ? view.active : textField(input, "file");
-  if (file === null) throw new UiControlError("invalidParams", "no file is open in this session");
+  if (file === null) throw new UiControlError("invalidParams", "no file is open in this chat");
   if (view.documents[file] === undefined)
-    throw new UiControlError("notFound", "that file is not open in this session (see state.files)");
+    throw new UiControlError("notFound", "that file is not open in this chat (see state.files)");
   return file;
 }
 

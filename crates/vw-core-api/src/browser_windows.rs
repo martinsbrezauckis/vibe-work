@@ -1,5 +1,7 @@
 //! Agent window actions and the person's title-bar close, scoped to one chat's web pages.
 //! Reuses checked navigation, Stop, tab-close review and native preview window operations.
+//! Depends on: browser ownership, checked navigation and preview windows.
+//! Called by: browser command dispatch and title-bar close.
 use crate::{ask::tool_calls::receipts::Execution, core::Shared};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -60,6 +62,9 @@ pub(crate) fn prepare(
 ) -> Result<Execution, String> {
     current(shared, owner, None)?;
     let action = args["action"].as_str().unwrap_or_default();
+    if action == "window.list" {
+        return prepare_list(shared, owner, args);
+    }
     if args.get("tab").is_some() {
         return Err("Window actions take windowId, not tab. Use the windowId returned by window.open or list_tabs.".into());
     }
@@ -81,6 +86,13 @@ pub(crate) fn prepare(
         Some(page)
     };
     if action == "window.close" {
+        if page
+            .as_deref()
+            .and_then(|page| hub.service.page_window_id(page))
+            .is_none()
+        {
+            return Err("This browser tab is in the main window, which window.close cannot close. Use close_tab with its tab id to close only the page.".into());
+        }
         let close = crate::browser_tab_tools::prepare_close(
             shared,
             owner,
@@ -96,7 +108,7 @@ pub(crate) fn prepare(
             Ok(result)
         }));
     }
-    if !matches!(action, "window.open" | "window.focus") {
+    if !matches!(action, "window.open" | "window.focus" | "window.resize") {
         return Err("Unknown window action.".into());
     }
     let action = action.to_owned();
@@ -104,29 +116,16 @@ pub(crate) fn prepare(
     let weak = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Ok(Box::pin(async move {
-        let shared = weak.upgrade().ok_or("Browser closed.")?;
+        let shared = weak
+            .upgrade()
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?;
         current(&shared, &owner, page.as_deref())?;
         let hub = crate::previews::hub(&shared).map_err(|e| e.message)?;
         let _flight = hub.browser.sessions().begin(&owner, Actor::Agent);
         let result = if action == "window.open" {
             open(&shared, &owner, &args).await
         } else {
-            let id = args["windowId"].as_str().unwrap_or_default();
-            let info = hub
-                .service
-                .focus_page_window(&owner, id)
-                .await
-                .map_err(|e| e.to_string())?;
-            let page = page.as_deref().ok_or("Browser window closed.")?;
-            current(&shared, &owner, Some(page))?;
-            hub.service
-                .set_agent_page(&owner, page)
-                .map_err(|e| e.to_string())?;
-            let mut result = serde_json::to_value(info).map_err(|e| e.to_string())?;
-            result["action"] = json!("window.focus");
-            result["tab"] = json!(page);
-            result["Outcome"] = json!("Focused this chat's browser window.");
-            Ok(result)
+            update(&shared, &owner, &args, page.as_deref()).await
         };
         let (outcome, detail) = match &result {
             Ok(_) => (Outcome::Done, "Browser window updated"),
@@ -141,6 +140,35 @@ pub(crate) fn prepare(
             detail,
         );
         result
+    }))
+}
+
+fn prepare_list(shared: &Arc<Shared>, owner: &str, args: &Value) -> Result<Execution, String> {
+    if ["tab", "windowId", "url"]
+        .iter()
+        .any(|key| args.get(key).is_some())
+    {
+        return Err(
+            "window.list reads this chat's independent windows. Omit tab, windowId and url.".into(),
+        );
+    }
+    let weak = Arc::downgrade(shared);
+    let owner = owner.to_owned();
+    Ok(Box::pin(async move {
+        let shared = weak
+            .upgrade()
+            .ok_or(crate::browser_outcomes::SESSION_UNAVAILABLE)?;
+        current(&shared, &owner, None)?;
+        let hub = crate::previews::hub(&shared).map_err(|e| e.message)?;
+        let windows = hub
+            .service
+            .inspect_page_windows(&owner)
+            .await
+            .map_err(|e| e.to_string())?;
+        current(&shared, &owner, None)?;
+        Ok(
+            json!({"action":"window.list","windows":windows,"scope":"chat-owned independent windows"}),
+        )
     }))
 }
 
@@ -213,4 +241,46 @@ async fn open(shared: &Arc<Shared>, owner: &str, args: &Value) -> Result<Value, 
         let _ = hub.service.close_web_tab_and_restore(owner, &page).await;
     }
     result
+}
+
+async fn update(
+    shared: &Shared,
+    owner: &str,
+    args: &Value,
+    page: Option<&str>,
+) -> Result<Value, String> {
+    let hub = crate::previews::hub(shared).map_err(|e| e.message)?;
+    let id = args["windowId"].as_str().unwrap_or_default();
+    let resize = args["action"] == "window.resize";
+    let info = if resize {
+        let size = |key: &str, min| {
+            args[key]
+                .as_u64()
+                .filter(|n| (min..=4096).contains(n))
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| {
+                    format!("window.resize needs {key} between {min} and 4096 logical pixels.")
+                })
+        };
+        hub.service
+            .resize_page_window(owner, id, size("width", 400)?, size("height", 300)?)
+            .await
+    } else {
+        hub.service.focus_page_window(owner, id).await
+    }
+    .map_err(|e| e.to_string())?;
+    let page = page.ok_or("Browser window closed.")?;
+    current(shared, owner, Some(page))?;
+    hub.service
+        .set_agent_page(owner, page)
+        .map_err(|e| e.to_string())?;
+    let mut result = serde_json::to_value(info).map_err(|e| e.to_string())?;
+    result["action"] = args["action"].clone();
+    result["tab"] = json!(page);
+    result["Outcome"] = json!(if resize {
+        "Resized this chat's browser window and measured its content area."
+    } else {
+        "Focused this chat's browser window."
+    });
+    Ok(result)
 }

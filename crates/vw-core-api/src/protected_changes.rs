@@ -290,7 +290,7 @@ impl Drop for Cancel {
                 false,
                 None,
                 Some(vw_ask::Outcome::Cancelled {
-                    reason: "the caller disconnected".into(),
+                    reason: "the request ended".into(),
                 }),
             );
         }

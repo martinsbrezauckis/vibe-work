@@ -48,12 +48,14 @@ mod linux {
                     | gdk::EventType::DoubleButtonPress
                     | gdk::EventType::TripleButtonPress
                     | gdk::EventType::TouchBegin
+                    | gdk::EventType::KeyPress
             );
             let release = matches!(
                 event.event_type(),
                 gdk::EventType::ButtonRelease
                     | gdk::EventType::TouchEnd
                     | gdk::EventType::TouchCancel
+                    | gdk::EventType::KeyRelease
             );
             if (press || release) && !OWN_INPUT.with(Cell::get) {
                 observed(press);
@@ -134,9 +136,17 @@ mod macos {
 
     fn dispatched(event: &NSEvent, main: MainThreadMarker) {
         let kind = event.r#type();
+        let keyboard = matches!(
+            kind,
+            NSEventType::KeyDown | NSEventType::KeyUp | NSEventType::FlagsChanged
+        );
         let press = matches!(
             kind,
-            NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
+            NSEventType::KeyDown
+                | NSEventType::FlagsChanged
+                | NSEventType::LeftMouseDown
+                | NSEventType::RightMouseDown
+                | NSEventType::OtherMouseDown
         );
         let Some(window) = event.window(main) else {
             return;
@@ -151,7 +161,15 @@ mod macos {
                 if view.window().as_deref() != Some(&*window) {
                     continue;
                 }
-                let within = inside(&view, event.locationInWindow());
+                let within = if keyboard {
+                    window.firstResponder().is_some_and(|responder| {
+                        responder.downcast_ref::<NSView>().is_some_and(|target| {
+                            std::ptr::eq(target, &raw const *view) || target.isDescendantOf(&view)
+                        })
+                    })
+                } else {
+                    inside(&view, event.locationInWindow())
+                };
                 // A release counts where it happens, or wherever it ends a press that began in the view.
                 if within || (!press && entry.pressed_inside.get()) {
                     entry.pressed_inside.set(press && within);
@@ -187,7 +205,10 @@ mod macos {
                 | NSEventMask::RightMouseDown
                 | NSEventMask::RightMouseUp
                 | NSEventMask::OtherMouseDown
-                | NSEventMask::OtherMouseUp;
+                | NSEventMask::OtherMouseUp
+                | NSEventMask::KeyDown
+                | NSEventMask::KeyUp
+                | NSEventMask::FlagsChanged;
             // SAFETY: the handler returns the event it was given (never null), as AppKit requires.
             let added =
                 unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) }

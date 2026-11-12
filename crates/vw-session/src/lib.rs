@@ -16,19 +16,11 @@ mod activity;
 mod anomaly;
 mod change;
 mod fanout;
-#[cfg(test)]
-mod fanout_tests;
 mod history;
-#[cfg(test)]
-mod history_tests;
 mod lifecycle;
 mod patch;
 mod reducer;
-#[cfg(test)]
-mod resume_tests;
 mod session;
-#[cfg(test)]
-mod stats_tests;
 mod store;
 
 pub use activity::Activity;

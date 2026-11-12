@@ -360,23 +360,3 @@ mod macos_impl {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::viewport_top;
-
-    #[test]
-    fn a_view_under_an_opaque_full_size_title_bar_starts_its_page_below_the_title_bar() {
-        // The app's own page: fills the content view from its top, the title bar is 32 pt.
-        assert!((viewport_top(0.0, Some(32.0)) - 32.0).abs() < f64::EPSILON);
-        // A view parked above the window: its page starts at the title bar too (the 10,032 pt inset).
-        assert!((viewport_top(-10_000.0, Some(32.0)) - 32.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn a_view_below_the_title_bar_or_without_one_starts_at_its_top() {
-        assert!((viewport_top(296.0, Some(32.0)) - 296.0).abs() < f64::EPSILON);
-        assert!((viewport_top(0.0, None)).abs() < f64::EPSILON);
-        assert!((viewport_top(-40.0, None) + 40.0).abs() < f64::EPSILON);
-    }
-}

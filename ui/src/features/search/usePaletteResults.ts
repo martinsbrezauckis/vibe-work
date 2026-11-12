@@ -29,7 +29,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
       .map((s) => ({
         id: `session:${s.id}`,
         label: s.title,
-        section: "Sessions",
+        section: "Chats",
         keywords: [s.preview, s.cwd ?? "", ...s.extraFolders, s.model ?? ""].join(" "),
         hint: s.project,
         run: () => {
@@ -49,7 +49,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
               path: [s?.project ?? "", c.label].filter((p) => p !== ""),
               hint: s?.project,
               detail: s?.preview ?? "",
-              opens: "Opens the session where you left it",
+              opens: "Opens the chat where you left it",
               run: c.run,
             };
           });

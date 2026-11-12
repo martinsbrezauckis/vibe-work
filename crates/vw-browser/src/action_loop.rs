@@ -40,13 +40,17 @@ impl Browser {
         nav: &dyn Navigate,
         allow_send: bool,
     ) -> Result<Value, ActError> {
-        let action = self.bind_point(session_id, action)?;
-        let target = self.target_text(session_id, &action);
+        // The person's Stop is checked first: no later guard (point binding, an unresolved earlier input) may
+        // answer a stopped agent with a different instruction.
         if by == Actor::Agent && self.sessions.stopped(session_id) {
+            let target = self.target_text(session_id, &action);
             let error = refused(STOPPED);
             self.log(session_id, by, &action, &target, &Err(error.clone()));
             return Err(error);
         }
+        let action = self.bind_point(session_id, action)?;
+        let unknown_key = self.check_unknown_input(session_id, &action, by)?;
+        let target = self.target_text(session_id, &action);
         if !matches!(action, Action::Dialog(_))
             && let Some(receipt) = self.dialog_receipt(session_id)
         {
@@ -56,12 +60,8 @@ impl Browser {
             self.log(session_id, by, &action, &target, &Err(error.clone()));
             return Err(error);
         }
-        if self
-            .sessions
-            .state(session_id)
-            .pending_native_click
-            .is_some()
-        {
+        let state = self.sessions.state(session_id);
+        if state.pending_native_click.is_some() {
             return Err(refused(crate::native_focus::CLICK_WAITING));
         }
         let _flight = self.sessions.begin(session_id, by);
@@ -124,13 +124,19 @@ impl Browser {
             self.send_before_action(session_id, &action, authorization_token.as_ref())
                 .await?;
         }
-        let result = Self::finish_native_action(result, native_sent.load(Ordering::Acquire));
+        let result = self.finish_unknown_input(
+            session_id,
+            unknown_key,
+            result,
+            native_sent.load(Ordering::Acquire),
+        );
         if result
             .as_ref()
             .is_err_and(|error| error.text == crate::SEND_REQUIRED)
         {
             return result;
         }
+        let result = self.record_action(session_id, &action, by, result).await;
         self.log(session_id, by, &action, &target, &result);
         result
     }
@@ -163,9 +169,9 @@ impl Browser {
     }
 }
 
-/// First sentence of every act that failed or stopped after native mouse input was sent. `vw-agent-tools`' MCP layer
+/// First sentence of every act that failed or stopped after native input was sent. `vw-agent-tools`' MCP layer
 /// matches it as an exact prefix to keep such a failure from being reported as "Not run:".
-pub const POST_INPUT_FAILED: &str = "Stopped or failed after native mouse input was sent.";
+pub const POST_INPUT_FAILED: &str = "Stopped or failed after native input was sent.";
 
 /// Why a repeat is risky after input was sent, and what to do instead.
 const POST_INPUT_ADVICE: &str = "The page may have acted on it, so repeating the act could do it twice. Do not repeat the act; check the Browser tab.";

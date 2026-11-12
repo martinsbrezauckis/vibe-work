@@ -15,6 +15,16 @@
     .ptab-label {
     display: none;
   }
+  /* Icon-only tool tabs keep the shared control gap as their inset, leaving room for file names. */
+  .ptabs:has(
+      .ptab-group:not(.file-panel-tab)
+        ~ .ptab-group:not(.file-panel-tab)
+        ~ .ptab-group:not(.file-panel-tab)
+    )
+    .ptab-group:not(.file-panel-tab)
+    .ptab:has(.ptab-label) {
+    padding-inline: var(--space-control-gap);
+  }
 }
 /* A file tab shrinks to 92 px (the strip's fit counts the same width): short name, full path on hover. */
 .file-panel-tab {
@@ -25,8 +35,6 @@
 .file-panel-tab .ptab {
   min-width: 0;
   flex: 1;
-  gap: 5px;
-  padding-left: 8px;
 }
 .file-panel-name {
   overflow: hidden;

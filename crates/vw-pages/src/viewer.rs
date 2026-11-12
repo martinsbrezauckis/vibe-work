@@ -280,6 +280,12 @@ impl PreviewHooks for ViewerHooks {
                 viewer.loading = false;
                 keep = false;
             }
+            // A newer open can await layout while the previous document finishes
+            // after a theme remount. Keep the pending target until show() sends its
+            // navigation and updates the mount; external URLs are still refused above.
+            _ if viewer.loading && (viewer.path != mount.path || viewer.anchor != mount.anchor) => {
+                return true;
+            }
             PageEvent::Started(url) => {
                 viewer.loading = true;
                 if url.as_str() != "about:blank" {

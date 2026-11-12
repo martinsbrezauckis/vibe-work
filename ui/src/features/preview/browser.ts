@@ -96,6 +96,7 @@ export function createBrowser(
   const store = createStore<BrowserUi>(initial);
   let counter = 0;
   const tabsRead = new Map<string, number>();
+  const ended = new Set<string>();
 
   const run = async (request: BrowserRequest): Promise<BrowserResult> => {
     const result = await core.run({ type: "browser", request });
@@ -428,10 +429,20 @@ export function createBrowser(
   });
 
   const stopListening = core.listen((event) => {
+    // Teardown can publish preview changes after the session was removed (including settings helpers).
+    // Do not read a closed owner or let its refusal become the result of the action that removed it.
+    if (event.type === "change" && event.change.kind === "removed") {
+      const id = event.change.sessionId;
+      ended.add(id);
+      tabsRead.set(id, (tabsRead.get(id) ?? 0) + 1);
+      return;
+    }
+    if (event.type === "snapshot") ended.delete(event.snapshot.sessionId);
     if (event.type !== "browserChanged" && event.type !== "previewChanged") return;
     const states = store.get().states;
     const ids = event.sessionId === null ? Object.keys(states) : [event.sessionId];
     for (const id of ids) {
+      if (ended.has(id)) continue;
       if (event.type === "browserChanged") void controller.load(id);
       void controller.loadTabs(id);
     }

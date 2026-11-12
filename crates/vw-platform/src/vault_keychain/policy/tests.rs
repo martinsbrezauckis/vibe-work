@@ -9,6 +9,8 @@ struct Fake {
     fail: Option<&'static str>,
     prepared: bool,
     marked: bool,
+    legacy: Option<Vec<u8>>,
+    corrupt_created: bool,
 }
 impl Fake {
     fn new(binding: Option<Binding>) -> Self {
@@ -19,6 +21,8 @@ impl Fake {
             fail: None,
             prepared: false,
             marked: false,
+            legacy: None,
+            corrupt_created: false,
         }
     }
     fn call(&mut self, call: &'static str) -> Result<(), String> {
@@ -47,10 +51,24 @@ impl Keychain for Fake {
     fn create_bound(&mut self, secret: &[u8]) -> Result<(), String> {
         self.call("create with access and marker")?;
         assert!(self.prepared);
-        assert!(self.binding.is_none());
+        assert_ne!(self.binding, Some(Binding::Bound));
+        if self.binding == Some(Binding::Legacy) {
+            self.legacy = Some(self.value.clone());
+        }
         self.binding = Some(Binding::Bound);
         self.marked = true;
-        self.value = secret.to_vec();
+        self.value = if self.corrupt_created {
+            b"wrong value".to_vec()
+        } else {
+            secret.to_vec()
+        };
+        Ok(())
+    }
+    fn verify_bound(&mut self, secret: &[u8]) -> Result<(), String> {
+        self.call("verify")?;
+        if self.binding != Some(Binding::Bound) || self.value != secret {
+            return Err("verification failed".to_owned());
+        }
         Ok(())
     }
     fn update(&mut self, secret: &[u8]) -> Result<(), String> {
@@ -58,9 +76,11 @@ impl Keychain for Fake {
         self.value = secret.to_vec();
         Ok(())
     }
-    fn delete(&mut self) -> Result<(), String> {
-        self.call("delete")?;
-        self.binding = None;
+    fn delete_legacy(&mut self) -> Result<(), String> {
+        if self.legacy.is_some() {
+            self.call("delete old")?;
+            self.legacy = None;
+        }
         Ok(())
     }
 }
@@ -88,8 +108,9 @@ fn unbound_migrates_once_and_preserves_value_across_reopen() {
             "inspect",
             "read",
             "prepare",
-            "delete",
-            "create with access and marker"
+            "create with access and marker",
+            "verify",
+            "delete old"
         ]
     );
     // Only persistent item state survives a new adapter/process, not an in-memory migration flag.
@@ -142,8 +163,9 @@ fn legacy_write_authorizes_old_value_before_replacement() {
             "inspect",
             "read",
             "prepare",
-            "delete",
-            "create with access and marker"
+            "create with access and marker",
+            "verify",
+            "delete old"
         ]
     );
     assert_eq!(store.value, b"rotated device key");
@@ -162,22 +184,22 @@ fn missing_read_does_not_create_a_key() {
 }
 
 #[test]
-fn preparation_or_delete_failure_keeps_legacy_item_and_never_retries() {
-    for failure in ["prepare", "delete"] {
-        let mut store = Fake::new(Some(Binding::Legacy));
-        store.fail = Some(failure);
-        assert_eq!(get(&mut store).unwrap_err(), format!("refused {failure}"));
-        assert_eq!(store.binding, Some(Binding::Legacy));
-        assert_eq!(store.calls.last(), Some(&failure));
-    }
+fn preparation_failure_keeps_legacy_item_and_never_retries() {
+    let mut store = Fake::new(Some(Binding::Legacy));
+    store.fail = Some("prepare");
+    assert_eq!(get(&mut store).unwrap_err(), "refused prepare");
+    assert_eq!(store.binding, Some(Binding::Legacy));
+    assert_eq!(store.calls.last(), Some(&"prepare"));
 }
 
 #[test]
-fn creation_failure_is_reported_once_without_returning_a_remembered_secret() {
+fn creation_failure_keeps_the_legacy_item_without_returning_a_remembered_secret() {
     let mut store = Fake::new(Some(Binding::Legacy));
     store.fail = Some("create with access and marker");
     assert!(get(&mut store).is_err());
-    assert_eq!(store.binding, None);
+    assert_eq!(store.binding, Some(Binding::Legacy));
+    assert_eq!(store.value, b"old owner key");
+    assert!(!store.calls.contains(&"delete old"));
     assert_eq!(
         store
             .calls
@@ -216,4 +238,55 @@ fn repeated_callers_do_not_repeat_a_refused_prompt() {
     // Explicit mode switching removes the old credential and permits fresh creation.
     attempts.removed("vault", "device");
     assert!(attempts.run("vault", "device", || Ok(())).is_ok());
+}
+
+#[test]
+fn failed_verification_keeps_the_old_item_for_reads_and_writes() {
+    for write in [false, true] {
+        for corrupt in [false, true] {
+            let mut store = Fake::new(Some(Binding::Legacy));
+            store.corrupt_created = corrupt;
+            if !corrupt {
+                store.fail = Some("verify");
+            }
+            let result = if write {
+                set(&mut store, b"new key")
+            } else {
+                get(&mut store).map(|_| ())
+            };
+            assert!(result.is_err());
+            assert_eq!(store.legacy.as_deref(), Some(b"old owner key".as_slice()));
+            assert!(!store.calls.contains(&"delete old"));
+            // A new adapter sees a bound replacement but has no proof that verification succeeded.
+            store.fail = None;
+            store.calls.clear();
+            let _ = get(&mut store);
+            assert_eq!(store.legacy.as_deref(), Some(b"old owner key".as_slice()));
+            assert!(!store.calls.contains(&"delete old"));
+        }
+    }
+}
+
+#[test]
+fn failed_add_keeps_the_old_value_when_setting_a_new_secret() {
+    let mut store = Fake::new(Some(Binding::Legacy));
+    store.fail = Some("create with access and marker");
+    assert!(set(&mut store, b"new key").is_err());
+    assert_eq!(store.binding, Some(Binding::Legacy));
+    assert_eq!(store.value, b"old owner key");
+}
+
+#[test]
+fn failed_cleanup_keeps_both_values_without_guessing_at_verification_on_reopen() {
+    let mut store = Fake::new(Some(Binding::Legacy));
+    store.fail = Some("delete old");
+    assert!(get(&mut store).is_err());
+    assert_eq!(store.binding, Some(Binding::Bound));
+    assert_eq!(store.legacy.as_deref(), Some(b"old owner key".as_slice()));
+    assert_eq!(store.value, b"old owner key");
+    store.fail = None;
+    store.calls.clear();
+    assert_eq!(&*get(&mut store).unwrap().unwrap(), b"old owner key");
+    assert_eq!(store.calls, ["inspect", "read"]);
+    assert_eq!(store.legacy.as_deref(), Some(b"old owner key".as_slice()));
 }

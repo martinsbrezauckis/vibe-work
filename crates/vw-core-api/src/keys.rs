@@ -590,23 +590,3 @@ pub(crate) async fn execute(
             .and(done),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::KeyRequest;
-    use serde_json::json;
-
-    #[test]
-    fn retired_key_operations_are_unknown() {
-        for op in ["listKeyCandidates", "useExistingKey"] {
-            let mut request = json!({"op":op});
-            if op == "useExistingKey" {
-                request["itemId"] = json!("saved-key");
-            }
-            assert!(
-                serde_json::from_value::<KeyRequest>(request).is_err(),
-                "{op} remains accepted"
-            );
-        }
-    }
-}

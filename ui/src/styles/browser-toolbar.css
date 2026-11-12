@@ -75,11 +75,6 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   gap: 5px;
   padding-inline: 3px;
 }
-.browser-strip .preview-btn {
-  padding: 3px 6px;
-  border-color: var(--orange-2);
-  color: var(--orange-2);
-}
 .browser-strip[data-state="stopped"] .preview-btn {
   color: var(--text-2);
   border-color: var(--line-2);
@@ -103,7 +98,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   background: var(--text-3);
 }
 .browser-strip[data-state="acting"] .browser-strip-dot {
-  animation: browser-pulse 1.2s ease-in-out infinite;
+  animation: browser-pulse var(--t-busy-fast) var(--ease-pulse) infinite;
 }
 @keyframes browser-pulse {
   50% {
@@ -222,10 +217,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
 }
 .browser-controls-content[data-collapsed="true"] .preview-save-control > .preview-btn {
   flex: 1;
-  border: 0;
-  background: transparent;
   text-align: left;
-  padding: 7px 9px;
 }
 .browser-controls-content[data-collapsed="true"] .preview-save-menu {
   flex-basis: 100%;

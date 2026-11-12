@@ -1,12 +1,23 @@
 // Bounded form label/context discovery for the shared page scripts. Depends on common.js helpers;
 // used by observation, labelOf and form prioritization. Context never reads input values.
 /* global REQ, clip, fieldLabelText, hideKeys, matches, secretKind, vaultFilled, visible -- Shared script helpers. */
-/* exported formControl, nearbyLabel, controlSearchText, labelledToggle */
+/* exported formControl, nearbyLabel, controlSearchText, labelledToggle, labelledSubmit */
 const labelledToggle = el => el.localName === "label" && el.control &&
   matches(el.control, 'input[type=checkbox],input[type=radio]') ? el.control : null;
+// Native label activation also reaches a hidden submitter, without a role or pointer cursor on its label.
+const labelledSubmit = el => el.localName === "label" && el.control &&
+  ["submit", "image"].includes(el.control.type) ? el.control : null;
+// A shadow label can be an empty slot in DOM text while its assigned content is the visible label.
+/* exported renderedLabelText */
+const renderedLabelText = el => {
+  const text = el.innerText || el.textContent || "";
+  if (text.trim()) return text;
+  const slots = el.localName === "slot" ? [el] : Array.from(el.querySelectorAll("slot"));
+  return slots.map(slot => slot.assignedNodes({flatten:true}).map(node => node.textContent || "").join(" ")).join(" ");
+};
 const formControl = el => matches(el,
   'input:not([type=hidden]),textarea,select,[role=textbox],[role=searchbox],[role=combobox],' +
-  '[role=checkbox],[role=radio],[role=switch],[role=slider],[contenteditable=""],[contenteditable=true]') ||
+  '[role=checkbox],[role=radio],[role=switch],[role=slider],[contenteditable=""],[contenteditable=true],[contenteditable=plaintext-only]') ||
   Boolean(labelledToggle(el));
 
 // Many forms put an unassociated label in one column and a custom widget in the next. Only a small

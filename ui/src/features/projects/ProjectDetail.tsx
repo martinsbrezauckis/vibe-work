@@ -9,7 +9,8 @@
  * Invariants: renders only; page text is plain text; handbook requests send user messages;
  * the agent writes the files, the app never does.
  */
-import { Button } from "../../components/Controls";
+import { TEXT } from "../../vocabulary";
+import { Button, LinkButton } from "../../components/Controls";
 import { type ReactElement, useEffect, useRef } from "react";
 
 import { Icon } from "../../components/Icon";
@@ -142,14 +143,14 @@ function NoFolderDetail({
             shape="outlined"
             onClick={actions.newSession}
           >
-            New session
+            {TEXT.newChat}
           </Button>
         </div>
       </div>
       {sessions.length > 0 && (
         <div className="pj-dsec">
           <h4>
-            <span>Sessions</span>
+            <span>Chats</span>
             <span>{sessions.length}</span>
           </h4>
           <div className="pj-sess">
@@ -300,7 +301,7 @@ function FolderDetail({
                 actions.openHandbook(null);
               }}
             >
-              {sessions.length > 0 ? "Open handbook" : "Open in a new session"}
+              {sessions.length > 0 ? "Open handbook" : "Open in a new chat"}
             </Button>
           )}
           <Button
@@ -310,7 +311,7 @@ function FolderDetail({
             shape="outlined"
             onClick={actions.newSession}
           >
-            New session
+            {TEXT.newChat}
           </Button>
           <Button
             data-testid="projects.project-detail-pj-btn-5"
@@ -338,10 +339,9 @@ function FolderDetail({
         !book.truncated &&
         !book.groups.some((g) => g.pages.some((p) => p.kind === "plan")) && (
           <div className="pj-dsec">
-            <button
+            <LinkButton
               data-testid="projects.project-detail-ask-plan"
-              type="button"
-              className="pages-plan-link"
+
               onClick={(event) => {
                 actions.askPlan(event.nativeEvent.isTrusted);
               }}
@@ -349,13 +349,13 @@ function FolderDetail({
               title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
             >
               Ask Vibe to write a plan page
-            </button>
+            </LinkButton>
           </div>
         )}
       {sessions.length > 0 && (
         <div className="pj-dsec">
           <h4>
-            <span>Sessions</span>
+            <span>Chats</span>
             <span>{sessions.length}</span>
           </h4>
           <div className="pj-sess">

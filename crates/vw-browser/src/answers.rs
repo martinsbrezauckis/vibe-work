@@ -56,6 +56,7 @@ fn input_refusal(answer: &PageAnswer) -> Option<String> {
         }
         "unsupportedPicker" => Some("Clicking this native colour picker is unsupported because its panel cannot be controlled through page refs. Use browser_act type with this field's ref and text in #RRGGBB format to set the colour.".to_owned()),
         "unsupportedInputSelect" => Some("Selecting an option is unsupported for this input because it is not a select box. Use browser_act type with this ref and the required value in text.".to_owned()),
+        "unsupportedSelectKey" => Some("This key opens a native select popup whose completion cannot be read through page refs. Use browser_act select with this ref and the option value instead.".to_owned()),
         "unsupportedNativeKey" => Some("This key is unsupported for the control's native editor because page key events do not perform its native editing action. Use browser_act type with this field's ref and the required value in text.".to_owned()),
         _ => None,
     }
@@ -92,9 +93,11 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                 }
                 Action::Select { .. } => "The selected option did not become the requested option; the page did not accept the change.".to_owned(),
                 Action::Type { .. } => "The field does not contain the requested text; the page did not accept the change.".to_owned(),
+                Action::Upload { .. } => "The page replaced or rejected the requested file selection after its input/change handlers ran. Inspect the file field before deciding whether to attach the files again.".to_owned(),
                 _ => "The page did not accept the requested change.".to_owned(),
             },
         }),
+        "nativeKeyboardFocus" => Err(refused("The browser did not focus this field, so no keyboard input was sent. Use a checked page.click on the field, then read the page before typing again.")),
         "stale" | "ambiguous" => Err(refused(format!(
             "ref {reference} is not on the page any more (the page changed since your last browser_read): call \
              browser_read again and use a fresh ref"

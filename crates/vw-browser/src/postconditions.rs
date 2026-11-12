@@ -19,9 +19,20 @@ impl Browser {
     ) -> Result<(), ActError> {
         if matches!(
             action,
-            Action::Check { .. } | Action::Select { .. } | Action::Type { submit: false, .. }
+            Action::ScrollMotion(_)
+                | Action::Control(_)
+                | Action::Check { .. }
+                | Action::Select { .. }
+                | Action::Upload { .. }
+                | Action::Type { submit: false, .. }
         ) {
             let proved = self.prove_state(session, action).await?;
+            if let Some(files) = proved.uploaded {
+                result["files"] = files;
+            }
+            if let Some(scroll) = proved.scroll {
+                result["scroll"] = scroll;
+            }
             if let Some(checked) = proved.checked {
                 result["checked"] = json!(checked);
             }
@@ -37,7 +48,13 @@ impl Browser {
         session: &str,
         action: &Action,
     ) -> Result<PageAnswer, ActError> {
-        let mount = self.ref_mount(session)?;
+        let mount = if action.reference().is_some() {
+            self.ref_mount(session)?
+        } else {
+            self.service
+                .page_mount(session)
+                .ok_or_else(|| refused(PAGE_CLOSED))?
+        };
         let page = self
             .service
             .page_accessor(session)
@@ -77,13 +94,15 @@ impl Browser {
         press["action"] = json!("press");
         press["key"] = json!("Enter");
         press["expectedText"] = request["text"].clone();
+        press["nativeKeyboard"] = json!(true);
+        press["keyboard"] = json!({"key":"Enter","modifiers":[],"expectedText":request["text"]});
         let answer: PageAnswer = self
             .run_act(
                 session,
                 scripts::act(&press),
                 Some(&mount),
                 self.dispatch_permission_check(session, by),
-                true,
+                false,
             )
             .await
             .map_err(failed)?;
@@ -97,7 +116,27 @@ impl Browser {
                 )
             })
             .map_err(failed)?;
-        proved.effect = answers::interpret(answer, action)?.effect;
+        let answer = answers::interpret(answer, action)?;
+        let point = answer.native_point.ok_or_else(|| {
+            refused(
+                "The field could not prepare native Enter. Read the field again before submitting.",
+            )
+        })?;
+        let key = Action::Press {
+            key: "Enter".into(),
+            reference: action.reference().map(str::to_owned),
+        };
+        let native = self
+            .native_ref_click(
+                session,
+                &key,
+                &press,
+                point,
+                by,
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await?;
+        proved.effect = native.effect;
         Ok(proved)
     }
 }

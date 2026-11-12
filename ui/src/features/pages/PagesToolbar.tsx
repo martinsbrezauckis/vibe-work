@@ -5,40 +5,12 @@
  * Depends on: components/Icon, protocol types. Called by: PagesTab.
  * Invariants: renders only; every button calls a prop; the path is plain text (never markup).
  */
-import { Button } from "../../components/Controls";
+import { Button, IconButton } from "../../components/Controls";
 import { term } from "../../vocabulary";
 import { formatKeys } from "../../state/shortcuts";
 import type { ReactElement } from "react";
 
-import { Icon, type IconName } from "../../components/Icon";
-
-function Tool({
-  testId,
-  icon,
-  label,
-  onClick,
-  disabled,
-}: {
-  icon: IconName;
-  testId: string;
-  label: string;
-  onClick: () => void;
-  disabled: boolean;
-}): ReactElement {
-  return (
-    <button
-      data-testid={testId}
-      type="button"
-      className="ibtn"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <Icon name={icon} size={14} />
-    </button>
-  );
-}
+import { Icon } from "../../components/Icon";
 
 /** Toolbar actions. */
 export interface ToolbarActions {
@@ -85,22 +57,25 @@ export function PagesToolbar({
         <Icon name="book-open" size={14} />
         Handbook
       </Button>
-      <Tool
-        testId="pages.toolbar-back"
+      <IconButton
+        iconSize={14}
+        data-testid="pages.toolbar-back"
         icon="arrow-left"
         label="Back"
         disabled={!onPage || busy}
         onClick={actions.back}
       />
-      <Tool
-        testId="pages.toolbar-forward"
+      <IconButton
+        iconSize={14}
+        data-testid="pages.toolbar-forward"
         icon="arrow-right"
         label="Forward"
         disabled={!onPage || busy}
         onClick={actions.forward}
       />
-      <Tool
-        testId="pages.toolbar-reload"
+      <IconButton
+        iconSize={14}
+        data-testid="pages.toolbar-reload"
         icon="refresh-cw"
         label="Reload"
         disabled={busy}
@@ -161,8 +136,9 @@ export function PagesToolbar({
             >
               Point Vibe at this
             </Button>
-            <Tool
-              testId="pages.toolbar-share"
+            <IconButton
+              iconSize={14}
+              data-testid="pages.toolbar-share"
               icon="download"
               label="Share as one file (styles, images and your answers in one HTML file)"
               disabled={!onPage || busy}

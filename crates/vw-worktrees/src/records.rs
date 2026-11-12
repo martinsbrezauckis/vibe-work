@@ -207,9 +207,12 @@ impl Records {
         };
         let bytes = serde_json::to_vec_pretty(record)
             .map_err(|e| WorktreeError::io("encode", &path, std::io::Error::other(e)))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes).map_err(|e| WorktreeError::io("write", &tmp, e))?;
-        std::fs::rename(&tmp, &path).map_err(|e| WorktreeError::io("replace", &path, e))
+        vw_platform::atomic_file::replace_file(
+            &path,
+            &bytes,
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+        .map_err(|e| WorktreeError::io("replace", &path, e))
     }
 
     /// Changes the record of `session_id` with `change` and writes it. `Ok(None)` when there is none.

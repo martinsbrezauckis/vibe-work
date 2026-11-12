@@ -55,7 +55,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 7px 8px 7px 12px;
+  padding: 7px 4px;
   min-height: var(--header-height);
   min-width: 0;
   overflow-x: auto;
@@ -64,47 +64,7 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  border-radius: var(--radius-7);
-}
-.ptab-group:hover:where(:not(:disabled)) {
-  background: var(--hover);
-}
-.ptab-group[data-selected="true"] {
-  background: var(--active);
-}
-.ptab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  background: none;
-  color: var(--text-3);
-  padding: 5px 4px 5px 10px;
-  border-radius: var(--radius-7);
-  cursor: pointer;
-  font-size: var(--text-13);
-  white-space: nowrap;
-}
-.ptab-group:hover:where(:not(:disabled)) .ptab,
-.ptab[aria-selected="true"] {
-  color: var(--text);
-}
-.ptab-x {
-  width: 18px;
-  height: 18px;
-  margin-right: 6px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-5);
-  color: var(--text-3);
-  border: 0;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-}
-.ptab-x:hover:where(:not(:disabled)) {
-  background: var(--line-2);
-  color: var(--text);
+  border-radius: var(--radius-md);
 }
 .panel-tabs > .end {
   flex-shrink: 0;

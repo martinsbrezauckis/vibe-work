@@ -205,7 +205,7 @@ describe("security bell", () => {
     ["approval", "Approvals", "No approvals."],
     ["finished", "Finished", "No finished chats."],
     ["failure", "Failures", "No failures."],
-    ["worktrees", "Session copies", "No session copies."],
+    ["worktrees", "Chat copies", "No chat copies."],
   ] as const)(
     "filters %s and remembers the choice after closing",
     async (kind, label, empty) => {

@@ -15,13 +15,13 @@ export function SessionsStrip() {
     <aside
       className="window-strip sessions-strip"
       data-toast-avoid="strip"
-      aria-label="Folded sessions"
+      aria-label="Folded chats"
     >
       <IconButton
         data-testid="shell.unfold-sessions"
         icon="panel-left"
-        label="Show sessions"
-        title={`Show sessions (${formatKeys("Mod+B")})`}
+        label="Show chats"
+        title={`Show chats (${formatKeys("Mod+B")})`}
         onClick={() => {
           if (layout.editorSplit) app.shell.actions.swapEditorSlot();
           else app.shell.actions.showList();

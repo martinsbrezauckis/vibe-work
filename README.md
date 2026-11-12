@@ -14,9 +14,9 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.9 adds video review on Linux, more of the agent browser (its own windows, page dialogs, double, right and
-middle clicks, downloads, element captures, cookies and storage), a browser rule for Ask mode and a choice of how the vault
-opens.
+Version 0.1.10 adds Your Firefox, more of Your Safari (forms, waiting for pages, page captures and full-page
+screenshots), more browser actions (harder forms, waiting for pages, tables to a spreadsheet, page video and audio),
+page checks while you build, and handing a tab to you for a CAPTCHA, payment or passkey.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -41,7 +41,7 @@ Questions and reports: `CONTRIBUTING.md`.
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
   session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
   own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
-  that call and the turn goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.`
+  that call and the turn goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name.
   Unanswered cards wait until you answer; Stop or closing the chat counts as No. A new card waits until you stop
   typing, and a held key does not answer it.
   Review and revoke permissions in Settings > Allowed without asking.
@@ -69,12 +69,13 @@ Questions and reports: `CONTRIBUTING.md`.
   while the page still shows what it checked. In Ask mode reading and browsing run without a card; entering or sending
   information asks first, in every browser. On Windows, macOS and Linux, Settings > Browser blocks ads and trackers
   (Off, Balanced, Strict).
-- **Your Chrome, Your Edge and Your Safari.** Connect the extension in Settings > Browser > Your Chrome or Your Edge
-  (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in your own
-  Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows, with Stop
-  in the extension and on the page.
-  Local pages open like in a normal browser in the built-in Browser and Your Safari; Your Chrome and Your Edge open
-  private-network pages and the chat's own servers until the next extension version. Manual:
+- **Your Chrome, Your Edge, Your Safari and Your Firefox.** Connect the extension in Settings > Browser > Your Chrome
+  or Your Edge (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in
+  your own Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows,
+  with Stop in the extension and on the page. In Firefox the agent works in a window Vibe Work opens with its own
+  empty profile each time: Settings > Browser > Your Firefox > Open window (on Linux, Mozilla's Firefox from the .deb
+  package or the download, not the Snap package). Local pages open like in a normal browser.
+  Manual:
   [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after
   differences, saved under `capture/`. The Browser tab's Capture menu also saves a PDF or one HTML file with pictures
@@ -150,7 +151,7 @@ is too old.
 
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (3.1.0 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.1.2 for this release); newer tested versions arrive through a signed list, without a new app release.
 
 ## Send files or text to a chat
 
@@ -175,7 +176,7 @@ computer on, enter the password once.
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
-goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer
@@ -184,7 +185,8 @@ you can revoke and links to the controls for lasting choices.
   your API key.
 - **Vibe's usage telemetry** follows Vibe's own setting, shown and changed in Settings > Privacy and data.
 - **Installing Vibe:** downloads from PyPI and GitHub, each checked against a pinned checksum.
-- **GitHub Releases:** the update check, once after start.
+- **GitHub Releases:** the update check and the signed list of supported Vibe versions, shortly after start and
+  then once a day while Vibe Work runs.
 - **What you open:** pages in the preview, the Browser, Your Chrome, Your Edge or Your Safari, connectors, tools you
   install, and your git remotes when you push or open a pull request.
 - **Send feedback:** only when you press Send: the report you reviewed, and the screenshot and app and system
@@ -213,20 +215,22 @@ Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, p
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.1.0/venv.
-uv venv --python 3.14.8 data/vibe-3.1.0/venv
-uv pip install --python data/vibe-3.1.0/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.1.2/venv.
+uv venv --python 3.14.8 data/vibe-3.1.2/venv
+uv pip install --python data/vibe-3.1.2/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.0/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.2/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the
 `config.toml` and the run folder (default `.scratch/dev-app`). `VW_DEV_KEYS=1` runs the key service (setup screen,
 vault, local proxy) in the run folder.
+`VW_APP_DATA_DIR` sets a development build's own app data and browser storage folder. With `VW_DEV_KEYS_STORE=os`,
+the development vault uses the real OS credential store for its saved unlock key; otherwise that key stays in memory.
 
 For browser development with `VW_DEBUG_DESCRIPTOR`, open the private `Browser dev UI` link printed by Vite.
 It authorizes that browser for this run; reopen the new link after restarting Vite. Keep the link private.

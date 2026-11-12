@@ -71,3 +71,25 @@ fn advertised_browser_fields_are_forwarded_unchanged() {
         assert_eq!(calls, [(tool.to_owned(), arguments)]);
     }
 }
+
+#[test]
+fn ordered_steps_validate_every_child_before_forwarding() {
+    use vw_agent_tools::browser_input::validate;
+    assert!(
+        validate(
+            "browser_act",
+            &json!({"steps":[{"action":"list_tabs"},{"action":"window.list"}]})
+        )
+        .is_ok()
+    );
+    for args in [
+        json!({"steps":[]}),
+        json!({"steps":vec![json!({"action":"list_tabs"});17]}),
+        json!({"action":"list_tabs","steps":[{"action":"list_tabs"}]}),
+        json!({"steps":[{"steps":[{"action":"list_tabs"}]}]}),
+        json!({"steps":[{"action":"list_tabs","extra":true}]}),
+        json!({"steps":[{"action":"not_an_action"}]}),
+    ] {
+        assert!(validate("browser_act", &args).is_err(), "{args}");
+    }
+}

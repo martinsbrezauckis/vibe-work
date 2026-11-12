@@ -86,6 +86,12 @@ pub trait PageContext: Send + Sync {
         false
     }
 
+    /// Addresses pinned by a successful proxy connection for one unambiguous live mount.
+    /// This is connection evidence, not a frame or document commit.
+    fn connected(&self, key: &str, host: &str, port: u16, addresses: &[SocketAddr]) {
+        let _ = (key, host, port, addresses);
+    }
+
     /// A final request refusal, after policy and owner checks; never includes URL paths or bodies.
     fn refused(&self, key: Option<&str>, reason: &str) {
         let _ = (key, reason);
@@ -151,6 +157,23 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Inner {
+    /// Deliver only to the same sole mount that owned the request before resolution/connection.
+    pub(crate) fn connected(
+        &self,
+        who: &Who,
+        key: Option<&str>,
+        host: &str,
+        port: u16,
+        addresses: &[SocketAddr],
+    ) {
+        if let Some(key) = key
+            && self.refusal_key(who).as_deref() == Some(key)
+            && let Some(context) = self.context.get()
+        {
+            context.connected(key, host, port, addresses);
+        }
+    }
+
     /// Records a refusal.
     pub(crate) fn record(&self, session: Option<&str>, host: &str, port: u16, reason: &str) {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;

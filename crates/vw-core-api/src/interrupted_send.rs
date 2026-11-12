@@ -1,6 +1,8 @@
 //! An explicit action or saved schedule stops an interrupted old turn before starting fresh work.
 //! Uses ordinary gated resume/interrupt/read calls in the chat's own mode. Dispatch/recovery own the
 //! chat lock; snapshots retain the old Interrupted row without inventing a Stop entry or hiding effects.
+//! Depends on: gated resume, interrupt and read calls.
+//! Called by: dispatch and saved-schedule recovery.
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -13,13 +15,46 @@ use crate::event::{CoreEvent, SessionChange};
 
 struct Interrupted {
     turn: Value,
+    inputs: Vec<String>,
     pending: bool,
+    terminal_event: bool,
 }
 
 #[derive(Default)]
 pub(crate) struct State(Mutex<HashMap<String, Interrupted>>);
 
 impl State {
+    /// Only actual turn events count, never a detached read's Interrupted projection.
+    pub(crate) fn turn_event(&self, id: &str, turn: &Value) {
+        if let Some(old) = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(id)
+            && old.pending
+            && old.turn["id"] == turn["id"]
+        {
+            old.terminal_event = matches!(
+                turn["status"].as_str(),
+                Some("completed" | "failed" | "interrupted")
+            );
+        }
+    }
+
+    fn terminal_event(&self, id: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .is_some_and(|old| old.terminal_event)
+    }
+
+    pub(crate) fn model_hold(&self, id: &str) -> Option<(String, Vec<String>)> {
+        let old = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let old = old.get(id).filter(|old| old.pending)?;
+        Some((old.turn["id"].as_str()?.to_owned(), old.inputs.clone()))
+    }
+
     pub(crate) fn pending(&self, id: &str) -> Option<String> {
         self.0
             .lock()
@@ -120,9 +155,32 @@ pub(crate) async fn prepare(core: &Core, id: &str) -> Result<(), CoreError> {
         .and_then(|turns| turns.last())
         .filter(|turn| matches!(turn["status"].as_str(), Some("interrupted" | "in_progress")))
     else {
+        if let Some(old) = core
+            .shared
+            .interrupted_send
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(id)
+        {
+            old.pending = false;
+        }
         return Ok(());
     };
     let mut turn = turn.clone();
+    let inputs = turn["inputEntryId"]
+        .as_str()
+        .into_iter()
+        .chain(
+            read.result["state"]["history"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|entry| entry["turnId"] == turn["id"] && entry["role"] == "user")
+                .filter_map(|entry| entry["id"].as_str()),
+        )
+        .map(str::to_owned)
+        .collect();
     turn["status"] = json!("interrupted");
     core.shared
         .interrupted_send
@@ -133,7 +191,9 @@ pub(crate) async fn prepare(core: &Core, id: &str) -> Result<(), CoreError> {
             id.to_owned(),
             Interrupted {
                 turn,
+                inputs,
                 pending: true,
+                terminal_event: false,
             },
         );
     Ok(())
@@ -145,10 +205,14 @@ pub(crate) async fn stop_recovered(
     shared: &Shared,
     id: &str,
     resumed: &mut Value,
+    model_hold: &mut Option<Box<dyn vw_supervisor::ModelRequestHold>>,
 ) -> Result<(), CoreError> {
     let Some(turn) = shared.interrupted_send.pending(id) else {
         return Ok(());
     };
+    // The launcher may settle recovery before resume answers, before any terminal event is subscribed.
+    // Retain that live, unprojected proof: a due loop can replace the old turn in the very next read.
+    let terminal_on_resume = terminal_turn(&resumed["state"], &turn);
     let interrupted = shared
         .gate
         .call(
@@ -160,6 +224,7 @@ pub(crate) async fn stop_recovered(
         .map_err(|e| CoreError::from_gate("turn/interrupt", &e));
     // Invalidate continuations of the old turn without publishing a separate user Stop action.
     crate::stops::stopped(shared, id);
+    let mut confirmed = false;
     loop {
         let reply = shared
             .gate
@@ -167,10 +232,22 @@ pub(crate) async fn stop_recovered(
             .await
             .map_err(|e| CoreError::from_gate("session/read", &e))?;
         let state = &reply.result["state"];
-        let idle = state["session"]["status"]["type"] == "idle"
-            && state["turns"]
-                .as_array()
-                .is_some_and(|turns| turns.iter().all(|t| t["status"] != "in_progress"));
+        crate::resume_models::state(shared, id, state);
+        let old_running = state["turns"].as_array().is_some_and(|turns| {
+            turns
+                .iter()
+                .any(|t| t["id"] == turn && t["status"] == "in_progress")
+        });
+        if !confirmed
+            && !old_running
+            && (terminal_on_resume
+                || terminal_turn(state, &turn)
+                || shared.interrupted_send.terminal_event(id))
+        {
+            crate::resume_models::release(model_hold)?;
+            confirmed = true;
+        }
+        let idle = confirmed && idle_state(state);
         if idle {
             crate::stops::finished(shared, &[id.to_owned()]);
             *resumed = reply.result;
@@ -185,10 +262,74 @@ pub(crate) async fn stop_recovered(
             }
             return Ok(());
         }
-        // A stale expected-turn refusal is safe only after a read confirms there is no running turn.
-        if let Err(error) = &interrupted {
+        // A stale expected-turn refusal is safe only with proof the old turn ended; a fresh loop may run.
+        if let Err(error) = &interrupted
+            && !confirmed
+        {
             return Err(error.clone());
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A read must describe the stopped turn, not just an idle session header.
+#[cfg(test)]
+fn stopped_state(state: &Value, turn: &str) -> bool {
+    idle_state(state) && terminal_turn(state, turn)
+}
+
+fn idle_state(state: &Value) -> bool {
+    matches!(
+        state["session"]["status"]["type"].as_str(),
+        Some("idle" | "failed")
+    ) && state["turns"]
+        .as_array()
+        .is_some_and(|turns| turns.iter().all(|t| t["status"] != "in_progress"))
+}
+
+fn terminal_turn(state: &Value, turn: &str) -> bool {
+    state["turns"].as_array().is_some_and(|turns| {
+        turns.iter().any(|t| {
+            t["id"] == turn
+                && matches!(
+                    t["status"].as_str(),
+                    Some("completed" | "failed" | "interrupted")
+                )
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stopped_state;
+    use serde_json::json;
+
+    #[test]
+    fn interrupted_turn_must_be_present_and_terminal_before_fresh_work() {
+        for turns in [
+            json!([]),
+            json!([{"id":"older","status":"completed"}]),
+            json!([{"id":"old","status":"in_progress"}]),
+            json!([{"id":"old"}]),
+            json!([{"id":"old","status":"interrupted"},{"id":"other","status":"in_progress"}]),
+        ] {
+            assert!(
+                !stopped_state(
+                    &json!({"session":{"status":{"type":"idle"}},"turns":turns}),
+                    "old"
+                ),
+                "{turns}"
+            );
+        }
+        for status in ["interrupted", "completed", "failed"] {
+            assert!(stopped_state(
+                &json!({"session":{"status":{"type":"idle"}},"turns":[{"id":"old","status":status}]}),
+                "old"
+            ));
+        }
+        assert!(!stopped_state(
+            &json!({"session":{"status":{"type":"busy"}},"turns":[{"id":"old","status":"interrupted"}]}),
+            "old"
+        ));
     }
 }

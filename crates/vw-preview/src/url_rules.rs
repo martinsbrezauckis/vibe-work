@@ -6,8 +6,8 @@
 //! by: `service` (open, close, session end), the core (`retain_allowed_ports`, its periodic port check).
 //! Invariants:
 //! - Only an open or a checked session handoff adds a port to a session's own set; the re-check only withdraws from it
-//!   ([`PreviewService::retain_allowed_ports`]). Other sessions' servers come from the re-check
-//!   ([`PreviewService::set_server_ports`]), as the egress guard reads them from the process monitor.
+//!   ([`PreviewService::retain_allowed_ports`]). Content rules ignore ports; the retained rights still govern
+//!   App preview navigation and its stopped-server recovery.
 //! - Refreshes run one at a time, each reading the newest state when it starts (an older, wider list never lands
 //!   after a newer one); the macOS engine also drops a compile that finishes after a newer one started
 //!   (`vw_netguard::rules::RuleGenerations`).
@@ -32,22 +32,6 @@ impl PreviewService {
             .filter(|(_, e)| !e.allowed.is_empty() || e.server_status.is_some())
             .map(|(id, _)| id.clone())
             .collect()
-    }
-
-    /// Sets the ports every session's servers listen on now (the core's re-check); every mounted Local preview's
-    /// rules follow when the set changed.
-    pub async fn set_server_ports(&self, mut ports: Vec<u16>) {
-        ports.sort_unstable();
-        ports.dedup();
-        let changed = {
-            let mut state = self.inner.lock();
-            let changed = state.server_ports != ports;
-            state.server_ports = ports;
-            changed
-        };
-        if changed {
-            self.refresh_rules().await;
-        }
     }
 
     /// Keeps only the ports of `session_id`'s preview that are still its own (`current`: listeners attributed to the

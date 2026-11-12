@@ -1,9 +1,11 @@
 //! Removes one receipted native registration. Shared helper/Windows manifest survive until the last browser.
 //! Uses setup's checked file operations and registration lock; foreign registrations are never removed.
+//! Depends on: setup file operations and the registration lock.
+//! Called by: per-browser setup removal.
 use super::{
-    ChromeControlConfig, HOST_NAME, Made, Path, RECEIPT, files, helper_name, home_of,
-    host_manifest, manifest_path, places, problem, read_receipt, registration, registration_lock,
-    registry_delete, removal, remove, targets, write_file,
+    ChromeControlConfig, HOST_NAME, Made, Path, RECEIPT, files, helper_name, home_of, manifest_for,
+    manifest_path, places, problem, read_receipt, registration, registration_lock, registry_delete,
+    removal, remove, targets, write_file,
 };
 
 pub(in crate::chrome_control) fn has_other(
@@ -40,21 +42,25 @@ pub(super) fn remove_registration(
 ) -> Result<(), String> {
     let mut receipt = read_receipt(config, state).ok_or("Browser setup is missing")?;
     let home = home_of(config)?;
-    let data = if browser == "Microsoft Edge" {
-        places::edge_data_for(&home, config.is_macos())
-    } else {
-        targets(&home, config)
-            .into_iter()
-            .find(|target| target.name == browser)
-            .ok_or("Browser setup is unavailable")?
-            .user_data
-    };
-    let manifest = if cfg!(windows) {
-        manifest_path(state, browser)
-    } else {
-        data.join("NativeMessagingHosts")
-            .join(format!("{HOST_NAME}.json"))
-    };
+    let target = targets(&home, config)
+        .into_iter()
+        .find(|target| target.name == browser)
+        .or_else(|| {
+            (browser == "Microsoft Edge").then(|| {
+                let user_data = places::edge_data_for(&home, config.is_macos());
+                places::Target {
+                    name: "Microsoft Edge",
+                    hosts: (!cfg!(windows)).then(|| user_data.join("NativeMessagingHosts")),
+                    user_data,
+                    registry: cfg!(windows).then_some(config.edge_registry_root.as_str()),
+                }
+            })
+        })
+        .ok_or("Browser setup is unavailable")?;
+    let manifest = target.hosts.map_or_else(
+        || manifest_path(state, browser),
+        |hosts| hosts.join(format!("{HOST_NAME}.json")),
+    );
     // Chromium's Windows registry keys share one manifest. Remove only the chosen browser's key.
     let shared_manifest = cfg!(windows)
         && receipt
@@ -67,14 +73,16 @@ pub(super) fn remove_registration(
         {
             registration::owned_manifest(
                 &bytes,
-                &host_manifest(&state.join("bin").join(helper_name()), &config.extension_id),
+                &manifest_for(&state.join("bin").join(helper_name()), config, browser),
             )?;
             files::remove(config, &manifest, &bytes)
                 .map_err(|error| removal::permission_failure(config, state, &manifest, &error))?;
         }
         receipt.files.retain(|path| path != &manifest);
     }
-    let root = if browser == "Microsoft Edge" {
+    let root = if browser == "Mozilla Firefox" {
+        &config.firefox_registry_root
+    } else if browser == "Microsoft Edge" {
         &config.edge_registry_root
     } else {
         &config.windows_registry_root

@@ -1074,7 +1074,7 @@ here). Vault kinds are `vibeWork` (private app-data vault), `shellx` and `deskto
 <!-- vocabulary:vault:start -->
 The window names them **Vibe Work vault**, **ShellX Vault** and **Vault app**. Its per-project entry
 permissions are **Ask**, **Always** and **User only** (`askEachTime`, `allowed`, `never` on the wire).
-**Pause agent access to secrets** pauses agents' use of secrets while sessions keep working;
+**Pause agent access to secrets** pauses agents' use of secrets while chats keep working;
 **Lock vault** closes the vault (its contents stay encrypted) and pauses model requests until unlock.
 <!-- vocabulary:vault:end -->
 

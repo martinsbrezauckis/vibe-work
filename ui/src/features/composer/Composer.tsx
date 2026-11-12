@@ -350,7 +350,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           readOnly={readOnly}
           placeholder={
             readOnly && heldKind === "terminal"
-              ? "Read-only while this session is open in the terminal"
+              ? "Read-only while this chat is open in the terminal"
               : context.length > 0
                 ? "Tell Vibe what to do with this"
                 : isNew

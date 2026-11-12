@@ -1,6 +1,6 @@
 //! The OS confirmation window of macOS and Windows: a question, the text below it and up to three buttons, answered
 //! only by a press of one of its buttons, closed from outside when the request that asks ends without an answer.
-//! (Linux uses GTK's `MessageDialog` directly in the app.)
+//! Linux uses [`linux`] to own its GTK dialogs; the app only schedules main-thread calls.
 //!
 //! - macOS ([`show`] / [`close`], main thread): an `NSAlert` shown as a sheet on the given window (or as a window of
 //!   its own), one sheet at a time per process in the order they were asked; later ones wait and are shown when it
@@ -22,6 +22,9 @@
 //!
 //! Depends on: `AppKit` through objc2 (macOS), comctl32 v6 through the `windows` crate (Windows; the app's manifest asks
 //! for common controls v6). Called by: the app (`app/src/dialogs/*_confirmation.rs`).
+
+#[cfg(all(target_os = "linux", feature = "startup-dialog"))]
+pub mod linux;
 
 #[cfg(target_os = "macos")]
 #[path = "confirm_window/mac.rs"]
@@ -45,7 +48,7 @@ pub struct ConfirmSpec {
     pub heading: String,
     /// The text below the question (may be empty).
     pub body: String,
-    /// The buttons in the order they are shown, 1 to 3. The FIRST is the default button (Return): the declining one.
+    /// Buttons in display order, 1 to 3. The declining default is first on macOS/Windows and last on Linux.
     pub buttons: Vec<String>,
 }
 

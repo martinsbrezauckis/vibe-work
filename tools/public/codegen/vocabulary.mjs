@@ -17,7 +17,7 @@ const permissions = source.vaultPermissions;
 const debugCopy = {
   fullAccess: source.accessModes["auto-approve"].name,
   browser: `\nTab closing follows the chat access mode. Ask can close agent-owned tabs; Accept edits and Full access can close user-origin tabs. App preview cannot be closed.\n`,
-  vault: `\nThe window names them **${kinds.vibeWork.name}**, **${kinds.shellx.name}** and **${kinds.desktop.name}**. Its per-project entry\npermissions are **${permissions.askEachTime.name}**, **${permissions.allowed.name}** and **${permissions.never.name}** (\`askEachTime\`, \`allowed\`, \`never\` on the wire).\n**${source.locks.agentPause.name}** pauses agents' use of secrets while sessions keep working;\n**${source.locks.vaultLock.name}** closes the vault (its contents stay encrypted) and pauses model requests until unlock.\n`,
+  vault: `\nThe window names them **${kinds.vibeWork.name}**, **${kinds.shellx.name}** and **${kinds.desktop.name}**. Its per-project entry\npermissions are **${permissions.askEachTime.name}**, **${permissions.allowed.name}** and **${permissions.never.name}** (\`askEachTime\`, \`allowed\`, \`never\` on the wire).\n**${source.locks.agentPause.name}** pauses agents' use of secrets while chats keep working;\n**${source.locks.vaultLock.name}** closes the vault (its contents stay encrypted) and pauses model requests until unlock.\n`,
 };
 const found = new Set();
 const debugDocument = debugSource.replace(
@@ -39,7 +39,7 @@ const sections = {
   vaultKinds: "Vault kinds",
   vaultPermissions: "Vault permissions",
   locks: "Agent access and vault lock",
-  workNames: "Projects and sessions",
+  workNames: "Projects and chats",
   builtinPlugins: "Built-in plugins",
   builtinSkills: "Built-in skills",
 };

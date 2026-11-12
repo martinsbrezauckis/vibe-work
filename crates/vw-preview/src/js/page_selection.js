@@ -4,6 +4,9 @@
 /* exported pageSelection */
 const pageSelection = (() => {
   if (!TRUSTED) return () => null;
+  // The native script builder enables this only for WKWebView. On X11, restoring an
+  // unfocused range takes PRIMARY ownership and can clear a selection in Browser chrome.
+  const RESTORE_SELECTION = false;
   let saved = null;
   let leaving = false;
   const clear = () => { saved = null; leaving = false; };
@@ -24,7 +27,7 @@ const pageSelection = (() => {
   // although the retained choice still works. Put the same range back while the page is unfocused: WebKit then
   // draws it as an inactive selection. Engines that keep their range on blur never reach the collapsed branch.
   const show = () => {
-    if (!leaving || document.hasFocus() || !valid()) return;
+    if (!RESTORE_SELECTION || !leaving || document.hasFocus() || !valid()) return;
     const selection = window.getSelection();
     if (!selection || (selection.rangeCount && !selection.isCollapsed)) return;
     selection.removeAllRanges();

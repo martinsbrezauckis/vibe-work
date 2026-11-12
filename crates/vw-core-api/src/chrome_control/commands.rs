@@ -17,7 +17,43 @@ use crate::{CommandResult, Core, CoreError, ErrorCode, Origin};
 pub enum ChromeControlRequest {
     /// Availability, connection and chat work states.
     Read {},
-    /// Claim one selected-text item for the composer.
+    /// Select this chat's exact profile after the old task acknowledges release.
+    SelectProfile {
+        /// Owning chat or New chat draft.
+        session_id: String,
+        /// Exact paired profile identity.
+        profile_id: String,
+    },
+    /// Rename a paired profile without changing its identity.
+    RenameProfile {
+        /// Exact paired identity.
+        profile_id: String,
+        /// Person-owned display name.
+        name: String,
+    },
+    /// Choose this browser's default for new chat bindings.
+    SetDefaultProfile {
+        /// Exact paired identity.
+        profile_id: String,
+    },
+    /// Enable or fence only this profile.
+    SetProfileEnabled {
+        /// Exact paired identity.
+        profile_id: String,
+        /// Whether the profile is available.
+        enabled: bool,
+    },
+    /// Reconnect a previously paired identity without choosing another account.
+    ConnectProfile {
+        /// Exact paired identity.
+        profile_id: String,
+    },
+    /// Remove this app pairing, leaving browser data and sign-ins intact.
+    RemoveProfile {
+        /// Exact paired identity.
+        profile_id: String,
+    },
+    /// Claim one person-shared browser context item for the composer.
     TakeSelection {
         /// The pending selection identity.
         selection_id: String,
@@ -45,6 +81,13 @@ pub enum ChromeControlRequest {
         /// Whether Edge tools are available.
         enabled: bool,
     },
+    /// Turn Firefox tools on or off without changing the other browsers.
+    SetFirefoxEnabled {
+        /// Whether Firefox tools are available.
+        enabled: bool,
+    },
+    /// Close Firefox and remove its connection.
+    RemoveFirefox {},
     /// Legacy command: refreshes the enabled compatibility policy sent to older extensions.
     SetLocalNetwork {
         /// Ignored legacy value; browser address access is always enabled.
@@ -103,6 +146,10 @@ pub enum ChromeControlRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChromeControlView {
+    /// Composer visibility and built-in availability, independent of paired-profile Off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub browser_preferences: Option<crate::BrowserPreferences>,
     /// Whether Chrome tools are available.
     pub enabled: bool,
     /// Edge's independent switch, omitted while its module is off.
@@ -115,6 +162,14 @@ pub struct ChromeControlView {
     pub local_network_applied: bool,
     /// Recent chat work, bounded and independent of permissions.
     pub work: Vec<super::ChromeWorkView>,
+    /// Individually paired identities, including retained offline profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub paired_profiles: Option<Vec<super::BrowserProfile>>,
+    /// Fixed chat selections, including unconfirmed switches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub chat_profiles: Option<Vec<super::ChatBrowserProfile>>,
     /// Pending selected-text deliveries, claimed once by a composer.
     pub pending_selections: Vec<String>,
     /// A bounded delivery failure state.
@@ -129,6 +184,14 @@ pub struct ChromeControlView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub firefox: Option<Box<setup::ChromeSetupView>>,
+    /// Firefox availability, independent of Chrome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub firefox_enabled: Option<bool>,
+    /// The optional person-share add-on, independent of the owned window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub firefox_sharing: Option<super::AddonView>,
     /// Safari is omitted while its optional module is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
@@ -162,6 +225,7 @@ pub(crate) fn extension_store(
 }
 
 pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
+    super::profile_presence::prune(shared);
     let chrome = &shared.chrome_control;
     let mut setup = setup::view(&chrome.config, chrome.dir(), &shared.instructions.own_home);
     setup.store_review = setup.state != setup::SetupState::Absent && store_review(shared);
@@ -241,6 +305,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         Box::new(edge)
     });
     ChromeControlView {
+        browser_preferences: Some(shared.browser_settings.view(shared.preview.is_some())),
         firefox: super::firefox_commands::setup_view(shared),
         safari: super::safari::view(shared),
         edge,
@@ -248,9 +313,15 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         selection_error: selections.error.clone(),
         enabled: chrome.enabled(),
         edge_enabled: cfg!(feature = "your-edge").then(|| chrome.edge_enabled()),
+        firefox_enabled: cfg!(feature = "your-firefox").then(|| chrome.firefox_enabled()),
+        firefox_sharing: cfg!(feature = "your-firefox")
+            .then(|| super::firefox_sharing::shown(shared))
+            .flatten(),
         local_network: chrome.local_network(),
         local_network_applied: chrome.local_network_applied(),
         work: super::work::view(chrome),
+        paired_profiles: super::profiles::optional_view(shared),
+        chat_profiles: super::profile_selection::view(chrome),
         setup,
     }
 }
@@ -507,34 +578,23 @@ impl Core {
         request: ChromeControlRequest,
     ) -> Result<CommandResult, CoreError> {
         let chrome = &self.shared.chrome_control;
-        let edge = matches!(
-            request,
-            ChromeControlRequest::RemoveEdge {}
-                | ChromeControlRequest::OfferEdgeSetup {}
-                | ChromeControlRequest::SetupEdge { .. }
-                | ChromeControlRequest::OpenEdgeStore {}
-        );
-        if edge && (!cfg!(feature = "your-edge") || !chrome.config.available()) {
-            return Err(invalid(setup::absent_for(true)));
-        }
-        let firefox = matches!(
-            request,
-            ChromeControlRequest::OfferFirefoxSetup {}
-                | ChromeControlRequest::SetupFirefox { .. }
-                | ChromeControlRequest::OpenFirefoxStore {}
-                | ChromeControlRequest::OpenFirefox {}
-                | ChromeControlRequest::CloseFirefox {}
-        );
-        if firefox && (!cfg!(feature = "your-firefox") || !chrome.config.available()) {
-            return Err(invalid(super::firefox_commands::ABSENT));
-        }
-        if !chrome.config.available() && !matches!(request, ChromeControlRequest::Read {}) {
-            return Err(invalid(setup::ABSENT));
-        }
+        self.check_browser_request(&request)?;
         match request {
             ChromeControlRequest::Read {} => {
                 super::browser::refresh(&chrome.config).await;
+                super::safari_copies::refresh(&self.shared).await;
                 Ok(self.chrome_result(None))
+            }
+            ChromeControlRequest::SelectProfile {
+                session_id,
+                profile_id,
+            } => super::profile_selection::command(self, origin, &session_id, &profile_id).await,
+            request @ (ChromeControlRequest::RenameProfile { .. }
+            | ChromeControlRequest::SetDefaultProfile { .. }
+            | ChromeControlRequest::SetProfileEnabled { .. }
+            | ChromeControlRequest::ConnectProfile { .. }
+            | ChromeControlRequest::RemoveProfile { .. }) => {
+                self.profile_setting(origin, request).await
             }
             ChromeControlRequest::OpenSafariSetup {} => self.safari_setup().await,
             ChromeControlRequest::RemoveSafari {} => self.safari_remove().await,
@@ -542,7 +602,7 @@ impl Core {
                 self.safari_enabled(enabled).await
             }
             ChromeControlRequest::TakeSelection { selection_id } => {
-                Ok(self.chrome_selection(&selection_id))
+                self.chrome_selection(&selection_id).await
             }
             ChromeControlRequest::Tabs {} => super::tabs::read(&self.shared, chrome).await,
             ChromeControlRequest::TabContext {
@@ -550,6 +610,15 @@ impl Core {
                 tab_id,
                 session_id,
             } => {
+                if let Some(chat) = session_id.as_deref()
+                    && crate::command_origin::debug_api_acts(&self.shared, origin)
+                    && !super::profile_bindings::selected(chrome, chat)
+                        .is_some_and(|old| super::profile_ids::same(&old, &profile_id))
+                {
+                    return Err(invalid(
+                        "Changing this chat's browser profile requires the user. Ask the user to select it in the chat.",
+                    ));
+                }
                 super::tabs::pick(
                     &self.shared,
                     chrome,
@@ -572,8 +641,7 @@ impl Core {
                 self.set_local_network(enabled).await
             }
             ChromeControlRequest::OfferSetup {} => {
-                let offer = self.setup_offer(false)?;
-                Ok(self.chrome_result(Some(offer)))
+                Ok(self.chrome_result(Some(self.setup_offer(false)?)))
             }
             ChromeControlRequest::Setup { offer_id } => {
                 self.chrome_setup(origin, offer_id, false).await
@@ -593,11 +661,15 @@ impl Core {
                     .map_err(|reason| invalid(&reason))?;
                 Ok(self.chrome_result(None))
             }
-            ChromeControlRequest::OfferFirefoxSetup {}
-            | ChromeControlRequest::SetupFirefox { .. }
-            | ChromeControlRequest::OpenFirefoxStore {} => Err(invalid(
-                "Firefox uses its own window. Choose Open window in Settings.",
-            )),
+            ChromeControlRequest::OfferFirefoxSetup {} => {
+                Ok(self.chrome_result(Some(self.firefox_setup_offer()?)))
+            }
+            ChromeControlRequest::SetupFirefox { offer_id } => self.firefox_setup(offer_id).await,
+            ChromeControlRequest::OpenFirefoxStore {} => self.firefox_addons(),
+            ChromeControlRequest::SetFirefoxEnabled { enabled } => {
+                self.browser_enabled(Browser::Firefox, enabled).await
+            }
+            ChromeControlRequest::RemoveFirefox {} => self.firefox_remove().await,
             ChromeControlRequest::OpenFirefox {} => self.firefox_window(true).await,
             ChromeControlRequest::CloseFirefox {} => self.firefox_window(false).await,
             ChromeControlRequest::Remove {} => self.remove_browser(Browser::Chrome).await,
@@ -605,18 +677,69 @@ impl Core {
         }
     }
 
-    fn chrome_selection(&self, selection_id: &str) -> CommandResult {
-        let mut selection = self
+    fn check_browser_request(&self, request: &ChromeControlRequest) -> Result<(), CoreError> {
+        let chrome = &self.shared.chrome_control;
+        let edge = matches!(
+            &request,
+            ChromeControlRequest::RemoveEdge {}
+                | ChromeControlRequest::OfferEdgeSetup {}
+                | ChromeControlRequest::SetupEdge { .. }
+                | ChromeControlRequest::OpenEdgeStore {}
+        );
+        if edge && (!cfg!(feature = "your-edge") || !chrome.config.available()) {
+            return Err(invalid(setup::absent_for(true)));
+        }
+        let firefox = matches!(
+            &request,
+            ChromeControlRequest::OfferFirefoxSetup {}
+                | ChromeControlRequest::SetupFirefox { .. }
+                | ChromeControlRequest::OpenFirefoxStore {}
+                | ChromeControlRequest::OpenFirefox {}
+                | ChromeControlRequest::CloseFirefox {}
+                | ChromeControlRequest::SetFirefoxEnabled { .. }
+                | ChromeControlRequest::RemoveFirefox {}
+        );
+        if firefox && (!cfg!(feature = "your-firefox") || !chrome.config.available()) {
+            return Err(invalid(super::firefox_commands::ABSENT));
+        }
+        if !chrome.config.available()
+            && !matches!(
+                &request,
+                ChromeControlRequest::Read {} | ChromeControlRequest::TakeSelection { .. }
+            )
+        {
+            return Err(invalid(setup::ABSENT));
+        }
+        Ok(())
+    }
+
+    async fn chrome_selection(&self, selection_id: &str) -> Result<CommandResult, CoreError> {
+        let pending = self
             .shared
             .chrome_control
             .selections
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take(selection_id);
-        if let Some(selection) = &mut selection {
-            selection.keep_live_chat(|id| self.shared.store.view(id).is_some());
-        }
         super::owner::publish(&self.shared);
-        CommandResult::ChromeSelection { selection }
+        let selection = if let Some(pending) = pending {
+            let result = super::sharing::claim(&self.shared, pending).await;
+            if result.is_err() {
+                self.shared
+                    .chrome_control
+                    .selections
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .error = Some(
+                    "The shared page could not be read. Choose Ask Vibe Work on that page again."
+                        .into(),
+                );
+                super::owner::publish(&self.shared);
+            }
+            Some(result?)
+        } else {
+            None
+        };
+        Ok(CommandResult::ChromeSelection { selection })
     }
 }

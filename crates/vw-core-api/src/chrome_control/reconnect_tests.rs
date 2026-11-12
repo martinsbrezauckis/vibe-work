@@ -57,7 +57,7 @@ async fn status_observes_a_reconnected_extension_before_repeating_an_old_refusal
 async fn a_session_still_reconnecting_offers_a_plain_retry_in_its_browser() {
     for (browser, profile) in [(Browser::Chrome, "chrome:p"), (Browser::Edge, "edge:p")] {
         let core = fixture(
-            "browser-session-not-ready",
+            &format!("browser-session-not-ready-{profile}"),
             json!([{"profileId":profile,"connected":true}]),
         )
         .await;
@@ -65,7 +65,7 @@ async fn a_session_still_reconnecting_offers_a_plain_retry_in_its_browser() {
         let count = calls.clone();
         let seen = core.shared.chrome_control.owner.answering(move |tool, _| {
             if tool == "chrome_session" && count.fetch_add(1, Ordering::SeqCst) == 0 {
-                let mut reply = owner::failure("Ask the person to restart the browser", "SESSION_NOT_READY");
+                let mut reply = owner::failure("Ask the user to restart the browser", "SESSION_NOT_READY");
                 reply["structuredContent"]["retryable"] = json!(false);
                 reply
             } else {
@@ -85,7 +85,7 @@ async fn a_session_still_reconnecting_offers_a_plain_retry_in_its_browser() {
             )),
             "{reply}"
         );
-        assert!(!reply.to_string().contains("Ask the person"), "{reply}");
+        assert!(!reply.to_string().contains("Ask the user"), "{reply}");
         assert_eq!(
             call_count(&seen, "chrome_session", &args),
             1,
@@ -466,6 +466,7 @@ async fn a_person_stop_received_during_reconnect_prevents_the_action() {
                 chat: "s".into(),
                 browser: Browser::Edge,
                 turn: None,
+                connection_ended: false,
             }]);
         json!({"structuredContent":{"profiles":[]}})
     });
@@ -479,7 +480,7 @@ async fn a_person_stop_received_during_reconnect_prevents_the_action() {
     .unwrap_err();
     assert!(
         reason.contains(&format!(
-            "the person pressed Stop in {}",
+            "the user pressed Stop in {}",
             Browser::Edge.name()
         )),
         "{reason}"
@@ -522,7 +523,7 @@ async fn connecting_before_the_first_pairing_keeps_the_owner_diagnosis() {
         .await
         .unwrap();
         assert!(
-            result.to_string().contains("Ask the person")
+            result.to_string().contains("Ask the user")
                 && result.to_string().contains("OWNER_REQUIRED"),
             "{result}"
         );
@@ -560,6 +561,6 @@ async fn a_new_pairing_request_is_not_hidden_by_old_connection_history() {
         result["vwMcpResult"]["structuredContent"]["error"]["code"], "OWNER_REQUIRED",
         "{result}"
     );
-    assert!(result.to_string().contains("Ask the person"), "{result}");
+    assert!(result.to_string().contains("Ask the user"), "{result}");
     core.shutdown().await;
 }

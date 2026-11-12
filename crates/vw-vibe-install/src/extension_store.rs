@@ -68,18 +68,9 @@ pub fn save_record(root: &Path, record: Option<ChromeExtension>) -> std::io::Res
     };
     std::fs::create_dir_all(root)?;
     let text = serde_json::to_vec(&record).map_err(std::io::Error::other)?;
-    let temp = root.join(format!(
-        "{EXTENSION_FILE}.{}.tmp",
-        crate::seen::temp_suffix()
-    ));
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)
-        .and_then(|mut file| std::io::Write::write_all(&mut file, &text))
-        .and_then(|()| std::fs::rename(&temp, &path));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    written
+    vw_platform::atomic_file::replace_file(
+        &path,
+        &text,
+        vw_platform::atomic_file::MetadataPolicy::NewFile,
+    )
 }

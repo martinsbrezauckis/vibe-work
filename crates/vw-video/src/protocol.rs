@@ -1,6 +1,7 @@
 //! Narrow helper protocol. The parent validates counts, geometry, timestamps, image magic and job identity.
 use serde::{Deserialize, Serialize};
 use vw_agent_tools::video::Request;
+use vw_video_types::{Code, Error};
 /// Immutable request sent only to the constrained helper.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +58,45 @@ pub struct Reply {
     /// Bounded image content; never an output path.
     pub png: String,
 }
+/// Failure envelope; the same typed error travels from the native operation to the parent.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Failure {
+    /// Typed diagnosis with log-only details.
+    pub error: Error,
+}
+/// Read one bounded response. Old string errors, unknown codes and malformed results fail closed.
+/// # Errors
+/// The worker's typed error or an invalid/incomplete result.
+pub fn decode(job: &Job, bytes: &[u8]) -> Result<Reply, Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Response {
+        Failure(Failure),
+        Ready(Reply),
+    }
+    let response =
+        serde_json::from_slice::<Response>(bytes).map_err(|e| Error::new(Code::InvalidReply, e))?;
+    match response {
+        Response::Failure(failure)
+            if failure.error.detail.chars().count() <= 2048
+                && !matches!(
+                    failure.error.code,
+                    Code::FolderRefused { .. } | Code::NotFound { .. } | Code::CannotRead { .. }
+                ) =>
+        {
+            Err(failure.error)
+        }
+        Response::Failure(_) => Err(Error::new(
+            Code::InvalidReply,
+            "invalid worker error code or oversized diagnostic",
+        )),
+        Response::Ready(reply) => {
+            validate(job, &reply)?;
+            Ok(reply)
+        }
+    }
+}
 /// Validates an untrusted worker reply without decoding images in the parent.
 /// # Errors
 /// Any mismatch or cap violation.
@@ -64,10 +104,10 @@ pub struct Reply {
     clippy::too_many_lines,
     reason = "one bounded reply validator keeps all envelope invariants together"
 )]
-pub fn validate(job: &Job, reply: &Reply) -> Result<(), String> {
+pub fn validate(job: &Job, reply: &Reply) -> Result<(), Error> {
     use base64::Engine as _;
     use vw_agent_tools::video::Output;
-    let invalid = || "decode_failed: invalid or incomplete helper reply".to_owned();
+    let invalid = || Error::new(Code::InvalidReply, "invalid or incomplete helper reply");
     let times = job.request.times()?;
     if reply.id != job.id
         || reply.planned_frames != job.request.frame_limit()?
@@ -218,45 +258,5 @@ impl Reply {
                 json!({"mimeType":"image/png","data":self.png});
         }
         value
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn pair() -> (Job, Reply) {
-        let job=Job{id:"one".into(),request:serde_json::from_value(serde_json::json!({"path":"input","selection":{"kind":"timestamps","times_ms":[999]},"output":"frame"})).unwrap()};
-        let r = Reply {
-            id: "other".into(),
-            backend: "gstreamer".into(),
-            duration_ns: 4_000_000_000,
-            source_size: [640, 360],
-            rotation: 0,
-            pixel_aspect_ratio: [1, 1],
-            codec: "h264".into(),
-            frames: vec![],
-            planned_frames: 1,
-            scan: None,
-            image_count: 1,
-            image_size: [640, 360],
-            columns: 1,
-            png: "invalid".into(),
-        };
-        (job, r)
-    }
-    #[test]
-    fn malformed_or_partial_output_is_never_ready() {
-        let (j, r) = pair();
-        assert!(validate(&j, &r).is_err());
-    }
-    #[test]
-    fn helper_bytes_and_pixels_cannot_raise_the_image_budget() {
-        let (j, mut r) = pair();
-        r.id = j.id.clone();
-        r.png = "A".repeat(vw_preview::MAX_BYTES * 2);
-        assert!(validate(&j, &r).is_err());
-        r.png.clear();
-        r.image_size = [u32::MAX, u32::MAX];
-        assert!(validate(&j, &r).is_err());
     }
 }

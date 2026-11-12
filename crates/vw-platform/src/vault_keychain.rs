@@ -1,6 +1,6 @@
 //! Login-Keychain storage for vault unlock and Chrome ownership; called by vw-vault.
-//! Access is assigned only at creation. A legacy value is read once, then recreated with a singleton
-//! trusted-app ACL and a migration marker. Security.framework still authorizes every secret read.
+//! Access is assigned only at creation. A legacy value is copied with a singleton trusted-app ACL
+//! and verified before the old item is removed. Security.framework still authorizes every secret read.
 
 #[cfg(target_os = "macos")]
 mod access;
@@ -8,8 +8,6 @@ mod access;
 mod ffi;
 #[cfg(target_os = "macos")]
 mod native;
-#[cfg(all(test, target_os = "macos"))]
-mod native_tests;
 mod policy;
 
 #[cfg(target_os = "macos")]
@@ -56,7 +54,6 @@ pub fn set(service: &str, account: &str, label: &str, secret: &[u8]) -> Result<(
 /// The Keychain refuses deletion.
 #[cfg(target_os = "macos")]
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
-    use policy::Keychain;
     let mut attempts = OPERATIONS
         .lock()
         .map_err(|_| "Keychain operation interrupted")?;

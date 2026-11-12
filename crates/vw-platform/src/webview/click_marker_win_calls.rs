@@ -1,5 +1,7 @@
 //! Captures each marker API's own last error before formatting, cleanup or another native call.
 //! Used only by the Windows renderer; clears ignored class-registration errors before the next call.
+//! Depends on: Windows native error APIs.
+//! Called by: the click-marker renderer.
 
 use windows::Win32::Foundation::{ERROR_SUCCESS, GetLastError, SetLastError, WIN32_ERROR};
 

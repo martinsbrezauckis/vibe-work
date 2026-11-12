@@ -77,7 +77,7 @@ export function SessionRow({
           : { id: "retry", label: "Try again", run: () => void sessions?.retryReopen(s.id) },
         {
           id: "continue",
-          label: "Continue in a new session",
+          label: "Continue in a new chat",
           run: () => void sessions?.continueInNew(s.id),
           separated: true,
         },

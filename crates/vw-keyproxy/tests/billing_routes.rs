@@ -1,14 +1,14 @@
-//! Billing allowlist boundary tests. Uses the public matcher; cargo tests both feature states.
+//! Billing allowlist boundary tests. Uses the public matcher; cargo tests the permanent read routes.
 //! Only two exact GETs may be added; every existing route and refusal must stay intact.
 
 use axum::http::Method;
 use vw_keyproxy::{ALLOWLIST, Upstream, match_route};
 
 #[test]
-fn billing_reads_require_the_optional_feature() {
+fn billing_reads_are_available_without_feature_switches() {
     for path in ["/v1/billing/subscription", "/v1/billing/budget"] {
         let route = match_route(&Method::GET, path);
-        assert_eq!(route.is_some(), cfg!(feature = "plan-usage"), "{path}");
+        assert!(route.is_some(), "billing read must be permanent: {path}");
         if let Some(route) = route {
             assert_eq!(route.upstream, Upstream::Api);
             assert_eq!(route.template, path);
@@ -96,8 +96,5 @@ fn the_rest_of_the_allowlist_is_unchanged() {
             ),
         ]
     );
-    assert_eq!(
-        ALLOWLIST.len(),
-        actual.len() + if cfg!(feature = "plan-usage") { 2 } else { 0 }
-    );
+    assert_eq!(ALLOWLIST.len(), actual.len() + 2);
 }

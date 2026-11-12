@@ -35,7 +35,7 @@ impl Reply {
         Self {
             exit_code: 1,
             stdout: Vec::new(),
-            stderr: format!("gh broker: {reason}\n").into_bytes(),
+            stderr: format!("{reason}\n").into_bytes(),
         }
     }
 }

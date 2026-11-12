@@ -199,7 +199,7 @@ impl Core {
     ) -> Result<CommandResult, CoreError> {
         let (owner, mut cancel) = self.shared.stuck.begin_retry(id);
         let bound = self.shared.config.retry_reopen_timeout;
-        let attempt = tokio::time::timeout(bound, self.open_session(origin, id));
+        let attempt = tokio::time::timeout(bound, self.open_session(origin, id, bound));
         let outcome = tokio::select! {
             done = attempt => Some(done),
             _ = &mut cancel => None,

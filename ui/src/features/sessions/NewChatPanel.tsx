@@ -151,7 +151,7 @@ export function NewChatPanel(): ReactElement | null {
         )}
         {ask && folder === null && !temporary && (
           <span className="folder-hint" id="new-chat-folder-hint" role="status">
-            Choose the folder this session works in.
+            Choose the folder this chat works in.
           </span>
         )}
       </div>

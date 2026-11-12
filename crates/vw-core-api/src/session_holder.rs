@@ -13,6 +13,8 @@ use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::event::CoreEvent;
 
+#[path = "session_handoff_release.rs"]
+mod handoff_release;
 #[path = "lease_inventory.rs"]
 mod inventory;
 
@@ -29,6 +31,8 @@ const RELEASE_WAIT: Duration = Duration::from_secs(3);
 pub(crate) struct Holders {
     held: Mutex<BTreeMap<String, Option<(u32, String)>>>,
     inventory: inventory::Inventory,
+    /// Source chats whose Vibe backend detached during a handoff and may still be settling.
+    handed_off: Mutex<BTreeSet<String>>,
     wake: Arc<tokio::sync::Notify>,
     changed: Mutex<BTreeSet<String>>,
     poll: Mutex<Option<JoinHandle<()>>>,
@@ -43,6 +47,7 @@ impl Default for Holders {
         Self {
             held: Mutex::default(),
             inventory: inventory::Inventory::default(),
+            handed_off: Mutex::default(),
             wake: Arc::new(tokio::sync::Notify::new()),
             changed: Mutex::default(),
             poll: Mutex::default(),
@@ -181,8 +186,9 @@ async fn read_once(
     let ours = if let Some(leader) = shared.supervisor.server_pid() {
         let program = shared.supervisor.program();
         let launchers = shared.supervisor.launcher_programs();
+        let adapter = shared.supervisor.adapter_path();
         tokio::task::spawn_blocking(move || {
-            crate::own_server::is_server(pid, leader, &program, &launchers)
+            crate::own_server::is_server(pid, leader, &program, &launchers, &adapter)
         })
         .await
         .unwrap_or(false)

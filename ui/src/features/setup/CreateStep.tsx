@@ -3,13 +3,13 @@
  * has) and choose a password. One password field with
  * a strength hint and show/hide, no second confirm field.
  * Depends on: AppContext, useKeys, fields, VibeKeyOffer, ConsoleLink. Called by: SetupScreen.
- * Invariants: the key and the password live only in this component's state until submit, then both
- * are cleared whether or not the call worked; a failure leaves the user on this step with the reason.
+ * Invariants: missing fields receive inline feedback without clearing completed input. Valid submits
+ * clear both secrets before the call; a failure leaves the user on this step with the reason.
  */
 import { Button } from "../../components/Controls";
 import type { VaultUnlockMethod } from "../../protocol/core";
 import { VaultUnlockChoice } from "./VaultUnlockChoice";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { term } from "../../vocabulary";
 
 import { Selector } from "../../components/Selector";
@@ -30,16 +30,26 @@ export function CreateStep() {
   const [key, setKey] = useState("");
   const [password, setPassword] = useState("");
   const [unlockMethod, setUnlockMethod] = useState<VaultUnlockMethod>("system");
+  const [submitted, setSubmitted] = useState(false);
+  const keyRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const fromVibe = found !== undefined && useVibe;
-  const ready = password !== "" && (fromVibe || key.trim() !== "");
+  const missingKey = !fromVibe && key.trim() === "";
+  const missingPassword = password === "";
 
   const submit = () => {
-    if (keys === null || !ready) return;
+    if (keys === null || busy) return;
+    setSubmitted(true);
+    if (missingKey || missingPassword) {
+      (missingKey ? keyRef : passwordRef).current?.focus();
+      return;
+    }
     const how = fromVibe ? { importFrom: found.source } : { key };
     const pass = password;
     // Clear first: whatever happens next, the inputs no longer hold the secrets.
     setKey("");
     setPassword("");
+    setSubmitted(false);
     void keys.createWithKey(pass, how, unlockMethod);
   };
 
@@ -83,12 +93,22 @@ export function CreateStep() {
             value={key}
             onChange={setKey}
             placeholder="Your key"
+            inputRef={keyRef}
+            error={submitted && missingKey ? "A key is required. Paste your Mistral key." : null}
             autoFocus
           />
           <ConsoleLink />
         </>
       )}
-      <NewPasswordField value={password} onChange={setPassword} testId="setup.password-input" />
+      <NewPasswordField
+        value={password}
+        onChange={setPassword}
+        testId="setup.password-input"
+        inputRef={passwordRef}
+        error={
+          submitted && missingPassword ? "A password is required. Choose a vault password." : null
+        }
+      />
       <p className="key-field-hint">
         If you forget the password, paste your key again. Vibe Work never sees your Mistral account
         password.
@@ -96,12 +116,7 @@ export function CreateStep() {
       <VaultUnlockChoice value={unlockMethod} onChange={setUnlockMethod} disabled={busy} />
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
-        <Button
-          type="submit"
-          appearance="dialog"
-          data-testid="setup.save"
-          disabled={busy || !ready}
-        >
+        <Button type="submit" appearance="dialog" data-testid="setup.save" disabled={busy}>
           {busy ? "Saving…" : "Save and test the key"}
         </Button>
         <Button

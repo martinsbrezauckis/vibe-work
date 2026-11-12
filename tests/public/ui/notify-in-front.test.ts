@@ -109,7 +109,7 @@ describe("OS notifications and the app in front", () => {
     });
   });
 
-  it("also leaves another session's request to the host while the webview has no focus", () => {
+  it("also leaves another chat's request to the host while the webview has no focus", () => {
     // The app's own confirmation window for that request may be what has the focus (seen on Windows: the new chat on screen).
     const sent = arrive(false, "other");
     expect(sent).toHaveLength(1);
@@ -119,7 +119,7 @@ describe("OS notifications and the app in front", () => {
     });
   });
 
-  it("shows the toast for another session while the person is in the app's window", () => {
+  it("shows the toast for another chat while the person is in the app's window", () => {
     const sent = arrive(true, "other");
     expect(sent).toHaveLength(1);
     expect(sent[0]?.skipWhenAppInFront).not.toBe(true);

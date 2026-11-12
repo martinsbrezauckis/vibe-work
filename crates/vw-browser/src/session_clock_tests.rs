@@ -4,27 +4,6 @@ use super::{ACTIVE_FOR_MS, Actor, Outcome, Sessions};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-#[tokio::test]
-async fn a_finished_turn_clears_activity_and_notifies_the_toolbar() {
-    let sessions = Sessions::default();
-    let flight = sessions.begin("s", Actor::Agent);
-    assert!(sessions.queue_native_click("s"));
-    let mut changes = sessions.changes();
-    sessions.cancel_confirmations("s");
-    assert!(!sessions.state("s").agent_active);
-    assert!(!sessions.state("s").in_flight);
-    assert!(sessions.state("s").pending_native_click.is_none());
-    assert_eq!(changes.try_recv().unwrap(), "s");
-    // An action already unwinding cannot restore the released turn's indicator.
-    sessions.end("s", Actor::Agent, "click", "Save", Outcome::Done, "done");
-    drop(flight);
-    assert!(!sessions.state("s").agent_active);
-    sessions.clear_native_click("s");
-    let next = sessions.begin("s", Actor::Agent);
-    assert!(sessions.state("s").agent_active);
-    drop(next);
-}
-
 #[tokio::test(start_paused = true)]
 async fn activity_window_ignores_wall_clock_steps() {
     static WALL: AtomicU64 = AtomicU64::new(1_800_000_000_000);

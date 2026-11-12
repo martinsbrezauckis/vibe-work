@@ -100,7 +100,7 @@ async fn a_dynamic_batch_card_keeps_waiting_beyond_the_browser_work_deadline() {
     tokio::task::yield_now().await;
     assert!(
         !task.is_finished(),
-        "a person deciding on a card must not consume the batch work budget"
+        "the user deciding on a card must not consume the batch work budget"
     );
     tool_calls::answer_by(
         &core.shared,

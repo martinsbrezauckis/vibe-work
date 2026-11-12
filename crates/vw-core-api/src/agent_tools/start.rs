@@ -304,7 +304,7 @@ fn exited_early(
         "port": port,
         "shell": started.shell,
         "status": format!("exited ({why})"),
-        "firstOutput": output::head(log, 20, 4096).unwrap_or_default(),
+        "firstOutput": first_output(log),
     })
 }
 
@@ -360,7 +360,15 @@ fn wait_for_it(
         "url": url_main,
         "urlsInOutput": urls,
         "status": status,
-        "firstOutput": output::head(log, 20, 4096).unwrap_or_default(),
+        "firstOutput": first_output(log),
         "note": "keeps running after this turn and after Vibe Work closes; stop it with process_stop",
     })
+}
+
+fn first_output(log: &std::path::Path) -> Vec<String> {
+    // Keep the file's terminal bytes; only the agent's plain-text reply is filtered.
+    vw_terminal::strip_ansi(&output::head(log, 20, 4096).unwrap_or_default().join("\n"))
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }

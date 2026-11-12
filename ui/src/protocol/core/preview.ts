@@ -66,7 +66,11 @@ rect?: Rect, } | { "op": "visibility",
 /**
  * Current UI facts; the service picks the first screenshot refusal reason for each target.
  */
-report: VisibilityReport, } | { "op": "nativeWindowVisibility",
+report: VisibilityReport, } | { "op": "appDialog",
+/**
+ * Accessible dialog name; absent once all UI modal dialogs are closed.
+ */
+name: string | null, } | { "op": "nativeWindowVisibility",
 /**
  * False when minimized or hidden.
  */
@@ -350,6 +354,10 @@ export type PageTab = {
  */
 pageKey: string,
 /**
+ * Chat-scoped window focus handle; absent for the pinned app preview.
+ */
+windowId?: string,
+/**
  * The pinned app page or a regular browser page.
  */
 kind: PageTabKind,
@@ -474,7 +482,7 @@ url: string,
  */
 atMs: bigint, };
 
-export type ConsoleLevel = "error" | "warn" | "exception" | "rejection";
+export type ConsoleLevel = "log" | "info" | "debug" | "error" | "warn" | "exception" | "rejection" | "resource";
 
 export type DownloadView = {
 /**

@@ -7,6 +7,7 @@
  */
 import { type ReactElement, useEffect, useState } from "react";
 
+import { LinkButton } from "../../components/Controls";
 import type { ImagesResult } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
@@ -56,19 +57,16 @@ export function ImageSettings(): ReactElement | null {
               : ` Image requests since the app started: ${String(state.made)}.`}
           </span>
           <span className="d">
-            <a
+            <LinkButton
               data-testid="settings.image-settings-prevent-default"
-              className="ext-link"
-              href="https://mistral.ai/pricing/"
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void core.client.openLink("https://mistral.ai/pricing/").catch(() => {
                   setLinkFallback(true);
                 });
               }}
             >
               Prices: Mistral&apos;s pricing page
-            </a>
+            </LinkButton>
             {linkFallback && (
               <span role="status"> Open https://mistral.ai/pricing/ in your browser.</span>
             )}

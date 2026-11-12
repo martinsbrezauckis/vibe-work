@@ -63,7 +63,7 @@ function MessageActions({
   const rewindLabel =
     problem === null ? "Rewind to here (restores files)" : `Rewind to here: ${problem}`;
   const branchLabel =
-    problem === null ? "Branch from here in a new session" : `Branch from here: ${problem}`;
+    problem === null ? "Branch from here in a new chat" : `Branch from here: ${problem}`;
   return (
     <>
       <button

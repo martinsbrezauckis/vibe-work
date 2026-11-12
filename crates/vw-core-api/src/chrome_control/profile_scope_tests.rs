@@ -1,5 +1,5 @@
 //! Profile choice regressions through the real views and gateway, with isolated Chrome folders and fake helpers.
-//! Disabled external copies cannot replace a paired profile or block its launch.
+//! Browser-wide installation diagnosis never supplies a folder-to-UUID association.
 use super::{AddonState, agent_browser::Browser, gateway, installation, owner, test_support};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -48,10 +48,10 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
             );
             assert_eq!(
                 installation::paired_directory(shared, browser).as_deref(),
-                Some("Default")
+                None
             );
         }
-        // A missing launch record can be learned while a healthy profile and a disabled copy coexist.
+        // A healthy profile proves its UUID is live, never which folder contains it.
         installation::forget_directory(chrome, browser);
         let profile = format!("{}:p", browser.id());
         let connected =
@@ -60,10 +60,10 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
         assert_eq!(browser.addon(shared).state, AddonState::Connected);
         assert_eq!(
             installation::paired_directory(shared, browser).as_deref(),
-            Some("Default")
+            None
         );
         test_support::observe_status(shared, &json!({"profiles":[]}));
-        // The paired copy's own disable reason must still give the person the enable/turn-on step.
+        // Browser-wide disabled installation evidence still gives the enable/turn-on step.
         for (reasons, state) in [
             (json!(8192), AddonState::EnableInChrome),
             (json!([1]), AddonState::TurnedOffInChrome),
@@ -108,7 +108,7 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
                 .count(),
             1
         );
-        // A second enabled profile is still a real choice.
+        // Enabling another folder cannot establish either pairing association.
         preferences(&pending, &chrome.config.extension_id, &json!(0)).unwrap();
         assert!(installation::paired_directory(shared, browser).is_none());
         core.shutdown().await;
@@ -116,7 +116,7 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
 }
 
 #[tokio::test]
-async fn disabled_paired_copies_count_until_their_folder_is_deleted() {
+async fn deleting_an_uncorrelated_folder_keeps_both_profile_history_rows() {
     for browser in [Browser::Chrome, Browser::Edge] {
         let core = super::browser_start_tests::fixture(
             &format!("browser-disabled-paired-{}", browser.id()),
@@ -148,19 +148,29 @@ async fn disabled_paired_copies_count_until_their_folder_is_deleted() {
         test_support::observe_status(shared, &json!({"profiles":[]}));
         assert!(
             installation::paired_directory(shared, browser).is_none(),
-            "a disabled paired copy is still a profile choice"
+            "a disabled copy is not a verified pairing association"
         );
         std::fs::remove_dir_all(&pending).unwrap();
+        let rows = super::profiles::view(shared);
+        assert_eq!(
+            rows.len(),
+            2,
+            "folder deletion cannot remove an uncorrelated pairing"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| !row.eligible && row.state == super::ProfileState::Offline)
+        );
         assert_eq!(
             installation::paired_directory(shared, browser).as_deref(),
-            Some("Default")
+            None
         );
         core.shutdown().await;
     }
 }
 
 #[tokio::test]
-async fn stale_unknown_pairings_do_not_block_a_known_existing_profile() {
+async fn legacy_inferred_folder_records_cannot_select_an_account() {
     for browser in [Browser::Chrome, Browser::Edge] {
         let core = super::browser_start_tests::fixture(
             &format!("browser-deleted-unknown-{}", browser.id()),
@@ -193,7 +203,7 @@ async fn stale_unknown_pairings_do_not_block_a_known_existing_profile() {
         .unwrap();
         assert_eq!(
             installation::paired_directory(&core.shared, browser).as_deref(),
-            Some("Default")
+            None
         );
         core.shutdown().await;
     }

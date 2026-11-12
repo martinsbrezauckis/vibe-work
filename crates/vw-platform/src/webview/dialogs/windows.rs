@@ -1,5 +1,7 @@
 //! `WebView2` native script-dialog and HTTP Basic deferrals, kept on its UI thread.
 //! Uses the shared dialog hub; existing proxy authentication is left untouched.
+//! Depends on: `WebView2` deferrals and the shared dialog hub.
+//! Called by: the Windows webview dialog adapter.
 use super::{Admit, Hub, hold};
 use serde_json::json;
 use std::sync::Arc;
