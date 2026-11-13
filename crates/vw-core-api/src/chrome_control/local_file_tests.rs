@@ -4,11 +4,19 @@ use serde_json::json;
 async fn local_navigation_needs_a_confirmed_file_access_toggle() {
     for granted in [false, true] {
         let core = super::read_consent_tests::core(&format!("local-file-toggle-{granted}")).await;
-        let folder = std::path::PathBuf::from(
+        let root = std::path::PathBuf::from(
             std::env::var_os("VW_TEST_ROOT")
                 .unwrap_or_else(|| std::env::temp_dir().into_os_string()),
-        )
-        .join(format!(
+        );
+        // Windows matches a chat folder by spelling only, and a temporary folder can be an 8.3 alias
+        // (`C:\Users\RUNNER~1\...`): use its long form, as a folder picker names it. On macOS the folder stays
+        // as named (below the /var link), which is what this test checks there.
+        let root = if cfg!(windows) {
+            vw_platform::canonical_plain(&root).unwrap()
+        } else {
+            root
+        };
+        let folder = root.join(format!(
             "local-toggle-chat-{}-{granted}",
             std::process::id()
         ));
