@@ -60,12 +60,34 @@ fn locate<'a>(folders: &'a [PathBuf], path: &str) -> Option<(&'a Path, PathBuf)>
     let folder = folders.first()?;
     let named = Path::new(path);
     if named.is_absolute() {
-        return named
-            .strip_prefix(folder)
-            .ok()
-            .map(|inside| (folder.as_path(), inside.to_path_buf()));
+        return inside_folder(folder, named).map(|inside| (folder.as_path(), inside));
     }
     Some((folder.as_path(), named.to_path_buf()))
+}
+
+/// The part of an absolute `named` path below `folder` (the chat's folder, resolved). A path named through a link
+/// above the folder (macOS `/var` is `/private/var`) is matched by its shortest leading part that resolves to the
+/// folder, so the rest keeps every link below the folder for the no-follow open to refuse.
+fn inside_folder(folder: &Path, named: &Path) -> Option<PathBuf> {
+    if let Ok(inside) = named.strip_prefix(folder) {
+        return Some(inside.to_path_buf());
+    }
+    // Windows: matched by spelling only. Resolving a named `\\host\share` prefix would reach out to that host.
+    if cfg!(windows) {
+        return None;
+    }
+    let mut leading = PathBuf::new();
+    let mut parts = named.components();
+    for part in parts.by_ref() {
+        leading.push(part);
+        // Only a leading part that names a folder (not a bare drive prefix or root) can resolve to the chat folder.
+        if matches!(part, std::path::Component::Normal(_))
+            && vw_platform::canonical_plain(&leading).is_ok_and(|resolved| resolved == folder)
+        {
+            return Some(parts.as_path().to_path_buf());
+        }
+    }
+    None
 }
 
 /// True when an absolute path lies in one of the chat's other workspace folders (not its first one).
@@ -75,7 +97,7 @@ fn in_other_folder(folders: &[PathBuf], path: &str) -> bool {
         && folders
             .iter()
             .skip(1)
-            .any(|folder| named.starts_with(folder))
+            .any(|folder| inside_folder(folder, named).is_some())
 }
 
 pub(crate) fn read(
@@ -392,6 +414,36 @@ mod tests {
             "{refused}"
         );
         let refused = read_all(&chat, &["../extra/other.txt".to_owned()]).unwrap_err();
+        assert!(refused.contains("outside this chat's folders"), "{refused}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// PREDICT (before the change): the chat's folders arrive resolved (`session::folders`), while the agent or the
+    /// person names a file in the spelling they see, through a link above the chat folder (macOS: `/var/folders/..`
+    /// is `/private/var/folders/..`; here a link made for the test). The file is refused as "outside this chat's
+    /// folders" because the named path does not start with the resolved folder. After: a path whose leading part
+    /// resolves to the chat folder is read; links below the chat folder are still refused, and a path through a link
+    /// that resolves outside the folder is still outside.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_named_through_a_link_above_the_chat_folder_is_inside_it() {
+        let root = folder("linked");
+        std::os::unix::fs::symlink(root.join("chat"), root.join("chat-link")).unwrap();
+        std::os::unix::fs::symlink(root.as_path(), root.join("chat/docs/up")).unwrap();
+        let chat = vec![root.join("chat")];
+        let linked = root.join("chat-link/docs/note.txt").display().to_string();
+        assert_eq!(read_all(&chat, &[linked]).unwrap()[0].data, b"hello");
+        let below = root
+            .join("chat-link/docs/up/chat/docs/note.txt")
+            .display()
+            .to_string();
+        let refused = read_all(&chat, &[below]).unwrap_err();
+        assert!(
+            refused.contains("link") && refused.contains("Choose a file"),
+            "{refused}"
+        );
+        let outside = root.join("chat-link/../secret.txt").display().to_string();
+        let refused = read_all(&chat, &[outside]).unwrap_err();
         assert!(refused.contains("outside this chat's folders"), "{refused}");
         let _ = std::fs::remove_dir_all(&root);
     }

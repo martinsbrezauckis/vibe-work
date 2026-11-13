@@ -75,7 +75,7 @@ async fn a_missing_bound_profile_names_it_and_never_dispatches_to_the_other_acco
         Ok(value) => value.to_string(),
         Err(error) => error,
     };
-    assert!(text.contains("Chrome · Work is unavailable; no action ran. Select a connected profile or reconnect this profile."), "{text}");
+    assert!(text.contains("Chrome · Work is unavailable; no action ran. Use another connected profile, or ask the user to reconnect this profile in Settings > Browser."), "{text}");
     assert!(
         !seen
             .lock()

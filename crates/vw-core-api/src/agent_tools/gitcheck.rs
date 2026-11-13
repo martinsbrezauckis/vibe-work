@@ -349,14 +349,16 @@ fn own_branch(shared: &Shared, session: &str, cwd: &Path) -> Option<String> {
         .then(|| record.branch.clone())
 }
 
-/// The actions the user has to allow (empty = none): another branch's rewrite.
-/// Ordinary local changes use Vibe's card; refused actions never get here.
+/// The actions the user has to allow (empty = none): another branch's rewrite, or a shell call whose command text
+/// cannot be read. Ordinary local changes use Vibe's card; refused actions never get here.
 fn needs_user(found: &GitScan, own_branch: Option<&str>) -> Vec<String> {
     let mut asks: Vec<String> = found
         .ops
         .iter()
         .filter(|o| match o.kind {
             GitKind::Deny | GitKind::Credential | GitKind::Change | GitKind::Identity => false,
+            // A shell call whose command text cannot be read: the user decides, never allowed unseen.
+            GitKind::Unread => true,
             // An explicit target (`git rebase main other`, `git branch -f x`) is held
             // unless it names the session's branch.
             GitKind::Own => {
@@ -440,5 +442,23 @@ mod kg1_tests {
         assert!(text.contains("Build session"));
         assert!(text.contains("remote rewrite"));
         assert!(text.ends_with(&format!("Command:\n{command}")));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vw_agent_tools::gitparse::scan;
+
+    #[test]
+    fn powershell_text_that_cannot_be_read_is_held_for_the_user_even_on_the_own_branch() {
+        let found = scan("powershell -NoProfile -Command -");
+        assert!(found.needs_core(), "{found:?}");
+        assert!(refused(&found).is_none(), "{found:?}");
+        let asks = needs_user(&found, Some("vibe/own"));
+        assert_eq!(asks.len(), 1, "{asks:?}");
+        assert!(asks[0].contains("standard input"), "{asks:?}");
+        let readable = scan("powershell -NoProfile -Command \"git status\"");
+        assert_eq!(needs_user(&readable, None), Vec::<String>::new());
     }
 }

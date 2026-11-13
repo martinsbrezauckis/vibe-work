@@ -536,6 +536,9 @@ impl Core {
                 // a temporary chat nobody wrote in answers "not found" to its own delete). Nothing left to delete,
                 // and the id must leave the record or every start would try it again.
                 self.shared.temporary.remove_saved(id).await;
+                // No confirmed delete ended it in the core, so it leaves its project here (its folder's project
+                // can only go once nothing is filed in it).
+                crate::projects_filing::deleted(&self.shared, id).await;
                 chat_ended(&self.shared, id).await;
                 Deleted::Yes
             }
@@ -577,6 +580,9 @@ impl Core {
                 }
             }
             Err(join) => warn!(%join, "temporary sessions: the scratch folder sweep stopped"),
+        }
+        if self.shared.temporary.ids().is_empty() {
+            crate::projects_filing::retire_scratch_projects(&self.shared).await;
         }
         deleted
     }

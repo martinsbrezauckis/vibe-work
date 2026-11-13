@@ -52,16 +52,6 @@ pub enum PrivateFileError {
         /// Why.
         reason: String,
     },
-    /// An OS permission tool failed or printed something we could not read (Windows).
-    #[error("{tool} failed for {path}: {detail}")]
-    Tool {
-        /// The tool that failed.
-        tool: &'static str,
-        /// The path involved.
-        path: String,
-        /// Exit status or parse problem (never file contents).
-        detail: String,
-    },
 }
 
 fn io(action: &'static str, path: &Path, source: std::io::Error) -> PrivateFileError {

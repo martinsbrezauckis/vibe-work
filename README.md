@@ -14,9 +14,8 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.10 adds Your Firefox, more of Your Safari (forms, waiting for pages, page captures and full-page
-screenshots), more browser actions (harder forms, waiting for pages, tables to a spreadsheet, page video and audio),
-page checks while you build, and handing a tab to you for a CAPTCHA, payment or passkey.
+Version 0.1.11 adds browser profiles named as in Chrome and Edge, one-time codes on web pages, protected fields in more
+languages and custom connectors with sign-in on Windows.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -41,7 +40,7 @@ Questions and reports: `CONTRIBUTING.md`.
   [docs/public/VOCABULARY.md](docs/public/VOCABULARY.md#access-modes). A card says what Allow once or Allow for this
   session covers. Saying No on a card for Vibe's own tools (commands, file edits) stops the turn. A No in Vibe Work's
   own prompts (Git guard, processes, vault, documents, protected folders, cards for Vibe Work's tools) answers only
-  that call and the turn goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name.
+  that call and the turn goes on; the agent receives: `Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name.
   Unanswered cards wait until you answer; Stop or closing the chat counts as No. A new card waits until you stop
   typing, and a held key does not answer it.
   Review and revoke permissions in Settings > Allowed without asking.
@@ -176,7 +175,7 @@ computer on, enter the password once.
 
 Permission cards show the action and wait until you answer. Saying No on a card for Vibe's own tools stops the
 turn; write what to do instead in the chat. A No in Vibe Work's own prompts answers only that call and the turn
-goes on; the agent receives: `Not run: the user declined this. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
+goes on; the agent receives: `Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.` A tool guard prefixes this reason with its name. Ctrl/Cmd+Shift+A goes to a waiting prompt. The session header lists its permissions; Settings > Allowed without asking lists permissions
 you can revoke and links to the controls for lasting choices.
 
 ## What leaves your computer

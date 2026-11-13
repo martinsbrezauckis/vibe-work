@@ -9,7 +9,7 @@
     "docs": "https://github.com/mistralai/mistral-vibe#readme",
     "license": "Apache-2.0",
     "requirements": "vibe.requirements.txt",
-    "requirementsSha256": "96854db253e9cb40d7514fe9ac01c4a8f9084a83af7ed75a60eb6dd13e99b67b",
+    "requirementsSha256": "10b3fedb8ee3e696081f39e9cda59e00d87d439c14a4a2555de7b78ef7ba0da6",
     "packages": 94,
     "wheels": {
       "x86_64-unknown-linux-gnu": {

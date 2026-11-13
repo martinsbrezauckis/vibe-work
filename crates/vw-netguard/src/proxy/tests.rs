@@ -133,3 +133,46 @@ async fn parallel_page_requests_wait_for_a_bounded_native_worker() {
     }
     assert!(resolver.peak.load(Ordering::SeqCst) <= 4);
 }
+
+/// PREDICT: every agent instruction below asked "the person"; the agent-facing actor word is "the user", so each
+/// exact text differs until the outcomes say "Ask the user".
+#[test]
+fn every_proxy_outcome_tells_the_agent_to_ask_the_user() {
+    let expected = [
+        (
+            Error::Configuration,
+            "The configured proxy or PAC result is invalid or unsupported. Ask the user to check Settings > Network or the system proxy. Do not bypass the guard.",
+        ),
+        (
+            Error::Discovery,
+            "The OS proxy/PAC resolver failed or is unavailable. Ask the user to check the system proxy; on Linux install libproxy with the desktop/PAC backend or set a manual proxy in Settings > Network. Do not retry directly.",
+        ),
+        (
+            Error::Unreachable,
+            "The configured proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy.",
+        ),
+        (
+            Error::Timeout,
+            "The proxy connection or system PAC lookup timed out. Ask the user to check their proxy, then retry. Do not bypass the proxy.",
+        ),
+        (
+            Error::Certificate,
+            "TLS verification of the proxy failed. Ask the user to check the proxy name and company CA in Settings > Network. Never disable certificate verification.",
+        ),
+        (
+            Error::Authentication,
+            "The proxy rejected sign-in or requested an unsupported authentication method. Ask the user to check the proxy credentials in Settings or the system configuration. Never put credentials in chat or logs.",
+        ),
+        (
+            Error::Refused,
+            "The proxy refused the guard's checked IP destination. Ask the user to check the proxy's access rules. Never retry by hostname or bypass the guard.",
+        ),
+        (
+            Error::Protocol,
+            "The proxy returned an invalid handshake. Ask the user to check the proxy type and address, then retry. Do not bypass the guard.",
+        ),
+    ];
+    for (error, text) in expected {
+        assert_eq!(error.outcome(), text, "{error:?}");
+    }
+}

@@ -21,11 +21,17 @@
  * - Empty projects show (they are drop targets) except while a search is active; a project whose name matches the
  * search shows all its sessions.
  * - Folder groups are keyed by the full `cwd`; two folders with the same last name get the parent folder added.
+ *   Temporary chats' own folders form one group, "Temporary chats", and never show their folder name.
  * - Search is substring match over title, preview, folder paths and model, all words must match;
  * it is not full-text over transcripts.
  */
 import type { GroupsData } from "../../state/projectGroups";
-import { type SessionSummary } from "../../state/sessionSummary";
+import {
+  type SessionSummary,
+  TEMPORARY_CHAT,
+  TEMPORARY_CHATS,
+  isTemporaryFolder,
+} from "../../state/sessionSummary";
 
 /** A session with its nested children. */
 export interface RowNode {
@@ -114,6 +120,7 @@ function normalizeFolder(path: string): string {
 
 function label(path: string | null, withParent: boolean): string {
   if (path === null) return "No folder";
+  if (isTemporaryFolder(path)) return TEMPORARY_CHAT;
   const parts = segments(path);
   const last = parts[parts.length - 1] ?? path;
   const parent = parts[parts.length - 2];
@@ -158,8 +165,11 @@ function withChips(rows: readonly RowNode[], mainFolder: string | null): RowNode
   const main = mainFolder === null ? null : normalizeFolder(mainFolder);
   const visit = (node: RowNode): RowNode => {
     const cwd = node.session.cwd;
+    // A Temporary chat's own folder is never a chip: its name is internal.
     const chip =
-      cwd === null || (main !== null && normalizeFolder(cwd) === main) ? null : folderName(cwd);
+      cwd === null || isTemporaryFolder(cwd) || (main !== null && normalizeFolder(cwd) === main)
+        ? null
+        : folderName(cwd);
     return { ...node, chip, children: node.children.map(visit) };
   };
   return rows.map(visit);
@@ -188,14 +198,20 @@ function summary(
 }
 
 /** Folder groups (before projects, or for sessions the core has not filed yet), in first-seen order. */
+/** The one folder group every Temporary chat's own folder joins (a key no folder path can have). */
+const TEMPORARY_GROUP = "temporary-chats";
+
 function folderGroups(nodes: readonly RowNode[], chips: boolean): ProjectGroup[] {
   const groups = new Map<string, RowNode[]>();
   for (const node of nodes) {
-    const key = node.session.cwd ?? "";
+    const cwd = node.session.cwd;
+    const key = isTemporaryFolder(cwd) ? TEMPORARY_GROUP : (cwd ?? "");
     groups.set(key, [...(groups.get(key) ?? []), node]);
   }
   const bare = [...groups.keys()].map((k) => label(k === "" ? null : k, false));
   return [...groups.entries()].map(([key, rows]) => {
+    if (key === TEMPORARY_GROUP)
+      return summary(key, null, TEMPORARY_CHATS, null, chips ? withChips(rows, null) : rows, null);
     const path = key === "" ? null : key;
     const ambiguous = bare.filter((b) => b === label(path, false)).length > 1;
     return summary(

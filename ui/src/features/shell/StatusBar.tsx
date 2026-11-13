@@ -13,6 +13,7 @@ import { contextReadout, rateLimitWarning, usageOf } from "../../state/account";
 import { useKeyUi } from "../setup/useKeys";
 import { useVibeUi } from "../setup/VibeInstallStep";
 import { installStatus } from "../../state/vibeInstall";
+import { isTemporaryFolder } from "../../state/sessionSummary";
 import { VaultLockControls } from "../secrets/VaultLockControls";
 import { useApp } from "./AppContext";
 import { useKeyReadiness } from "./KeyNotice";
@@ -21,7 +22,8 @@ import { useCoreState, useSessionSummaries, useShellState } from "./hooks";
 
 function Server() {
   const server = useCoreState((s) => s.server);
-  // While Vibe is being installed or updated the server is "not installed": say what is happening instead.
+  // While Vibe is being installed or updated, or did not start after its install, the server is "not installed": say
+  // what is happening instead.
   const installing = useVibeUi((s) => installStatus(s.view));
   switch (server.phase) {
     case "running":
@@ -176,8 +178,9 @@ export function StatusBar({ children }: { children?: ReactNode }) {
           {key.status}
         </span>
       )}
-      {/* The folder gives way (ellipsis) so the readout and the Debug API indicator stay visible at 390 px. */}
-      {cwd !== null && <PathText path={cwd} className="sb-cwd" />}
+      {/* The folder gives way (ellipsis) so the readout and the Debug API indicator stay visible at 390 px. A
+          Temporary chat's own folder is not shown: its path is internal and goes when the chat goes. */}
+      {cwd !== null && !isTemporaryFolder(cwd) && <PathText path={cwd} className="sb-cwd" />}
       {children}
       <span className="push" />
       <LeftRunningButton />

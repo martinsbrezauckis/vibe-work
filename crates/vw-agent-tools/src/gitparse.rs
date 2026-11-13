@@ -23,6 +23,9 @@ pub enum GitKind {
     Credential,
     /// Sets the Git identity (the name and email Git writes into commits): the user's to set, refused.
     Identity,
+    /// A shell call whose command text cannot be read here (PowerShell reading standard input, for example):
+    /// always held for the user.
+    Unread,
 }
 
 /// Git config keys that make up the identity commits carry (compared in lower case).
@@ -137,7 +140,11 @@ impl GitScan {
             || self.ops.iter().any(|o| {
                 matches!(
                     o.kind,
-                    GitKind::Deny | GitKind::Own | GitKind::Credential | GitKind::Identity
+                    GitKind::Deny
+                        | GitKind::Own
+                        | GitKind::Credential
+                        | GitKind::Identity
+                        | GitKind::Unread
                 )
             })
     }
@@ -194,7 +201,9 @@ pub fn scan(command: &str) -> GitScan {
                 one.mentions
             };
             for op in one.ops {
-                if (!credentials_only || op.kind == GitKind::Credential) && !out.ops.contains(&op) {
+                if (!credentials_only || matches!(op.kind, GitKind::Credential | GitKind::Unread))
+                    && !out.ops.contains(&op)
+                {
                     out.ops.push(op);
                 }
             }
@@ -266,10 +275,15 @@ fn scan_reading<'a>(
                 at += 1;
             }
         }
-        // Windows shells: `cmd /c …` (Git Bash writes `cmd //c`) and `pwsh|powershell -Command …` run the rest of the
-        // line as a command, the natural Windows form of a wrapped credential read.
-        for script in windows_shell_script(&name, args) {
+        // Windows shells: `cmd /c …` (Git Bash writes `cmd //c`) and PowerShell run command text, the natural Windows
+        // form of a wrapped credential read. Text PowerShell takes from elsewhere is held for the user.
+        let shell = crate::windows_shell::command_text(&name, args);
+        for script in shell.scripts {
             scripts.push((script, true));
+        }
+        if let Some(why) = shell.unreadable {
+            out.mentions = true;
+            Sink(&mut out).op(GitKind::Unread, format!("PowerShell ({why})"), elsewhere);
         }
         let mut switched = false;
         if name == "git" {
@@ -287,103 +301,6 @@ fn scan_reading<'a>(
         elsewhere |= switched;
     }
     out
-}
-
-/// The command texts a Windows shell may run: `cmd /c|/k|/r` (also `//c` from Git Bash and `/cTEXT` without a space, `^`
-/// escapes removed) or PowerShell `-Command` (any prefix) and `-EncodedCommand` (decoded), wherever they appear. Without
-/// either, Windows PowerShell runs its first plain argument as a command; which word that is depends on parameter
-/// values, so every plain word starts a candidate (pwsh's default is -File, a script file, which is not read).
-/// Reading more candidates can only add asks, never remove one.
-pub(crate) fn windows_shell_script(name: &str, args: &[&str]) -> Vec<String> {
-    match name {
-        "cmd" => cmd_script(args).into_iter().collect(),
-        "pwsh" | "powershell" => powershell_scripts(name == "powershell", args),
-        _ => Vec::new(),
-    }
-}
-
-fn cmd_script(args: &[&str]) -> Option<String> {
-    for (at, arg) in args.iter().enumerate() {
-        let Some(switch) = arg.strip_prefix("//").or_else(|| arg.strip_prefix('/')) else {
-            continue;
-        };
-        let mut chars = switch.chars();
-        if chars
-            .next()
-            .is_some_and(|c| matches!(c.to_ascii_lowercase(), 'c' | 'k' | 'r'))
-        {
-            let mut words: Vec<&str> = Vec::new();
-            let attached = chars.as_str();
-            if !attached.is_empty() {
-                words.push(attached);
-            }
-            words.extend_from_slice(&args[at + 1..]);
-            let script = words.join(" ").replace('^', "");
-            return (!script.trim().is_empty()).then_some(script);
-        }
-    }
-    None
-}
-
-fn powershell_flag(arg: &str) -> Option<String> {
-    let lower = arg.to_ascii_lowercase();
-    let flag = lower
-        .strip_prefix("--")
-        .or_else(|| lower.strip_prefix('-'))
-        .or_else(|| lower.strip_prefix('/'))?;
-    (!flag.is_empty()).then(|| flag.to_owned())
-}
-
-/// At most this many positional candidates per PowerShell call (each is read again as a command line).
-const MAX_POSITIONAL_CANDIDATES: usize = 8;
-
-fn powershell_scripts(windows_powershell: bool, args: &[&str]) -> Vec<String> {
-    let mut scripts = Vec::new();
-    for (at, arg) in args.iter().enumerate() {
-        let Some(flag) = powershell_flag(arg) else {
-            continue;
-        };
-        if "command".starts_with(flag.as_str()) {
-            let rest = &args[at + 1..];
-            if !rest.is_empty() {
-                scripts.push(rest.join(" "));
-            }
-            break;
-        }
-        if flag == "e"
-            || flag == "ec"
-            || (flag.starts_with("en") && "encodedcommand".starts_with(flag.as_str()))
-        {
-            scripts.extend(args.get(at + 1).map(|text| decode_powershell(text)));
-            break;
-        }
-    }
-    if windows_powershell {
-        scripts.extend(
-            (0..args.len())
-                .filter(|&at| powershell_flag(args[at]).is_none())
-                .take(MAX_POSITIONAL_CANDIDATES)
-                .map(|at| args[at..].join(" ")),
-        );
-    }
-    scripts
-}
-
-/// `-EncodedCommand` is base64 of UTF-16LE text. Undecodable input is returned as is, so it reads as no command.
-fn decode_powershell(text: &str) -> String {
-    use base64::Engine as _;
-    let Ok(bytes) =
-        base64::engine::general_purpose::STANDARD.decode(text.trim_matches(['"', '\'']))
-    else {
-        return text.to_owned();
-    };
-    let units: Vec<u16> = bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| u16::from_le_bytes(*pair))
-        .collect();
-    String::from_utf16_lossy(&units)
 }
 
 pub(crate) struct Sink<'a>(&'a mut GitScan);

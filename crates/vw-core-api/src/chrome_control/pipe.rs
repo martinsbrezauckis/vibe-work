@@ -22,6 +22,47 @@ mod tests;
 #[path = "pipe_identity_tests.rs"]
 mod identity_tests;
 
+/// Refusal codes the helper prints on stderr before it ends; the first one found names why it stopped.
+const REFUSALS: [&str; 3] = [
+    "OWNER_CONFLICT",
+    "OWNER_IDENTITY_MISMATCH",
+    "OWNER_APPROVAL_REQUIRED",
+];
+
+/// The helper's refusal when another helper holds this state folder's lock.
+pub(super) const OWNER_CONFLICT: &str = "OWNER_CONFLICT";
+
+/// Why a launch failed. `helper_code` is the helper's own refusal code (`REFUSALS`) when it printed one before it
+/// ended; `None` for every other failure (not found, pin mismatch, spawn error, handshake error).
+#[derive(Debug, Default)]
+pub(super) struct LaunchError {
+    pub(super) helper_code: Option<&'static str>,
+}
+
+impl From<()> for LaunchError {
+    fn from((): ()) -> Self {
+        Self::default()
+    }
+}
+
+/// Reads the first 4 KiB of the helper's stderr and returns the first refusal code in it, logged as a warning.
+async fn read_refusal(stderr: tokio::process::ChildStderr) -> Option<&'static str> {
+    let mut bytes = Vec::new();
+    let _ = stderr.take(4096).read_to_end(&mut bytes).await;
+    let code = refusal_code(&bytes)?;
+    // A closing process's stderr can arrive after its connection was cleared.
+    tracing::warn!(code, "Chrome Control helper reported an error");
+    Some(code)
+}
+
+fn refusal_code(bytes: &[u8]) -> Option<&'static str> {
+    REFUSALS.into_iter().find(|code| {
+        bytes
+            .windows(code.len())
+            .any(|part| part == code.as_bytes())
+    })
+}
+
 pub(super) struct Pipe {
     pub(super) child: Child,
     _executable: Option<vw_platform::checked_executable::CheckedExecutable>,
@@ -42,7 +83,7 @@ impl Pipe {
         expected: blake3::Hash,
         secret: &vw_vault::SecretString,
         shared: Weak<Shared>,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, LaunchError> {
         let (mut executable, helper) = super::setup::open_helper(package).map_err(|reason| {
             tracing::debug!(%reason, "Chrome Control helper could not be opened");
         })?;
@@ -50,7 +91,7 @@ impl Pipe {
         std::io::Read::read_to_end(executable.file(), &mut bytes).map_err(|_| ())?;
         super::setup::check_helper_pin(package, &bytes).map_err(|_| ())?;
         if blake3::hash(&bytes) != expected {
-            return Err(());
+            return Err(LaunchError::default());
         }
         #[cfg(test)]
         if let Some(after_check) = &package.after_helper_check {
@@ -83,28 +124,12 @@ impl Pipe {
         {
             let _ = child.kill().await;
             let _ = child.wait().await;
-            return Err(());
+            return Err(LaunchError::default());
         }
-        if let Some(stderr) = child.stderr.take() {
-            tokio::spawn(async move {
-                let mut bytes = Vec::new();
-                let _ = stderr.take(4096).read_to_end(&mut bytes).await;
-                for code in [
-                    "OWNER_CONFLICT",
-                    "OWNER_IDENTITY_MISMATCH",
-                    "OWNER_APPROVAL_REQUIRED",
-                ] {
-                    if bytes
-                        .windows(code.len())
-                        .any(|part| part == code.as_bytes())
-                    {
-                        // A closing process's stderr can arrive after its connection was cleared.
-                        tracing::warn!(code, "Chrome Control helper reported an error");
-                        break;
-                    }
-                }
-            });
-        }
+        let refusal = child
+            .stderr
+            .take()
+            .map(|stderr| tokio::spawn(read_refusal(stderr)));
         let input = child.stdin.take().ok_or(())?;
         let output = child.stdout.take().ok_or(())?;
         let mut pipe = Self {
@@ -126,7 +151,17 @@ impl Pipe {
             // A refused helper is ended and reaped before the error returns: dropping it only starts the kill, and
             // Windows keeps a still-running helper's executable and files locked for whoever touches them next.
             let _ = pipe.child.kill().await;
-            return Err(());
+            // The helper's stderr ends with it; its refusal code is read before the error returns so the caller can
+            // name the cause (bounded: a process the helper started could still hold the stream open).
+            let helper_code = match refusal {
+                Some(task) => tokio::time::timeout(Duration::from_secs(1), task)
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .flatten(),
+                None => None,
+            };
+            return Err(LaunchError { helper_code });
         }
         Ok(pipe)
     }

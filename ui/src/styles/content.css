@@ -75,13 +75,15 @@
   color: var(--text);
   background: var(--active);
 }
-.has-panel .shead .lbltxt {
+.has-panel .shead .lbltxt,
+.has-panel .shead .temporary-more {
   display: none;
 }
 /* A chat area under 720 px (the 900 px window with the list open) shows the tab buttons as icons; each keeps its
-   name as its label and tooltip. */
+   name as its label and tooltip. The Temporary chip keeps its first word; its tooltip explains the rest. */
 @container (max-width: 720px) {
-  .shead .lbltxt {
+  .shead .lbltxt,
+  .shead .temporary-more {
     display: none;
   }
 }

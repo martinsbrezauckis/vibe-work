@@ -1,5 +1,7 @@
 //! Scoped `WebView2` mouse variants using its own protocol channel after native HWND/focus checks.
-//! Called by the checked frame input adapter; every press rechecks permission and cancellation, every press is released.
+//! Called by the checked frame input adapter; runs the steps of `windows_sequence_plan` in order. Every admitted
+//! step rechecks the deadline, permission and foreground target; every press is released.
+use super::windows_sequence_plan::{self as plan, Step};
 use super::{ClickPermission, ClickReply};
 use crate::webview::devtools_win::DevTools;
 use std::{
@@ -17,8 +19,9 @@ struct Sequence {
     channel: DevTools,
     point: (f64, f64),
     css: (f64, f64),
-    options: (u8, u8, u8, Option<(i32, i32)>),
-    count: Cell<u8>,
+    options: plan::Options,
+    steps: Vec<Step>,
+    at: Cell<usize>,
     sent: Arc<AtomicBool>,
     allowed: ClickPermission,
     deadline: std::time::Instant,
@@ -32,26 +35,13 @@ struct Sequence {
 pub fn click(
     controller: &ICoreWebView2Controller,
     points: ((f64, f64), (f64, f64)),
-    options: (u8, u8, u8, Option<(i32, i32)>),
+    options: plan::Options,
     sent: Arc<AtomicBool>,
     allowed: ClickPermission,
     deadline: std::time::Instant,
     reply: ClickReply,
 ) {
-    if ((options.0, options.1, options.2) != (0, 0, 0)
-        && (options.0 > 2 || !(1..=3).contains(&options.1) || options.2 > 15))
-        || options.3.is_some_and(|(x, y)| {
-            options.0 != 0
-                || options.1 != 0
-                || options.2 != 0
-                || !(-20_000..=20_000).contains(&x)
-                || !(-20_000..=20_000).contains(&y)
-                || (x == 0 && y == 0)
-        })
-        || ![points.1.0, points.1.1]
-            .into_iter()
-            .all(|n| n.is_finite() && n >= 0.0)
-    {
+    if !plan::admissible(options, points.1) {
         let _ = reply.send(Err("invalid native click options".into()));
         return;
     }
@@ -68,7 +58,8 @@ pub fn click(
         point: points.0,
         css: points.1,
         options,
-        count: Cell::new(1),
+        steps: plan::steps(options),
+        at: Cell::new(0),
         sent,
         allowed,
         deadline,
@@ -78,7 +69,7 @@ pub fn click(
             .as_secs_f64(),
         reply: RefCell::new(Some(reply)),
     });
-    sequence.press();
+    sequence.next();
 }
 
 impl Sequence {
@@ -87,91 +78,72 @@ impl Sequence {
             let _ = reply.send(result);
         }
     }
-    fn event(&self, kind: &str) -> String {
-        if let Some((x, y)) = self.options.3 {
-            return serde_json::json!({"type":"mouseWheel","x":self.css.0,"y":self.css.1,"deltaX":x,"deltaY":y,"timestamp":self.timestamp}).to_string();
-        }
-        if self.options.1 == 0 {
-            return serde_json::json!({"type":"mouseMoved","x":self.css.0,"y":self.css.1,"button":"none","buttons":0,"timestamp":self.timestamp}).to_string();
-        }
-        let button = match self.options.0 {
-            1 => "middle",
-            2 => "right",
-            _ => "left",
-        };
-        // Always release a held button. After a slow press callback, release outside the viewport so a
-        // document born during that callback cannot receive an unguarded late mouseup/activation.
-        let (x, y) = if kind == "mouseReleased" && std::time::Instant::now() >= self.deadline {
-            (-1.0, -1.0)
-        } else {
-            self.css
-        };
-        serde_json::json!({"type":kind,"x":x,"y":y,"button":button,"clickCount":self.count.get(),"modifiers":self.options.2,"timestamp":self.timestamp}).to_string()
-    }
-    fn press(self: Rc<Self>) {
+    /// The live checks before a step that starts input; `false` after it answered (or the caller went away).
+    fn admit(&self) -> bool {
         if self
             .reply
             .borrow()
             .as_ref()
             .is_none_or(ClickReply::is_closed)
         {
-            return;
+            return false;
         }
         if std::time::Instant::now() >= self.deadline {
             self.finish(Err(
                 "the page moved: native input preparation took too long; read the page again"
                     .into(),
             ));
-            return;
+            return false;
         }
         if self.allowed.as_ref().is_some_and(|allowed| !allowed()) {
             self.finish(Err("Browser permission changed before native input.".into()));
-            return;
+            return false;
         }
         if let Err(error) = super::windows_click::target(&self.controller, self.point) {
             self.finish(Err(error));
+            return false;
+        }
+        true
+    }
+    fn next(self: Rc<Self>) {
+        let Some(&step) = self.steps.get(self.at.get()) else {
+            self.finish(Ok(()));
+            return;
+        };
+        if step.admitted() && !self.admit() {
             return;
         }
-        let next = self.clone();
-        self.sent.store(true, Ordering::Release);
-        self.channel.call(
-            "",
-            "Input.dispatchMouseEvent",
-            &self.event("mousePressed"),
-            Box::new(move |result| {
-                if let Err(error) = result {
-                    next.finish(Err(format!("Native mouse press failed: {error}")));
-                    return;
-                }
-                next.sent.store(true, Ordering::Release);
-                if next.options.1 == 0 {
-                    next.finish(Ok(()));
-                    return;
-                }
-                // Release even when Stop or a permission change arrived after the press.
-                next.release();
-            }),
-        );
-    }
-    fn release(self: Rc<Self>) {
+        if step.sends() {
+            self.sent.store(true, Ordering::Release);
+        }
+        // After a slow press callback a release goes outside the viewport (see `plan::event`).
+        let late = std::time::Instant::now() >= self.deadline;
+        let event = plan::event(step, self.css, self.options, self.timestamp, late).to_string();
         let next = self.clone();
         self.channel.call(
             "",
             "Input.dispatchMouseEvent",
-            &self.event("mouseReleased"),
+            &event,
             Box::new(move |result| {
                 if let Err(error) = result {
-                    next.finish(Err(format!(
-                        "Native mouse release failed after input was sent: {error}"
-                    )));
+                    next.finish(Err(match step {
+                        Step::Approach => {
+                            format!("Native pointer move failed before input: {error}")
+                        }
+                        Step::Release(_) => {
+                            format!("Native mouse release failed after input was sent: {error}")
+                        }
+                        _ => format!("Native mouse press failed: {error}"),
+                    }));
                     return;
                 }
-                if next.count.get() >= next.options.1 {
-                    next.finish(Ok(()));
-                } else {
-                    next.count.set(next.count.get() + 1);
-                    next.press();
+                if step.sends() {
+                    next.sent.store(true, Ordering::Release);
                 }
+                // A press is always followed by its release, also when Stop or a permission change arrived
+                // after the press: only admitted steps recheck.
+                next.at.set(next.at.get() + 1);
+                next.next();
             }),
         );
     }

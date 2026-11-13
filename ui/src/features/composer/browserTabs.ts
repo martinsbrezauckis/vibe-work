@@ -32,6 +32,11 @@ export function composerShown(
   );
 }
 
+/** The tab panel's element id, so the composer's "Add a browser tab…" button can name the panel it controls. */
+export function browserTabsPanelId(sessionId: string): string {
+  return `composer-browser-tabs-${sessionId}`;
+}
+
 /** The chat's browser session, then its last picker choice, then Chrome or the first usable browser. */
 export async function openBrowserTabs(
   app: App,

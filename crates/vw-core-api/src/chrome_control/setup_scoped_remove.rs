@@ -47,7 +47,7 @@ pub(super) fn remove_registration(
         .find(|target| target.name == browser)
         .or_else(|| {
             (browser == "Microsoft Edge").then(|| {
-                let user_data = places::edge_data_for(&home, config.is_macos());
+                let user_data = places::edge_data_for(&home, config);
                 places::Target {
                     name: "Microsoft Edge",
                     hosts: (!cfg!(windows)).then(|| user_data.join("NativeMessagingHosts")),

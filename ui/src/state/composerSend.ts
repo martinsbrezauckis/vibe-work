@@ -78,6 +78,11 @@ export function createSendActions(deps: {
   afterTurn: (sessionId: string) => void;
   /** Apply new-session model preferences before submitting; a failed pick leaves the chat sendable. */
   beforeTurn: (sessionId: string) => Promise<boolean>;
+  /**
+   * True for a Temporary chat: its prompts stay out of the prompt history shared with the Vibe CLI, which would
+   * outlive the chat.
+   */
+  isTemporary?: ((sessionId: string) => boolean) | undefined;
 }) {
   const { core, composer, runCommand, chains, afterTurn } = deps;
   const entry = (id: string) => core.store.get().sessions[id];
@@ -179,7 +184,12 @@ export function createSendActions(deps: {
     const previous = chains.get(sessionId) ?? Promise.resolve();
     const next = previous.then(async () => {
       const outcome = await deliver(sessionId, wanted, content);
-      if (outcome.ok && content.restoreOnFailure !== false && content.text.trim() !== "")
+      if (
+        outcome.ok &&
+        content.restoreOnFailure !== false &&
+        content.text.trim() !== "" &&
+        deps.isTemporary?.(sessionId) !== true
+      )
         void syncPromptHistory(core, composer, content.text);
       return outcome;
     });

@@ -2,6 +2,8 @@
 //! Used by agent tools and Settings; pairing is independent of action authority.
 mod action_tracking;
 mod addon;
+#[cfg(test)]
+mod agent_profile_text_tests;
 pub(crate) mod safari;
 mod safari_copies;
 mod safari_package;
@@ -100,6 +102,8 @@ mod pairing_approval;
 pub use pairing_approval::BROWSER_PAIRING_DIALOG_METHOD;
 #[cfg(test)]
 mod pairing_approval_tests;
+#[cfg(test)]
+mod pairing_removed_tests;
 pub use pairing::PairingState;
 #[cfg(test)]
 mod ask_policy_tests;
@@ -123,11 +127,28 @@ mod profile_selection;
 pub use profile_selection::ChatBrowserProfile;
 mod profiles;
 pub use profiles::{BrowserProfile, ProfileState};
+mod browser_data;
+#[cfg(test)]
+mod profile_card_agent_tests;
+#[cfg(test)]
+mod profile_choice_tests;
 mod profile_folders;
 mod profile_ids;
+mod profile_names;
+#[cfg(all(test, feature = "your-edge"))]
+mod profile_names_access_tests;
+#[cfg(all(test, feature = "your-edge"))]
+mod profile_names_macos_tests;
+#[cfg(all(test, feature = "your-edge"))]
+mod profile_names_tests;
 mod profile_presence;
 #[cfg(all(test, feature = "your-edge"))]
 mod profile_presence_tests;
+mod profile_reason;
+#[cfg(all(test, feature = "your-edge"))]
+mod profile_reinstall_tests;
+#[cfg(test)]
+mod profile_retire_tests;
 #[cfg(all(test, feature = "your-edge"))]
 mod profile_scope_tests;
 mod profile_storage;
@@ -150,6 +171,8 @@ mod registry_native_tests;
 mod remove;
 #[cfg(all(test, feature = "your-safari"))]
 mod safari_action_tests;
+#[cfg(all(test, feature = "your-safari"))]
+mod safari_supersede_tests;
 #[cfg(all(test, feature = "your-safari"))]
 mod safari_tests;
 #[cfg(test)]
@@ -243,9 +266,16 @@ pub(crate) struct ChromeControl {
     local_documents: Mutex<local_documents::Documents>,
     click_refs: Mutex<approval::ClickRefs>,
     profiles: Mutex<profiles::Profiles>,
+    /// Since when each browser has had no live paired profile (`profile_reason::observe`).
+    offline_since: Mutex<std::collections::BTreeMap<&'static str, std::time::Instant>>,
+    /// macOS: browser user data folders the profile-name search checked in this run (`browser_data`).
+    name_folders: Mutex<browser_data::Checked>,
     bindings: Mutex<profile_bindings::Bindings>,
     binding_changes: tokio::sync::Mutex<()>,
     chat_profiles: Mutex<std::collections::HashMap<String, String>>,
+    /// The profile the person picked for a chat on the profile card (`profile_selection::select_picked`), while it
+    /// is still that chat's profile: a call naming another profile is told which one the user picked.
+    picked_profiles: Mutex<std::collections::HashMap<String, String>>,
     /// The compatibility generation the running helper acknowledged (`None`: not yet, or a new helper connection). A
     /// change stays pending, and is sent again, until the helper acknowledges that very change.
     local_network_acked: Mutex<Option<u64>>,
@@ -309,9 +339,12 @@ impl ChromeControl {
             local_documents: Mutex::new(local_documents::Documents::default()),
             click_refs: Mutex::new(approval::ClickRefs::default()),
             profiles: Mutex::new(profiles),
+            offline_since: Mutex::new(std::collections::BTreeMap::new()),
+            name_folders: Mutex::new(browser_data::Checked::new()),
             bindings: Mutex::new(bindings),
             binding_changes: tokio::sync::Mutex::new(()),
             chat_profiles: Mutex::new(chat_profiles),
+            picked_profiles: Mutex::new(std::collections::HashMap::new()),
             stopped_by_person: Mutex::new(std::collections::HashMap::new()),
             local_network_acked: Mutex::new(None),
             local_network_delivery: tokio::sync::Mutex::new(()),
@@ -537,6 +570,10 @@ impl ChromeControl {
         }
         if deleted {
             profile_bindings::forget(self, chat);
+            self.picked_profiles
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(chat);
         }
         if deleted
             && let Some(profile) = self
@@ -549,6 +586,15 @@ impl ChromeControl {
                 .control(json!({"action":"delete","profileId":profile,"_clientSessionId":chat}));
         }
     }
+}
+/// Before a `chrome_session` open: the person picks this chat's profile on a card when it is not decided
+/// (`profile_seeding::ask_person`). The open's own arguments are unchanged; it then runs in the chat's binding.
+pub(crate) async fn ask_profile(
+    shared: &std::sync::Arc<crate::core::Shared>,
+    chat: &str,
+    args: &serde_json::Value,
+) -> Result<(), String> {
+    profile_seeding::ask_person(shared, chat, &mut args.clone()).await
 }
 /// Exact browser identity comparison, including the legacy raw Chrome UUID alias.
 pub(crate) fn same_profile(left: &str, right: &str) -> bool {

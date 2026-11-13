@@ -89,15 +89,17 @@ pub(super) fn view(chrome: &super::ChromeControl) -> Option<Vec<ChatBrowserProfi
     (!rows.is_empty()).then_some(rows)
 }
 
-fn eligible(shared: &Shared, profile: &str) -> Result<(), String> {
-    if profiles::view(shared)
-        .iter()
-        .any(|row| row.eligible && super::profile_ids::same(&row.profile_id, profile))
-    {
+/// Connected now; for a pick on the profile card also offline (paired and on, its extension asleep), since the open
+/// that follows wakes the browser and still runs only in a live profile.
+fn eligible(shared: &Shared, profile: &str, offline: bool) -> Result<(), String> {
+    if profiles::view(shared).iter().any(|row| {
+        (row.eligible || offline && row.state == super::ProfileState::Offline)
+            && super::profile_ids::same(&row.profile_id, profile)
+    }) {
         Ok(())
     } else {
         Err(format!(
-            "{} is unavailable; no action ran. Select a connected profile or reconnect this profile.",
+            "{} is unavailable; no action ran. Use another connected profile, or ask the user to reconnect this profile in Settings > Browser.",
             profiles::label(&shared.chrome_control, profile)
         ))
     }
@@ -105,6 +107,32 @@ fn eligible(shared: &Shared, profile: &str) -> Result<(), String> {
 
 /// Returns whether a previous task was released, so the person command can open a fresh task afterwards.
 pub(super) async fn select(shared: &Shared, chat: &str, profile: &str) -> Result<bool, String> {
+    select_with(shared, chat, profile, false).await
+}
+
+/// The person's pick on the profile card (`ask::tool_calls::choose_profile`): as [`select`], and an offline profile
+/// the card offered may be picked.
+pub(super) async fn select_picked(
+    shared: &Shared,
+    chat: &str,
+    profile: &str,
+) -> Result<bool, String> {
+    let released = select_with(shared, chat, profile, true).await?;
+    shared
+        .chrome_control
+        .picked_profiles
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(chat.into(), profiles::canonical(profile));
+    Ok(released)
+}
+
+async fn select_with(
+    shared: &Shared,
+    chat: &str,
+    profile: &str,
+    offline: bool,
+) -> Result<bool, String> {
     if !crate::new_chat::known_owner(shared, chat) {
         return Err(
             "This chat is no longer open. Open the chat and select its profile again.".into(),
@@ -112,7 +140,7 @@ pub(super) async fn select(shared: &Shared, chat: &str, profile: &str) -> Result
     }
     let chrome = &shared.chrome_control;
     let _held = chrome.binding_changes.lock().await;
-    eligible(shared, profile)?;
+    eligible(shared, profile, offline)?;
     let profile = profiles::canonical(profile);
     let pending = chrome
         .bindings
@@ -157,7 +185,7 @@ pub(super) async fn select(shared: &Shared, chat: &str, profile: &str) -> Result
             return Err("The old profile's release is unconfirmed; switching is stopped. Reconnect the old profile and retry this selection.".into());
         }
     }
-    eligible(shared, &profile)?;
+    eligible(shared, &profile, offline)?;
     profile_bindings::complete_change(chrome, chat, &profile)?;
     super::owner::publish(shared);
     Ok(!change.releases.is_empty())
@@ -249,7 +277,7 @@ pub(super) async fn command(
 ) -> Result<crate::CommandResult, crate::CoreError> {
     if crate::command_origin::debug_api_acts(&core.shared, origin) {
         return Err(super::commands::invalid(
-            "Changing this chat's browser profile requires the user. Ask the user to select it in the chat.",
+            "Choosing this chat's browser profile requires the user. Open a browser session so the user can pick a profile on the card.",
         ));
     }
     let opened = select(&core.shared, chat, profile)
@@ -275,5 +303,6 @@ pub(super) async fn command(
     Ok(crate::CommandResult::ChromeControl {
         view: super::commands::view(&core.shared),
         offer: None,
+        hint: None,
     })
 }

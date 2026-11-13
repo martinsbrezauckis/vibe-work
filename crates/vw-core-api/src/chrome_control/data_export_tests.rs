@@ -172,3 +172,102 @@ async fn continuations_keep_the_first_data_row_and_refuse_symlink_collections() 
     }
     core.shutdown().await;
 }
+
+// PREDICT (before the fix): a connected browser returns a long table in bounded receipts (the helper keeps each
+// receipt near 3 KB, Safari pages its captured structure), so the export saves only the first receipt's rows (here
+// 16 of 40) with truncated:true, and the agent's appendFrom re-export of the same read adds nothing.
+// After the fix: the export follows the read's own helper and structure continuations before saving, so every
+// captured row reaches the file and the receipt is complete.
+#[tokio::test]
+async fn a_long_connected_table_follows_its_continuations_into_one_file() {
+    let (core, folder) = read_output_tests::fixture("browser-data-long-table").await;
+    let row = |n: usize| json!([format!("Batch {n}"), n.to_string(), (n + 1).to_string()]);
+    let seen = test_support::answering(&core.shared, move |tool, args| {
+        if tool == "chrome_status" {
+            return output_tests::status(args);
+        }
+        let rows = |range: std::ops::Range<usize>| {
+            range
+                .map(|n| json!({"tables":[{"rows":[row(n)]}],"frameId":0}))
+                .collect::<Vec<_>>()
+        };
+        let data = match args["args"]["cursor"].as_str() {
+            None => {
+                let mut structure =
+                    vec![json!({"tables":[{"rows":[["Batch","Blue","Sage"]]}],"frameId":0})];
+                structure.extend(rows(1..17));
+                json!({"url":"https://example.com/lab","structure":structure,
+                    "coverage":{"complete":false,"reason":"captured_content_remaining","sourceLimits":[]},
+                    "continuation":{"helper":{"action":"page.read","args":{"tabId":7,"cursor":"h-next","maxBytes":3000}}}})
+            }
+            Some("h-next") => json!({"tabId":7,"structure":rows(17..30),
+                "continuation":{"structure":{"action":"page.read","args":{"tabId":7,"cursor":"cap:structure:30"}}}}),
+            Some("cap:structure:30") => json!({"tabId":7,"structure":rows(30..41),
+                "coverage":{"complete":true,"sourceLimits":[]},"continuation":{}}),
+            Some(other) => panic!("unexpected cursor {other}"),
+        };
+        output_tests::mcp(json!({"status":"completed","action":"page.read","data":data}))
+    });
+    let request = json!({"sessionId":"t","action":"page.read","args":{"ref":"table","tabId":7},"saveTo":"csv","extract":{"kind":"table"}});
+    let answer = gateway::call(&core.shared, "s", "chrome_execute", request)
+        .await
+        .unwrap();
+    let body = &answer["vwMcpResult"]["structuredContent"];
+    assert_eq!(body["savedToFile"]["rows"], 40, "{body}");
+    assert_eq!(body["untrustedPageContent"]["truncated"], false, "{body}");
+    let csv = std::fs::read_to_string(
+        folder.join(body["savedToFile"]["path"].as_str().expect("CSV receipt")),
+    )
+    .unwrap();
+    assert!(csv.starts_with("\"Batch\",\"Blue\",\"Sage\"\r\n\"Batch 1\""));
+    assert!(csv.ends_with("\"Batch 40\",\"40\",\"41\"\r\n"), "{csv}");
+    let cursors: Vec<_> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(tool, _)| tool == "chrome_execute")
+        .map(|(_, args)| {
+            assert!(args.get("extract").is_none() && args.get("saveTo").is_none());
+            args["args"]["cursor"].as_str().unwrap_or("").to_owned()
+        })
+        .collect();
+    assert_eq!(cursors, ["", "h-next", "cap:structure:30"]);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_failed_continuation_saves_the_captured_rows_as_incomplete() {
+    let (core, folder) = read_output_tests::fixture("browser-data-failed-page").await;
+    test_support::answering(&core.shared, move |tool, args| {
+        if tool == "chrome_status" {
+            return output_tests::status(args);
+        }
+        if args["args"]["cursor"].is_string() {
+            return output_tests::mcp(json!({"status":"failed","action":"page.read",
+                "error":{"code":"cursorExpired","message":"The read cursor expired."}}));
+        }
+        output_tests::mcp(
+            json!({"status":"completed","action":"page.read","data":{"url":"https://example.com/lab",
+            "structure":[{"tables":[{"rows":[["Batch"]]}]},{"tables":[{"rows":[["Batch 1"]]}]}],
+            "coverage":{"complete":false,"reason":"captured_content_remaining","sourceLimits":[]},
+            "continuation":{"helper":{"action":"page.read","args":{"tabId":7,"cursor":"h-gone"}}}}}),
+        )
+    });
+    let request = json!({"sessionId":"t","action":"page.read","args":{"ref":"table","tabId":7},"saveTo":"csv","extract":{"kind":"table"}});
+    let answer = gateway::call(&core.shared, "s", "chrome_execute", request)
+        .await
+        .unwrap();
+    let body = &answer["vwMcpResult"]["structuredContent"];
+    assert_eq!(body["savedToFile"]["rows"], 1, "{body}");
+    assert_eq!(body["untrustedPageContent"]["truncated"], true, "{body}");
+    assert_eq!(
+        body["untrustedPageContent"]["continuation"]["structure"]["args"]["cursor"], "h-gone",
+        "{body}"
+    );
+    assert!(
+        folder
+            .join(body["savedToFile"]["path"].as_str().unwrap())
+            .exists()
+    );
+    core.shutdown().await;
+}

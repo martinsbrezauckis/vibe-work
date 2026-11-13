@@ -317,7 +317,7 @@ async fn proxy_failures_have_short_states_and_actionable_recorded_outcomes() {
         // Record inspection below is intentionally through the same public log the core consumes.
         let refusals = guard.refusals_since(0);
         assert_eq!(refusals.len(), 1);
-        assert!(refusals[0].reason.contains("Ask the person"));
+        assert!(refusals[0].reason.contains("Ask the user"));
         assert!(!refusals[0].reason.contains("secret"));
     }
 }

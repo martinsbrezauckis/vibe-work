@@ -127,7 +127,7 @@ async fn blocked_clipboard(kind: &str, action: &str, args: Value, question: bool
     let reason = result.unwrap_err().message;
     assert!(
         reason.contains(if question {
-            "person"
+            "user's answer"
         } else {
             "operation, connection or permission ended"
         }),

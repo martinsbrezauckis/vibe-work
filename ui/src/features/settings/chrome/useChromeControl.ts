@@ -12,11 +12,11 @@ import { toCallError } from "../../../protocol/client/types";
 import { useApp } from "../../shell/AppContext";
 import { useCoreState } from "../../shell/hooks";
 
-/** The section's status line: what the last change did. */
+/** The section's status line: what the last change did, or guidance after a step (`hint`, never an alert). */
 interface ChromeStatus {
   text: string;
   alert: boolean;
-  kind?: "removed";
+  kind?: "removed" | "hint";
 }
 
 /** What the section reads and does. */
@@ -121,8 +121,14 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
             type: "chromeControl",
             request: { op: "setSafariEnabled", enabled: true },
           });
-        if (current?.safari?.addon.action !== "turnOn")
-          await core.run({ type: "chromeControl", request: { op: "openSafariSetup" } });
+        if (current?.safari?.addon.action !== "turnOn") {
+          const opened = await core.run({
+            type: "chromeControl",
+            request: { op: "openSafariSetup" },
+          });
+          if (opened.type === "chromeControl" && opened.hint)
+            setStatus({ kind: "hint", text: opened.hint, alert: false });
+        }
         return;
       }
       if (browser === "Firefox") {
@@ -169,10 +175,13 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
           request: { op: browser === "Edge" ? "setEdgeEnabled" : "setEnabled", enabled: true },
         });
       } else {
-        await core.run({
+        const asked = await core.run({
           type: "chromeControl",
           request: { op: browser === "Edge" ? "openEdgeStore" : "connect" },
         });
+        // A profile that waits after "Not now" is asked again on its next reconnect; the hint says when.
+        if (asked.type === "chromeControl" && asked.hint)
+          setStatus({ kind: "hint", text: asked.hint, alert: false });
       }
     } catch (thrown) {
       setStatus({ text: toCallError(thrown).error.message, alert: true });
@@ -198,6 +207,9 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
     return core.watchBrowserSetup();
   }, [core, setupState, pendingRemoval]);
 
+  // Pairing guidance is moot once the browser is connected; it is dropped, not only hidden, so a later
+  // disconnect does not bring it back. (State adjusted during render: React re-renders before committing.)
+  if (status?.kind === "hint" && view?.setup.pairingState === "paired") setStatus(null);
   const liveStatus =
     status?.kind === "removed"
       ? {

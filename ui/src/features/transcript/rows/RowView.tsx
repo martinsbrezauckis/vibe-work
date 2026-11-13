@@ -10,6 +10,7 @@ import type { Row } from "../model/build";
 import { detailOf, entryId } from "../model/entries";
 import { protectedChangeOf } from "../model/protectedChange";
 import { ApprovalAsk } from "../../ask/ApprovalAsk";
+import { BrowserProfileAsk, isProfileCard } from "../../ask/BrowserProfileAsk";
 import { ProtectedAsk } from "../../ask/ProtectedAsk";
 import { QuestionAsk } from "../../ask/QuestionAsk";
 import { AssistantRow, UserRow } from "./MessageRows";
@@ -29,6 +30,12 @@ function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement
       // a subagent's card answers for the child session (`answerFor`), not the transcript's own.
       return detailOf(row.entry)["kind"] === "user_input" ? (
         <QuestionAsk
+          entry={row.entry}
+          sessionId={row.answerFor ?? sessionId}
+          hostSessionId={sessionId}
+        />
+      ) : detailOf(row.entry)["kind"] === "approval" && isProfileCard(row.entry) ? (
+        <BrowserProfileAsk
           entry={row.entry}
           sessionId={row.answerFor ?? sessionId}
           hostSessionId={sessionId}

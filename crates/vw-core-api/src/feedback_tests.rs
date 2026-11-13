@@ -90,3 +90,45 @@ async fn feedback_delivery_sends_only_the_reviewed_payload_and_requires_a_storag
     }
     core.shutdown().await;
 }
+
+/// PREDICT: the agent's schema listed remarks as required and the core refused a draft without it ("Supply kind,
+/// title, description and remarks"), although the dialog marks Remarks optional; a draft without remarks now opens
+/// with empty remarks and the schema requires only kind, title and description.
+#[tokio::test]
+async fn an_agent_draft_without_remarks_opens_like_the_dialog_allows() {
+    let tools = vw_agent_tools::mcp::tool_list();
+    let spec = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == vw_agent_tools::wire::tools::FEEDBACK_DRAFT)
+        .unwrap();
+    assert_eq!(
+        spec["inputSchema"]["required"],
+        serde_json::json!(["kind", "title", "description"])
+    );
+    let core = crate::offline_core::start("feedback-optional-remarks").await;
+    let _ = core
+        .shared
+        .store
+        .load(
+            serde_json::json!({"session":{"id":"s"},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    let offered = crate::feedback::offer(
+        &core.shared,
+        "s",
+        serde_json::json!({"kind":"bug","title":"Tab disappeared",
+            "description":"Open two tabs, close the second; both disappear."}),
+    )
+    .await;
+    assert_eq!(offered.unwrap()["status"], "draftOffered");
+    let view = core
+        .feedback(crate::Origin::Ui, crate::FeedbackRequest::Read)
+        .await
+        .unwrap();
+    let remarks = view.draft.unwrap().remarks;
+    assert_eq!(remarks, "");
+    core.shutdown().await;
+}

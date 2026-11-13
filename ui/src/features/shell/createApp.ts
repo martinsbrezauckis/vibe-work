@@ -145,6 +145,7 @@ export function createApp(options: CreateAppOptions): App {
   const keyGuard = () => (keys === null ? null : (keyReadiness(keys.store.get())?.message ?? null));
   const canUseKey = () => keyGuard() === null;
   const canUseVault = () => keys === null || vaultReadiness(keys.store.get()) === null;
+  const sessionTools = core === null ? null : createSessionTools({ core, shell, toasts });
   const composer = createComposer({
     core,
     shell,
@@ -152,6 +153,7 @@ export function createApp(options: CreateAppOptions): App {
     sessions,
     persist: options.persist ?? true,
     keyGuard,
+    isTemporary: (id) => sessionTools?.isTemporary(id) === true,
     // `/mcp` and `/connectors` do what the rail's plug button does. Called only after the app is built,
     // so `connectors` and `projects` (made below) are set by then.
     openTools: () => {
@@ -244,7 +246,7 @@ export function createApp(options: CreateAppOptions): App {
     git,
     changes: core === null ? null : createChanges(core, { composer, toasts }),
     leftRunning,
-    sessionTools: core === null ? null : createSessionTools({ core, shell, toasts }),
+    sessionTools,
     find: createFind(),
     sessionProcesses: core === null ? null : createSessionProcesses({ core, shell, toasts }),
     composer,

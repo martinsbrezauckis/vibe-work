@@ -83,7 +83,7 @@ pub struct RefItem {
     /// The current value (never for redacted fields).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    /// Why the value is hidden: `password`, `otp`, `card`, `vault` (a vault-filled field). Nothing else is
+    /// Why the value is hidden: `password`, `card`, `vault` (a vault-filled field). Nothing else is
     /// hidden (text the user typed is readable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redacted: Option<String>,

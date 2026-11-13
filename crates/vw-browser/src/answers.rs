@@ -104,12 +104,11 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
         ))),
         "consentChanged" => Err(refused("the authorization page or target changed while access was checked: call browser_read again".to_owned())),
         "secret" => Err(refused(format!(
-            "not typed: this is a {} field. The agent never types passwords, one-time codes or card details. For a \
+            "not typed: this is a {} field. The agent never types passwords or card details. For a \
              password: browser_act fill {{ref, login}} with a login the user saved in the vault for this site \
-             (secret_list lists them; you never see the password). One-time codes and card details: ask the user to \
+             (secret_list lists them; you never see the password). Card details: ask the user to \
              fill them in in the Browser tab, then continue.",
             match answer.kind.as_deref() {
-                Some("otp") => "one-time code",
                 Some("card") => "payment card",
                 _ => "password",
             }

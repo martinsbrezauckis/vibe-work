@@ -222,7 +222,14 @@ pub(crate) async fn offer(
     if shared.store.view(session).is_none() {
         return Err("The session is not open. Open it before offering feedback.".into());
     }
-    let draft: FeedbackDraft = serde_json::from_value(args).map_err(|_| "Supply kind, title, description and remarks as plain text. No conversation or files are attached; include only the relevant reproduction.")?;
+    // Remarks are optional, as in the dialog: an absent field opens with empty remarks.
+    let mut args = args;
+    if let Some(fields) = args.as_object_mut() {
+        fields
+            .entry("remarks")
+            .or_insert_with(|| serde_json::Value::String(String::new()));
+    }
+    let draft: FeedbackDraft = serde_json::from_value(args).map_err(|_| "Supply kind, title and description as plain text; remarks are optional. No conversation or files are attached; include only the relevant reproduction.")?;
     let core = Core {
         shared: shared.clone(),
     };

@@ -9,7 +9,7 @@
 //! - A ref action needs a retained observation in this document and the same node, fingerprint and label;
 //!   gone, replaced or ambiguous targets require another read. Receipts retain the target's last observed state;
 //!   coordinate baselines stay latest-only.
-//! - The agent never types into a password, one-time-code or payment-card field (refused, nothing typed).
+//! - The agent never types into a password or payment-card field (refused, nothing typed). One-time codes are ordinary fields.
 //! - Local addresses use ordinary page ownership and action permissions.
 //! - Every wait is bounded (actionability 2 s, settling 1.5 s, loads 8 s, `wait` at most 15 s): an action answers
 //!   well within Vibe's 60 s tool timeout.

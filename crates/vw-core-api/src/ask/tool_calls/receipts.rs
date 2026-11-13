@@ -1,7 +1,21 @@
 //! Single-use decisions issued by the authenticated hook after permission is settled.
-//! Binds owner, source/call, tool and input; the tool consumes the prepared action once.
+//! Binds owner, source/call, tool and input; the tool consumes the prepared action once, and only after the core saw
+//! Vibe carry the receipt into a running call of the receipt's own chat (`announced`).
+use super::announced::{self, Announcement, Origin};
 use super::{Calls, PoisonError, Shared, Value, json, names};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// The refusal for a receipt no running Vibe call of its chat carries.
+pub(crate) const NOT_STARTED_BY_VIBE: &str =
+    "Not run: this tool call was not started by Vibe in this chat.";
+/// How long the tool route waits for Vibe's report of a call; the tool server's request can overtake it.
+const ANNOUNCE_WAIT: Duration = Duration::from_secs(3);
+/// The wait between two reads of a session's history from Vibe.
+const READ_AGAIN: Duration = Duration::from_millis(750);
+/// How long a reported decision stays usable: Vibe's own limit for a session tool call. A call Vibe gave up on (its
+/// tool server died, the request was dropped) cannot be completed later by whoever reads the decision from history.
+const REPORTED_LIFETIME: Duration = Duration::from_secs(60);
 
 pub(crate) type Execution =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>>;
@@ -15,6 +29,9 @@ pub(super) struct Receipt {
     prepared_args: Value,
     execution: Option<Execution>,
     stop: u64,
+    /// Vibe's report of this receipt in a running call of its own source session (the first report counts), and when
+    /// it arrived (`REPORTED_LIFETIME`).
+    announced: Option<(Announcement, std::time::Instant)>,
 }
 fn clean(args: &Value) -> Result<Value, String> {
     let mut args = args
@@ -146,6 +163,7 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
             prepared_args,
             execution,
             stop,
+            announced: None,
         },
     )?;
     if let Some(guard) = reservation {
@@ -165,12 +183,133 @@ fn save(shared: &Shared, receipt: Receipt) -> Result<(), String> {
         .transports
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    pending.retain(|r| crate::stops::generation(shared, &r.owner) == r.stop);
+    pending.retain(|r| {
+        crate::stops::generation(shared, &r.owner) == r.stop
+            && r.announced
+                .as_ref()
+                .is_none_or(|(_, at)| at.elapsed() <= REPORTED_LIFETIME)
+    });
     if pending.len() >= 1000 {
         return Err("Too many tool calls are in progress.".into());
     }
     pending.push_back(receipt);
     Ok(())
+}
+
+/// Records Vibe's report of a receipt in a newly added running call entry (the pump, for every notification on a
+/// chat's channel, before the store applies it). Lobby notifications and entries for another tool are ignored.
+pub(crate) fn observe(
+    shared: &Shared,
+    channel: Option<crate::channels::ChannelKey>,
+    method: &str,
+    params: &Value,
+) {
+    let (Some(channel), Some(entry)) = (channel, announced::notification(method, params)) else {
+        return;
+    };
+    let origin = Origin::Channel(channel);
+    if let Some(calls) = super::calls(shared) {
+        mark(calls, entry.receipt, entry.tool, entry.session, origin);
+    }
+}
+
+/// Sets the announcement of the live receipt `key` once, when the report names its own tool and source session (a
+/// report for another session cannot block the real one), and wakes the tool routes waiting for it.
+fn mark(calls: &Calls, key: &str, tool: &str, session: &str, origin: Origin) -> bool {
+    let marked = calls
+        .transports
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter_mut()
+        .find(|r| r.key == key && r.tool == tool && r.source == session && r.announced.is_none())
+        .map(|receipt| {
+            receipt.announced = Some((
+                Announcement {
+                    session: session.to_owned(),
+                    origin,
+                },
+                std::time::Instant::now(),
+            ));
+        })
+        .is_some();
+    if marked {
+        calls.announced.notify_waiters();
+    }
+    marked
+}
+
+/// Debug-build test fixtures only: stands in for Vibe's report of `key` in its own source session, for direct tool
+/// fixtures that call the hook and the tool route without a model. Never reachable from any route.
+#[cfg(any(test, debug_assertions))]
+pub(crate) fn announce_for_fixture(shared: &Shared, key: &str) -> bool {
+    let Some(calls) = super::calls(shared) else {
+        return false;
+    };
+    let found = calls
+        .transports
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|r| r.key == key)
+        .map(|r| (r.source.clone(), r.tool.clone()));
+    found.is_some_and(|(source, tool)| mark(calls, key, &tool, &source, Origin::Fixture))
+}
+
+/// Before the tool route consumes the receipt in `args`: waits a bounded time for Vibe's report of it, reading the
+/// source session's history back from Vibe when no report is pushed (a subagent's calls are not pushed on its
+/// parent's channel; a lost notification is read back the same way). `take` decides on what was seen.
+pub(crate) async fn await_vibe_call(shared: &Arc<Shared>, caller: &str, args: &Value) {
+    let Some(key) = args[names::RECEIPT_FIELD].as_str() else {
+        return;
+    };
+    let Some(calls) = super::calls(shared) else {
+        return;
+    };
+    let deadline = tokio::time::Instant::now() + ANNOUNCE_WAIT;
+    let mut read = None;
+    loop {
+        let notified = calls.announced.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let state = calls
+            .transports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|r| r.key == key && r.owner == caller)
+            .map(|r| (r.announced.is_some(), r.source.clone(), r.tool.clone()));
+        let Some((false, source, tool)) = state else {
+            // Unknown, used, another chat's or already reported: `take` answers.
+            return;
+        };
+        // A child's history is read at once; a chat's own call is normally pushed before its tool request arrives.
+        // Only the chat itself or a subagent the core's own record puts under it is ever read.
+        let readable =
+            || source == caller || crate::stop_tree::family(shared, caller).contains(&source);
+        if (read.is_some() || source != caller) && readable() {
+            let reply = tokio::time::timeout_at(
+                deadline,
+                shared.gate.call(
+                    "session/read",
+                    json!({"sessionId":source, "history":{"limit":50}}),
+                    None,
+                ),
+            )
+            .await;
+            if reply.is_ok_and(|reply| {
+                reply.is_ok_and(|reply| announced::in_history(&reply.result, &source, &tool, key))
+            }) {
+                mark(calls, key, &tool, &source, Origin::Read);
+                return;
+            }
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let _ = tokio::time::timeout_at(deadline.min(now + READ_AGAIN), notified).await;
+        read = Some(());
+    }
 }
 
 fn index(
@@ -230,6 +369,29 @@ pub(crate) fn take(
         .unwrap_or_else(PoisonError::into_inner);
     let index = index(&pending, owner, tool, args)?;
     let receipt = pending.remove(index).ok_or("Tool decision already used.")?;
+    drop(pending);
+    // The final dispatch binding: only a call Vibe itself runs in this chat (or its own subagent) may use it. A refused
+    // receipt is spent, so a forged one cannot be presented again.
+    let fresh = receipt
+        .announced
+        .as_ref()
+        .is_some_and(|(_, at)| at.elapsed() <= REPORTED_LIFETIME);
+    if !fresh
+        || !announced::started_by_vibe(
+            receipt.announced.as_ref().map(|(seen, _)| seen),
+            &receipt.owner,
+            &receipt.source,
+            shared.channels.key_of(&receipt.owner),
+            || crate::stop_tree::family(shared, &receipt.owner).contains(&receipt.source),
+        )
+    {
+        tracing::warn!(
+            tool = %receipt.tool,
+            announced = receipt.announced.is_some(),
+            "tool decision refused: no running Vibe call of its chat carries it"
+        );
+        return Err(NOT_STARTED_BY_VIBE.into());
+    }
     if crate::stops::generation(shared, owner) != receipt.stop {
         return Err(crate::stops::APPROVAL_ENDED.into());
     }
@@ -288,143 +450,8 @@ fn browser_execution(shared: &Arc<Shared>, receipt: Receipt) -> Result<Execution
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decision_is_bound_to_owner_source_call_tool_and_input() {
-        let calls = Calls::default();
-        calls.transports.lock().unwrap().push_back(Receipt {
-            key: "decision".into(),
-            owner: "parent".into(),
-            source: "child".into(),
-            call: "call-1".into(),
-            tool: "process_start".into(),
-            args: json!({"command":"echo once"}),
-            prepared_args: Value::Null,
-            execution: None,
-            stop: 0,
-        });
-        let args = json!({"command":"echo once","_vwReceipt":"decision"});
-        assert!(
-            verify(
-                &calls,
-                "parent",
-                "child",
-                "approval-call-1",
-                "process_start",
-                &args
-            )
-            .is_ok()
-        );
-        assert!(
-            verify(
-                &calls,
-                "parent",
-                "child",
-                "approval-call-1-1a2b3c4d",
-                "process_start",
-                &args
-            )
-            .is_ok()
-        );
-        for (owner, source, call, tool, input) in [
-            (
-                "other",
-                "child",
-                "approval-call-1",
-                "process_start",
-                args.clone(),
-            ),
-            (
-                "parent",
-                "sibling",
-                "approval-call-1",
-                "process_start",
-                args.clone(),
-            ),
-            (
-                "parent",
-                "child",
-                "approval-call-2",
-                "process_start",
-                args.clone(),
-            ),
-            (
-                "parent",
-                "child",
-                "approval-call-1",
-                "process_stop",
-                args.clone(),
-            ),
-            (
-                "parent",
-                "child",
-                "approval-call-1",
-                "process_start",
-                json!({"command":"echo twice","_vwReceipt":"decision"}),
-            ),
-        ] {
-            assert!(verify(&calls, owner, source, call, tool, &input).is_err());
-        }
-    }
-
-    /// Seen with Mistral: `history.read {startTime: dayStart, endTime: Date.now()}` was denied "Tool
-    /// decision does not match this call." The hook's copy and the tool call's copy of the same arguments can spell a
-    /// whole number beyond 32 bits differently (1793404800000 and 1793404800000.0); they are the same JSON number.
-    /// PREDICT (before the change): the float spelling of the hook's integer is refused as a mismatch.
-    #[test]
-    fn the_same_number_in_either_spelling_matches_and_a_different_number_does_not() {
-        let calls = Calls::default();
-        let decided: Value =
-            serde_json::from_str(r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000,"limit":100}}]}"#)
-                .unwrap();
-        calls.transports.lock().unwrap().push_back(Receipt {
-            key: "decision".into(),
-            owner: "chat".into(),
-            source: "chat".into(),
-            call: "call-1".into(),
-            tool: "chrome_execute".into(),
-            args: clean(&decided).unwrap(),
-            prepared_args: Value::Null,
-            execution: None,
-            stop: 0,
-        });
-        let called = |text: &str| -> Value { serde_json::from_str(text).unwrap() };
-        let same = called(
-            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.0,"limit":100.0}}],"_vwReceipt":"decision"}"#,
-        );
-        assert!(
-            verify(
-                &calls,
-                "chat",
-                "chat",
-                "approval-call-1",
-                "chrome_execute",
-                &same
-            )
-            .is_ok()
-        );
-        for other in [
-            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800001.0,"limit":100}}],"_vwReceipt":"decision"}"#,
-            r#"{"steps":[{"action":"history.read","args":{"startTime":1793404800000.5,"limit":100}}],"_vwReceipt":"decision"}"#,
-            r#"{"steps":[{"action":"history.read","args":{"startTime":"1793404800000","limit":100}}],"_vwReceipt":"decision"}"#,
-        ] {
-            assert!(
-                verify(
-                    &calls,
-                    "chat",
-                    "chat",
-                    "approval-call-1",
-                    "chrome_execute",
-                    &called(other)
-                )
-                .is_err(),
-                "{other}"
-            );
-        }
-    }
-}
+#[path = "receipts_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod decline_tests {
@@ -475,6 +502,10 @@ mod decline_tests {
             "the hook must retain a declined tool result: {decision:?}"
         );
         let mut args = decision.unwrap();
+        assert!(announce_for_fixture(
+            shared,
+            args[names::RECEIPT_FIELD].as_str().unwrap()
+        ));
         let result = take(shared, "s", "search", &mut args)
             .unwrap()
             .execution
@@ -482,6 +513,162 @@ mod decline_tests {
             .await;
         assert!(result.unwrap_err().contains("the user declined"));
         assert!(take(shared, "s", "search", &mut args).is_err());
+        f.finish().await;
+    }
+
+    /// Whoever holds the hook credential can mint a receipt naming any registered chat.
+    /// PREDICT (before the fix): `take` accepts the minted receipt because owner, tool and input match, so the tool
+    /// would run for a call Vibe never made; after the fix it answers `NOT_STARTED_BY_VIBE` and spends the receipt.
+    #[tokio::test]
+    async fn a_receipt_no_vibe_call_carries_is_refused_and_spent() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("s", &f.root.join("project"), &[], false);
+        let shared = &f.core.shared;
+        shared
+            .agent_tools
+            .as_ref()
+            .unwrap()
+            .table
+            .for_session("s")
+            .unwrap();
+        shared
+            .access
+            .observe_runtime("s", &json!({"activeAgent":{"name":"auto-approve"}}));
+        let mut args = issue(
+            shared,
+            &json!({"session_id":"s", "tool_call_id":"forged-1",
+            "tool_name":"mcp_vw.search", "tool_input":{"query":"needle"}}),
+        )
+        .await
+        .unwrap();
+        let mut again = args.clone();
+        let refused = take(shared, "s", "search", &mut args).err();
+        assert_eq!(refused.as_deref(), Some(NOT_STARTED_BY_VIBE));
+        assert!(
+            take(shared, "s", "search", &mut again)
+                .err()
+                .is_some_and(|e| e.contains("already used")),
+            "a refused receipt is spent"
+        );
+        f.finish().await;
+    }
+
+    /// PREDICT: only a newly added running entry of the receipt's own tool, pushed on a channel, marks it; a lobby
+    /// notification or another tool's entry does not. A marked receipt still needs the owner's live channel.
+    #[tokio::test]
+    async fn a_pushed_report_marks_only_its_own_tool_and_needs_the_owners_channel() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("s", &f.root.join("project"), &[], false);
+        let shared = &f.core.shared;
+        shared
+            .agent_tools
+            .as_ref()
+            .unwrap()
+            .table
+            .for_session("s")
+            .unwrap();
+        shared
+            .access
+            .observe_runtime("s", &json!({"activeAgent":{"name":"auto-approve"}}));
+        let mut args = issue(
+            shared,
+            &json!({"session_id":"s", "tool_call_id":"call-1",
+            "tool_name":"mcp_vw.search", "tool_input":{"query":"needle"}}),
+        )
+        .await
+        .unwrap();
+        let key = args[names::RECEIPT_FIELD].as_str().unwrap().to_owned();
+        let added = |tool: &str| {
+            json!({"sessionId":"s","entry":{"type":"effect","id":"e","sessionId":"s",
+            "state":{"status":"running"},"detail":{"toolName":tool,"input":{"query":"needle","_vwReceipt":key}}}})
+        };
+        let announced = |shared: &Shared| {
+            super::super::calls(shared)
+                .unwrap()
+                .transports
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|r| r.key == key)
+                .and_then(|r| r.announced.as_ref().map(|(seen, _)| seen.clone()))
+        };
+        observe(shared, None, "history/entryAdded", &added("mcp_vw.search"));
+        observe(
+            shared,
+            Some((1, 1)),
+            "history/entryAdded",
+            &added("mcp_vw.secret_run"),
+        );
+        assert_eq!(announced(shared), None);
+        observe(
+            shared,
+            Some((1, 1)),
+            "history/entryAdded",
+            &added("mcp_vw.search"),
+        );
+        assert_eq!(
+            announced(shared),
+            Some(Announcement {
+                session: "s".into(),
+                origin: Origin::Channel((1, 1))
+            })
+        );
+        // This fixture's chat has no live channel, so no channel can be its own.
+        assert_eq!(
+            take(shared, "s", "search", &mut args).err().as_deref(),
+            Some(NOT_STARTED_BY_VIBE)
+        );
+        f.finish().await;
+    }
+
+    /// PREDICT: a report naming another session neither marks the receipt nor blocks Vibe's own later report; a
+    /// report older than Vibe's tool-call limit no longer lets the receipt run.
+    #[tokio::test]
+    async fn only_a_fresh_report_of_the_receipts_own_session_counts() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("s", &f.root.join("project"), &[], false);
+        let shared = &f.core.shared;
+        shared
+            .agent_tools
+            .as_ref()
+            .unwrap()
+            .table
+            .for_session("s")
+            .unwrap();
+        shared
+            .access
+            .observe_runtime("s", &json!({"activeAgent":{"name":"auto-approve"}}));
+        let payload = |call: &str| {
+            json!({"session_id":"s", "tool_call_id":call,
+            "tool_name":"mcp_vw.search", "tool_input":{"query":"needle"}})
+        };
+        let calls = super::super::calls(shared).unwrap();
+        let mut args = issue(shared, &payload("call-1")).await.unwrap();
+        let key = args[names::RECEIPT_FIELD].as_str().unwrap().to_owned();
+        assert!(!mark(calls, &key, "search", "other", Origin::Fixture));
+        assert!(mark(calls, &key, "search", "s", Origin::Fixture));
+        assert!(take(shared, "s", "search", &mut args).is_ok());
+
+        let mut stale = issue(shared, &payload("call-2")).await.unwrap();
+        let key = stale[names::RECEIPT_FIELD].as_str().unwrap().to_owned();
+        for receipt in calls.transports.lock().unwrap().iter_mut() {
+            if receipt.key == key {
+                let long_ago = std::time::Instant::now()
+                    .checked_sub(REPORTED_LIFETIME + Duration::from_secs(1))
+                    .unwrap();
+                receipt.announced = Some((
+                    Announcement {
+                        session: "s".into(),
+                        origin: Origin::Fixture,
+                    },
+                    long_ago,
+                ));
+            }
+        }
+        assert_eq!(
+            take(shared, "s", "search", &mut stale).err().as_deref(),
+            Some(NOT_STARTED_BY_VIBE)
+        );
         f.finish().await;
     }
 }

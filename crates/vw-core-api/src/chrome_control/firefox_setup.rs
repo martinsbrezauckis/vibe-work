@@ -74,6 +74,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 
@@ -109,6 +110,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 
@@ -161,6 +163,7 @@ impl Core {
             .owner
             .connected_profiles
             .remove_browser(Browser::Firefox);
+        super::profiles::remove_browser(chrome, Browser::Firefox);
         chrome
             .chat_profiles
             .lock()
@@ -200,6 +203,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 }

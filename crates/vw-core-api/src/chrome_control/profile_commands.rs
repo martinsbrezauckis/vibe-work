@@ -5,6 +5,18 @@ use crate::{CommandResult, Core, CoreError, core::Shared};
 use serde_json::json;
 use std::sync::{PoisonError, atomic::Ordering};
 
+/// The person-owned profile settings `profile_setting` handles.
+pub(super) fn is_setting(request: &ChromeControlRequest) -> bool {
+    matches!(
+        request,
+        ChromeControlRequest::SetDefaultProfile { .. }
+            | ChromeControlRequest::ClearDefaultProfile { .. }
+            | ChromeControlRequest::SetProfileEnabled { .. }
+            | ChromeControlRequest::ConnectProfile { .. }
+            | ChromeControlRequest::RemoveProfile { .. }
+    )
+}
+
 impl Core {
     pub(super) async fn profile_setting(
         &self,
@@ -19,8 +31,8 @@ impl Core {
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
         let id = match &request {
-            ChromeControlRequest::RenameProfile { profile_id, .. }
-            | ChromeControlRequest::SetDefaultProfile { profile_id }
+            ChromeControlRequest::SetDefaultProfile { profile_id }
+            | ChromeControlRequest::ClearDefaultProfile { profile_id }
             | ChromeControlRequest::SetProfileEnabled { profile_id, .. }
             | ChromeControlRequest::ConnectProfile { profile_id }
             | ChromeControlRequest::RemoveProfile { profile_id } => profiles::canonical(profile_id),
@@ -34,10 +46,14 @@ impl Core {
         if fence {
             fence_profile(&self.shared, &id);
         }
+        // The removed extension may reconnect at once; its request must not surprise the person with a dialog.
+        if matches!(request, ChromeControlRequest::RemoveProfile { .. }) {
+            chrome.owner.approvals.removed_by_person(&id);
+        }
         let needs_delivery = !matches!(
             request,
-            ChromeControlRequest::RenameProfile { .. }
-                | ChromeControlRequest::SetDefaultProfile { .. }
+            ChromeControlRequest::SetDefaultProfile { .. }
+                | ChromeControlRequest::ClearDefaultProfile { .. }
         );
         if matches!(request, ChromeControlRequest::ConnectProfile { .. })
             && !chrome.owner.is_running()
@@ -56,17 +72,30 @@ impl Core {
             if chrome.owner.is_running() && !applied.is_some_and(|result| result["applied"] == true)
             {
                 super::owner::publish(&self.shared);
+                if chrome.owner.helper_conflict.load(Ordering::SeqCst) {
+                    return Err(invalid(&format!(
+                        "Profile setting saved. {}",
+                        super::switches::OTHER_HELPER_STEP
+                    )));
+                }
                 return Err(invalid(
                     "Profile setting saved; release is unconfirmed. Reconnect this profile before using it.",
                 ));
             }
         }
         if matches!(request, ChromeControlRequest::RemoveProfile { .. }) {
-            let removed = chrome
-                .owner
-                .rpc("owner.profileUnpair", json!({"profileId":id}))
-                .await;
-            if !removed.is_some_and(|result| result["unpaired"] == true) {
+            // An older identity of this profile (an extension installed again) is hidden but still approved in the
+            // helper: unpair it with the profile the person removes.
+            let mut unpaired = true;
+            for profile in std::iter::once(id.clone()).chain(profiles::retired_by(chrome, &id)) {
+                let removed = chrome
+                    .owner
+                    .rpc("owner.profileUnpair", json!({"profileId":profile}))
+                    .await;
+                unpaired &= removed.is_some_and(|result| result["unpaired"] == true);
+            }
+            if !unpaired {
+                chrome.owner.approvals.removal_failed(&id);
                 return Err(invalid(
                     "The profile is off, but its pairing could not be removed. Reconnect the helper and try Remove again.",
                 ));
@@ -92,6 +121,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 }
@@ -150,13 +180,6 @@ fn save_setting(
             | ChromeControlRequest::RemoveProfile { .. }
     );
     match &request {
-        ChromeControlRequest::RenameProfile { name, .. } => {
-            let name = name.trim();
-            if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
-                return Err(invalid("Use a profile name of 1–80 characters."));
-            }
-            record.name = Some(name.into());
-        }
         ChromeControlRequest::SetDefaultProfile { .. } => {
             if !profiles::view(shared)
                 .iter()
@@ -167,6 +190,11 @@ fn save_setting(
                 ));
             }
             next.defaults.insert(browser.id().into(), id.to_owned());
+        }
+        ChromeControlRequest::ClearDefaultProfile { .. } => {
+            if next.defaults.get(browser.id()).map(String::as_str) == Some(id) {
+                next.defaults.remove(browser.id());
+            }
         }
         ChromeControlRequest::SetProfileEnabled { enabled, .. } => record.enabled = *enabled,
         ChromeControlRequest::ConnectProfile { .. } => record.enabled = true,

@@ -10,7 +10,7 @@
   catch { return fail("The selector is invalid; use a CSS selector for one element."); }
   if (matches.length !== 1) return fail(`The selector matched ${matches.length} elements; use a selector for exactly one element.`);
   const element = matches[0];
-  const sensitive = el => /^(script|template)$/i.test(el.localName) || el.matches('input[type="password"],input[type="hidden"],[autocomplete="one-time-code"],[autocomplete^="cc-"]');
+  const sensitive = el => /^(script|template)$/i.test(el.localName) || el.matches('input[type="password"],input[type="hidden"],[autocomplete^="cc-"]');
   const privateName = name => /(?:password|secret|token|authorization|cookie|nonce|integrity)/i.test(name) || /^on/i.test(name);
   if (sensitive(element)) return fail("This element may contain hidden credentials; inspect a visible non-secret element instead.");
   if (req.attribute && (privateName(req.attribute) || req.attribute.toLowerCase() === "value")) return fail("This attribute may contain a credential or field value; read the visible page instead.");

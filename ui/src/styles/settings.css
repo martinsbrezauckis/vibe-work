@@ -67,20 +67,21 @@
   accent-color: var(--orange);
 }
 
-/* Profile identity rows wrap actions within the Settings column at compact widths. */
+/* Profile rows (several profiles of one browser) wrap their actions within the Settings column at compact widths. */
 .browser-profile-name {
   min-width: 0;
   flex: 1 1 140px;
-}
-.browser-profile-name input {
-  width: 100%;
-  min-width: 0;
 }
 .browser-profile-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+.browser-profile-use {
+  font-size: var(--text-12);
+  color: var(--text-2);
+  cursor: pointer;
 }
 [data-setting="browser-profile"] {
   flex-wrap: wrap;

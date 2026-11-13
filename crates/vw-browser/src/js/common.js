@@ -356,11 +356,48 @@ const editable = (el) => {
     && enabled(el) && !el.readOnly;
 };
 
-// Words that mark one-time-code and payment-card fields (by name, id, label, placeholder, test id).
+// Words that mark one-time-code fields (only to keep vault logins out of them; their values are ordinary) and
+// payment-card fields (by name, id, label, placeholder, test id).
 const OTP_META = /\b(otp|totp|one[-_ ]?time|passcode|verification[-_ ]?code|2fa|mfa|sms[-_ ]?code|auth(entication)?[-_ ]?code)\b/;
 const CARD_META = /(card[-_ ]?(number|no|num)|cc[-_ ]?(num|number)|ccnum|\bcvc\b|\bcvv\b|\bcsc\b|security[-_ ]?code|expir)/;
-// The kind of secret a field holds (its value never leaves the page): "password", "otp" or "card". These, and values the vault filled, are the ONLY field values the agent never reads;
-// every other value, also text the user typed, is readable.
+// Labels in other languages (card words: lv, lt, et, de, fr, es, ru; password and PIN words also it, pl, nl, pt, Nordic,
+// fi, cs, sk, tr, hu, el) and English card phrases the English pattern lacks: reviewed whole-word phrases, matched after
+// folding diacritics on both sides ("Derīguma termiņš" = "deriguma_termins"; soft hyphens and zero-width characters
+// dropped). The Chrome Control helper's protected-field rule uses the same phrases. One-time code labels are not listed;
+// expiry counts only in card phrases (a bare "Fecha de vencimiento" or "Gültig bis" is often a document or due date).
+const foldWords = (value) => ` ${Array.from(String(value || "")).slice(0, 900).join("").replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/g, "").normalize("NFD").replace(/\p{M}+/gu, "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[^\p{L}\p{N}]+/gu, " ").toLowerCase().trim()} `;
+const LOCAL_PASSWORD = ["parole", "paroli", "slaptažodis", "slaptažodį", "slaptažodžio", "parool", "parooli", "salasõna",
+  "passwort", "kennwort", "mot de passe", "contraseña", "пароль", "пароля", "geheimzahl", "geheimnummer", "code secret",
+  "code confidentiel", "número secreto", "clave", "codice segreto", "пин", "hasło", "haslo", "wachtwoord", "senha",
+  "lösenord", "salasana", "heslo", "şifre", "parola", "passord", "adgangskode", "jelszó", "κωδικός πρόσβασης",
+  "συνθηματικό"].map(foldWords);
+// Chinese, Japanese and Korean password and PIN words count anywhere (no spaces between words): "请输入密码", "비밀번호를".
+const LOCAL_PASSWORD_GLUED = ["密码", "密碼", "パスワード", "暗証番号", "비밀번호"].map((phrase) => foldWords(phrase).trim());
+const LOCAL_CARD = ["exp date", "valid thru", "kartes numurs", "kartes numuru", "kartes nr", "derīguma termiņš",
+  "derīguma termiņu", "kortelės numeris", "kortelės numerį", "kaardi number", "kaardinumber", "kartennummer",
+  "kreditkartennummer", "prüfnummer", "kartenprüfnummer", "numéro de carte", "numéro de la carte", "cryptogramme",
+  "número de tarjeta", "número de la tarjeta", "номер карты", "номер карточки"].map(foldWords);
+// Expiry words that also name document, birth or due dates: they count only in a form that holds a card number.
+const LOCAL_EXPIRY = ["mm yy", "derīgs līdz", "galiojimo data", "galioja iki", "kehtivusaeg", "kehtiv kuni", "ablaufdatum",
+  "gültig bis", "date d'expiration", "fecha de caducidad", "fecha de vencimiento", "fecha de expiración",
+  "срок действия"].map(foldWords);
+// Card security codes named like other codes.
+const LOCAL_SECURITY = ["drošības kods", "drošības kodu", "saugos kodas", "turvakood", "sicherheitscode",
+  "code de sécurité", "código de seguridad", "код безопасности"].map(foldWords);
+// One-time passwords in other languages, removed before the password words are looked for (English ones by a pattern
+// in secretKind), so "Vienreizējā parole" is not a password field but "Parole vai vienreizējā parole" still is.
+const LOCAL_ONE_TIME = ["vienreizējā parole", "vienreizējo paroli", "vienkartinis slaptažodis",
+  "vienkartinį slaptažodį", "ühekordne parool", "ühekordset parooli", "einmal passwort", "einmal kennwort",
+  "mot de passe à usage unique", "mot de passe unique", "contraseña de un solo uso", "contraseña única",
+  "одноразовый пароль", "одноразового пароля", "hasło jednorazowe", "jednorazowe hasło", "eenmalig wachtwoord",
+  "senha de uso único", "kertakäyttöinen salasana", "jednorázové heslo", "tek kullanımlık şifre", "clave dinámica",
+  "clave de un solo uso"].map(foldWords);
+// The same for Chinese, Japanese and Korean, removed wherever they occur.
+const LOCAL_ONE_TIME_GLUED = ["一次性密码", "一次性密碼", "动态密码", "動態密碼", "ワンタイムパスワード", "일회용 비밀번호", "일회용비밀번호"].map((phrase) => foldWords(phrase).trim());
+// The kind of secret a field holds (its value never leaves the page): "password" or "card". These, and values the
+// vault filled, are the ONLY field values the agent never reads; every other value, also text the user typed and
+// one-time codes, is readable.
 const secretKind = (el) => {
   const tag = el.localName;
   if (tag !== "input" && tag !== "textarea" && !el.isContentEditable) return null;
@@ -374,19 +411,39 @@ const secretKind = (el) => {
   } catch {
     // No style (a detached element): judged by its attributes only.
   }
-  if (/\bone-time-code\b/.test(auto)) return "otp";
   if (/\bcc-(number|csc|exp|exp-month|exp-year)\b/.test(auto)) return "card";
   const meta = ["name", "id", "aria-label", "placeholder", "data-testid"]
     .map((n) => String(el.getAttribute(n) || ""))
     .join(" ")
     .toLowerCase();
   // The visible label counts too: many payment forms name their card fields only there ("Card number").
-  const words = `${meta} ${fieldLabelText(el)} ${nearbyLabel(el).toLowerCase()}`;
-  if (OTP_META.test(words)) return "otp";
-  if (CARD_META.test(words)) return "card";
-  if (/\bpass(word|wd)?\b|\bpin\b/.test(meta)) return "password";
-  // A bare "Code" (or CVC-like) field in a form that also holds a card number is that card's security code.
-  if (CARD_CODE.test(fieldLabelText(el).trim()) || CARD_CODE.test(nearbyLabel(el).toLowerCase()) || CARD_CODE.test(String(el.getAttribute("name") || "").toLowerCase())) {
+  const labelText = fieldLabelText(el);
+  const words = `${meta} ${labelText} ${nearbyLabel(el).toLowerCase()}`;
+  const local = foldWords(`${["name", "id", "aria-label", "placeholder", "data-testid"].map((n) => el.getAttribute(n) || "").join(" ")} ${words}`);
+  const has = (list) => list.some((phrase) => local.includes(phrase));
+  // autocomplete="one-time-code" does not lower protection: pages also set it only to stop autofill, so a password,
+  // PIN or card label on such a field still protects it (on conflicting signals the protected side wins). It only
+  // keeps a bare "Code" field in a card form readable (below).
+  const declaredCode = /\bone-time-code\b/.test(auto);
+  if (CARD_META.test(words) || has(LOCAL_CARD) || has(LOCAL_SECURITY)) return "card";
+  if (declaredCode && /\b(cvc|cvv|csc)2\b/.test(words)) return "card";
+  if (has(LOCAL_EXPIRY) && holdsCardNumber(el.form)) return "card";
+  // One-time password phrases ("One-time password", "Vienreizējā parole") are removed before the password words are
+  // looked for; a separate password word still counts. The English words count in the attributes, the field's own
+  // labels (<label>, aria-labelledby) and its nearby unassociated label, like the local words; a bare "pass" counts only
+  // in an attribute (name="pass"), since a visible "Pass" is often a ticket or pass number.
+  const oneTime = /\bone[-_\s]*time[-_\s]*(password|passwd|pin)\b/g;
+  const metaRest = meta.replace(oneTime, " ");
+  const labelRest = `${labelText} ${nearbyLabel(el).toLowerCase()}`.replace(oneTime, " ");
+  let localRest = local;
+  for (const phrase of LOCAL_ONE_TIME) while (localRest.includes(phrase)) localRest = localRest.replace(phrase, " ");
+  for (const phrase of LOCAL_ONE_TIME_GLUED) while (localRest.includes(phrase)) localRest = localRest.replace(phrase, " ");
+  if (/\bpass(word|wd)?\b|\bpin\b/.test(metaRest) || /\bpass(word|wd)\b|\bpin\b/.test(labelRest)
+    || LOCAL_PASSWORD.some((phrase) => localRest.includes(phrase))
+    || LOCAL_PASSWORD_GLUED.some((phrase) => localRest.includes(phrase))) return "password";
+  // A bare "Code" (or CVC-like) field in a form that also holds a card number is that card's security code, unless
+  // the page declares it a one-time code (a card check's SMS code).
+  if (!declaredCode && (CARD_CODE.test(fieldLabelText(el).trim()) || CARD_CODE.test(nearbyLabel(el).toLowerCase()) || CARD_CODE.test(String(el.getAttribute("name") || "").toLowerCase()))) {
     if (holdsCardNumber(el.form)) return "card";
   }
   return null;
@@ -429,7 +486,8 @@ function holdsCardNumber(form) {
   return Array.from(form.elements).slice(0, 60).some((f) => {
     const auto = String((f.getAttribute && f.getAttribute("autocomplete")) || "").toLowerCase();
     const attrs = ["name", "id", "aria-label", "placeholder"].map((n) => String((f.getAttribute && f.getAttribute(n)) || "")).join(" ").toLowerCase();
-    return /\bcc-number\b/.test(auto) || CARD_NUMBER.test(`${attrs} ${fieldLabelText(f)} ${nearbyLabel(f).toLowerCase()}`);
+    const text = `${attrs} ${fieldLabelText(f)} ${nearbyLabel(f).toLowerCase()}`;
+    return /\bcc-number\b/.test(auto) || CARD_NUMBER.test(text) || LOCAL_CARD.some((phrase) => foldWords(text).includes(phrase));
   });
 }
 // The role a field plays in a sign-in form, from its LIVE state:
@@ -687,10 +745,10 @@ const consentSnapshot = (reference = "") => {
   if (ENV && !ENV.consentDocumentId) {
     ENV.consentDocumentId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   }
-  // Authorization metadata is read only from hidden fields. A hostile page can name a password field "scope";
-  // its value must never enter a dialog or an action request.
+  // Authorization metadata is read only from hidden fields. A hostile page can name a password, card or one-time-code
+  // field "scope"; its value must never enter a dialog or an action request (a one-time code is never a scope list).
   const fields = Array.from(document.querySelectorAll('input[type="hidden"][name="scope"], input[type="hidden"][name="scopes"], input[type="hidden"][name="client_id"], input[type="hidden"][name="clientId"], input[type="hidden"][name="access_type"]'))
-    .filter((f) => !secretKind(f) && !vaultFilled(f) && !f.hasAttribute("data-secret"));
+    .filter((f) => !secretKind(f) && !vaultFilled(f) && !f.hasAttribute("data-secret") && !/\bone-time-code\b/i.test(String(f.getAttribute("autocomplete") || "")) && !OTP_META.test(fieldMeta(f)));
   const scopes = [...parsed.searchParams.getAll("scope"), ...parsed.searchParams.getAll("scopes"), ...fields.filter((f) => /^(scope|scopes)$/i.test(f.name)).map((f) => String(f.value || ""))];
   const clients = [...parsed.searchParams.getAll("client_id"), ...parsed.searchParams.getAll("clientId"), ...fields.filter((f) => /^(client_id|clientId)$/i.test(f.name)).map((f) => String(f.value || ""))];
   const accessTypes = [...parsed.searchParams.getAll("access_type"), ...fields.filter((f) => f.name === "access_type").map((f) => String(f.value || ""))];

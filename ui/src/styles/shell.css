@@ -57,10 +57,19 @@ kbd {
   flex: none;
   position: relative;
 }
+/* The unread count is a small opaque counter on the bell's top-right corner; the bell stays readable under it. */
 .titlebar .ibtn[data-icon="bell"] .ui-badge {
   position: absolute;
-  right: 0;
-  top: 0;
+  right: 1px;
+  top: 2px;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background: var(--chrome);
+  color: var(--text);
+  font-size: var(--text-10-5);
+  line-height: 12px;
 }
 .brand {
   display: flex;

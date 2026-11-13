@@ -13,11 +13,14 @@
 //!    even where `mistral-vibe`'s own metadata pins the older version, and nothing outside the file is resolved in;
 //!    bytecode compiled once so the first start is fast; copies, so the uv cache can go).
 //! 5. Check: the `mistral_vibe-<version>.dist-info` and the server executable exist; sizes; `installed.json`.
-//! 6. Start Vibe: the `on_ready` hook. Its progress keeps counting while it waits (the first start after an install
-//!    can take a minute or more on Windows while antivirus software checks the new files).
+//! 6. Start Vibe: the `on_ready` hook. Its seconds go on from the install's own count while it waits (the first start
+//!    after an install can take a minute or more on Windows while antivirus software checks the new files). A start
+//!    cannot be cancelled: Cancel is refused from this step on.
 //!
-//! Try again after a failed start: when this version's install is complete (`installed.json` matches the pinned
-//! requirements and uv), steps 1-5 are not repeated; only step 6 runs again ([`reusable`]).
+//! Try again after a failed start ([`crate::VibeInstaller::retry_start`]): only step 6 runs again, with the server
+//! and the `installed` view the failed start kept, without a new offer. A failed first start at app start is reported
+//! the same way ([`crate::VibeInstaller::start_failed`]). A confirmed offer over this version's complete install
+//! (`installed.json` matches the pinned requirements and uv) also skips steps 1-5 ([`reusable`]).
 //!
 //! Every uv step: `UV_NO_CONFIG=1` (a user's uv.toml / index settings cannot redirect it), `UV_CACHE_DIR` in the
 //! install folder, `UV_SYSTEM_CERTS=1` (the OS trust store, so corporate CAs work), `UV_NO_PROGRESS=1`, the proxy
@@ -46,7 +49,9 @@ use crate::pin::{Sources, UvAsset};
 use crate::steps::{self, Step, StepError, Tail};
 use crate::view::{FailKind, InstallPhase, InstallSource, VibeUpdatePhase};
 
-const TOTAL: u32 = 6;
+pub(crate) const TOTAL: u32 = 6;
+/// The last step of an install: Vibe's first start.
+pub(crate) const START_STEP: &str = "Start Vibe";
 /// An update has no start step (it starts with Vibe Work's next start).
 const UPDATE_TOTAL: u32 = 5;
 
@@ -267,7 +272,7 @@ pub(crate) async fn install(inner: Arc<Inner>, job: Job, cancel: watch::Receiver
                 install_ms: Some(record.install_ms),
                 warning: None,
             };
-            start(&inner, record.server, installed, "Start Vibe", TOTAL).await;
+            start(&inner, record.server, installed, START_STEP, TOTAL, started).await;
         }
         Err(failure) => {
             warn!(step = %failure.step, kind = ?failure.kind, error = %failure.error, "Vibe install failed");
@@ -331,33 +336,43 @@ fn update_outcome(inner: &Inner, layout: &Layout, outcome: Result<Installed, Fai
     inner.publish(&state);
 }
 
-/// Runs the `on_ready` hook and publishes `installed` (or `failed` with kind `start`).
+/// Runs the `on_ready` hook and publishes `installed` (or `failed` with kind `start`, keeping what to start again for
+/// [`crate::VibeInstaller::retry_start`]).
 pub(crate) async fn start(
     inner: &Arc<Inner>,
     server: PathBuf,
     installed: InstallPhase,
     step: &str,
     index: u32,
+    counted_from: Instant,
 ) {
     {
         let mut state = inner.lock();
-        state.phase = installing(step, index, 0, String::new());
+        // A start cannot be cancelled: Cancel is refused from here on (`VibeInstaller::cancel`).
+        state.cancel = None;
+        state.phase = installing(step, index, millis(counted_from), String::new());
         inner.publish(&state);
     }
     let outcome = match inner.on_ready() {
-        Some(hook) => waiting_start(inner, hook(server), step, index).await,
+        Some(hook) => waiting_start(inner, hook(server.clone()), step, index, counted_from).await,
         None => Ok(()),
     };
     let mut state = inner.lock();
     state.cancel = None;
     state.phase = match outcome {
-        Ok(()) => installed,
-        Err(error) => InstallPhase::Failed {
-            step: step.to_owned(),
-            kind: FailKind::Start,
-            error,
-            output_tail: String::new(),
-        },
+        Ok(()) => {
+            state.start_again = None;
+            installed
+        }
+        Err(error) => {
+            state.start_again = Some((server, installed));
+            InstallPhase::Failed {
+                step: step.to_owned(),
+                kind: FailKind::Start,
+                error,
+                output_tail: String::new(),
+            }
+        }
     };
     if let InstallPhase::Installed {
         source: InstallSource::Private,
@@ -384,13 +399,15 @@ pub(crate) async fn start(
 const SLOW_START_NOTE: &str = "The first start after an install can take a few minutes while the computer checks the new files.";
 const SLOW_START: Duration = Duration::from_secs(5);
 
-/// Waits for the start hook while the step's elapsed time keeps counting on the view (once a second), so a slow first
-/// start reads as progress rather than a stalled screen.
+/// Waits for the start hook while the elapsed time keeps counting on the view (once a second, on from
+/// `counted_from`: the install's own count when the start follows it), so a slow first start reads as progress rather
+/// than a stalled screen. The slow-start note goes by the start's own time.
 async fn waiting_start(
     inner: &Arc<Inner>,
     start: impl std::future::Future<Output = Result<(), String>>,
     step: &str,
     index: u32,
+    counted_from: Instant,
 ) -> Result<(), String> {
     let started = Instant::now();
     tokio::pin!(start);
@@ -404,7 +421,7 @@ async fn waiting_start(
                 let note = if elapsed >= SLOW_START { SLOW_START_NOTE } else { "" };
                 let mut state = inner.lock();
                 if matches!(state.phase, InstallPhase::Installing { .. }) {
-                    state.phase = installing(step, index, millis(started), note.to_owned());
+                    state.phase = installing(step, index, millis(counted_from), note.to_owned());
                     inner.publish(&state);
                 }
             }

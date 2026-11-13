@@ -173,6 +173,49 @@ mod unix {
         assert_eq!(fs::read_dir(root).unwrap().count(), 0);
     }
 
+    /// A real folder below a link that only the system can change, when this machine has one: a new folder in the
+    /// unresolved temporary folder on macOS (`/var` -> `/private/var`), else a folder under a merged-/usr `/lib`
+    /// (`/lib` -> `usr/lib`, read only). The bool says whether the folder was made here (and is removed after).
+    fn below_a_system_link() -> Option<(PathBuf, bool)> {
+        let linked = |path: &Path| {
+            path.ancestors()
+                .any(|a| fs::symlink_metadata(a).is_ok_and(|m| m.file_type().is_symlink()))
+        };
+        let temp = std::env::temp_dir();
+        if linked(&temp) {
+            let dir = temp.join(format!("vw-proposals-system-link-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            return Some((dir, true));
+        }
+        if !linked(Path::new("/lib")) {
+            return None;
+        }
+        fs::read_dir("/lib")
+            .ok()?
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()))
+            .map(|dir| (dir, false))
+    }
+
+    /// PREDICT (before the change): every link above the protected folder is refused, including the ones only the
+    /// system can change, so a Vibe home under macOS's `/var` (the temporary folder) refuses each proposal with
+    /// "symlink in proposal path: /var" before its own paths are looked at. After: a link owned by the system in a
+    /// folder only the system can write is resolved once; the links a person can make stay refused
+    /// (`root_symlinks_and_symlinked_root_ancestors_are_refused`).
+    #[test]
+    fn a_protected_folder_below_a_system_link_is_captured() {
+        let Some((root, made)) = below_a_system_link() else {
+            eprintln!("no folder below a system link on this machine; nothing to check");
+            return;
+        };
+        let proposal = Proposal::new(&root, request(vec![add("vw-proposals-probe")]));
+        if made {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        assert!(proposal.is_ok(), "{}: {:?}", root.display(), proposal.err());
+    }
+
     #[test]
     fn target_symlink_inserted_after_capture_refuses_all_changes() {
         let root = support::tempdir();

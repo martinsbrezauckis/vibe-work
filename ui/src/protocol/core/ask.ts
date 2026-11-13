@@ -240,17 +240,13 @@ sessionId: string,
 /**
  * Exact paired profile identity.
  */
-profileId: string, } | { "op": "renameProfile",
+profileId: string, } | { "op": "setDefaultProfile",
 /**
  * Exact paired identity.
  */
-profileId: string,
+profileId: string, } | { "op": "clearDefaultProfile",
 /**
- * Person-owned display name.
- */
-name: string, } | { "op": "setDefaultProfile",
-/**
- * Exact paired identity.
+ * The current default's exact paired identity.
  */
 profileId: string, } | { "op": "setProfileEnabled",
 /**
@@ -316,7 +312,7 @@ offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | 
 /**
  * Whether the optional Safari connection is enabled.
  */
-enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", } | { "op": "removeEdge", };
+enabled: boolean, } | { "op": "removeSafari", } | { "op": "remove", } | { "op": "removeEdge", } | { "op": "recheckProfileNames", } | { "op": "openProfileNameSettings", };
 
 export type ChromeControlView = {
 /**
@@ -394,7 +390,8 @@ profileId: string,
  */
 browser: string,
 /**
- * Person-editable label, with a stable suffix when another profile has the same name.
+ * The browser's own profile name (or "Chrome profile 2" when it cannot be read), with the pairing number
+ * added when another profile of the same browser has the same name.
  */
 name: string,
 /**
@@ -416,7 +413,11 @@ isDefault: boolean,
 /**
  * Short reason for an unavailable retained identity.
  */
-reason?: string, };
+reason?: string,
+/**
+ * The signed-in account the browser shows under the profile name. Screen only: agent text carries only its domain.
+ */
+account?: string, };
 
 export type ChatBrowserProfile = {
 /**
@@ -516,7 +517,7 @@ export type ChromeTab = {
  */
 profileId: string,
 /**
- * Profile display label.
+ * The profile's shown name, as Settings > Browser shows it.
  */
 profileName: string,
 /**
@@ -595,7 +596,12 @@ extensionLeft?: boolean,
 /**
  * After Remove, Chrome must restart to finish removing its externally installed extension.
  */
-extensionRestart?: boolean, };
+extensionRestart?: boolean,
+/**
+ * macOS refused reading this browser's profile folder for a paired profile, so its profiles keep numbered
+ * names: the card says how to allow it in System Settings. Absent: nothing refused (always on Windows and Linux).
+ */
+profileNamesRefused?: boolean, };
 
 export type ChromeSetupState = "absent" | "notSetUp" | "repairRequired" | "waitingForExtension" | "extensionAdded";
 
@@ -630,6 +636,6 @@ instruction: string,
  */
 step?: string, };
 
-export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "accessBlocked" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
+export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "otherHelperRunning" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "accessBlocked" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
 
 export type ChromeAddonAction = "connect" | "setupAgain" | "remove" | "openPairingPage" | "turnOn";

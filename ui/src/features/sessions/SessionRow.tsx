@@ -16,7 +16,7 @@ import { useState } from "react";
 
 import { Icon } from "../../components/Icon";
 import { createStore, useStore } from "../../state/createStore";
-import { BADGE_LABEL } from "../../state/sessionSummary";
+import { BADGE_LABEL, isTemporaryFolder } from "../../state/sessionSummary";
 import { NO_SESSION_TOOLS } from "../../state/sessionTools";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
@@ -247,7 +247,8 @@ export function SessionRow({
                 local
               </Badge>
             )}
-            {temporary && (
+            {/* In its own folder the chat sits in the "Temporary chats" group, which already says so. */}
+            {temporary && !isTemporaryFolder(s.cwd) && (
               <Badge presentation="session" title="Temporary: deleted when you quit Vibe Work">
                 temporary
               </Badge>

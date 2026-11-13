@@ -3,6 +3,8 @@
  * viewport-bound menu. A containing popover owns its menu so both share the top layer.
  * Depends on React, ReactDOM and Icon; callers own values and side effects.
  * Keyboard arrows/Home/End move, Enter/Space pick, Escape closes and restores trigger focus.
+ * The trigger's tooltip is withdrawn while the menu is open, so it never lies over the first choices.
+ * `align="end"` lines a wider menu up with the trigger's right edge (a trigger at the end of a Settings row).
  * An option's accessible name is its visible label alone; its description line is its accessible description,
  * so "Click <label>" in voice control and screen readers find the option by what it shows.
  */
@@ -44,6 +46,7 @@ export function Selector<T extends string>({
   testId,
   itemId,
   hint,
+  align = "start",
 }: {
   label: string;
   value: T;
@@ -67,6 +70,8 @@ export function Selector<T extends string>({
   itemId?: string;
   /** Passive guidance beside the choices, such as where their default is set. */
   hint?: string;
+  /** Which trigger edge a menu wider than the trigger lines up with. */
+  align?: "start" | "end";
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -139,7 +144,13 @@ export function Selector<T extends string>({
       const preferredTop = up ? bounds.top - Math.min(height, maxHeight) - 4 : bounds.bottom + 4;
       setPosition({
         top: Math.max(inset, Math.min(preferredTop, bottom - Math.min(height, maxHeight) - inset)),
-        left: Math.max(inset, Math.min(bounds.left, window.innerWidth - width - inset)),
+        left: Math.max(
+          inset,
+          Math.min(
+            align === "end" ? bounds.right - width : bounds.left,
+            window.innerWidth - width - inset,
+          ),
+        ),
         minWidth: Math.min(bounds.width, window.innerWidth - 2 * inset),
         width,
         maxHeight,
@@ -152,7 +163,7 @@ export function Selector<T extends string>({
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [open, options.length]);
+  }, [open, options.length, align]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -208,7 +219,7 @@ export function Selector<T extends string>({
         aria-expanded={open && !disabled}
         aria-controls={open && !disabled ? id : undefined}
         disabled={disabled}
-        title={title ?? label}
+        title={open ? undefined : (title ?? label)}
         onClick={() => {
           if (open) close();
           else show();

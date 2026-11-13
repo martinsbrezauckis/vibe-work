@@ -45,6 +45,8 @@ export function createComposerActions(deps: {
   keyGuard?: (() => string | null) | undefined;
   /** Opens the Tools page (`/mcp`, `/connectors`). */
   openTools?: (() => void) | undefined;
+  /** True for a Temporary chat (its prompts are not added to the shared prompt history). */
+  isTemporary?: ((sessionId: string) => boolean) | undefined;
 }) {
   const { composer, shell, toasts, sessions, chains } = deps;
   // The origin is bound when the set is built, never read from a global at call time.
@@ -72,6 +74,7 @@ export function createComposerActions(deps: {
     runCommand: (id, name, args) => controls.runCommand(id, name, args),
     chains,
     keyGuard: deps.keyGuard,
+    isTemporary: deps.isTemporary,
     beforeTurn: (id) => controls.prepareSession(id),
     // the channel is open after a turn went out, so the chips can name the real mode and model.
     afterTurn: (id) => {

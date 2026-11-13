@@ -46,7 +46,7 @@ An open user question hands this chat's browser back: capture and agent actions 
 
 `page.focus`, `page.blur` and `page.insert_text` use pointId in Chrome/Edge and an observed ref in Firefox and Safari. Insertion replaces the current selection, preserves surrounding text and editable markup, sends beforeinput/input without key events, and reports actual focus/value. Sensitive, replaced or canceled fields return a refusal or met:false with a reason.
 
-Page reads withhold the values of protected fields (passwords, one-time codes, card numbers, masked inputs); the user fills them or `auth.fill` uses a vault login.
+Page reads withhold the values of protected fields (passwords, card numbers, security codes and expiry dates, masked inputs), also when they are labelled in another language; the user fills them or `auth.fill` uses a vault login. One-time codes are ordinary fields: read them for the user. In Chrome and Edge, typing into a field the page marks as a one-time code needs Full access, and a field masked only by the page's styling is not recognised.
 
 `page.wait_for` polls one CSS selector for attached, detached, visible or hidden. A hidden element remains attached. Conditions are read-only and bounded by timeoutMs (up to 20000); timeout returns met:false, and ambiguous or invalid selectors return a reason. `page.wait {networkIdle}` is Chrome/Edge only.
 

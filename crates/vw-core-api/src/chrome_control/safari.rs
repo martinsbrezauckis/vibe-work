@@ -109,6 +109,24 @@ fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
     addon
 }
 
+/// Shown after the person approved a Safari pairing until the extension connects: Safari may not run the extension's
+/// page again until its toolbar button is clicked, so the card says that step instead of looking unpaired.
+pub(super) const FINISH_STEP: &str = "Click {yourBrowser} in Safari's toolbar to finish.";
+
+pub(super) fn finishing(shared: &Shared, addon: &mut AddonView, enabled: bool) {
+    let approved = &shared.chrome_control.owner.safari_approved;
+    if addon.state == AddonState::Connected || !enabled {
+        approved.store(false, std::sync::atomic::Ordering::SeqCst);
+    } else if addon.state == AddonState::NotPaired
+        && approved.load(std::sync::atomic::Ordering::SeqCst)
+    {
+        *addon = super::addon::view_for(AddonState::Connecting, "", Browser::Safari);
+        addon.label = "Finish in Safari".into();
+        addon.step = Some(Browser::Safari.words(FINISH_STEP));
+        addon.instruction = Browser::Safari.words("The user approved Safari's connection, but Safari has not run the Vibe Work extension since. Ask the user to click {yourBrowser} in Safari's toolbar to finish.");
+    }
+}
+
 fn removed(shared: &Shared) -> bool {
     shared
         .chrome_control
@@ -135,6 +153,7 @@ pub(super) fn view(shared: &Shared) -> Option<SafariView> {
                 ConnectionError::Relay => "Safari could not start its connection. Ask the user to click Set up again. If it still fails, ask the user to restart Vibe Work.",
             }.into();
         }
+        finishing(shared, &mut addon, enabled);
         let fingerprint = matches!(addon.state, AddonState::NotPaired | AddonState::OtherOwner).then(|| pairing.1.clone()).flatten();
         let other_app_copies = shared.chrome_control.safari_copies.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner).clone();
@@ -162,19 +181,65 @@ pub(super) fn observe(shared: &Shared, params: &Value) {
             v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit()) && state != "mismatch"
         })
         .map(str::to_owned);
-    *shared
-        .chrome_control
-        .owner
-        .safari_pairing
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = (state.into(), fingerprint);
+    let previous = std::mem::replace(
+        &mut *shared
+            .chrome_control
+            .owner
+            .safari_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        (state.into(), fingerprint),
+    );
+    // The user completed pairing in this run: the extension reported `waiting` (or another owner's `mismatch`)
+    // and now `paired`. An already paired Safari reconnecting reports `paired` directly and never prompts, so the
+    // system Accessibility prompt appears once per pairing, never at app start and never from an agent action.
+    if state == "paired" && matches!(previous.0.as_str(), "waiting" | "mismatch") {
+        accessibility_prompt(shared);
+    }
     // A pairing state reaches the helper only from a connected extension (`safari_package::open` waits on this).
     shared
         .chrome_control
         .owner
         .safari_seen
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *shared
+        .chrome_control
+        .owner
+        .safari_seen_at
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
     super::owner::publish(shared);
+}
+
+/// Safari runs the extension's background page only briefly after its last native exchange, and Apple drops the
+/// pairing notice while that page is not running (and still reports success). A waiting extension reports its
+/// pairing state each time its page starts, so a report within this window means the notice can still arrive.
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) const NOTICE_WINDOW: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Whether the pairing notice can reach the extension: Safari is being launched for it (the notice then waits for the
+/// extension's first report), or the extension reported within [`NOTICE_WINDOW`].
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) fn notice_reachable(
+    launching: bool,
+    last_report: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    launching || last_report.is_some_and(|at| now.saturating_duration_since(at) < NOTICE_WINDOW)
+}
+
+/// Native Safari keys and clicks need Accessibility; ask macOS for its own prompt while the user is pairing.
+/// The system call runs off the helper pipe loop. Tests count the request without calling the system.
+fn accessibility_prompt(shared: &Shared) {
+    shared
+        .chrome_control
+        .owner
+        .safari_accessibility_prompts
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(all(not(test), target_os = "macos", feature = "your-safari"))]
+    std::thread::spawn(|| {
+        let _ = vw_platform::safari_input::request_accessibility();
+    });
 }
 
 pub(super) fn agent_fact(shared: &Shared) -> Option<Value> {
@@ -309,6 +374,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 
@@ -319,6 +385,7 @@ impl Core {
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
         super::safari_pairing::revoke(&self.shared).await?;
+        super::profiles::remove_browser(chrome, Browser::Safari);
         self.safari_enabled_held(false).await?;
         #[cfg(target_os = "macos")]
         super::safari_package::registration(true)
@@ -338,6 +405,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 
@@ -353,11 +421,14 @@ impl Core {
         let _held = self.shared.chrome_control.lifecycle.lock().await;
         repair_connection(&self.shared).await;
         #[cfg(target_os = "macos")]
-        super::safari_package::open(&self.shared)
+        let hint = super::safari_package::open(&self.shared)
             .map_err(|reason| super::commands::invalid(&reason))?;
+        #[cfg(not(target_os = "macos"))]
+        let hint = None;
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint,
         })
     }
 }

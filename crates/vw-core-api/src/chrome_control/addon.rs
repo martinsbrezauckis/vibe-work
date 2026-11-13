@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 use super::browser::BrowserIssue;
 use super::probe::Probe;
 
+/// The instruction while another Vibe Work browser helper holds the connection. The owner keeps retrying, so
+/// ending that helper is enough; Connect cannot help while it runs.
+pub(super) const OTHER_HELPER_RUNNING: &str = "Another Vibe Work browser helper is still running and holds the connection to {browser}. Ask the user to quit any other Vibe Work copy; if none is open, end the chrome-control process (Activity Monitor or Task Manager) or restart the computer. It then connects by itself.";
+
 /// Where Your Chrome stands, most blocking first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -42,6 +46,8 @@ pub enum AddonState {
     Connecting,
     /// The extension waits to be paired with this Vibe Work.
     NotPaired,
+    /// Another Vibe Work browser helper still holds the connection, so this app's helper cannot start.
+    OtherHelperRunning,
     /// Vibe Work's Chrome helper is not running.
     HelperNotRunning,
     /// The device credential was deleted outside the app; remove the old registration before connecting.
@@ -130,8 +136,13 @@ pub(crate) struct Facts {
     pub connecting: bool,
     pub waiting: bool,
     pub helper_up: bool,
+    /// The helper was refused because another helper holds its connection (`Owner::helper_conflict`).
+    pub helper_conflict: bool,
     pub credential_missing: bool,
     pub paired_once: bool,
+    /// The person removed every pairing of this browser in Browser settings. The extension may still be on, so this
+    /// is not a lost connection: only a new pairing (Connect) brings the browser back.
+    pub removed: bool,
     pub chrome_running: bool,
     pub install_state: Option<String>,
     pub extension_folder: bool,
@@ -256,6 +267,17 @@ pub(crate) fn state(facts: &Facts, probe: impl FnOnce() -> Probe) -> AddonState 
     if facts.other_owner {
         return S::OtherOwner;
     }
+    // A down helper keeps its own states (Connect cannot help while another helper holds the connection).
+    if facts.removed && !facts.waiting && facts.helper_up {
+        if facts.extension_folder {
+            match probe() {
+                Probe::AwaitingEnable => return S::EnableInChrome,
+                Probe::Off => return S::TurnedOffInChrome,
+                Probe::NotOff | Probe::Unknown => {}
+            }
+        }
+        return S::NotConnected;
+    }
     if facts.connecting {
         if facts.paired_once && facts.extension_folder {
             match probe() {
@@ -268,6 +290,9 @@ pub(crate) fn state(facts: &Facts, probe: impl FnOnce() -> Probe) -> AddonState 
     }
     if facts.waiting {
         return S::NotPaired;
+    }
+    if !facts.helper_up && facts.helper_conflict {
+        return S::OtherHelperRunning;
     }
     if !facts.helper_up {
         return S::HelperNotRunning;
@@ -303,6 +328,10 @@ pub(crate) fn state(facts: &Facts, probe: impl FnOnce() -> Probe) -> AddonState 
     }
     S::NotConnected
 }
+
+/// The person's step when the extension is off. Chrome also turns it off by itself when an update asks for more
+/// permissions; it then stays off until the person confirms Re-enable in Chrome's own dialog.
+const TURN_ON_STEP: &str = "Open {browser} extensions → Vibe Work and turn it on. If {browser} asks for new permissions, click Re-enable.";
 
 /// Chrome's presentation of the shared state table.
 pub(crate) fn view(state: AddonState, package_text: &str) -> AddonView {
@@ -384,6 +413,11 @@ pub(crate) fn view_for(
             Some(A::Remove),
             "Vibe Work's browser credential is missing. Ask the user to click Remove… in Settings > Browser, then Connect {browser}.",
         ),
+        S::OtherHelperRunning => (
+            "Another Vibe Work helper is running",
+            None,
+            OTHER_HELPER_RUNNING,
+        ),
         S::HelperNotRunning => (
             "Not running",
             Some(A::Connect),
@@ -392,7 +426,7 @@ pub(crate) fn view_for(
         S::TurnedOffInChrome => (
             "Turn on in {browser}",
             None,
-            "The Vibe Work extension is turned off in {browser}, for example after an update that asked for new permissions. Ask the user to turn it on in {browser}'s Extensions page.",
+            "The Vibe Work extension is turned off in {browser}, for example after an update that asked for new permissions. Ask the user to turn it on in {browser}'s Extensions page and click Re-enable if {browser} asks.",
         ),
         S::RestartChrome => (
             "Restart {browser}",
@@ -440,6 +474,19 @@ pub(crate) fn view_for(
             Some(browser.words("Quit {browser} with Cmd+Q and open it again."))
         }
         S::RestartChrome => Some(browser.words("Close every {browser} window and open it again.")),
+        S::TurnedOffInChrome => Some(browser.words(TURN_ON_STEP)),
+        S::OtherHelperRunning if cfg!(target_os = "macos") => Some(
+            "Quit the other Vibe Work copy with Cmd+Q. If none is open, restart the Mac. Vibe Work then connects by itself."
+                .into(),
+        ),
+        S::OtherHelperRunning if cfg!(windows) => Some(
+            "Close the other Vibe Work copy. If none is open, restart the computer. Vibe Work then connects by itself."
+                .into(),
+        ),
+        S::OtherHelperRunning => Some(
+            "Quit the other Vibe Work copy. If none is open, restart the computer. Vibe Work then connects by itself."
+                .into(),
+        ),
         _ => None,
     };
     let instruction = match state {
@@ -475,10 +522,38 @@ pub(super) fn reconnecting_for(
     if paired_once && view.state == AddonState::Connecting {
         view.label = browser.words("Turn on in {browser}");
         view.action = None;
-        view.instruction = browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.");
-        view.step = Some(browser.words("Open {browser} extensions → Vibe Work"));
+        view.instruction = browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off (clicking Re-enable if {browser} asks), or restart {browser} if it is already on.");
+        view.step = Some(browser.words(TURN_ON_STEP));
     }
 }
+
+/// A paired browser runs but no window of a paired profile is open (its profile picker, for example), and the
+/// extension is on in a paired profile: the person opens a window; nothing needs turning on.
+pub(super) fn window_closed_for(view: &mut AddonView, browser: super::agent_browser::Browser) {
+    if view.state == AddonState::Connecting {
+        view.label = browser.words("Open a {browser} window");
+        view.action = None;
+        view.instruction = browser.words("No window of a paired {browser} profile is open, so its Vibe Work extension is not running. Ask the user to open a window of the profile they want in {browser}; if {browser} shows its profile picker, they choose that profile there.");
+        view.step = Some(browser.words(WINDOW_STEP));
+    }
+}
+
+/// A paired browser runs, no paired profile is connected, and its files cannot be read (macOS): the extension is not
+/// known to be off, so the card names the likely steps, a closed window or a waiting approval, never Re-enable.
+pub(super) fn window_or_approval_for(view: &mut AddonView, browser: super::agent_browser::Browser) {
+    if view.state == AddonState::Connecting {
+        view.label = browser.words("Open a {browser} window");
+        view.action = None;
+        view.instruction = browser.words("No paired {browser} profile is connected. Its window may be closed, or it may wait for the user's approval in Vibe Work. Ask the user to open a window of a paired {browser} profile, or to approve it in Vibe Work; only if the connection stays down, to check in {browser}'s Extensions page that Vibe Work is on.");
+        view.step = Some(
+            browser
+                .words("Open a window of a paired {browser} profile, or approve it in Vibe Work."),
+        );
+    }
+}
+
+/// The person's step when no window of a paired profile is open.
+const WINDOW_STEP: &str = "Open a window of a paired {browser} profile. If {browser} shows its profile picker, choose that profile.";
 
 #[cfg(test)]
 #[path = "addon_tests.rs"]

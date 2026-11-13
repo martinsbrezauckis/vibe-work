@@ -43,7 +43,7 @@ async fn agent_cannot_replace_the_chats_profile_binding() {
     for profile in ["chrome:personal", "edge:work"] {
         let error = open(&core, profile).await.unwrap_err();
         assert!(
-            error.contains("Select") && error.contains("profile"),
+            error.contains("this chat's profile") && error.contains("new chat"),
             "{error}"
         );
     }
@@ -127,7 +127,7 @@ async fn a_changed_owner_cannot_inherit_the_saved_chat_binding() {
     test_support::observe_status(&core.shared, &json!({"ownerPublicKey":"changed-owner"}));
     let error = open(&core, "chrome:work").await.unwrap_err();
     assert!(
-        error.contains("another Vibe Work identity") && error.contains("Reconnect"),
+        error.contains("another Vibe Work identity") && error.contains("reconnect"),
         "{error}"
     );
     core.shutdown().await;

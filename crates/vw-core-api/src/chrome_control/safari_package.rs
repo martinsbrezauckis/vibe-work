@@ -92,7 +92,7 @@ pub(super) async fn registration(remove: bool) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<(), String> {
+pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<Option<String>, String> {
     // Only the containing app may check, configure or message its Safari extension (see
     // `vw_platform::safari_extension`), so this app process takes the step; the bundled setup tool only prepares
     // the App Group. The person just clicked this app, so it is the active one and brings Safari forward first.
@@ -105,6 +105,14 @@ pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<(), S
         .owner
         .safari_seen
         .load(std::sync::atomic::Ordering::SeqCst);
+    let last_report = *shared
+        .chrome_control
+        .owner
+        .safari_seen_at
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let reachable =
+        super::safari::notice_reachable(launching, last_report, std::time::Instant::now());
     let forwarded = vw_platform::browser::bring_safari_forward(|allowed| {
         tracing::info!(allowed, "Safari brought forward after its launch");
     });
@@ -124,7 +132,23 @@ pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<(), S
             Err(reason) => tracing::warn!(%reason, "Safari setup step failed"),
         },
     )
-    .map_err(|_| "Safari Settings could not be opened.".to_owned())
+    .map_err(|_| "Safari Settings could not be opened.".to_owned())?;
+    // The notice is still sent (Safari may run the page by now), but the person gets the way that always works.
+    Ok(pairing_hint(reachable))
+}
+
+/// The guidance `openSafariSetup` returns with its result: none while the notice can reach the extension page.
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) fn pairing_hint(reachable: bool) -> Option<String> {
+    (!reachable).then(toolbar_hint)
+}
+
+/// What to do when the pairing notice may not reach the extension: its own toolbar button always opens the controls.
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) fn toolbar_hint() -> String {
+    super::agent_browser::Browser::Safari.words(
+        "If Safari did not open the pairing page, click {yourBrowser} in Safari's toolbar, then choose Pair Vibe Work.",
+    )
 }
 
 /// A Safari launched for the pairing notice has no extension port yet, and Apple drops a notice sent before one

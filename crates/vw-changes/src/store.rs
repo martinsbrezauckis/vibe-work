@@ -60,7 +60,7 @@ pub fn valid_session_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Makes the changes dir user-only (once per process is enough; cheap on Unix, `icacls` on Windows).
+/// Makes the changes dir user-only (once per process is enough; cheap on Unix, one Win32 DACL write on Windows).
 ///
 /// # Errors
 /// `Io` when the folder cannot be created or restricted.

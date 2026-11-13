@@ -37,12 +37,12 @@ impl Fixture {
             },
             ..crate::CoreConfig::default()
         };
-        let core = crate::Core::start(
+        let core = Box::pin(crate::Core::start(
             vw_supervisor::SupervisorConfig::new(root.join("no-vibe-spawned"), home, root.clone()),
             Arc::new(vw_supervisor::NoSecret),
             NoPrompt,
             config,
-        )
+        ))
         .await
         .unwrap();
         Self { core, root }

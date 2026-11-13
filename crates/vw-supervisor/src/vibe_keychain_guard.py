@@ -1,4 +1,5 @@
 """Write fitting macOS Keychain values through Apple's tool on standard input; keep Vibe's writer as fallback.
+On Windows, split values longer than one Credential Manager entry holds into parts.
 
 Installed by the launcher for the audited pin. Items keep the attributes Vibe gives them,
 so Vibe's reads stay unchanged. Diagnostics never name items.
@@ -92,3 +93,105 @@ def install_macos_keychain_guard():
 
     set_password._vw_macos_keychain_original = original
     keyring._set_password = set_password
+
+
+def install_windows_credential_guard():
+    """Split values Windows Credential Manager cannot hold in one entry; keep Vibe's own entry for the rest.
+
+    A generic credential holds at most 2560 bytes (1280 UTF-16 characters); a longer write is refused with error
+    1783. OAuth tokens are often longer. A long value is stored as numbered parts, each its own credential, and Vibe's
+    entry then holds only a marker with the part count and the SHA-256 of the whole value. Reads join and check the
+    parts; a missing or changed part reads as no value, so the next sign-in starts fresh. Diagnostics never name items.
+    """
+    import hashlib
+    import importlib.metadata
+    import sys
+
+    if sys.platform != "win32" or importlib.metadata.version("mistral-vibe") != "3.1.2":
+        return
+    from vibe.utils import keyring
+
+    limit = 1280
+    prefix = "vw-credential-parts:1:"
+    current = (keyring._set_password, keyring._get_password, keyring._delete_password)
+    set_original, get_original, delete_original = (
+        vars(function).get("_vw_windows_credential_original", function) for function in current)
+
+    def part_service(service, username, index):
+        return f"{service}:{username}:part{index}"
+
+    def units(text):
+        return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+
+    def split(password):
+        parts, part, size = [], [], 0
+        for char in password:
+            width = units(char)
+            if size + width > limit:
+                parts.append("".join(part))
+                part, size = [], 0
+            part.append(char)
+            size += width
+        parts.append("".join(part))
+        return parts
+
+    def stored_parts(service, username):
+        """The part count Vibe's entry names, or 0 for a plain or absent entry."""
+        try:
+            head = get_original(service, username)
+        except Exception:
+            return 0
+        if not head or not head.startswith(prefix):
+            return 0
+        count = head[len(prefix):].split(":", 1)[0]
+        return int(count) if count.isdigit() else 0
+
+    def remove_parts(service, username, start, end):
+        for index in range(start, end):
+            try:
+                delete_original(part_service(service, username, index), username)
+            except Exception:
+                # A part that is already gone needs no cleanup; the marker no longer names it.
+                pass
+
+    def set_password(service, username, password):
+        before = stored_parts(service, username)
+        if units(password) <= limit:
+            set_original(service, username, password)
+            remove_parts(service, username, 0, before)
+            return
+        parts = split(password)
+        for index, part in enumerate(parts):
+            set_original(part_service(service, username, index), username, part)
+        digest = hashlib.sha256(password.encode("utf-8", errors="surrogatepass")).hexdigest()
+        set_original(service, username, f"{prefix}{len(parts)}:{digest}")
+        remove_parts(service, username, len(parts), before)
+
+    def get_password(service, username):
+        head = get_original(service, username)
+        if head is None or not head.startswith(prefix):
+            return head
+        count, _, digest = head[len(prefix):].partition(":")
+        if not count.isdigit():
+            return None
+        parts = [get_original(part_service(service, username, index), username) for index in range(int(count))]
+        if any(part is None for part in parts):
+            keyring.logger.warning("Windows credential parts: a part is missing; the value reads as absent")
+            return None
+        value = "".join(parts)
+        if hashlib.sha256(value.encode("utf-8", errors="surrogatepass")).hexdigest() != digest:
+            keyring.logger.warning("Windows credential parts: the parts do not match; the value reads as absent")
+            return None
+        return value
+
+    def delete_password(service, username):
+        before = stored_parts(service, username)
+        delete_original(service, username)
+        remove_parts(service, username, 0, before)
+
+    for function, original in zip((set_password, get_password, delete_password),
+                                  (set_original, get_original, delete_original)):
+        function._vw_windows_credential_original = original
+    keyring._set_password = set_password
+    keyring._get_password = get_password
+    keyring._delete_password = delete_password

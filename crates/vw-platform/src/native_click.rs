@@ -12,6 +12,8 @@ use tokio::sync::oneshot;
 
 #[cfg(any(target_os = "macos", test))]
 mod macos_wheel_plan;
+#[cfg(any(windows, test))]
+mod windows_sequence_plan;
 
 /// Answer channel for a checked click. Dropping its receiver (Stop or timeout) cancels pending dispatch.
 pub type ClickReply = oneshot::Sender<Result<(), String>>;

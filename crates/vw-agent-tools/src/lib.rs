@@ -57,6 +57,7 @@ pub mod secretspec;
 pub mod shell_find;
 pub mod spawn;
 mod specs;
+mod windows_shell;
 pub mod wire;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics can assert

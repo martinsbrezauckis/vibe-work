@@ -175,7 +175,11 @@ impl Core {
         let view = view(&self.shared);
         self.shared
             .emit(crate::CoreEvent::ChromeControl { view: view.clone() });
-        Ok(CommandResult::ChromeControl { view, offer: None })
+        Ok(CommandResult::ChromeControl {
+            view,
+            offer: None,
+            hint: None,
+        })
     }
 }
 
@@ -228,7 +232,7 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             _ => (
                 A::ChromeClosed,
                 "Window closed",
-                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session cannot resume after a restart.",
+                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session has ended.",
             ),
         }
     };
@@ -245,6 +249,19 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
 #[cfg(all(test, feature = "your-firefox"))]
 mod tests {
     use super::*;
+    /// PREDICT: the closed-window instruction ended "the old session cannot resume after a restart" also when the
+    /// user had only closed the window; it now says the old session has ended, which holds for a close and a restart.
+    #[test]
+    fn a_closed_window_says_its_old_session_ended() {
+        let view = state_view(PairingState::WindowClosed, true, true);
+        let name = vw_vocabulary::texts::FIREFOX_NAME;
+        assert_eq!(
+            view.instruction,
+            format!(
+                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {name}, then open a new chat browser session; the old session has ended."
+            )
+        );
+    }
     #[tokio::test]
     async fn firefox_facts_use_its_window_controls_and_connection_state() {
         let core = crate::offline_core::start_with("firefox-window-facts", |config, dir| {

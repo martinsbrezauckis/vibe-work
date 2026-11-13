@@ -40,28 +40,28 @@ impl Error {
     pub fn outcome(self) -> &'static str {
         match self {
             Self::Configuration => {
-                "The configured proxy or PAC result is invalid or unsupported. Ask the person to check Settings > Network or the system proxy. Do not bypass the guard."
+                "The configured proxy or PAC result is invalid or unsupported. Ask the user to check Settings > Network or the system proxy. Do not bypass the guard."
             }
             Self::Discovery => {
-                "The OS proxy/PAC resolver failed or is unavailable. Ask the person to check the system proxy; on Linux install libproxy with the desktop/PAC backend or set a manual proxy in Settings > Network. Do not retry directly."
+                "The OS proxy/PAC resolver failed or is unavailable. Ask the user to check the system proxy; on Linux install libproxy with the desktop/PAC backend or set a manual proxy in Settings > Network. Do not retry directly."
             }
             Self::Unreachable => {
-                "The configured proxy could not be reached. Ask the person to check their network and proxy address, then retry. Do not bypass the proxy."
+                "The configured proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy."
             }
             Self::Timeout => {
-                "The proxy connection or system PAC lookup timed out. Ask the person to check their proxy, then retry. Do not bypass the proxy."
+                "The proxy connection or system PAC lookup timed out. Ask the user to check their proxy, then retry. Do not bypass the proxy."
             }
             Self::Certificate => {
-                "TLS verification of the proxy failed. Ask the person to check the proxy name and company CA in Settings > Network. Never disable certificate verification."
+                "TLS verification of the proxy failed. Ask the user to check the proxy name and company CA in Settings > Network. Never disable certificate verification."
             }
             Self::Authentication => {
-                "The proxy rejected sign-in or requested an unsupported authentication method. Ask the person to check the proxy credentials in Settings or the system configuration. Never put credentials in chat or logs."
+                "The proxy rejected sign-in or requested an unsupported authentication method. Ask the user to check the proxy credentials in Settings or the system configuration. Never put credentials in chat or logs."
             }
             Self::Refused => {
-                "The proxy refused the guard's checked IP destination. Ask the person to check the proxy's access rules. Never retry by hostname or bypass the guard."
+                "The proxy refused the guard's checked IP destination. Ask the user to check the proxy's access rules. Never retry by hostname or bypass the guard."
             }
             Self::Protocol => {
-                "The proxy returned an invalid handshake. Ask the person to check the proxy type and address, then retry. Do not bypass the guard."
+                "The proxy returned an invalid handshake. Ask the user to check the proxy type and address, then retry. Do not bypass the guard."
             }
         }
     }

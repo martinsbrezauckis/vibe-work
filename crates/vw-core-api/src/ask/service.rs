@@ -301,11 +301,11 @@ impl Service {
             None
         } else if held.iter().any(|(id, _)| state.open.contains_key(*id)) {
             Some(
-                "Not run: this chat's browser is waiting for the person's answer. Let the person finish in the browser and answer the open question before continuing.",
+                "Not run: this chat's browser is waiting for the user's answer. Let the user finish in the browser and answer the open question before continuing.",
             )
         } else {
             Some(
-                "Not run: the browser remains handed back because the question was not answered. Wait for a new message from the person before using this chat's browser again.",
+                "Not run: the browser remains handed back because the question was not answered. Wait for a new message from the user before using this chat's browser again.",
             )
         }
     }

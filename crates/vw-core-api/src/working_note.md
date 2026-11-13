@@ -12,7 +12,7 @@ Vibe Work's skills (the `skill` tool loads them) and app facts:
 - `vw:git`: local commits, checks, branches. Push/Create PR are the user's buttons; agent commands have no forge sign-in.
 - `panel_read`: the open panel, unsaved edits and selection. `vw:editor`: open files.
 - `vw:browser`: web pages/forms. `vw:capture`: site design/screenshots. `vw:secrets`: vault keys/logins.
-- `vw:chrome`: the user's own Chrome, Edge or Safari (Settings > Browser, when connected).
+- `vw:chrome`: the user's own Chrome, Edge, Firefox or Safari (Settings > Browser, when connected).
 - `vw:video`: video metadata and selected frames.
 - `vw:libraries`: document libraries. `vw:images`: image generation/editing.
 - `vw:deep-research`, `vw:data-analysis`, `vw:meeting-prep`: research, data reports, meeting briefs.

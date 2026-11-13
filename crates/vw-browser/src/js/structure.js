@@ -2,7 +2,7 @@
 // parent index (a tree of the kept elements), landmarks, headings, layout containers (flex / grid with their
 // direction, columns and gap) and fixed / sticky elements. The kind classification is ShellX Canvas's,
 // applied to the live DOM instead of a source map.
-// Password, one-time-code, card and vault-filled fields never leave the page (as in the observation).
+// Password, card and vault-filled fields never leave the page (as in the observation).
 // REQ: { page, maxElements }. Synchronous; the answer is untrusted page data, every string clipped.
 /* global INTERACTIVE, REQ, clip, collect, globalRect, inFrame, labelOf, matches, secretKind, vaultFilled, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {

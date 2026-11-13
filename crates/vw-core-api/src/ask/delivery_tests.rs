@@ -133,7 +133,7 @@ fn unconfirmed(shared: &Shared, id: &str) {
 
 #[tokio::test]
 async fn a_reserved_answer_has_no_decision_and_cannot_be_clicked_or_closed_again() {
-    let (core, root) = core().await;
+    let (core, root) = Box::pin(core()).await;
     let shared = core.shared.clone();
     open(&shared, "in-flight");
     let delivery = shared
@@ -173,7 +173,7 @@ async fn a_reserved_answer_has_no_decision_and_cannot_be_clicked_or_closed_again
 }
 
 async fn failed_decision(decision: &str) {
-    let (core, root) = core().await;
+    let (core, root) = Box::pin(core()).await;
     let shared = &core.shared;
     open(shared, decision);
     let output = json!({"type":"approval", "decision":{"type":decision}});
@@ -212,20 +212,20 @@ async fn failed_decision(decision: &str) {
 
 #[tokio::test]
 async fn failed_yes_is_not_a_final_decision() {
-    failed_decision("approve").await;
+    Box::pin(failed_decision("approve")).await;
 }
 #[tokio::test]
 async fn failed_no_is_not_a_final_decision() {
-    failed_decision("deny").await;
+    Box::pin(failed_decision("deny")).await;
 }
 #[tokio::test]
 async fn failed_session_answer_keeps_no_grant() {
-    failed_decision("approve_for_session").await;
+    Box::pin(failed_decision("approve_for_session")).await;
 }
 
 #[tokio::test]
 async fn failed_automatic_answer_never_reopens_a_claimed_card_or_counts_a_grant_use() {
-    let (core, root) = core().await;
+    let (core, root) = Box::pin(core()).await;
     let shared = core.shared.clone();
     open(&shared, "grant-source");
     let pending = shared.ask_grants.claim("grant-source").unwrap();

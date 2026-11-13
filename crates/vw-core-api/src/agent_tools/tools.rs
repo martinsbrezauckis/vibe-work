@@ -28,6 +28,7 @@ pub(crate) async fn call(
     mut args: Value,
 ) -> Result<Value, String> {
     vw_agent_tools::video::check_tool(tool)?;
+    crate::ask::tool_calls::receipts::await_vibe_call(shared, session_id, &args).await;
     let prepared = crate::ask::tool_calls::receipts::take(shared, session_id, tool, &mut args)?;
     let outcome = match prepared.execution {
         Some(execution) => execution.await,

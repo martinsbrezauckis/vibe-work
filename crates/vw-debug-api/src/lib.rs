@@ -33,7 +33,7 @@ mod ask_routes;
 mod auth;
 mod body_limit;
 mod config;
-/// Test builds only (feature `e2e-script`): `POST /e2e/script`, `GET /e2e/windows`.
+/// Test builds only (feature `e2e-script`): `POST /e2e/script`, `GET /e2e/windows`, `POST /e2e/tool-call`.
 #[cfg(feature = "e2e-script")]
 pub mod e2e_script;
 mod registry;

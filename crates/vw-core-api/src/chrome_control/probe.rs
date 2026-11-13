@@ -425,11 +425,37 @@ pub(super) fn profiles_for(
     if config.is_macos() {
         return Vec::new();
     }
+    profiles_for_names(config, user_data, extension_id)
+}
+
+/// [`profiles_for`] for the profile-name search, which also reads on macOS once `browser_data::readable` allowed
+/// this folder.
+pub(super) fn profiles_for_names(
+    config: &super::setup::ChromeControlConfig,
+    user_data: &Path,
+    extension_id: &str,
+) -> Vec<PathBuf> {
     if super::setup::files::access(config, super::setup::files::Access::ReadDir, user_data).is_err()
     {
         return Vec::new();
     }
     profiles(user_data, extension_id)
+}
+
+/// What Chrome's files say about the extension in one profile folder, read now (no cache, no thread): the
+/// Settings row of a paired profile whose folder is proven.
+pub(super) fn folder(
+    config: &super::setup::ChromeControlConfig,
+    profile: &Path,
+    extension_id: &str,
+) -> Probe {
+    if config.is_macos()
+        || super::setup::files::access(config, super::setup::files::Access::ReadDir, profile)
+            .is_err()
+    {
+        return Probe::Unknown;
+    }
+    probe_once(&[profile.to_path_buf()], extension_id).0
 }
 
 pub(super) fn version_for(

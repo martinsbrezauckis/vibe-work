@@ -266,8 +266,5 @@ async fn a_visible_question_has_released_the_browser_before_firefox_availability
         "the visible question still leaves agent control: {state:?}"
     );
     assert!(other_state.agent_active);
-    assert!(
-        held.unwrap_err()
-            .contains("waiting for the person's answer")
-    );
+    assert!(held.unwrap_err().contains("waiting for the user's answer"));
 }

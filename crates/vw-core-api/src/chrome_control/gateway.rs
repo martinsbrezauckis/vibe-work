@@ -231,6 +231,13 @@ pub(crate) async fn call(
                     &output_request,
                     &mut answer["vwMcpResult"],
                 );
+                super::profile_agent::chosen(
+                    shared,
+                    session,
+                    tool,
+                    &output_request,
+                    &mut answer["vwMcpResult"],
+                );
                 if super::output_cache::observation(&answer["vwMcpResult"]) {
                     super::output_cache::bound(
                         shared,
@@ -400,11 +407,14 @@ pub(super) async fn call_one_inner(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
-    args: Value,
+    mut args: Value,
     consent: Option<&super::read_consent::Consent>,
     previous: Option<&str>,
 ) -> Result<Value, String> {
     let opening = tool == "chrome_session" && args["action"] == "open";
+    if opening {
+        super::profile_seeding::ask_person(shared, session, &mut args).await?;
+    }
     let _binding = if opening {
         Some(shared.chrome_control.binding_changes.lock().await)
     } else {
@@ -422,7 +432,7 @@ pub(super) async fn call_one_inner(
         ]
         .contains(&profile)
     {
-        super::profile_bindings::check(&shared.chrome_control, session, profile)?;
+        super::profile_bindings::check_agent(&shared.chrome_control, session, profile)?;
     }
     call_prepared(shared, session, tool, args, consent, previous).await
 }
@@ -488,15 +498,10 @@ async fn call_prepared(
     }
     let clamped = super::output::clamp_request(tool, &mut args);
     let output_request = args.clone();
-    if let Some(args) = args.as_object_mut() {
-        for key in ["saveTo", "extract", "appendFrom", "deduplicate"] {
-            args.remove(key);
-        }
-    }
     if let Some(previous) = previous {
         args["_preflightOperationId"] = json!(previous);
     }
-    let mut answer = super::read_consent::send(shared, session, tool, args, consent)
+    let mut answer = super::output_file::send(shared, session, tool, args, consent)
         .await
         .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;
     if request {

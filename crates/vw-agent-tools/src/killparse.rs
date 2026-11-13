@@ -133,10 +133,15 @@ fn scan_segment(segment: &[&str], out: &mut KillScan, depth: u8) {
     };
     let args = &words[1..];
     let name = command_name(program);
-    // `cmd /c …` (Git Bash: `cmd //c`) and `pwsh|powershell -Command …` run their text: the natural Windows forms.
-    let scripts = crate::gitparse::windows_shell_script(&name, args);
-    if !scripts.is_empty() {
-        for script in scripts {
+    // `cmd /c …` (Git Bash: `cmd //c`) and PowerShell run their text: the natural Windows forms. Text PowerShell
+    // takes from elsewhere (standard input, a server mode) cannot be read: ask instead of letting a stop through.
+    let shell = crate::windows_shell::command_text(&name, args);
+    if let Some(why) = shell.unreadable {
+        out.mentions = true;
+        out.reason(format!("the command text cannot be read: {why}"));
+    }
+    if !shell.scripts.is_empty() || shell.unreadable.is_some() {
+        for script in shell.scripts {
             if depth < MAX_SHELL_DEPTH {
                 scan_into(&script, out, depth + 1);
             } else if script.to_ascii_lowercase().contains("kill")

@@ -39,6 +39,22 @@ async fn prompt(
         .unwrap()
 }
 
+/// Remove a profile, then the person's Connect: a removed profile asks only after it (`pairing_removed_tests`).
+/// Setup may stop early here; only the removal must succeed.
+async fn remove_then_connect(core: &crate::Core, profile: &str) {
+    core.chrome_control(
+        crate::Origin::Ui,
+        super::ChromeControlRequest::RemoveProfile {
+            profile_id: profile.into(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = core
+        .chrome_control(crate::Origin::Ui, super::ChromeControlRequest::Connect {})
+        .await;
+}
+
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
@@ -321,14 +337,7 @@ async fn an_explicitly_removed_profile_can_pair_again_only_after_a_new_native_ap
             "owner.pairing.approve" => json!({"approved":true}),
             _ => json!({"applied":true}),
         });
-    core.chrome_control(
-        crate::Origin::Ui,
-        super::ChromeControlRequest::RemoveProfile {
-            profile_id: profile.clone(),
-        },
-    )
-    .await
-    .unwrap();
+    remove_then_connect(&core, &profile).await;
     notify(&core, ID, "chrome");
     let (_, answer) = prompt(&mut receive).await;
     assert!(
@@ -384,5 +393,208 @@ async fn safari_repair_approval_uses_the_same_person_only_card() {
     answer.send(Confirmation::Approved).unwrap();
     settle().await;
     assert!(calls.lock().unwrap().iter().any(|(method, params)| method == "owner.pairing.approve" && params["approved"] == true));
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): the native dialog said "Connect Chrome to Vibe Work?" for every profile, so with a
+// second profile pairing the person could not tell which one asked. When the asking identity's own UUID is found in
+// one profile folder's extension storage, the dialog names that folder's profile as the browser's picker shows it.
+#[tokio::test]
+async fn the_native_pairing_dialog_names_the_profile_that_asks_when_its_folder_is_known() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "pairing-named",
+        |config, dir| config.chrome_control.package = Some(dir.join("package")),
+        Presenter(send),
+    )
+    .await;
+    core.shared.chrome_control.set_enabled(true).unwrap();
+    let chrome = &core.shared.chrome_control;
+    let data = chrome
+        .config
+        .user_home
+        .as_ref()
+        .unwrap()
+        .join("named-browser-data");
+    let folder = data.join("Profile 2");
+    let extension = &chrome.config.extension_id;
+    let storage = folder
+        .join("IndexedDB")
+        .join(format!("chrome-extension_{extension}_0"));
+    std::fs::create_dir_all(folder.join("Extensions").join(extension).join("0.1.7_0")).unwrap();
+    std::fs::create_dir_all(&storage).unwrap();
+    std::fs::write(
+        storage.join("WCHYFF2I4HCHMUPPZAC67CSVYI6DH5O5Q6INA6VYGXVHAVFYHNPQ"),
+        format!("SQLite format 3\0\u{ff}\u{14}\"${PROFILE}"),
+    )
+    .unwrap();
+    std::fs::write(
+        data.join("Local State"),
+        json!({"profile":{"info_cache":{"Profile 2":{"name":"Work"}}}}).to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(chrome.dir().unwrap()).unwrap();
+    std::fs::write(
+        chrome.dir().unwrap().join("setup.json"),
+        json!({"files":[],"browsers":["Google Chrome"],"userData":[data]}).to_string(),
+    )
+    .unwrap();
+    notify(&core, ID, "chrome");
+    let (request, _answer) = prompt(&mut receive).await;
+    assert_eq!(
+        request.summary,
+        "Connect Chrome profile \u{201c}Work\u{201d} to Vibe Work?\n\nChrome needs your approval. Choose Connect to allow this connection."
+    );
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): after the person answers "Not now", the helper keeps that answer for its request's
+// life, so the extension's reconnects never ask again and the profile stays unpaired until Vibe Work restarts. The card
+// offered no way back. Now the card says the profile waits after Not now and offers Connect; Connect makes the helper
+// forget the answer for that unpaired identity (`owner.profileUnpair`, no setup), returns guidance as a hint, and the
+// next request from the helper opens the dialog again. Nothing asks again without that click.
+#[tokio::test]
+async fn after_not_now_the_persons_connect_lets_the_profile_ask_again_without_a_restart() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "pairing-not-now",
+        |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+        },
+        Presenter(send),
+    )
+    .await;
+    core.shared.chrome_control.set_enabled(true).unwrap();
+    let profile = format!("chrome:{PROFILE}");
+    super::test_support::observe_status(
+        &core.shared,
+        &json!({"profiles":[{"profileId":profile,"connected":true}]}),
+    );
+    let calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|tool, _| match tool {
+            "owner.profileUnpair" => json!({"unpaired":true}),
+            "owner.pairing.approve" => json!({"approved":false}),
+            _ => json!({"applied":true}),
+        });
+    remove_then_connect(&core, &profile).await;
+    notify(&core, ID, "chrome");
+    let (_, answer) = prompt(&mut receive).await;
+    answer.send(Confirmation::Declined).unwrap();
+    settle().await;
+    calls.lock().unwrap().clear();
+    let card = || {
+        let mut view = super::addon::view(super::AddonState::Connecting, "");
+        super::profile_reason::reconnecting(
+            &core.shared,
+            &mut view,
+            true,
+            super::agent_browser::Browser::Chrome,
+        );
+        view
+    };
+    let card = card();
+    assert_eq!(
+        card.action,
+        Some(super::addon::AddonAction::Connect),
+        "{card:?}"
+    );
+    assert!(
+        card.step.as_deref().unwrap_or_default().contains("Not now"),
+        "{card:?}"
+    );
+    let result = core
+        .chrome_control(crate::Origin::Ui, super::ChromeControlRequest::Connect {})
+        .await
+        .unwrap();
+    let crate::CommandResult::ChromeControl { hint, .. } = result else {
+        panic!("Connect answers with the browser view");
+    };
+    assert!(
+        hint.as_deref()
+            .unwrap_or_default()
+            .contains("Check connection"),
+        "{hint:?}"
+    );
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![("owner.profileUnpair".into(), json!({"profileId":profile}))],
+        "Connect only lets the helper ask again"
+    );
+    let card = {
+        let mut view = super::addon::view(super::AddonState::Connecting, "");
+        super::profile_reason::reconnecting(
+            &core.shared,
+            &mut view,
+            true,
+            super::agent_browser::Browser::Chrome,
+        );
+        view
+    };
+    assert!(
+        !card.step.as_deref().unwrap_or_default().contains("Not now"),
+        "{card:?}"
+    );
+    let next = "33333333-3333-4333-8333-333333333333";
+    notify(&core, next, "chrome");
+    let (request, answer) = prompt(&mut receive).await;
+    assert!(request.summary.starts_with("Connect Chrome"));
+    answer.send(Confirmation::Declined).unwrap();
+    settle().await;
+    assert!(
+        receive.try_recv().is_err(),
+        "no dialog without a new request"
+    );
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): after the person chose Connect on "Connect Safari to Vibe Work?", Safari may not
+// run the extension's page again until its toolbar button is clicked, so Settings kept the unpaired "Pair in Safari"
+// card and a person thought pairing had failed. Now the card says to click Your Safari in the toolbar to finish, as a
+// help step, until the extension connects; once connected the step is gone and does not come back.
+#[cfg(feature = "your-safari")]
+#[tokio::test]
+async fn an_approved_safari_pairing_says_to_finish_in_the_toolbar_until_safari_connects() {
+    use super::agent_browser::Browser;
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "safari-finish-step",
+        |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+        },
+        Presenter(send),
+    )
+    .await;
+    let dir = core.shared.chrome_control.dir().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("safari-enabled.json"), b"true").unwrap();
+    let _calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|_, _| json!({"approved":true}));
+    let unpaired = || super::addon::view_for(super::AddonState::NotPaired, "", Browser::Safari);
+    let card = || {
+        let mut view = unpaired();
+        super::safari::finishing(&core.shared, &mut view, true);
+        view
+    };
+    assert_eq!(card(), unpaired(), "nothing approved yet");
+    notify(&core, ID, "safari");
+    let (_, answer) = prompt(&mut receive).await;
+    answer.send(Confirmation::Approved).unwrap();
+    settle().await;
+    let view = card();
+    assert_eq!(
+        view.step.as_deref(),
+        Some("Click Your Safari in Safari's toolbar to finish.")
+    );
+    assert_ne!(view.label, unpaired().label, "it no longer looks unpaired");
+    let mut connected = super::addon::view_for(super::AddonState::Connected, "", Browser::Safari);
+    super::safari::finishing(&core.shared, &mut connected, true);
+    assert_eq!(connected.step, None);
+    assert_eq!(card(), unpaired(), "the step is gone once Safari connected");
     core.shutdown().await;
 }

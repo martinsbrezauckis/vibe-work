@@ -244,7 +244,7 @@ impl Core {
         let generation = self.shared.changes.expire(
             session_id,
             &folder,
-            "The folder was too big to record before the session started.",
+            "Preparing the review took too long before the session started.",
         );
         let hub_owner = self.shared.clone();
         let id = session_id.to_owned();

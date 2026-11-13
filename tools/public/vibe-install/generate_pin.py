@@ -29,6 +29,8 @@ For a dependency-removal-only bump, --reuse-pin <previous pin dir> uses only PyP
 requirements hash is checked, every retained dependency (including its marker) must match both published
 releases exactly, and the already-reviewed uv assets are reused. Added or changed dependencies require
 a fresh lock export. The supplied source commit is provenance, not reverified in this mode.
+The same mode adds security overrides to a previous pin that has none (its dependencies are still exactly
+the lock's); a previous pin that already carries an override needs a fresh lock export.
 Needs: git, uv, network (only PyPI with --reuse-pin). Writes `vibe-install.json` and `vibe.requirements.txt` into --out.
 Called by: maintainers when bumping Vibe (with tools/public/codegen/vibe.pin, regenerated types, bench, gate).
 """
@@ -57,7 +59,9 @@ TARGETS = {
 # Security overrides: package -> (fixed version, the advisories it fixes). Generation fails when an entry is stale
 # (the tag's lock already has that version or a later one) or names a package the lock does not have: remove it then.
 # The fixed release must be a pure-Python wheel (`py3-none-any`, not yanked), so one file serves every target.
-SECURITY_OVERRIDES = {}
+SECURITY_OVERRIDES = {
+    "soupsieve": ("4.0", "GHSA-mmhr-3c5m-f64f, GHSA-4j63-6c4x-wfg4"),
+}
 
 
 def version_key(version: str) -> tuple[int, ...]:
@@ -146,14 +150,23 @@ def reused_export(previous: str, old_requires: list[str], new_requires: list[str
     return export
 
 
+def check_reuse(previous: str, pinned_uv: str, uv: str, overrides: dict) -> None:
+    """Reuse needs the reviewed uv; overrides apply only to a previous file whose dependencies are the lock's own."""
+    if pinned_uv != uv:
+        raise SystemExit("reuse requires unchanged uv")
+    lines = previous.splitlines()
+    clean = len(lines) > 2 and lines[2] == "# Security overrides (generate_pin.py SECURITY_OVERRIDES): none."
+    if overrides and not clean:
+        raise SystemExit("reuse with security overrides needs a previous pin without overrides: regenerate from the lock")
+
+
 def reuse_pin(directory: Path, pypi: dict, uv: str, python: str) -> tuple[str, dict]:
     """Validate the old requirements file and compare both releases' PyPI metadata."""
     pin = json.loads((directory / "vibe-install.json").read_text())
     previous = (directory / pin["vibe"]["requirements"]).read_bytes()
     if hashlib.sha256(previous).hexdigest() != pin["vibe"]["requirementsSha256"]:
         raise SystemExit("previous requirements checksum differs from its pin")
-    if pin["uv"]["version"] != uv or SECURITY_OVERRIDES:
-        raise SystemExit("reuse requires unchanged uv and no security overrides")
+    check_reuse(previous.decode(), pin["uv"]["version"], uv, SECURITY_OVERRIDES)
     old = json.loads(fetch(f"https://pypi.org/pypi/mistral-vibe/{pin['vibe']['version']}/json"))
     check_python(python, pypi["info"]["requires_python"], old["info"]["requires_python"])
     return reused_export(previous.decode(), old["info"]["requires_dist"], pypi["info"]["requires_dist"]), pin["uv"]

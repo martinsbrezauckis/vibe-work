@@ -85,12 +85,14 @@ impl Core {
         {
             return Err(invalid(&reason));
         }
+        super::pairing_approval::removed_browser(chrome, browser);
         if chrome.owner.is_running() {
             let answer = chrome
                 .owner
                 .rpc("owner.browserUnpair", json!({"browser":browser.id()}))
                 .await;
             if !answer.is_some_and(|answer| answer["unpaired"] == true) {
+                chrome.owner.approvals.forget_removed(browser);
                 return Err(invalid(&browser.words(
                     "The {browser} connection could not be removed. Try again.",
                 )));
@@ -134,6 +136,7 @@ impl Core {
                     .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_DELETE_FAILED))?;
             }
             chrome.reset();
+            super::profiles::forget_all(chrome);
             // With no connection left, retain the pre-setup switch default for the next Connect.
             chrome
                 .set_browser_enabled(browser, was_enabled)
@@ -149,6 +152,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 }
@@ -180,6 +184,7 @@ fn forget_browser(
             .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
     }
     chrome.owner.connected_profiles.remove_browser(browser);
+    super::profiles::remove_browser(chrome, browser);
     chrome
         .chat_profiles
         .lock()

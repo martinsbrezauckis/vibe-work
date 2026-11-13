@@ -2,7 +2,7 @@
 // lists, links and images as absolute URLs, code, quotes, tables), as plain visible text (ShellX Browser's
 // whole-page text), or as HTML without active content (the live DOM after its scripts ran, with
 // scripts, handlers, frames, plugins, `javascript:` URLs, `<base>` and refresh removed; the host adds a `<base>` and
-// a CSP that forbids scripts). Password, one-time-code, card and vault-filled fields never leave the
+// a CSP that forbids scripts). Password, card and vault-filled fields never leave the
 // page. Large answers are handed over in chunks: `start` builds the text once and keeps it in the page environment
 // under a token, `chunk` answers a slice, `end` drops it.
 // REQ: { page, op: start|chunk|end, format: markdown|text|html, token, offset, maxChars, chunk }.

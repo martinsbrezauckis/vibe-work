@@ -15,13 +15,13 @@ const renderedLabelText = el => {
   const slots = el.localName === "slot" ? [el] : Array.from(el.querySelectorAll("slot"));
   return slots.map(slot => slot.assignedNodes({flatten:true}).map(node => node.textContent || "").join(" ")).join(" ");
 };
-const formControl = el => matches(el,
-  'input:not([type=hidden]),textarea,select,[role=textbox],[role=searchbox],[role=combobox],' +
-  '[role=checkbox],[role=radio],[role=switch],[role=slider],[contenteditable=""],[contenteditable=true],[contenteditable=plaintext-only]') ||
-  Boolean(labelledToggle(el));
+const FORM_CONTROLS = 'input:not([type=hidden]),textarea,select,[role=textbox],[role=searchbox],[role=combobox],' +
+  '[role=checkbox],[role=radio],[role=switch],[role=slider],[contenteditable=""],[contenteditable=true],[contenteditable=plaintext-only]';
+const formControl = el => matches(el, FORM_CONTROLS) || Boolean(labelledToggle(el));
 
 // Many forms put an unassociated label in one column and a custom widget in the next. Only a small
-// preceding label/legend in the same local row is eligible; never borrow another field's own label.
+// preceding label/legend in the same local row is eligible; never borrow another field's own label, also not an
+// unassociated one that shares a preceding row with that row's own control.
 const nearbyLabel = el => {
   let fallback = '';
   for (let cur = el, depth = 0; cur && depth < 6; cur = cur.parentElement, depth += 1) {
@@ -31,7 +31,8 @@ const nearbyLabel = el => {
       const labels = sibling.matches('label,legend') ? [sibling] : sibling.querySelectorAll('label,legend');
       if (labels.length === 1) {
         const label = labels[0];
-        if (!label.control && !label.querySelector('input,select,textarea') && visible(label))
+        if (!label.control && !label.querySelector('input,select,textarea') && visible(label) &&
+          (sibling === label || !sibling.querySelector(FORM_CONTROLS)))
           return clip(label.innerText || label.textContent, 160);
       }
       if (!fallback && !labels.length && sibling.children.length <= 1 &&

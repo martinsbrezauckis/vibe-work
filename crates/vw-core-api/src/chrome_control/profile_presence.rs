@@ -18,6 +18,14 @@ const STORAGE_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const LOCAL_STATE_LIMIT: u64 = 16 * 1024 * 1024;
 /// Unproven identities are searched again at most this often unless the set of unproven identities changes.
 const RESCAN: Duration = Duration::from_secs(60);
+/// The first searches again for the same unproven identities come sooner: a browser writes a newly paired profile's
+/// extension storage a moment after pairing, and until its folder is found the profile has only a numbered name.
+const RETRIES: [Duration; 4] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
+];
 
 /// Owner status observed: prove folders, record deletions, clear them for live identities, then prune.
 pub(super) fn reconcile(shared: &Shared) {
@@ -33,13 +41,18 @@ pub(super) fn reconcile(shared: &Shared) {
             .filter(|(id, record)| record.folder.is_none() && !record.removed && uuid(id).is_some())
             .map(|(id, _)| id.clone())
             .collect();
+        let repeat = saved
+            .scanned
+            .as_ref()
+            .filter(|(_, ids, _)| ids == &unproven)
+            .map(|(at, _, searches)| (*at, *searches));
         let due = !unproven.is_empty()
-            && saved
-                .scanned
-                .as_ref()
-                .is_none_or(|(at, ids)| ids != &unproven || at.elapsed() >= RESCAN);
+            && repeat.is_none_or(|(at, searches)| {
+                at.elapsed() >= RETRIES.get(searches).copied().unwrap_or(RESCAN)
+            });
         if due {
-            saved.scanned = Some((Instant::now(), unproven.clone()));
+            let searches = repeat.map_or(0, |(_, searches)| searches + 1);
+            saved.scanned = Some((Instant::now(), unproven.clone(), searches));
         }
         let proven: Vec<(String, PathBuf)> = saved
             .records
@@ -52,7 +65,12 @@ pub(super) fn reconcile(shared: &Shared) {
     let found = associate(chrome, &unproven);
     let deleted: Vec<String> = proven
         .into_iter()
-        .filter(|(_, folder)| deleted_folder(folder))
+        .filter(|(_, folder)| {
+            folder
+                .parent()
+                .is_some_and(|data| super::browser_data::readable(chrome, data))
+                && deleted_folder(folder)
+        })
         .map(|(id, _)| id)
         .collect();
     if !found.is_empty() || !deleted.is_empty() {
@@ -80,9 +98,15 @@ pub(super) fn reconcile(shared: &Shared) {
             Err(reason) => tracing::warn!(%reason, "Browser profile removal could not be saved"),
         }
     }
+    // The browser's own names for proven folders. Not every helper message publishes the browser view, so a
+    // changed name is published here for the open window.
+    if super::profile_names::refresh(chrome) {
+        super::owner::publish(shared);
+    }
     // Open cards stay until the person answers them (any action is then refused by `profiles::check`); the row is
     // pruned once they settle. The generation bump above fences late replies for this identity.
     prune(shared);
+    super::profile_reason::observe(chrome);
 }
 
 /// Retire removed identities that nothing uses any more, exactly like the person's own Remove leaves them: a
@@ -169,6 +193,52 @@ fn uuid(id: &str) -> Option<&str> {
         .filter(|uuid| super::enroll::uuid_shape(uuid))
 }
 
+/// A profile folder proven to hold an identity, with that folder's entry in the browser's `Local State`.
+pub(super) type Found = (PathBuf, super::profile_names::Entry);
+
+/// What the native pairing dialog learned about the identity that asks to pair.
+#[derive(Default)]
+pub(super) struct Asking {
+    /// The browser's own name for it: its record's name when known, else its folder's name.
+    pub(super) name: Option<String>,
+    /// The one folder whose extension storage holds its UUID, found for this dialog, with that folder's entry in
+    /// `Local State`. Kept for the approval (`profiles::paired`), so a profile paired again after its extension was
+    /// installed again is named from the moment the person approves.
+    pub(super) found: Option<Found>,
+}
+
+/// The browser's own name for an identity that asks to pair, for the native dialog: its record's name when known,
+/// else the name of the one folder whose extension storage holds its UUID, with that folder. Empty when neither is
+/// known.
+pub(super) fn asking(chrome: &super::ChromeControl, id: &str) -> Asking {
+    let known = chrome
+        .profiles
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .records
+        .get(id)
+        .filter(|record| !record.removed && !record.deleted)
+        .and_then(|record| record.browser_name.clone());
+    if known.is_some() {
+        return Asking {
+            name: known,
+            found: None,
+        };
+    }
+    let Some(folder) = associate(chrome, &BTreeSet::from([id.to_owned()])).remove(id) else {
+        return Asking::default();
+    };
+    let entry =
+        super::profile_names::folder_entry(&folder).unwrap_or(super::profile_names::Entry {
+            name: None,
+            account: None,
+        });
+    Asking {
+        name: entry.name.clone(),
+        found: Some((folder, entry)),
+    }
+}
+
 /// Each identity whose UUID is in exactly one profile folder's extension `IndexedDB`. A compacted `LevelDB` table may be
 /// compressed, so a miss proves nothing; a hit on a random 122-bit UUID is the association.
 fn associate(chrome: &super::ChromeControl, ids: &BTreeSet<String>) -> BTreeMap<String, PathBuf> {
@@ -192,7 +262,10 @@ fn associate(chrome: &super::ChromeControl, ids: &BTreeSet<String>) -> BTreeMap<
         };
         let extension = &chrome.config.extension_id;
         for data in setup::user_data(&chrome.config, chrome.dir(), name) {
-            for folder in probe::profiles_for(&chrome.config, &data, extension) {
+            if !super::browser_data::readable(chrome, &data) {
+                continue;
+            }
+            for folder in probe::profiles_for_names(&chrome.config, &data, extension) {
                 let files = storage(&folder, extension);
                 for (id, uuid) in &wanted {
                     if files.iter().any(|bytes| contains(bytes, uuid.as_bytes())) {
@@ -261,7 +334,7 @@ fn deleted_folder(folder: &Path) -> bool {
 /// The person's next step for a chat still bound to a removed identity.
 pub(super) fn removed_message(chrome: &super::ChromeControl, id: &str) -> String {
     format!(
-        "{} was removed; no action ran. Choose another profile in this chat or reconnect this profile.",
+        "{} was removed; no action ran. Open the session again so the user can pick another profile, or ask the user to reconnect this profile.",
         profiles::label(chrome, id)
     )
 }

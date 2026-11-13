@@ -24,16 +24,14 @@ pub enum ChromeControlRequest {
         /// Exact paired profile identity.
         profile_id: String,
     },
-    /// Rename a paired profile without changing its identity.
-    RenameProfile {
-        /// Exact paired identity.
-        profile_id: String,
-        /// Person-owned display name.
-        name: String,
-    },
     /// Choose this browser's default for new chat bindings.
     SetDefaultProfile {
         /// Exact paired identity.
+        profile_id: String,
+    },
+    /// Ask in each chat again: clear this browser's default when it is still this identity.
+    ClearDefaultProfile {
+        /// The current default's exact paired identity.
         profile_id: String,
     },
     /// Enable or fence only this profile.
@@ -139,6 +137,10 @@ pub enum ChromeControlRequest {
     Remove {},
     /// Remove only the Edge connection.
     RemoveEdge {},
+    /// macOS: read browser folders the system refused again, after the person may have allowed them.
+    RecheckProfileNames {},
+    /// macOS: open System Settings where the person allows Vibe Work to read Chrome's or Edge's profile names.
+    OpenProfileNameSettings {},
 }
 
 /// Settings › Browser › Your Chrome.
@@ -254,6 +256,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
     if chrome.config.is_macos() {
         setup.profiles = super::installation::reported_profiles(shared, Browser::Chrome);
     }
+    setup.profile_names_refused = super::browser_data::refused(chrome, Browser::Chrome);
     setup.addon = Some(addon_view(shared, &setup, pairing_state));
     let left = extension_left(chrome);
     let external = chrome
@@ -301,6 +304,7 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         if chrome.config.is_macos() {
             edge.profiles = super::installation::reported_profiles(shared, Browser::Edge);
         }
+        edge.profile_names_refused = super::browser_data::refused(chrome, Browser::Edge);
         edge.addon = Some(super::agent_browser::edge_addon(shared, &edge));
         Box::new(edge)
     });
@@ -379,6 +383,7 @@ fn addon_view(
             .collect::<Vec<_>>(),
     );
     let paired_once = chrome.paired_once.load(std::sync::atomic::Ordering::SeqCst);
+    let removed = super::profiles::all_removed(chrome, Browser::Chrome);
     let facts = super::addon::Facts {
         package: setup.package,
         package_text: setup.pairing.clone(),
@@ -401,7 +406,12 @@ fn addon_view(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty(),
+        helper_conflict: chrome
+            .owner
+            .helper_conflict
+            .load(std::sync::atomic::Ordering::SeqCst),
         paired_once,
+        removed,
         // Only a disconnected remembered pairing needs an OS probe; live tools avoid a process per read.
         chrome_running: paired_once
             && pairing != PairingState::Paired
@@ -428,7 +438,8 @@ fn addon_view(
     let state = super::installation::observed_state(&chrome.config, state);
     let mut view = super::addon::view(state, &facts.package_text);
     view.extension_version = super::installation::version(shared, Browser::Chrome);
-    super::addon::reconnecting(&mut view, paired_once && !waiting);
+    super::addon::reconnecting(&mut view, paired_once && !waiting && !removed);
+    super::profile_reason::window_card(chrome, &mut view, Browser::Chrome);
     super::installation::present(&chrome.config, &mut view);
     view
 }
@@ -461,11 +472,43 @@ impl Core {
         view(&self.shared)
     }
 
+    /// Connect while a profile waits after "Not now": ask it again instead of setting up (`pairing_approval`).
+    async fn ask_again(&self, origin: Origin, browser: Browser) -> Option<CommandResult> {
+        let hint = super::pairing_approval::ask_again(&self.shared, origin, browser).await?;
+        Some(CommandResult::ChromeControl {
+            view: self.chrome_view(),
+            offer: None,
+            hint: Some(hint),
+        })
+    }
+
     fn chrome_result(&self, offer: Option<ToolsInstallOffer>) -> CommandResult {
         CommandResult::ChromeControl {
             view: self.chrome_view(),
             offer: offer.map(Box::new),
+            hint: None,
         }
+    }
+
+    /// macOS profile-name access: read refused browser folders again, or open System Settings where it is allowed.
+    async fn profile_names_access(
+        &self,
+        request: &ChromeControlRequest,
+    ) -> Result<CommandResult, CoreError> {
+        self.check_browser_request(request)?;
+        if *request == (ChromeControlRequest::RecheckProfileNames {}) {
+            let shared = self.shared.clone();
+            tokio::task::spawn_blocking(move || super::browser_data::recheck(&shared))
+                .await
+                .map_err(|_| CoreError::new(ErrorCode::Internal, "Recheck stopped"))?;
+        } else {
+            let config = self.shared.chrome_control.config.clone();
+            tokio::task::spawn_blocking(move || super::browser_data::open_settings(&config))
+                .await
+                .map_err(|_| CoreError::new(ErrorCode::Internal, "System Settings did not open"))?
+                .map_err(|reason| invalid(&reason))?;
+        }
+        Ok(self.chrome_result(None))
     }
 
     fn chrome_open_store(&self) -> Result<CommandResult, CoreError> {
@@ -486,6 +529,9 @@ impl Core {
     }
 
     async fn connect_chrome(&self, origin: Origin) -> Result<CommandResult, CoreError> {
+        if let Some(asked) = self.ask_again(origin, Browser::Chrome).await {
+            return Ok(asked);
+        }
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
         if chrome
@@ -565,7 +611,13 @@ impl Core {
         origin: Origin,
         request: ChromeControlRequest,
     ) -> Result<CommandResult, CoreError> {
-        let result = self.chrome_control_inner(origin, request).await;
+        let result = match request {
+            request @ (ChromeControlRequest::RecheckProfileNames {}
+            | ChromeControlRequest::OpenProfileNameSettings {}) => {
+                self.profile_names_access(&request).await
+            }
+            request => self.chrome_control_inner(origin, request).await,
+        };
         if result.is_err() {
             super::owner::publish(&self.shared);
         }
@@ -589,11 +641,7 @@ impl Core {
                 session_id,
                 profile_id,
             } => super::profile_selection::command(self, origin, &session_id, &profile_id).await,
-            request @ (ChromeControlRequest::RenameProfile { .. }
-            | ChromeControlRequest::SetDefaultProfile { .. }
-            | ChromeControlRequest::SetProfileEnabled { .. }
-            | ChromeControlRequest::ConnectProfile { .. }
-            | ChromeControlRequest::RemoveProfile { .. }) => {
+            request if super::profile_commands::is_setting(&request) => {
                 self.profile_setting(origin, request).await
             }
             ChromeControlRequest::OpenSafariSetup {} => self.safari_setup().await,
@@ -616,7 +664,7 @@ impl Core {
                         .is_some_and(|old| super::profile_ids::same(&old, &profile_id))
                 {
                     return Err(invalid(
-                        "Changing this chat's browser profile requires the user. Ask the user to select it in the chat.",
+                        "This chat uses another browser profile; nothing was added. Use a tab from this chat's profile, or ask the user to start a new chat for the other profile.",
                     ));
                 }
                 super::tabs::pick(
@@ -655,6 +703,9 @@ impl Core {
                 self.chrome_setup(origin, offer_id, true).await
             }
             ChromeControlRequest::OpenEdgeStore {} => {
+                if let Some(asked) = self.ask_again(origin, Browser::Edge).await {
+                    return Ok(asked);
+                }
                 let _held = chrome.lifecycle.lock().await;
                 super::enroll::connect_edge(&self.shared, origin)
                     .await
@@ -674,6 +725,8 @@ impl Core {
             ChromeControlRequest::CloseFirefox {} => self.firefox_window(false).await,
             ChromeControlRequest::Remove {} => self.remove_browser(Browser::Chrome).await,
             ChromeControlRequest::RemoveEdge {} => self.remove_browser(Browser::Edge).await,
+            // Recheck and System Settings: `chrome_control` sends them to `profile_names_access` before this match.
+            request => self.profile_names_access(&request).await,
         }
     }
 

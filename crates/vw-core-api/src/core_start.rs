@@ -53,7 +53,24 @@ async fn start_supervisor(
             secrets,
             "Vibe is not installed yet: install it on the setup screen".to_owned(),
         )),
-        _ => Arc::new(Supervisor::start(supervisor, secrets).await?),
+        Some(installer) => {
+            // A first start that fails (a cold start over its time limit, a broken install) leaves the core running
+            // without a server: the setup screen says Vibe did not start, and its Try again starts it again
+            // (`VibeInstaller::retry_start`) without restarting the app. A refused startup check stays fatal.
+            let program = supervisor.program.clone();
+            let pending =
+                Supervisor::start_pending(supervisor, secrets, "Vibe is starting".to_owned());
+            match pending.launch_installed(&program).await {
+                Ok(()) => {}
+                Err(error @ SupervisorError::BeforeLaunch(_)) => return Err(error),
+                Err(error) => {
+                    tracing::warn!(%error, "Vibe did not start; the setup screen offers Try again");
+                    installer.start_failed(format!("Vibe did not start: {error}"));
+                }
+            }
+            Arc::new(pending)
+        }
+        None => Arc::new(Supervisor::start(supervisor, secrets).await?),
     })
 }
 

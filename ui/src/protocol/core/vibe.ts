@@ -9,7 +9,7 @@ export type VibeRequest = { "op": "readStatus", } | { "op": "prepare", } | { "op
 /**
  * The id from `prepare`'s offer.
  */
-offerId: string, } | { "op": "cancel", } | { "op": "checkExisting", } | { "op": "useExisting",
+offerId: string, } | { "op": "retryStart", } | { "op": "cancel", } | { "op": "checkExisting", } | { "op": "useExisting",
 /**
  * Its path as the check listed it.
  */

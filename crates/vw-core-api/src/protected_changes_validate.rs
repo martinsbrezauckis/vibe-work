@@ -143,8 +143,8 @@ mod tests {
     #[test]
     fn a2_38_symlinked_folder_in_a_proposal_is_refused_with_the_link_message() {
         let dir = tempfile::tempdir().unwrap();
-        // Resolved: macOS temp folders sit under the /var -> /private/var link.
-        let base = dir.path().canonicalize().unwrap();
+        // Not resolved: on macOS the Vibe home sits under the system's /var -> /private/var link, which is allowed.
+        let base = dir.path().to_path_buf();
         let root = base.join("vibe-home");
         let outside = base.join("outside");
         std::fs::create_dir_all(root.join("skills")).unwrap();

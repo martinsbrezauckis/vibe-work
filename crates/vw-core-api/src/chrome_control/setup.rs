@@ -45,6 +45,9 @@ pub struct ChromeControlConfig {
     pub(super) after_helper_check: Option<AfterHelperCheck>,
     #[cfg(test)]
     pub(super) edge_policy: Option<serde_json::Value>,
+    /// Records the System Settings address the profile-name button opens, in place of opening it.
+    #[cfg(test)]
+    pub(super) settings_opener: Option<Launcher>,
     /// SHA-256 of the final shipped helper, embedded by the release build.
     pub helper_sha256: Option<String>,
     /// Kernel code-directory hash of the signed macOS helper, embedded by the release build.
@@ -88,6 +91,8 @@ impl Default for ChromeControlConfig {
             after_helper_check: None,
             #[cfg(test)]
             edge_policy: None,
+            #[cfg(test)]
+            settings_opener: None,
             helper_sha256: option_env!("VW_CHROME_HELPER_SHA256").map(str::to_owned),
             #[cfg(target_os = "macos")]
             helper_cdhash: option_env!("VW_CHROME_HELPER_CDHASH").map(str::to_owned),
@@ -234,6 +239,11 @@ pub struct ChromeSetupView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub extension_restart: Option<bool>,
+    /// macOS refused reading this browser's profile folder for a paired profile, so its profiles keep numbered
+    /// names: the card says how to allow it in System Settings. Absent: nothing refused (always on Windows and Linux).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub profile_names_refused: Option<bool>,
 }
 
 /// What a set up made, so Remove deletes exactly that.
@@ -402,6 +412,7 @@ pub(super) fn view_for(
             )),
             extension_left: None,
             extension_restart: None,
+            profile_names_refused: None,
         };
     }
     let receipt = state
@@ -476,6 +487,7 @@ pub(super) fn view_for(
         }),
         extension_left: None,
         extension_restart: None,
+        profile_names_refused: None,
     }
 }
 

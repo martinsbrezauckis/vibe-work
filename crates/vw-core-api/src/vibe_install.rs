@@ -3,7 +3,8 @@
 //! op answers the install view after it ran; progress arrives as [`crate::CoreEvent::VibeInstall`] events.
 //!
 //! Ops: `readStatus`, `prepare` (an offer: sources, checksums, commands, sizes), `confirm {offerId}` (starts the
-//! install of exactly that offer), `cancel`, `checkExisting` (finds other installs, reads their versions),
+//! install of exactly that offer), `retryStart` (after a failed start: starts Vibe again, no new offer), `cancel`,
+//! `checkExisting` (finds other installs, reads their versions),
 //! `useExisting {path}`. Vibe updates: `prepareUpdate` (the consent offer for the update
 //! the last verified supported-Vibe check found), `confirmUpdate {offerId}` (installs it next to the running Vibe;
 //! it starts with Vibe Work's next start), `cancelUpdate`. The check itself runs only with the app's update check.
@@ -38,6 +39,8 @@ pub enum VibeRequest {
         /// The id from `prepare`'s offer.
         offer_id: String,
     },
+    /// Try again after a failed start: starts Vibe again from the finished install, without a new offer.
+    RetryStart {},
     /// Cancels the running install, or withdraws the offer.
     Cancel {},
     /// Looks for Vibe installs already on this machine and reads their versions.
@@ -112,6 +115,7 @@ pub async fn execute(
             .confirm_update(&offer_id, requester)
             .map_err(|e| refused(&e))?,
         VibeRequest::CancelUpdate {} => installer.cancel_update().map_err(|e| refused(&e))?,
+        VibeRequest::RetryStart {} => installer.retry_start().map_err(|e| refused(&e))?,
         VibeRequest::Cancel {} => installer.cancel().map_err(|e| refused(&e))?,
         VibeRequest::CheckExisting {} => {
             installer.check_existing().await;

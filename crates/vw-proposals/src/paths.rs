@@ -37,10 +37,15 @@ pub(crate) fn absolute_root(root: &Path) -> Result<PathBuf, Error> {
     }
 }
 
+/// The protected root, resolved. The root itself and every link above it that a person could make or change are
+/// refused; a link only the system can change ([`system_link`]) is resolved here once, and every later step works
+/// on the resolved root.
 pub(crate) fn validate_root(root: &Path) -> Result<PathBuf, Error> {
     for ancestor in root.ancestors() {
         let metadata = fs::symlink_metadata(ancestor).map_err(|error| Error::io(root, error))?;
-        if metadata.file_type().is_symlink() {
+        if metadata.file_type().is_symlink()
+            && (ancestor == root || !system_link(ancestor, &metadata))
+        {
             return Err(Error::Symlink {
                 path: ancestor.into(),
             });
@@ -53,6 +58,24 @@ pub(crate) fn validate_root(root: &Path) -> Result<PathBuf, Error> {
         }
     }
     fs::canonicalize(root).map_err(|error| Error::io(root, error))
+}
+
+/// A link owned by the system administrator in a folder that only the administrator can write, such as macOS's
+/// `/var` -> `/private/var` and `/tmp` -> `/private/tmp`, or `/home` -> `/var/home` on image-based Linux systems.
+#[cfg(unix)]
+fn system_link(link: &Path, metadata: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    metadata.uid() == 0
+        && link
+            .parent()
+            .and_then(|parent| fs::metadata(parent).ok())
+            .is_some_and(|parent| parent.uid() == 0 && parent.mode() & 0o022 == 0)
+}
+
+/// Windows has no folder links that only the system can change in an ordinary profile path.
+#[cfg(not(unix))]
+fn system_link(_link: &Path, _metadata: &Metadata) -> bool {
+    false
 }
 
 pub(crate) fn validate_target_with_parents(

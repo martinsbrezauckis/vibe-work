@@ -379,6 +379,10 @@
   font-size: var(--text-12);
   color: var(--text-3);
 }
+/* "start one" is a link inside the sentence: no side padding, so the period follows it directly. */
+.proj-empty .ext-link {
+  padding-inline: 0;
+}
 
 .proj-h.proj-rename {
   grid-template-columns: 16px 1fr;

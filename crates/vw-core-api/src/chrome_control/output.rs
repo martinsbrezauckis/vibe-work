@@ -199,6 +199,7 @@ fn protected(key: &str) -> bool {
             | "sessionId"
             | "profileId"
             | "profileName"
+            | "profileChoice"
             | "selectedProfile"
             | "status"
             | "effect"

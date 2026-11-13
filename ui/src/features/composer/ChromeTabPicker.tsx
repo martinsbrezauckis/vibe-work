@@ -1,28 +1,63 @@
 /**
  * Connected browser tabs, using the composer's menu styles: a section heading with the icon close button, then one
- * row per tab (the title as plain menu text, the profile and address muted below). Rows are buttons, so
- * `.chrome-tabs .it` resets the browser's button look. Depends on the composer store and chromeTabs; called by
+ * row per tab (the title as plain menu text, the profile's shown name and address muted below). Rows are buttons, so
+ * `.chrome-tabs .it` resets the browser's button look. Once the chat uses a browser profile, tabs of other profiles
+ * stay listed but disabled with "Not this chat's profile": a chat keeps its profile. Depends on the composer store and chromeTabs; called by
  * Composer. The menu fits between the chat header and footer, resizing its scrollable list as the window changes.
+ * Keyboard: opened from its "Add a browser tab…" button, focus moves into the panel; Escape or the close button
+ * closes it and puts focus back on that button.
  */
 import { pickBuiltinTab } from "./builtinTabs";
 import { Button } from "../../components/Controls";
 import { Tabs, Tab } from "../../components/Tabs";
-import { usableBrowsers, openBrowserTabs } from "./browserTabs";
+import { browserTabsPanelId, usableBrowsers, openBrowserTabs } from "./browserTabs";
 import { useCoreState } from "../shell/hooks";
 import { Icon } from "../../components/Icon";
 import { type ReactElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../shell/AppContext";
 import { useComposerState } from "./hooks";
-import { pickChromeTab } from "./chromeTabs";
+import { chatProfile, pickChromeTab, sameProfile } from "./chromeTabs";
+import { NEW_CHAT } from "../../state/newChatKey";
+import { useShellState } from "../shell/hooks";
+
+/** The composer's "Add a browser tab…" button that opens this panel. */
+function triggerOf(panel: HTMLElement | null): HTMLElement | null {
+  return (
+    panel
+      ?.closest(".composer")
+      ?.querySelector<HTMLElement>('[data-testid="composer.browser-tabs-open"]') ?? null
+  );
+}
+
+/** The browser a profile identity belongs to; a bare UUID is a Chrome identity from before namespaces. */
+function profileBrowser(id: string): "Chrome" | "Edge" | "Safari" | "Firefox" {
+  if (id.startsWith("edge:")) return "Edge";
+  if (id.startsWith("safari:")) return "Safari";
+  if (id.startsWith("firefox:")) return "Firefox";
+  return "Chrome";
+}
 
 export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElement | null {
   const app = useApp();
   const view = useCoreState((s) => s.chromeControl);
   const browsers = usableBrowsers(view);
   const picker = useComposerState((s) => s.chromePicker);
+  const newChatOwner = useShellState((s) => s.newChatOwner);
+  const owner = sessionId === NEW_CHAT ? newChatOwner : sessionId;
+  const bound = chatProfile(view, owner);
   const element = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<{ up: boolean; maxHeight?: number }>({ up: true });
   const open = picker?.sessionId === sessionId;
+  const close = () => {
+    const back = triggerOf(element.current);
+    app.composer.setChromePicker(null);
+    back?.focus();
+  };
+  useEffect(() => {
+    // Only a panel opened from its button takes focus; an open started elsewhere leaves focus where it is.
+    const panel = element.current;
+    if (open && panel !== null && document.activeElement === triggerOf(panel)) panel.focus();
+  }, [open]);
   useEffect(() => {
     if (picker?.sessionId === sessionId && !browsers.includes(picker.browser ?? "Chrome"))
       app.composer.setChromePicker(null);
@@ -59,6 +94,15 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
   }, [open]);
   if (picker?.sessionId !== sessionId) return null;
   const browser = picker.browser ?? "Chrome";
+  // A tab of another browser cannot join a chat bound to this one: say which browser and profile the chat uses.
+  const usedBy = bound === null ? null : profileBrowser(bound);
+  const boundName = (
+    view?.chatProfiles?.find((row) => row.sessionId === owner)?.name ?? ""
+  ).replace(`${usedBy ?? ""} · `, "");
+  const otherBrowser =
+    usedBy !== null && usedBy !== browser
+      ? `This chat uses ${usedBy}${boundName ? ` (${boundName})` : ""}`
+      : null;
   return (
     <div
       ref={element}
@@ -67,12 +111,14 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
       data-side={placement.up ? "above" : "below"}
       className="slash chrome-tabs"
       role="region"
+      id={browserTabsPanelId(sessionId)}
+      tabIndex={-1}
       aria-label={`${browser} tabs`}
       data-testid="composer.chrome-tabs"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
-          app.composer.setChromePicker(null);
+          close();
         }
       }}
     >
@@ -99,9 +145,7 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
           aria-label={`Close ${browser} tabs`}
           title={`Close ${browser} tabs`}
           data-testid="composer.chrome-tabs-close"
-          onClick={() => {
-            app.composer.setChromePicker(null);
-          }}
+          onClick={close}
         >
           <Icon name="x" size={12} />
         </Button>
@@ -136,30 +180,40 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
             <span className="ui-help">{tab.preview?.url}</span>
           </Button>
         ))}
-        {picker.rows.map((tab) => (
-          <Button
-            type="button"
-            appearance="menu-option"
-            data-testid="composer.chrome-tab-pick"
-            data-item-id={`${tab.profileId}:${String(tab.tabId)}`}
-            key={`${tab.profileId}:${String(tab.tabId)}`}
-            aria-label={tab.title || tab.url}
-            disabled={picker.loading}
-            onClick={() =>
-              void pickChromeTab(
-                app,
-                sessionId,
-                { profileId: tab.profileId, tabId: tab.tabId },
-                "window",
-              )
-            }
-          >
-            <span className="chrome-tab-title">{tab.title || tab.url}</span>
-            <span className="ui-help">
-              {tab.profileName} · {tab.url}
-            </span>
-          </Button>
-        ))}
+        {picker.rows.map((tab) => {
+          const other = bound !== null && !sameProfile(tab.profileId, bound);
+          return (
+            <Button
+              type="button"
+              appearance="menu-option"
+              data-testid="composer.chrome-tab-pick"
+              data-item-id={`${tab.profileId}:${String(tab.tabId)}`}
+              key={`${tab.profileId}:${String(tab.tabId)}`}
+              aria-label={tab.title || tab.url}
+              data-profile={other ? "other" : undefined}
+              title={
+                other
+                  ? (otherBrowser ??
+                    `A chat keeps one ${browser} profile. Start a new chat to add a tab from ${tab.profileName}.`)
+                  : undefined
+              }
+              disabled={picker.loading || other}
+              onClick={() =>
+                void pickChromeTab(
+                  app,
+                  sessionId,
+                  { profileId: tab.profileId, tabId: tab.tabId },
+                  "window",
+                )
+              }
+            >
+              <span className="chrome-tab-title">{tab.title || tab.url}</span>
+              <span className="ui-help">
+                {tab.profileName} · {other ? (otherBrowser ?? "Not this chat's profile") : tab.url}
+              </span>
+            </Button>
+          );
+        })}
       </div>
     </div>
   );

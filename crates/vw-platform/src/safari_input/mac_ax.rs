@@ -16,6 +16,8 @@ struct Pair {
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: Ref) -> u8;
+    static kAXTrustedCheckOptionPrompt: Ref;
     fn AXUIElementCreateApplication(pid: i32) -> Ref;
     fn AXUIElementCopyAttributeValue(el: Ref, key: Ref, value: *mut Ref) -> i32;
     fn AXUIElementSetAttributeValue(el: Ref, key: Ref, value: Ref) -> i32;
@@ -135,6 +137,24 @@ impl Owned {
         })
     }
 }
+/// Ask macOS whether the app is trusted, showing the system Accessibility prompt when it is not.
+/// The prompt only offers System Settings; it never grants or removes permission by itself.
+/// Called only when Safari pairing completes; agent actions use the read-only check in [`Window::discover`].
+/// Unlike the window code it holds no AX element, only its own CF values, so any thread may call it.
+pub(super) fn request_accessibility() -> bool {
+    use core_foundation::{
+        base::TCFType, boolean::CFBoolean, dictionary::CFDictionary, string::CFString,
+    };
+    // SAFETY: read-only TCC query, no prompt or permission change.
+    if unsafe { AXIsProcessTrusted() } != 0 {
+        return true;
+    }
+    // SAFETY: the key is a framework-owned constant string; wrap_under_get_rule retains it for the dictionary.
+    let key = unsafe { CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt.cast()) };
+    let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+    // SAFETY: the options dictionary stays alive through this synchronous call.
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef().cast()) != 0 }
+}
 pub(super) struct Window {
     app: Owned,
     element: Owned,
@@ -142,10 +162,8 @@ pub(super) struct Window {
 }
 impl Window {
     pub(super) fn discover(bounds: Rect) -> Result<Self, String> {
-        // SAFETY: read-only TCC query, no implicit prompt or permission downgrade.
-        if unsafe { AXIsProcessTrusted() } == 0 {
-            return Err("Vibe Work has no Accessibility permission, so native Safari input was refused. Enable Vibe Work in System Settings > Privacy & Security > Accessibility, then try again.".into());
-        }
+        // SAFETY: read-only TCC query, no prompt or permission change.
+        super::super::lifecycle::require_accessibility(|| unsafe { AXIsProcessTrusted() } != 0)?;
         let apps = objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(
             &objc2_foundation::NSString::from_str("com.apple.Safari"),
         );

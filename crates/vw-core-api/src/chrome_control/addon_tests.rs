@@ -165,6 +165,18 @@ fn labels_states() {
             Some(A::OpenPairingPage),
         ),
         (
+            "another helper holds the connection",
+            Facts {
+                helper_up: false,
+                helper_conflict: true,
+                ..ready()
+            },
+            Probe::Unknown,
+            S::OtherHelperRunning,
+            "Another Vibe Work helper is running",
+            None,
+        ),
+        (
             "helper down",
             Facts {
                 helper_up: false,
@@ -330,6 +342,7 @@ fn every_instruction_gives_the_reason_and_the_step() {
         S::OtherOwner,
         S::Connecting,
         S::NotPaired,
+        S::OtherHelperRunning,
         S::HelperNotRunning,
         S::TurnedOffInChrome,
         S::RestartChrome,
@@ -601,7 +614,7 @@ fn a_lost_connection_retries_before_asking_for_a_browser_restart() {
         reconnecting_for(&mut view, true, browser);
         assert_eq!(
             view.instruction,
-            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off, or restart {browser} if it is already on.")
+            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off (clicking Re-enable if {browser} asks), or restart {browser} if it is already on.")
         );
     }
 }
@@ -628,4 +641,148 @@ fn first_disconnect_recovery_works_even_before_preferences_record_the_extension_
             assert!(!view.instruction.contains("Check connection"));
         }
     }
+}
+
+/// PREDICT (written before the fix): fails. Chrome turns the extension off when a newer version asks for more
+/// permissions and keeps it off until the person clicks Re-enable in Chrome's own dialog. The "Turn on" card has no
+/// step at all when Chrome's files say the extension is off, and the reconnecting card (the only one macOS can show,
+/// because the app does not read Chrome's files there) says only "Open Chrome extensions → Vibe Work"; neither card
+/// nor the agent's instruction names Re-enable.
+#[test]
+fn a_turned_off_extension_names_chromes_re_enable_step() {
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let expected = browser.words(
+            "Open {browser} extensions → Vibe Work and turn it on. If {browser} asks for new permissions, click Re-enable.",
+        );
+        let off = view_for(AddonState::TurnedOffInChrome, "", browser);
+        assert_eq!(
+            off.step.as_deref(),
+            Some(expected.as_str()),
+            "{browser:?} off"
+        );
+        assert!(off.instruction.contains("Re-enable"), "{}", off.instruction);
+        let mut lost = view_for(AddonState::Connecting, "", browser);
+        reconnecting_for(&mut lost, true, browser);
+        assert_eq!(
+            lost.step.as_deref(),
+            Some(expected.as_str()),
+            "{browser:?} lost"
+        );
+        assert!(
+            lost.instruction.contains("Re-enable"),
+            "{}",
+            lost.instruction
+        );
+    }
+}
+
+/// After the person removed every pairing in Settings, the card offers Connect (a new pairing) whether the helper
+/// reports the extension as connecting or Chrome is simply running; Chrome's own "off" and "asks to enable" still
+/// decide, and a waiting pairing request is still "Pair in Chrome".
+#[test]
+fn a_removed_pairing_offers_connect_unless_chrome_says_otherwise() {
+    use AddonState as S;
+    let removed = Facts {
+        removed: true,
+        paired_once: true,
+        ..ready()
+    };
+    for facts in [
+        Facts {
+            connecting: true,
+            ..removed.clone()
+        },
+        Facts {
+            chrome_running: true,
+            ..removed.clone()
+        },
+    ] {
+        for (probe, expected) in [
+            (Probe::Unknown, S::NotConnected),
+            (Probe::NotOff, S::NotConnected),
+            (Probe::Off, S::TurnedOffInChrome),
+            (Probe::AwaitingEnable, S::EnableInChrome),
+        ] {
+            let found = state(&facts, || probe);
+            assert_eq!(found, expected, "{facts:?} {probe:?}");
+            let mut card = view(found, "");
+            reconnecting(&mut card, false);
+            if expected == S::NotConnected {
+                assert_eq!(card.label, "Not connected");
+                assert_eq!(card.action, Some(AddonAction::Connect));
+            }
+        }
+    }
+    let waiting = Facts {
+        waiting: true,
+        ..removed.clone()
+    };
+    assert_eq!(state(&waiting, never_probed), S::NotPaired);
+    // Connect cannot help while the helper is down: its own states still decide.
+    let helper_down = Facts {
+        helper_up: false,
+        ..removed
+    };
+    assert_eq!(state(&helper_down, never_probed), S::HelperNotRunning);
+    let other_helper = Facts {
+        helper_conflict: true,
+        ..helper_down
+    };
+    assert_eq!(state(&other_helper, never_probed), S::OtherHelperRunning);
+}
+
+/// While another Vibe Work helper holds the connection, Settings > Browser shows a step the person can follow.
+///
+/// PREDICT (written before the fix): fails. The step names a process ("end the chrome-control process", "end
+/// chrome-control in Task Manager / Activity Monitor") that a person does not know, and does not say that the
+/// connection then comes back by itself, so the person does not know whether to click anything afterwards. After the
+/// fix the step says, in person words for this system, to quit the other Vibe Work copy (or restart the computer when
+/// none is open) and that Vibe Work then connects by itself.
+#[test]
+fn another_running_helper_card_says_what_to_do_in_person_words() {
+    let card = view(AddonState::OtherHelperRunning, "");
+    let step = card.step.unwrap_or_default();
+    for process_word in [
+        "chrome-control",
+        "process",
+        "Task Manager",
+        "Activity Monitor",
+    ] {
+        assert!(!step.contains(process_word), "{step}");
+    }
+    assert!(step.contains("the other Vibe Work copy"), "{step}");
+    assert!(step.contains("restart"), "{step}");
+    assert!(
+        step.ends_with("Vibe Work then connects by itself."),
+        "{step}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(step.starts_with("Quit the other Vibe Work copy"), "{step}");
+        assert!(step.contains("restart the Mac"), "{step}");
+    } else if cfg!(windows) {
+        assert!(step.starts_with("Close the other Vibe Work copy"), "{step}");
+    } else {
+        assert!(step.starts_with("Quit the other Vibe Work copy"), "{step}");
+    }
+    // The same advice after a setting is saved while the other helper holds the connection (shown in Settings).
+    let saved = super::super::switches::OTHER_HELPER_STEP;
+    assert!(
+        saved.starts_with("Another Vibe Work browser helper is still running"),
+        "{saved}"
+    );
+    for process_word in [
+        "chrome-control",
+        "process",
+        "Task Manager",
+        "Activity Monitor",
+    ] {
+        assert!(!saved.contains(process_word), "{saved}");
+    }
+    assert!(
+        saved.ends_with("Vibe Work then connects by itself."),
+        "{saved}"
+    );
 }

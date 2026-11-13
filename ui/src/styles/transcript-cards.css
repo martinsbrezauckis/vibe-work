@@ -264,6 +264,30 @@
   font-size: var(--text-12);
   color: var(--text-3);
 }
+/* Browser profile card: one answer button per profile, the signed-in account dimmed on its own line under the
+   name. Long names and accounts wrap inside the button, which never grows past the card. */
+.profile-choices {
+  display: contents;
+}
+.profile-choices > .tb-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  padding-block: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+.profile-choice-name,
+.profile-choice-account {
+  max-width: 100%;
+}
+.profile-choice-account {
+  font-weight: var(--weight-regular);
+  color: var(--text-3);
+}
 
 /* Inline diff */
 .diff {

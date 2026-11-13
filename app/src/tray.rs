@@ -25,13 +25,44 @@ pub(crate) fn reveal_main_window<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri
         return Ok(());
     };
     window.unminimize()?;
-    window.show()?;
+    show(app, &window)?;
     #[cfg(target_os = "macos")]
     app.show()?;
     window.set_focus()?;
     crate::report_native_window_visibility(&window);
     Ok(())
 }
+
+/// Shows the main window and nothing inside it. On Linux, tao's `Window::show` is `gtk_widget_show_all`: it also
+/// shows every child webview the preview engine hid with `gtk_widget_hide` (a Browser page of another chat or of a
+/// closed panel), and GTK then draws that page over the app. So only the GTK toplevel is shown here; each child keeps
+/// the visibility the preview engine gave it. Runs on the GTK main thread (at once when called there), queued before
+/// the focus request that follows.
+#[cfg(target_os = "linux")]
+fn show<R: tauri::Runtime>(app: &AppHandle<R>, window: &tauri::Window<R>) -> tauri::Result<()> {
+    use gtk::prelude::*;
+    let window = window.clone();
+    app.run_on_main_thread(move || match window.gtk_window() {
+        Ok(native) => show_toplevel(native.upcast_ref()),
+        Err(error) => tracing::warn!(%error, "the main window could not be shown"),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn show<R: tauri::Runtime>(_app: &AppHandle<R>, window: &tauri::Window<R>) -> tauri::Result<()> {
+    window.show()
+}
+
+/// Maps `window` without changing the visibility of its children (`gtk_widget_show`, never `show_all`).
+#[cfg(target_os = "linux")]
+fn show_toplevel(window: &gtk::Window) {
+    use gtk::prelude::*;
+    window.show();
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "tray_linux_tests.rs"]
+mod linux_tests;
 
 pub(crate) fn menu(app: &AppHandle, id: &str) -> Result<(), String> {
     match id {

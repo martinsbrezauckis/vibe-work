@@ -91,7 +91,9 @@ async fn several_profiles_require_a_person_choice_even_when_the_agent_supplies_a
     .await
     .expect_err("an agent cannot select an account from multiple choices");
     assert!(
-        error.contains("Work") && error.contains("Personal") && error.contains("user"),
+        error.contains("Work")
+            && error.contains("Personal")
+            && error.contains("Settings > Browser"),
         "{error}"
     );
     assert_eq!(selected(&core), None);

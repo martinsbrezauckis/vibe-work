@@ -1,10 +1,34 @@
 /** Person-picked tab context and window handoff, with the same state and actions in the Debug API. */
-import type { ChromeTab } from "../../protocol/core";
+import type { ChromeControlView, ChromeTab } from "../../protocol/core";
 import type { ChromePicker } from "../../state/composerStore";
 import { NEW_CHAT } from "../../state/newChatKey";
 import type { App } from "../shell/AppContext";
 
 type Source = "window" | "debug-api";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** One browser identity however it is spelled: a bare Chrome UUID and "chrome:<uuid>" in any case are the same. */
+export function sameProfile(left: string, right: string): boolean {
+  const chrome = (id: string) => {
+    const raw = id.startsWith("chrome:") ? id.slice("chrome:".length) : id;
+    return UUID.test(raw) ? raw.toLowerCase() : null;
+  };
+  if (left === right) return true;
+  const a = chrome(left);
+  return a !== null && a === chrome(right);
+}
+
+/**
+ * The profile a chat's browser work uses (`chatProfiles`), or null while it has none yet. `owner` is the chat, or the
+ * New chat draft's owner. A chat keeps its profile, so the tab list offers only that profile's tabs.
+ */
+export function chatProfile(
+  view: ChromeControlView | null | undefined,
+  owner: string | null,
+): string | null {
+  if (owner === null) return null;
+  return view?.chatProfiles?.find((row) => row.sessionId === owner)?.profileId ?? null;
+}
 export async function openChromeTabs(
   app: App,
   sessionId: string,

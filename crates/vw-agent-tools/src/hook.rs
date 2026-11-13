@@ -81,8 +81,7 @@ const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list sh
 process_stop stops one of them.";
 
 /// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
-pub const DECLINED: &str =
-    "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
+pub const DECLINED: &str = "Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.";
 
 /// The kill guard's refusal. A guard refusal names the process tools; the user's own No is returned as it is,
 /// so nothing points the agent at another way to stop the same process.

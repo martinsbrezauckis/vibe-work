@@ -48,7 +48,9 @@ fn addon_suggest(shared: &Shared, args: &Value) -> Result<Value, String> {
             browser.name(),
             browser.text("Chrome")
         )),
-        crate::chrome_control::AddonState::Unavailable => {
+        // No card can help: the browser is unavailable here, or another helper must end first.
+        crate::chrome_control::AddonState::Unavailable
+        | crate::chrome_control::AddonState::OtherHelperRunning => {
             Err(format!("Not shown: {}", view.instruction))
         }
         _ => Ok(json!({"addonSuggestion":{

@@ -50,6 +50,21 @@ pub async fn request(
     }
 }
 
+/// Show the macOS Accessibility prompt when the app is not trusted yet; returns whether it is trusted.
+/// Call this only when the user completes Safari pairing: agent actions never prompt and refuse with the
+/// System Settings instruction instead. Blocks briefly on a system query; other platforms return `false`.
+#[must_use]
+pub fn request_accessibility() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        mac::request_accessibility()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// Snapshot the native pasteboard generation without making a caller wait for its worker on Stop.
 /// Non-macOS fixtures use generation zero; actual input remains macOS-only.
 /// # Errors

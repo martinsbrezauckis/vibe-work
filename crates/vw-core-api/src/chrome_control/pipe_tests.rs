@@ -199,3 +199,34 @@ printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method 
     assert_eq!(pipe.next().await, Err(()));
     pipe.close().await;
 }
+
+// The helper names why it stopped on stderr before it ends; launch reads that code so the owner can tell another
+// helper holding the connection (OWNER_CONFLICT) from any other failure.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_refused_helper_reports_its_code_before_it_ends() {
+    for (stderr, expected) in [
+        (
+            "OWNER_CONFLICT: another owner holds this endpoint",
+            Some(OWNER_CONFLICT),
+        ),
+        ("OWNER_APPROVAL_REQUIRED", Some("OWNER_APPROVAL_REQUIRED")),
+        ("some other failure", None),
+    ] {
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &format!("echo '{stderr}' >&2; exit 1")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let reader = tokio::spawn(read_refusal(child.stderr.take().unwrap()));
+        let _ = child.wait().await;
+        let code = tokio::time::timeout(Duration::from_secs(5), reader)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(code, expected, "{stderr}");
+    }
+}

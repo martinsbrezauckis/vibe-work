@@ -33,7 +33,7 @@ use vw_supervisor::Discovery;
 use crate::layout::{Choice, Installed, Layout};
 use crate::pin::{PinError, Sources};
 use crate::view::{
-    ExistingView, InstallOffer, InstallPhase, InstallSource, InstallView, SourceView,
+    ExistingView, FailKind, InstallOffer, InstallPhase, InstallSource, InstallView, SourceView,
     VibeUpdatePhase, VibeUpdateView,
 };
 
@@ -116,6 +116,8 @@ pub(crate) struct State {
     /// The older app-owned version an app update's install replaces ([`crate::InstallView::replacing`]).
     pub(crate) replacing: Option<String>,
     pub(crate) cancel: Option<watch::Sender<bool>>,
+    /// After a failed start: the server and the `installed` phase a retry starts again ([`VibeInstaller::retry_start`]).
+    pub(crate) start_again: Option<(PathBuf, InstallPhase)>,
     /// The Vibe update install.
     pub(crate) update: VibeUpdatePhase,
     /// The last manifest check's result.
@@ -202,6 +204,7 @@ impl VibeInstaller {
             existing,
             replacing: None,
             cancel: None,
+            start_again: None,
             update: VibeUpdatePhase::Idle {},
             support: crate::update::SupportState::default(),
             deferred_support: None,
@@ -345,19 +348,87 @@ impl VibeInstaller {
         Ok(())
     }
 
+    /// The first start of the installed Vibe at app start failed (`error` says why): the view shows a failed start, and
+    /// Try again ([`Self::retry_start`]) starts the same server again. Nothing happens unless Vibe is installed.
+    pub fn start_failed(&self, error: String) {
+        let mut state = self.inner.lock();
+        let InstallPhase::Installed { server, .. } = &state.phase else {
+            return;
+        };
+        let server = PathBuf::from(server);
+        let failed = InstallPhase::Failed {
+            step: crate::run::START_STEP.to_owned(),
+            kind: FailKind::Start,
+            error,
+            output_tail: String::new(),
+        };
+        let installed = std::mem::replace(&mut state.phase, failed);
+        state.start_again = Some((server, installed));
+        self.inner.publish(&state);
+    }
+
+    /// Try again after a failed start: the install is complete (or the chosen existing install is there), so only
+    /// Vibe is started again, without a new offer to review. The view goes straight to the start step.
+    ///
+    /// # Errors
+    /// [`InstallError::WrongState`] unless the last start failed.
+    pub fn retry_start(&self) -> Result<(), InstallError> {
+        let (server, installed) = {
+            let mut state = self.inner.lock();
+            if !matches!(
+                state.phase,
+                InstallPhase::Failed {
+                    kind: FailKind::Start,
+                    ..
+                }
+            ) {
+                return Err(InstallError::WrongState(
+                    "only a failed start can be started again".into(),
+                ));
+            }
+            let Some(again) = state.start_again.take() else {
+                return Err(InstallError::WrongState(
+                    "there is no failed start to start again".into(),
+                ));
+            };
+            state.phase =
+                crate::run::installing(crate::run::START_STEP, crate::run::TOTAL, 0, String::new());
+            self.inner.publish(&state);
+            again
+        };
+        info!(server = %server.display(), "Vibe is started again after a failed start");
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            crate::run::start(
+                &inner,
+                server,
+                installed,
+                crate::run::START_STEP,
+                crate::run::TOTAL,
+                std::time::Instant::now(),
+            )
+            .await;
+        });
+        Ok(())
+    }
+
     /// Cancels a running install (its processes are killed, the unfinished folder removed), or withdraws an offer.
     ///
     /// # Errors
-    /// [`InstallError::WrongState`] when there is nothing to cancel.
+    /// [`InstallError::WrongState`] when there is nothing to cancel, or while Vibe is starting (a start cannot be
+    /// cancelled; it ends `installed` or `failed`).
     pub fn cancel(&self) -> Result<(), InstallError> {
         let mut state = self.inner.lock();
         match &state.phase {
-            InstallPhase::Installing { .. } => {
-                if let Some(cancel) = &state.cancel {
+            InstallPhase::Installing { .. } => match &state.cancel {
+                Some(cancel) => {
                     cancel.send_replace(true);
+                    Ok(())
                 }
-                Ok(())
-            }
+                None => Err(InstallError::WrongState(
+                    "Vibe is starting; a start cannot be cancelled".into(),
+                )),
+            },
             InstallPhase::Offered { .. } => {
                 state.phase = InstallPhase::NotInstalled {};
                 self.inner.publish(&state);
@@ -439,7 +510,15 @@ impl VibeInstaller {
             install_ms: None,
             warning,
         };
-        crate::run::start(&self.inner, server, installed, "Start Vibe", 1).await;
+        crate::run::start(
+            &self.inner,
+            server,
+            installed,
+            crate::run::START_STEP,
+            1,
+            std::time::Instant::now(),
+        )
+        .await;
         Ok(())
     }
 

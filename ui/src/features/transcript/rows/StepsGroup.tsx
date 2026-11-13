@@ -11,6 +11,7 @@
  */
 import { type ReactElement, memo } from "react";
 import { AuditText } from "../../ask/AuditRow";
+import { isProfileCard, profileAuditLine } from "../../ask/BrowserProfileAsk";
 import { approvalSummary, auditLine, neverText } from "../../ask/model";
 import { Walker } from "../../../components/Walker";
 
@@ -112,8 +113,13 @@ function Audit({ entry, related }: { entry: Obj; related: Obj | null }): ReactEl
   const summary = approvalSummary(entry);
   const question = obj(entry["detail"])?.["kind"] === "user_input";
   // Question answers come from Vibe’s entry.
+  // A browser profile card names the picked profile in plain words, as its own closed row does.
   const fromRecord =
-    record === undefined || question ? null : auditLine(record, summary, via, always);
+    record === undefined || question
+      ? null
+      : isProfileCard(entry)
+        ? profileAuditLine(record, entry, via)
+        : auditLine(record, summary, via, always);
   const by = record !== undefined && "by" in record.outcome ? record.outcome.by : undefined;
   const receiptOrigin = by === "debugApi" ? "debug-api" : by === "person" ? "ui" : undefined;
   const text = auditText(entry, related, via, receiptOrigin ?? origin);

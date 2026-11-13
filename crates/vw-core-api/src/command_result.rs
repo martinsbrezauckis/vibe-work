@@ -258,6 +258,11 @@ pub enum CommandResult {
         view: crate::ChromeControlView,
         /// The set up offer the window shows before the click (`offerSetup` only).
         offer: Option<Box<crate::ToolsInstallOffer>>,
+        /// Guidance for the person after a step that went through but may not show anything
+        /// (`openSafariSetup` when Safari is not running the extension page). Shown as help, not as a failure.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        hint: Option<String>,
     },
     /// Connected tabs for the composer picker.
     ChromeTabs {

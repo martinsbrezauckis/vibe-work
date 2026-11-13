@@ -317,7 +317,12 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .is_empty(),
+        helper_conflict: chrome
+            .owner
+            .helper_conflict
+            .load(std::sync::atomic::Ordering::SeqCst),
         paired_once,
+        removed: super::profiles::all_removed(chrome, Browser::Edge),
         chrome_running: paired_once
             && setup.pairing_state != PairingState::Paired
             && chrome.edge_enabled()
@@ -349,11 +354,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
     let package_text = super::browser_text::label(Browser::Edge, package_text);
     let mut view = super::addon::view_for(state, &package_text, Browser::Edge);
     view.extension_version = super::installation::version(shared, Browser::Edge);
-    super::addon::reconnecting_for(
-        &mut view,
-        Browser::Edge.reconnectable(shared),
-        Browser::Edge,
-    );
+    super::profile_reason::reconnecting(shared, &mut view, !facts.removed, Browser::Edge);
     super::installation::present(&chrome.config, &mut view);
     view
 }

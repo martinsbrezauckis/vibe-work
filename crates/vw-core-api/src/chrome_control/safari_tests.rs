@@ -499,3 +499,154 @@ async fn safari_pairing_states_count_extension_connections_for_the_pairing_notic
     assert_eq!(seen(), 2);
     core.shutdown().await;
 }
+
+// PREDICT (before the fix): Safari pairing completion never asks macOS for the Accessibility prompt (the counter
+// stays 0); only a refused agent action prompted. After the fix: the change from `waiting` or `mismatch` to
+// `paired` (the user paired in this run) asks once; a `paired` report from an already paired Safari reconnecting
+// at app start, a repeated `paired`, other browsers and plain waiting states never ask.
+#[tokio::test]
+async fn safari_pairing_completion_asks_for_accessibility_once_and_reconnects_never_do() {
+    let core = crate::offline_core::start_with("safari-ax-prompt", |config, dir| {
+        config.chrome_control.package = Some(dir.join("package"));
+    })
+    .await;
+    let shared = &core.shared;
+    let asked = || {
+        shared
+            .chrome_control
+            .owner
+            .safari_accessibility_prompts
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    let pairing = |profile: &str, state: &str| {
+        owner::observe(
+            &std::sync::Arc::downgrade(shared),
+            &json!({"method":"notifications/owner/pairing", "params":{
+                "profileId":profile, "state":state, "fingerprint":"a".repeat(64)}}),
+        )
+        .unwrap();
+    };
+    // An already paired Safari connecting after app start.
+    pairing("safari:p", "paired");
+    pairing("safari:p", "paired");
+    assert_eq!(
+        asked(),
+        0,
+        "a reconnect of an existing pairing never prompts"
+    );
+    pairing("chrome:p", "waiting");
+    pairing("chrome:p", "paired");
+    assert_eq!(asked(), 0, "other browsers never prompt");
+    // The user pairs Safari in this run.
+    pairing("safari:p", "waiting");
+    assert_eq!(asked(), 0, "waiting for pairing does not prompt yet");
+    pairing("safari:p", "paired");
+    assert_eq!(asked(), 1, "pairing completion prompts once");
+    pairing("safari:p", "paired");
+    assert_eq!(asked(), 1, "a later paired report does not prompt again");
+    // Removal clears the pairing; pairing again may prompt once more.
+    *shared.chrome_control.owner.safari_pairing.lock().unwrap() = (String::new(), None);
+    pairing("safari:p", "paired");
+    assert_eq!(asked(), 1);
+    pairing("safari:p", "mismatch");
+    pairing("safari:p", "paired");
+    assert_eq!(
+        asked(),
+        2,
+        "replacing another owner's pairing is a new pairing"
+    );
+    core.shutdown().await;
+}
+
+// PREDICT: without the window check an idle extension counts as reachable, so "Open pairing page" with Safari already
+// running reports success although Safari, not running the extension's page, drops the notice. With the check the
+// notice is reachable only while Safari is launched for it or right after the extension reported; otherwise the
+// person is pointed to the extension's toolbar button.
+#[test]
+fn the_pairing_notice_is_reachable_only_while_the_extension_page_runs() {
+    use super::safari::notice_reachable;
+    let now = std::time::Instant::now();
+    let ago = |seconds: u64| now.checked_sub(std::time::Duration::from_secs(seconds));
+    assert!(
+        notice_reachable(true, None, now),
+        "a launching Safari waits for the extension"
+    );
+    assert!(
+        notice_reachable(false, ago(3), now),
+        "a report 3 s ago: the page is running"
+    );
+    assert!(
+        !notice_reachable(false, None, now),
+        "no report in this app run"
+    );
+    assert!(
+        !notice_reachable(false, ago(25), now),
+        "a report older than the window"
+    );
+    assert!(!notice_reachable(false, ago(140), now), "idle for minutes");
+}
+
+#[tokio::test]
+async fn a_safari_pairing_state_records_when_the_extension_page_last_reported() {
+    let core = crate::offline_core::start_with("safari-seen-at", |config, dir| {
+        config.chrome_control.package = Some(dir.join("package"));
+    })
+    .await;
+    let shared = &core.shared;
+    let at = || *shared.chrome_control.owner.safari_seen_at.lock().unwrap();
+    assert_eq!(at(), None);
+    let before = std::time::Instant::now();
+    owner::observe(
+        &std::sync::Arc::downgrade(shared),
+        &json!({"method":"notifications/owner/pairing", "params":{
+            "profileId":"safari:p", "state":"waiting", "fingerprint":"a".repeat(64)}}),
+    )
+    .unwrap();
+    assert!(at().is_some_and(|at| at >= before), "{:?}", at());
+    assert!(super::safari::notice_reachable(
+        false,
+        at(),
+        std::time::Instant::now()
+    ));
+    core.shutdown().await;
+}
+
+#[test]
+fn the_toolbar_hint_names_the_extension_button_and_the_pair_action() {
+    let hint = super::safari_package::toolbar_hint();
+    assert!(
+        hint.contains("Your Safari") && hint.contains("Pair Vibe Work"),
+        "{hint}"
+    );
+    assert!(!hint.contains('{'), "{hint}");
+}
+
+// Open pairing page answers an unreachable notice with guidance, not a failure.
+// PREDICT (before the fix): `pairing_hint` and the result's `hint` field do not exist, so this does not compile;
+// the guidance was the command's error, which the window draws as a red problem line and which also counts
+// as a refusal of the command.
+#[tokio::test]
+async fn open_pairing_page_returns_the_toolbar_hint_as_guidance_only_when_the_notice_cannot_arrive()
+{
+    use super::safari_package::{pairing_hint, toolbar_hint};
+    assert_eq!(pairing_hint(true), None, "the notice can arrive: no hint");
+    assert_eq!(pairing_hint(false), Some(toolbar_hint()));
+    let core = crate::offline_core::start_with("safari-hint", |_, _| {}).await;
+    let shared = &core.shared;
+    let with_hint = serde_json::to_value(crate::CommandResult::ChromeControl {
+        view: super::commands::view(shared),
+        offer: None,
+        hint: pairing_hint(false),
+    })
+    .unwrap();
+    assert_eq!(with_hint["type"], "chromeControl");
+    assert_eq!(with_hint["hint"], json!(toolbar_hint()));
+    let without = serde_json::to_value(crate::CommandResult::ChromeControl {
+        view: super::commands::view(shared),
+        offer: None,
+        hint: None,
+    })
+    .unwrap();
+    assert!(without.get("hint").is_none(), "{without}");
+    core.shutdown().await;
+}

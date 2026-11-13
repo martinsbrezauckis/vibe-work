@@ -39,6 +39,12 @@ export function SessionListSkeleton({ ready }: { ready: boolean }) {
           {ready ? "Still loading chats from Vibe." : "Still loading. Vibe is starting."}
         </p>
       )}
+      {slow && !ready && (
+        <p className="col-note">
+          The first start after an install or an update can take a few minutes while the computer
+          checks the new files.
+        </p>
+      )}
     </>
   );
 }

@@ -13,8 +13,7 @@ async fn local_navigation_needs_a_confirmed_file_access_toggle() {
             std::process::id()
         ));
         std::fs::create_dir_all(&folder).unwrap();
-        // Resolved: macOS temp folders sit under the /var -> /private/var link.
-        let folder = folder.canonicalize().unwrap();
+        // Not resolved: on macOS the chat folder is named under the /var -> /private/var link, as the person sees it.
         let path = folder.join("local.html");
         std::fs::write(&path, "<h1>Local</h1>").unwrap();
         let _ = core

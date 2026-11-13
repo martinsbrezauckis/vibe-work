@@ -88,7 +88,7 @@ impl Bindings {
             .zip(self.owner.as_ref())
             .is_some_and(|(old, current)| old != current)
         {
-            return Err("This profile was paired with another Vibe Work identity; no action ran. Reconnect the profile and select it in this chat.".into());
+            return Err("This profile was paired with another Vibe Work identity; no action ran. Ask the user to reconnect the profile in Settings > Browser, then open the session again.".into());
         }
         Ok(())
     }
@@ -97,7 +97,7 @@ impl Bindings {
             return Err(super::profile_storage::UNREADABLE.into());
         }
         if self.ambiguous.contains_key(chat) {
-            return Err("This legacy chat has several browser profiles; no action ran. Ask the user to choose a profile in this chat.".into());
+            return Err("This older chat used several browser profiles; no action ran. Open the session again so the user can pick one.".into());
         }
         if self.pending.contains_key(chat) {
             return Err("This chat's profile switch is unconfirmed; no action ran. Reconnect the old profile and retry the selection.".into());
@@ -105,7 +105,7 @@ impl Bindings {
         if let Some(identity) = self.chats.get(chat) {
             self.check_owner(identity)?;
             if !super::profile_ids::same(&identity.profile, profile) {
-                return Err("This chat is bound to another browser profile; no action ran. Select the intended profile in this chat before continuing.".into());
+                return Err(OTHER_PROFILE.into());
             }
         }
         Ok(())
@@ -132,6 +132,42 @@ impl Bindings {
     }
 }
 
+/// The refusal of a profile that is not this chat's own.
+const OTHER_PROFILE: &str = "This chat uses another browser profile; no action ran. Continue in this chat's profile, or ask the user to start a new chat for the other profile.";
+
+/// [`check`] for the agent's own calls: when the chat's profile is the one the person picked on the profile card, the
+/// refusal of another profile names the picked one, so the agent continues there instead of guessing why it was
+/// refused. Person commands keep [`check`]'s text.
+pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> Result<(), String> {
+    check(chrome, chat, profile).map_err(|refusal| {
+        if refusal != OTHER_PROFILE {
+            return refusal;
+        }
+        let picked = chrome
+            .picked_profiles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(chat)
+            .cloned();
+        match picked {
+            Some(picked)
+                if selected(chrome, chat)
+                    .is_some_and(|bound| super::profile_ids::same(&bound, &picked)) =>
+            {
+                let name = chrome
+                    .profiles
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .agent_name(&picked);
+                format!(
+                    "The user picked {name} for this chat; use it (profileId {picked}). No action ran."
+                )
+            }
+            _ => refusal,
+        }
+    })
+}
+
 pub(super) fn check(chrome: &ChromeControl, chat: &str, profile: &str) -> Result<(), String> {
     // Existing single-binding chats retain their exact choice, including legacy raw Chrome UUIDs.
     if let Some(selected) = chrome
@@ -141,7 +177,7 @@ pub(super) fn check(chrome: &ChromeControl, chat: &str, profile: &str) -> Result
         .get(chat)
         && !super::profile_ids::same(selected, profile)
     {
-        return Err("This chat is bound to another browser profile; no action ran. Select the intended profile in this chat before continuing.".into());
+        return Err(OTHER_PROFILE.into());
     }
     chrome
         .bindings

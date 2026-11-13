@@ -636,7 +636,12 @@ view: ChromeControlView,
 /**
  * The set up offer the window shows before the click (`offerSetup` only).
  */
-offer: ToolsInstallOffer | null, } | { "type": "chromeTabs",
+offer: ToolsInstallOffer | null,
+/**
+ * Guidance for the person after a step that went through but may not show anything
+ * (`openSafariSetup` when Safari is not running the extension page). Shown as help, not as a failure.
+ */
+hint?: string, } | { "type": "chromeTabs",
 /**
  * Tabs in all connected profiles.
  */

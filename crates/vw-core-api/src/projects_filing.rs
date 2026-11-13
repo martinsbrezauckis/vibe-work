@@ -149,8 +149,9 @@ fn seen_of(shared: &Shared, item: &Value) -> Option<Seen> {
     })
 }
 
-/// The name the project of a Temporary chat's own folder shows: the folder's random name means nothing to the person.
-const TEMPORARY_CHAT: &str = "Temporary chat";
+/// The name of the one project every Temporary chat in a folder of its own is filed in: the folders' random names mean
+/// nothing to the person.
+const TEMPORARY_CHATS: &str = "Temporary chats";
 
 /// Which of `folders` are Temporary chats' own folders (`temporary::new_scratch`).
 fn scratch_folders<'a>(shared: &Shared, folders: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -161,12 +162,62 @@ fn scratch_folders<'a>(shared: &Shared, folders: impl IntoIterator<Item = &'a st
         .collect()
 }
 
-/// Gives the automatic projects of `folders` (Temporary chats' own folders) their shown name.
-fn name_scratch(s: &mut State, folders: &[String]) -> usize {
-    folders
-        .iter()
-        .map(|f| usize::from(s.name_auto_project(f, TEMPORARY_CHAT)))
-        .sum()
+/// Files the chats of the automatic projects of `folders` (Temporary chats' own folders) into one project, "Temporary
+/// chats": the first such project takes the name, a later one hands its chats to it and goes. A project the person
+/// renamed is theirs and stays as it is.
+fn gather_scratch(
+    temporary: &crate::temporary::TemporarySessions,
+    s: &mut State,
+    folders: &[String],
+) -> usize {
+    let mut changed = 0;
+    for folder in folders {
+        let Some(own) = s
+            .projects()
+            .iter()
+            .find(|p| {
+                p.auto
+                    && p.main_folder
+                        .as_deref()
+                        .is_some_and(|m| vw_projects::same_folder(m, folder))
+            })
+            .map(|p| (p.id.clone(), p.name.clone()))
+        else {
+            continue;
+        };
+        let shared_project = s
+            .projects()
+            .iter()
+            .find(|p| {
+                p.auto
+                    && p.name == TEMPORARY_CHATS
+                    && p.main_folder
+                        .as_deref()
+                        .is_some_and(|m| temporary.is_scratch(std::path::Path::new(m)))
+            })
+            .map(|p| p.id.clone());
+        let Some(target) = shared_project else {
+            changed += usize::from(s.name_auto_project(folder, TEMPORARY_CHATS));
+            continue;
+        };
+        let label = vw_projects::folder_label(&vw_projects::normalize_folder(folder));
+        if target == own.0 || label.is_empty() || !own.1.contains(&label) {
+            continue;
+        }
+        let chats: Vec<String> = s
+            .members()
+            .iter()
+            .filter(|(_, filed)| filed.as_deref() == Some(own.0.as_str()))
+            .map(|(id, _)| id.clone())
+            .collect();
+        if !chats.is_empty() {
+            changed += s
+                .move_sessions(&chats, Some(&target), |_| true)
+                .unwrap_or(0);
+        }
+        changed += usize::from(s.retire_auto_project(folder));
+    }
+    changed
 }
 
 /// A listing page: every session seen for the first time is filed by its folder (auto projects at the end).
@@ -177,8 +228,9 @@ pub(crate) async fn listed(shared: &Shared, items: &[Value]) {
     }
     let now = vw_projects::now_ms();
     let scratch = scratch_folders(shared, seen.iter().filter_map(|s| s.folder.as_deref()));
+    let temporary = shared.temporary.clone();
     file(shared, move |s| {
-        s.file_seen(&seen, now) + name_scratch(s, &scratch)
+        s.file_seen(&seen, now) + gather_scratch(&temporary, s, &scratch)
     })
     .await;
 }
@@ -205,10 +257,11 @@ pub(crate) async fn loaded(shared: &Shared, params: &Value, state: &Value, new: 
     }
     let now = vw_projects::now_ms();
     let scratch = scratch_folders(shared, [rule.as_deref(), started_in].into_iter().flatten());
+    let temporary = shared.temporary.clone();
     if !new {
         let seen = vec![Seen { id, folder: rule }];
         file(shared, move |s| {
-            s.file_seen(&seen, now) + name_scratch(s, &scratch)
+            s.file_seen(&seen, now) + gather_scratch(&temporary, s, &scratch)
         })
         .await;
         return;
@@ -235,7 +288,7 @@ pub(crate) async fn loaded(shared: &Shared, params: &Value, state: &Value, new: 
                 folder: folder.as_deref(),
             },
             now,
-        )) + name_scratch(s, &scratch)
+        )) + gather_scratch(&temporary, s, &scratch)
     })
     .await;
 }
@@ -388,10 +441,58 @@ pub(crate) async fn retire_work_project(shared: &Shared) {
     file(shared, move |s| usize::from(s.retire_auto_project(&work))).await;
 }
 
-/// Removes the empty automatic project `folder` got (a temporary chat's own folder, removed with the chat).
+/// Removes the empty automatic project `folder` got (a temporary chat's own folder, removed with the chat), and the
+/// "Temporary chats" project once no chat is left in it: it was made for the folder of whichever Temporary chat came
+/// first, which need not be the last one to go.
 pub(crate) async fn retire_folder_project(shared: &Shared, folder: &std::path::Path) {
     let folder = folder.to_string_lossy().into_owned();
-    file(shared, move |s| usize::from(s.retire_auto_project(&folder))).await;
+    let temporary = shared.temporary.clone();
+    file(shared, move |s| {
+        let empty: Vec<String> = s
+            .projects()
+            .iter()
+            .filter(|p| p.auto && s.member_count(&p.id) == 0)
+            .filter_map(|p| p.main_folder.clone())
+            .filter(|m| temporary.is_scratch(std::path::Path::new(m)))
+            .collect();
+        std::iter::once(folder)
+            .chain(empty)
+            .map(|f| usize::from(s.retire_auto_project(&f)))
+            .sum()
+    })
+    .await;
+}
+
+/// Retires every automatic project of a Temporary chat's own folder, with whatever is still filed in it. Called only
+/// when no temporary chat is left: no other chat can start in such a folder (`new_chat::unusable_start_folder`), so
+/// anything still filed there is a chat that is gone (one whose end the project never heard of, or a subagent of
+/// one), and its folder is gone or about to go with the same sweep.
+pub(crate) async fn retire_scratch_projects(shared: &Shared) {
+    let temporary = shared.temporary.clone();
+    file(shared, move |s| {
+        let scratch: Vec<(String, String)> = s
+            .projects()
+            .iter()
+            .filter(|p| p.auto)
+            .filter_map(|p| Some((p.id.clone(), p.main_folder.clone()?)))
+            .filter(|(_, folder)| temporary.is_scratch(std::path::Path::new(folder)))
+            .collect();
+        let mut changed = 0;
+        for (project, folder) in scratch {
+            let stale: Vec<String> = s
+                .members()
+                .iter()
+                .filter(|(_, filed)| filed.as_deref() == Some(project.as_str()))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in stale {
+                changed += usize::from(s.forget(&id));
+            }
+            changed += usize::from(s.retire_auto_project(&folder));
+        }
+        changed
+    })
+    .await;
 }
 
 /// The folder whose handbook session `id` shows in its Project tab: its project's main folder,

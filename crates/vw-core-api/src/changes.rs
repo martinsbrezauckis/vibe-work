@@ -455,6 +455,10 @@ fn lost_review(repo: vw_changes::Repo, session_dir: &SessionDir, reason: String)
 #[path = "changes_shutdown_tests.rs"]
 mod shutdown_tests;
 
+#[cfg(test)]
+#[path = "changes_deadline_tests.rs"]
+mod deadline_tests;
+
 /// Sends `changesUpdated` for `view` when `changed`. Every refresh reports its own change, whoever asked
 /// for it (a client's read must not swallow the event other clients wait for).
 pub(crate) fn emit_if_changed(shared: &Shared, changed: bool, view: &ChangesView) {

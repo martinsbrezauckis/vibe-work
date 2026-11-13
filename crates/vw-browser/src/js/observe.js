@@ -1,5 +1,5 @@
 // The observation of the agent browser: what the page shows as a compact model with refs for its
-// interactive elements. Values of password, one-time-code and payment-card fields and of fields the vault filled
+// interactive elements. Values of password and payment-card fields and of fields the vault filled
 // never leave the page (`redacted`); every other value is readable. Text, names,
 // values and links that look like an API key are hidden (`keyLike`). Text is the page's visible text (layout-aware innerText), one window of it per
 // call (`REQ.textOffset`, `REQ.maxText`).
@@ -166,7 +166,7 @@
         item.login = role;
         item.submitsTo = submitOrigins(el);
       }
-      // Only password, one-time-code, card and vault-filled fields are redacted, whatever their sign-in role.
+      // Only password, card and vault-filled fields are redacted, whatever their sign-in role.
       // Every other value is readable, also the user name and text the user typed.
       const secret = vaultFilled(el) ? "vault" : secretKind(el);
       if (secret) item.redacted = secret;

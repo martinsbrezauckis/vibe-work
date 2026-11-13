@@ -2,6 +2,15 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.11 (2026-11-13)
+
+Built for Vibe 3.1.2 on Python 3.14.8.
+
+- **Browser profiles** named as in Chrome and Edge, with a default profile to pick in Settings.
+- **One-time codes**: the agent reads and enters them on web pages.
+- **Protected fields in more languages**, including Latvian.
+- **Custom connectors with sign-in** on Windows.
+
 ## 0.1.10 (2026-11-12)
 
 Built for Vibe 3.1.2 on Python 3.14.8.

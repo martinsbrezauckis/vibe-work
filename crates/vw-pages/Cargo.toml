@@ -39,9 +39,9 @@ base64 = "0.23"
 # Share a page as one file: the exported file leaves our sandbox, so it is
 # sanitized from a parsed tree, never by string surgery. lol_html 3.0.1 (BSD-3-Clause,
 # Cloudflare's HTML5-tokenizer rewriter) does our rewrites (inline styles and images, answers after inputs), then
-# ammonia 4.2.4 (MIT OR Apache-2.0, html5ever tree, allowlist) sanitizes and serializes the body.
+# ammonia 4.2.5 (MIT OR Apache-2.0, html5ever tree, allowlist) sanitizes and serializes the body.
 lol_html = { version = "3.0.1", default-features = false }
-ammonia = "4.2.4"
+ammonia = "4.2.5"
 # Share a page as one file: every file the export reads is opened through a directory
 # capability rooted at the handbook folder (openat2 RESOLVE_BENEATH on Linux, per-component no-follow resolution
 # elsewhere), so a symlink swapped in during the export cannot reach outside it. cap-std 4.0.3

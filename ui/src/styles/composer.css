@@ -420,6 +420,10 @@
   background: var(--hover);
   color: var(--text);
 }
+/* A tab of another profile than the chat's: listed for orientation, disabled, its reason in place of the address. */
+.chrome-tabs .it[data-profile="other"]:hover {
+  background: transparent;
+}
 .chrome-tab-title {
   color: var(--text);
   overflow: hidden;
@@ -509,16 +513,4 @@
 }
 .browser-signal[data-state="ready"] {
   background: var(--green);
-}
-
-.composer-profile-choice {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: 100%;
-}
-.composer-profile-label {
-  color: var(--text-2);
-  font-size: var(--text-12);
 }

@@ -89,7 +89,7 @@ fn authorize_mode(
             .contains(&profile.as_str())
         {
             super::profiles::check(&shared.chrome_control, &profile)?;
-            super::profile_bindings::check(&shared.chrome_control, session, &profile)?;
+            super::profile_bindings::check_agent(&shared.chrome_control, session, &profile)?;
         }
         crate::browser_handover::check(shared, session)?;
     }

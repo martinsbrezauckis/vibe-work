@@ -12,7 +12,7 @@ import { Button } from "../../components/Controls";
 
 import type { ExistingView, InstallOffer, InstallPhase } from "../../protocol/core";
 import { type Store, createStore, useStore } from "../../state/createStore";
-import type { VibeUi } from "../../state/vibeInstall";
+import type { VibeInstall, VibeUi } from "../../state/vibeInstall";
 import { useApp } from "../shell/AppContext";
 import { OfferDetails } from "./VibeOfferDetails";
 
@@ -27,6 +27,15 @@ const NONE: Store<VibeUi> = createStore<VibeUi>({
 /** Selects from the install state. */
 export function useVibeUi<S>(select: (state: VibeUi) => S): S {
   return useStore(useApp().vibe?.store ?? NONE, select);
+}
+
+/** The core's name of the last install step, Vibe's first start (`vw-vibe-install` `run::START_STEP`). */
+const START_STEP = "Start Vibe";
+
+/** Starts Vibe again; when the core has no failed start to repeat (an older view), the install review is the retry. */
+async function retryStart(vibe: VibeInstall | null): Promise<void> {
+  if (vibe === null) return;
+  if (!(await vibe.retryStart())) await vibe.prepare();
 }
 
 /** What a failure means and what to do, in plain words. */
@@ -175,14 +184,17 @@ export function VibeInstallStep() {
               {phase.outputTail.split("\n").slice(-12).join("\n")}
             </pre>
           )}
-          <Button
-            data-testid="setup.vibe-install-step-cancel-2"
-            type="button"
+          {/* Starting Vibe cannot be cancelled (the core refuses it): no button that would do nothing. */}
+          {phase.step !== START_STEP && (
+            <Button
+              data-testid="setup.vibe-install-step-cancel-2"
+              type="button"
 
-            onClick={() => void vibe?.cancel()}
-          >
-            Cancel
-          </Button>
+              onClick={() => void vibe?.cancel()}
+            >
+              Cancel
+            </Button>
+          )}
         </>
       )}
       {phase.state === "failed" && (
@@ -201,7 +213,11 @@ export function VibeInstallStep() {
             type="button"
             appearance="dialog"
             disabled={busy}
-            onClick={() => void vibe?.prepare()}
+            onClick={() => {
+              // After a failed start the install is complete: Try again only starts Vibe again (no new review).
+              if (phase.kind === "start") void retryStart(vibe);
+              else void vibe?.prepare();
+            }}
           >
             Try again
           </Button>

@@ -30,10 +30,11 @@ pub fn plain_note(note: &str) -> String {
         .take(2000)
         .collect()
 }
-/// The result of a call the user said No to on a Vibe Work card or window. The agent's turn goes on with it, so
-/// the agent must explain why the delegated task needs it before asking again.
-pub const DECLINED: &str =
-    "Not run: the user declined this. Explain why it is needed for the user's delegated task.";
+/// The result of a call the user said No to on a Vibe Work card or window. The agent's turn goes on with it, so the
+/// text says that nothing happened (the agent's answer must not report the action as done, also when other steps of
+/// the same script ran) and that the agent must explain why the delegated task needs it before asking again. It
+/// starts with "Not run: the user declined this." (the window matches that start).
+pub const DECLINED: &str = "Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.";
 
 /// The outcome sentence; permission never adds text to an allowed tool's normal result. A No is always
 /// [`DECLINED`], with no note or subject appended.

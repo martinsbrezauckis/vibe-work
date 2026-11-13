@@ -9,7 +9,7 @@ use support::Rig;
 #[tokio::test]
 async fn capture_exports_redact_secrets_and_bind_chunks_to_the_document() {
     let rig = Rig::new().await;
-    rig.engine.eval("window.captureFixture={};document.body.innerHTML='<h1>Article</h1><input type=password value=hidden-secret><textarea autocomplete=one-time-code>hidden-code</textarea><script>secretScript()</script><p onclick=bad()>Visible text</p>';").await;
+    rig.engine.eval("window.captureFixture={};document.body.innerHTML='<h1>Article</h1><input type=password value=hidden-secret><textarea autocomplete=cc-number>hidden-code</textarea><textarea autocomplete=one-time-code>shown-code</textarea><script>secretScript()</script><p onclick=bad()>Visible text</p>';").await;
     for format in ["html", "single_html", "markdown", "text"] {
         let script = vw_browser::scripts::page_text(
             "captureFixture",
@@ -19,6 +19,10 @@ async fn capture_exports_redact_secrets_and_bind_chunks_to_the_document() {
         let data: Value = serde_json::from_str(value.as_str().unwrap()).unwrap();
         let text = data["chunk"].as_str().unwrap();
         assert!(text.contains("Visible text"), "{format}");
+        // A one-time code is an ordinary field value (HTML exports keep textarea contents).
+        if format.contains("html") {
+            assert!(text.contains("shown-code"), "{format}");
+        }
         for secret in ["hidden-secret", "hidden-code", "secretScript", "onclick"] {
             assert!(!text.contains(secret), "{format}: {secret}");
         }

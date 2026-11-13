@@ -238,6 +238,17 @@ impl Core {
         CoreSubscription::new(&self.shared, session)
     }
 
+    /// Debug-build test fixtures only: stands in for Vibe's report that it carried the tool decision `receipt` into a
+    /// running call of the decision's own chat, so a direct tool fixture (hook route, then tool route, no model) can
+    /// use it. Returns whether a live decision was marked. Absent from release builds and never exposed to any route:
+    /// in the app only Vibe's own report lets a decision run.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn announce_tool_call_for_fixture(&self, receipt: &str) -> bool {
+        crate::ask::tool_calls::receipts::announce_for_fixture(&self.shared, receipt)
+    }
+
     /// Records a folder the user picked in a native dialog (the only folders that may be
     /// trusted). Not reachable from the webview; the Debug API has its own `pickFolder` command
     /// (it acts as the user).

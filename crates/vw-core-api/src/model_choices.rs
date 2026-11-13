@@ -4,7 +4,7 @@
 //! restores alert without closing the chat. No user config or Vibe session files are edited here.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -247,7 +247,7 @@ async fn apply(shared: &Shared, id: &str, choice: &Choice) -> Result<Value, Core
 }
 
 /// Deferred worktree setup can answer turn/start before pinning. Retire only a confirmed durable choice.
-pub(crate) async fn turn_started(shared: &Shared, params: &Value) {
+pub(crate) async fn turn_started(shared: &Arc<Shared>, params: &Value) {
     let Some(id) = params["sessionId"].as_str() else {
         return;
     };
@@ -256,6 +256,11 @@ pub(crate) async fn turn_started(shared: &Shared, params: &Value) {
         .store
         .runtime(id)
         .and_then(|runtime| actual(&json!({"runtime":runtime})));
+    if let Some(choice) = &served
+        && moved_off(shared, id, choice).await
+    {
+        return;
+    }
     let expected = shared.model_choices.records.get(id).replay();
     let pinned = if let Some(choice) = &expected {
         shared
@@ -289,4 +294,25 @@ pub(crate) async fn turn_started(shared: &Shared, params: &Value) {
     }) {
         tracing::warn!(%error, "chat model identity could not be saved");
     }
+}
+
+/// Vibe resolves the model again when a turn starts. A model that left Vibe's list after the send check (its runtime
+/// view can trail its own model list by a few seconds) runs the turn on Vibe's own fallback. Then the chat gets the
+/// same notice and Settings default as at reopen, and `true` is returned. `choice` is the model the check let through.
+async fn moved_off(shared: &Arc<Shared>, id: &str, choice: &Choice) -> bool {
+    let Ok(runtime) = restore::read(shared, id).await else {
+        return false;
+    };
+    // Without a model list (an older runtime shape) nothing shows that the model left it.
+    if !runtime
+        .pointer("/config/models")
+        .is_some_and(Value::is_array)
+        || restore::offered(&runtime, choice)
+    {
+        return false;
+    }
+    let choice = shared.model_choices.named(choice.clone());
+    let runtime = restore::fallback(shared, id, &choice, runtime).await;
+    publish(shared, id, runtime).await;
+    true
 }

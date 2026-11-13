@@ -88,6 +88,12 @@ pub(super) struct Owner {
     pub(super) safari_pairing: Mutex<(String, Option<String>)>,
     /// Safari pairing states received from the helper; a change means an extension port is open.
     pub(super) safari_seen: std::sync::atomic::AtomicU64,
+    /// When the last Safari pairing state arrived (the extension's page was running then).
+    pub(super) safari_seen_at: Mutex<Option<std::time::Instant>>,
+    /// The person approved a Safari pairing and the extension has not connected since (`safari::view`).
+    pub(super) safari_approved: std::sync::atomic::AtomicBool,
+    /// Times a completed Safari pairing asked macOS for its Accessibility prompt (once per pairing).
+    pub(super) safari_accessibility_prompts: std::sync::atomic::AtomicU64,
     pub(super) safari_error: Mutex<Option<super::safari::ConnectionError>>,
     pub(super) firefox_pairing: Mutex<(PairingState, Option<String>)>,
     pub(super) firefox_share_pairing: Mutex<(PairingState, Option<String>)>,
@@ -95,6 +101,9 @@ pub(super) struct Owner {
     pub(super) edge_pairing: Mutex<(PairingState, Option<String>)>,
     observed_setup: Mutex<Option<SetupSnapshot>>,
     pub(super) credential_missing: std::sync::atomic::AtomicBool,
+    /// The last helper launch was refused because another helper holds this state folder's lock
+    /// (`OWNER_CONFLICT`). The owner keeps retrying; a helper connection or `stop` clears it.
+    pub(super) helper_conflict: std::sync::atomic::AtomicBool,
     pub(super) connected_profiles: super::addon::ConnectedProfiles,
     pub(super) profile_ids: super::profile_ids::ProfileIds,
     pub(super) wake: super::reconnect::Wake,
@@ -187,6 +196,8 @@ impl Owner {
             let _ = running.stop.send(true);
             let _ = running.task.await;
         }
+        self.helper_conflict
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.clear_connection();
     }
 
@@ -427,8 +438,25 @@ async fn supervise(
             _ = stop.changed() => return,
             result = super::pipe::Pipe::launch(&package, &dir, expected, &secret, shared.clone()) => result,
         };
-        if result.is_err() {
-            tracing::debug!("Chrome Control helper did not start or was refused");
+        let conflict =
+            matches!(&result, Err(error) if error.helper_code == Some(super::pipe::OWNER_CONFLICT));
+        if let Some(core) = shared.upgrade() {
+            let before = core
+                .chrome_control
+                .owner
+                .helper_conflict
+                .swap(conflict, std::sync::atomic::Ordering::SeqCst);
+            if conflict && !before {
+                // Logged once per refusal streak; the retries continue with backoff.
+                tracing::warn!(
+                    "Chrome Control helper refused: another Vibe Work browser helper holds this connection"
+                );
+            }
+        }
+        if let Err(error) = &result
+            && !conflict
+        {
+            tracing::debug!(code = ?error.helper_code, "Chrome Control helper did not start or was refused");
         }
         if let Ok(mut pipe) = result {
             if let Some(shared) = shared.upgrade() {

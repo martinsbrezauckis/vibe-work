@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 pub struct ChromeTab {
     /// Connected profile identity.
     pub profile_id: String,
-    /// Profile display label.
+    /// The profile's shown name, as Settings > Browser shows it.
     pub profile_name: String,
     /// Exact Chrome tab identity.
     pub tab_id: u32,
@@ -50,6 +50,14 @@ pub(super) fn list(reply: &Value) -> Result<Vec<ChromeTab>, CoreError> {
             })
         })
         .collect()
+}
+/// Names each tab's profile as Settings and the profile card show it (`Profiles::name`): the helper reports only the
+/// browser's name for every profile, so tabs of two profiles would read alike.
+fn shown_names(mut tabs: Vec<ChromeTab>, profiles: &super::profiles::Profiles) -> Vec<ChromeTab> {
+    for tab in &mut tabs {
+        tab.profile_name = profiles.name(&tab.profile_id);
+    }
+    tabs
 }
 pub(super) fn selection(
     reply: &Value,
@@ -96,6 +104,13 @@ pub(super) async fn read(
         .into_iter()
         .filter(|tab| super::agent_browser::Browser::from_profile(&tab.profile_id).enabled(shared))
         .collect();
+    let tabs = shown_names(
+        tabs,
+        &chrome
+            .profiles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
     Ok(crate::CommandResult::ChromeTabs { tabs })
 }
 pub(super) async fn pick(
@@ -193,7 +208,7 @@ pub(super) async fn pick_expected(
                 .generation(profile_id)
     {
         return Err(super::commands::invalid(
-            "This profile's tab read was stopped. Select a connected profile before trying again.",
+            "This profile's tab read was stopped. Use a connected profile, or ask the user to reconnect this profile in Settings > Browser.",
         ));
     }
     if let Some(chat) = session_id {
@@ -237,6 +252,52 @@ mod tests {
             .is_err()
         );
         assert!(list(&json!({"isError":true})).is_err());
+    }
+}
+
+/// PREDICT (written before the fix): fails. Every tab row in the composer picker reads "Chrome · <address>" because
+/// `profileName` is the helper's registration name, which is the browser's name for every profile; the two paired
+/// profiles "Work" and "Personal" are not told apart, and a profile the store names "Chrome profile 2" still reads
+/// "Chrome". After the fix each row carries the store's shown name, the same text Settings > Browser shows.
+#[cfg(test)]
+mod profile_name_tests {
+    #![allow(
+        clippy::unwrap_used,
+        reason = "fixed JSON fixtures must parse for the test to mean anything"
+    )]
+    use super::*;
+    const WORK: &str = "chrome:1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+    const HOME: &str = "chrome:6fa459ea-ee8a-4ca4-894e-db77e160355e";
+    const BARE: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    #[test]
+    fn tab_rows_carry_the_profile_name_settings_shows() {
+        let record = |name: Option<&str>, number: u32| {
+            json!({"owner":null,"name":null,"metadata_name":null,"enabled":true,"removed":false,
+                "browser_name":name,"number":number})
+        };
+        let profiles: super::super::profiles::Profiles = serde_json::from_value(json!({
+            "records":{WORK:record(Some("Work"),1),HOME:record(Some("Personal"),2),
+                format!("chrome:{BARE}"):record(None,3)},
+            "defaults":{}
+        }))
+        .unwrap();
+        let reply = json!({"structuredContent":{"tabs":[
+            {"profileId":WORK,"profileName":"Chrome","tab":{"tabId":1,"title":"Inbox","url":"https://mail.example/"}},
+            {"profileId":HOME,"profileName":"Chrome","tab":{"tabId":2,"title":"Inbox","url":"https://mail.example/"}},
+            {"profileId":BARE.to_ascii_uppercase(),"profileName":"Chrome","tab":{"tabId":3,"title":"Docs","url":"https://docs.example/"}}
+        ]}});
+        let tabs = shown_names(list(&reply).unwrap(), &profiles);
+        let names: Vec<&str> = tabs.iter().map(|tab| tab.profile_name.as_str()).collect();
+        assert_eq!(names, ["Work", "Personal", "Chrome profile 3"]);
+        for tab in &tabs {
+            assert_eq!(
+                tab.profile_name,
+                profiles.name(&tab.profile_id),
+                "the picker and Settings name the profile alike"
+            );
+        }
+        // The identity is passed back unchanged, so the tab read reaches the same profile the helper listed.
+        assert_eq!(tabs[2].profile_id, BARE.to_ascii_uppercase());
     }
 }
 

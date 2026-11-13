@@ -42,16 +42,27 @@ export function vibeCovers(s: VibeUi): boolean {
   return s.availability === "ready" && s.view !== null && s.view.phase.state !== "installed";
 }
 
-/** The setup screen's heading for the install: Update when an app update replaces an older app-owned Vibe. */
+/** Vibe is installed but its start failed: the step offers only to start it again. */
+function startFailed(view: InstallView | null): boolean {
+  return view?.phase.state === "failed" && view.phase.kind === "start";
+}
+
+/**
+ * The setup screen's heading for the install: Update when an app update replaces an older app-owned Vibe, Start when
+ * Vibe is installed but did not start.
+ */
 export function installTitle(view: InstallView | null): string {
+  if (startFailed(view)) return "Start Vibe";
   return view?.replacing === undefined ? "Install Vibe" : "Update Vibe";
 }
 
 /**
  * The status bar's words while the server is not installed: an install that runs says so (the replaced version is
- * named after an app update), else Vibe is not installed yet. Null when no install runs.
+ * named after an app update), an installed Vibe that did not start says that, else Vibe is not installed yet. Null
+ * when neither applies.
  */
 export function installStatus(view: InstallView | null): string | null {
+  if (startFailed(view)) return "Vibe did not start";
   if (view?.phase.state !== "installing") return null;
   return view.replacing === undefined
     ? "Installing Vibe…"
@@ -67,6 +78,8 @@ export interface VibeInstall {
   prepare(): Promise<boolean>;
   /** The user agrees to the offer on screen. */
   confirm(offerId: string): Promise<boolean>;
+  /** Try again after a failed start: starts Vibe again from the finished install, without a new review. */
+  retryStart(): Promise<boolean>;
   cancel(): Promise<boolean>;
   checkExisting(): Promise<boolean>;
   useExisting(path: string): Promise<boolean>;
@@ -117,6 +130,7 @@ export function createVibeInstall(core: CoreController): VibeInstall {
     },
     prepare: () => send({ op: "prepare" }),
     confirm: (offerId) => send({ op: "confirm", offerId }),
+    retryStart: () => send({ op: "retryStart" }),
     cancel: () => send({ op: "cancel" }),
     checkExisting: () => send({ op: "checkExisting" }),
     useExisting: (path) => send({ op: "useExisting", path }),

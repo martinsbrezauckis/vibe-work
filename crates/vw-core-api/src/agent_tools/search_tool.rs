@@ -180,6 +180,11 @@ mod tests {
             &serde_json::json!({"activeAgent":{"name":"auto-approve"}}),
         );
         let args=crate::ask::tool_calls::receipts::issue(&f.core.shared,&serde_json::json!({"session_id":"a","tool_call_id":"search-wire","tool_name":"mcp_vw.search","tool_input":{"query":"needle"}})).await.unwrap();
+        // Stands in for Vibe carrying the decision into its running call.
+        assert!(crate::ask::tool_calls::receipts::announce_for_fixture(
+            &f.core.shared,
+            args["_vwReceipt"].as_str().unwrap()
+        ));
         let replay = args.clone();
         assert!(
             super::super::tools::call(&f.core.shared, &tools, "b", "search", replay.clone())

@@ -46,7 +46,7 @@ pub(super) fn stamp(shared: &Shared, tool: &str, args: &Value, result: &mut Valu
         .profiles
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .name(&profile);
+        .agent_name(&profile);
     body.insert("profileId".into(), Value::String(profile));
     body.insert("profileName".into(), Value::String(name));
     super::output::sync_text(result);

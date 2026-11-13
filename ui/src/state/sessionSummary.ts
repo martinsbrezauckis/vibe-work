@@ -99,9 +99,29 @@ export function statusType(session: SessionEntry["session"]): string {
   return "idle";
 }
 
-/** The folder name used to group sessions into projects. */
+/** What a Temporary chat's own folder is called in the window: its random name means nothing to the person. */
+export const TEMPORARY_CHAT = "Temporary chat";
+
+/** The one sidebar group every Temporary chat in a folder of its own sits in (the core's project has this name too). */
+export const TEMPORARY_CHATS = "Temporary chats";
+
+/**
+ * True for a folder Vibe Work made for a Temporary chat: a `chat-` + 16 hex digits folder directly in a
+ * `temporary-folders` folder (the core's `vibe-work-temporary-folders-<process>` in the system temp folder counts
+ * too). A folder the person chose never matches, so it keeps its own name and path.
+ */
+export function isTemporaryFolder(cwd: string | null): boolean {
+  if (cwd === null) return false;
+  const parts = cwd.split(/[\\/]+/).filter((p) => p !== "");
+  const name = parts[parts.length - 1] ?? "";
+  const parent = parts[parts.length - 2] ?? "";
+  return /^chat-[0-9a-f]{16}$/i.test(name) && /(^|-)temporary-folders(-\d+)?$/i.test(parent);
+}
+
+/** The folder name used to group sessions into projects ("Temporary chat" for a Temporary chat's own folder). */
 export function projectOf(cwd: string | null): string {
   if (cwd === null) return "No folder";
+  if (isTemporaryFolder(cwd)) return TEMPORARY_CHAT;
   const parts = cwd.split(/[\\/]+/).filter((p) => p !== "");
   return parts[parts.length - 1] ?? "No folder";
 }
@@ -129,9 +149,13 @@ export function badgeOf(
   return entry.session["isUnseen"] === true ? "done" : "idle";
 }
 
-/** The session's visible name while Vibe is still preparing its title. */
+/** The session's visible name while Vibe is still preparing its title ("Temporary chat" for an untitled one). */
 export function sessionTitle(session: SessionEntry["session"] | undefined): string {
-  return str(session?.["title"]) ?? str(session?.["preview"]) ?? TEXT.untitledSession;
+  return (
+    str(session?.["title"]) ??
+    str(session?.["preview"]) ??
+    (isTemporaryFolder(str(session?.["cwd"])) ? TEMPORARY_CHAT : TEXT.untitledSession)
+  );
 }
 
 /** Derives the row for one entry (`waiting`: see `badgeOf`). */

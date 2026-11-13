@@ -22,7 +22,7 @@ pub(crate) fn remove(config: &ChromeControlConfig, state: &Path) -> Result<(), S
         .collect();
     // Removal also recognizes Edge installed before policy disabled its setup target.
     allowed.push(
-        super::places::edge_data_for(&home, config.is_macos())
+        super::places::edge_data_for(&home, config)
             .join("NativeMessagingHosts")
             .join(format!("{HOST_NAME}.json")),
     );

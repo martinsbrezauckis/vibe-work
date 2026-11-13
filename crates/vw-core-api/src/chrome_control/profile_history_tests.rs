@@ -496,3 +496,43 @@ async fn profile_off_revokes_evicted_leases_without_revoking_sibling_profiles() 
 async fn browser_off_revokes_evicted_leases_without_revoking_other_browsers() {
     off_fences_evicted_leases(true).await;
 }
+
+/// PREDICT (written before the fix): fails. After Settings > Browser removes the only Chrome profile's pairing, the
+/// extension is still on in Chrome, but the card takes the "lost connection" branch of a once-paired browser and says
+/// "Turn on in Chrome" with no button. Expected: "Not connected" with the Connect action, whose click lets Chrome ask
+/// for a new pairing (the native "Connect Chrome to Vibe Work?" approval).
+#[tokio::test]
+async fn removing_the_only_pairing_offers_connect_instead_of_turn_on() {
+    let core = fixture(
+        "profile-removed-card",
+        json!([{"profileId":"chrome:work","name":"Work","connected":true}]),
+    )
+    .await;
+    test_support::answering(&core.shared, |tool, _| match tool {
+        "owner.profileUnpair" => json!({"unpaired":true}),
+        _ => json!({"applied":true}),
+    });
+    core.chrome_control(
+        crate::Origin::Ui,
+        super::ChromeControlRequest::RemoveProfile {
+            profile_id: "chrome:work".into(),
+        },
+    )
+    .await
+    .unwrap();
+    // The helper still runs and the extension is still on, but it has no pairing any more: the once-paired browser
+    // reads as connecting (the state the Mac run showed as "Turn on in Chrome").
+    test_support::observe_status(&core.shared, &json!({"profiles":[]}));
+    let chrome = &core.shared.chrome_control;
+    assert!(Browser::Chrome.was_paired(&core.shared));
+    chrome.owner.pairing.lock().unwrap().0 = super::PairingState::Connecting;
+    let card = super::commands::addon(&core.shared);
+    assert_eq!(card.label, "Not connected", "{card:?}");
+    assert_eq!(
+        card.action,
+        Some(super::addon::AddonAction::Connect),
+        "{card:?}"
+    );
+    assert!(!card.instruction.contains("Turn on"), "{card:?}");
+    core.shutdown().await;
+}

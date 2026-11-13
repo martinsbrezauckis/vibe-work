@@ -294,7 +294,8 @@ pub async fn call(who: &(String, String), tool: &str, args: Value) -> Result<Val
     raw_call(who, tool, args).await
 }
 
-/// Completes hook policy before a test controls the tool's own wire connection.
+/// Completes hook policy before a test controls the tool's own wire connection, and reports the decision as Vibe
+/// would for a running call (debug builds only; the tool route refuses a decision no Vibe call carries).
 /// Subscribes before the request and waits for an actual registered ask, answering each card once.
 /// History can expose a card before its ask exists and can still report it open after an answer.
 pub async fn prepare_call(
@@ -337,8 +338,24 @@ pub async fn prepare_call(
                 }
             }
         };
+        // No model makes this call, so the fixture stands in for Vibe reporting it in the chat's running call.
+        if let Some(receipt) = args[wire::tools::RECEIPT_FIELD].as_str() {
+            assert!(core.announce_tool_call_for_fixture(receipt));
+        }
     }
     Ok(args)
+}
+
+/// Direct fixtures that call the hook route themselves: stands in for Vibe reporting the decision `decided` carries
+/// in its chat's running call (debug builds only), so the tool route accepts it. A repeated browser request's
+/// decision, already reported, is left as it is.
+pub fn announced(core: &Core, decided: Result<Value, String>) -> Result<Value, String> {
+    if let Ok(value) = &decided
+        && let Some(receipt) = value[wire::tools::RECEIPT_FIELD].as_str()
+    {
+        let _ = core.announce_tool_call_for_fixture(receipt);
+    }
+    decided
 }
 
 /// Sends a raw tool request for tests of credential and decision rejection.

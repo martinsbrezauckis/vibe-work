@@ -281,6 +281,7 @@ def install():
     install_restored_turn_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
     install_resumed_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
     install_macos_keychain_guard()  # noqa: F821 - launch.rs prepends vibe_keychain_guard.py
+    install_windows_credential_guard()  # noqa: F821 - launch.rs prepends vibe_keychain_guard.py
     install_bundled_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_plugin_enablement.py
     install_process_start_guard()
     install_process_tracking()  # noqa: F821 - launch.rs prepends vibe_process_tracking.py

@@ -313,7 +313,7 @@ Cargo normal dependency graphs
 - alloc-stdlib@0.3.0 — BSD-3-Clause; crates.io; linux,macos,windows
 - allocator-api2@0.2.21 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - ambient-authority@0.0.2 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; crates.io; linux,macos,windows
-- ammonia@4.2.4 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- ammonia@4.2.5 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - anstyle@1.0.14 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - anyhow@1.0.104 — MIT OR Apache-2.0; crates.io; linux,macos,windows
 - apple-native-keyring-store@1.0.2 — MIT OR Apache-2.0; crates.io; macos

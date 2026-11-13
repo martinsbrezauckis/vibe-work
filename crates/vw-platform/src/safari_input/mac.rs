@@ -28,6 +28,10 @@ struct Ticket {
     created: Instant,
 }
 static WORKER: OnceLock<mpsc::SyncSender<Request>> = OnceLock::new();
+/// Show the system Accessibility prompt when the app is untrusted (Safari pairing completion only).
+pub(super) fn request_accessibility() -> bool {
+    ax::request_accessibility()
+}
 pub(super) async fn request(
     stage: &str,
     prepared: Value,

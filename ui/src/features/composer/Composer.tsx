@@ -488,10 +488,12 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
             // Learnable by sight while a card waits.
             wording(TEXT.askWaitingHint, { shortcut: formatKeys(GO_TO_PROMPT_KEYS) })
           ) : isNew ? (
-            temporary && newFolder === null ? (
+            newFolder !== null ? (
+              "Enter to send: the chat starts in the folder above · Shift+Enter for a new line"
+            ) : temporary ? (
               "Enter to send: the chat starts in a folder of its own · Shift+Enter for a new line"
             ) : (
-              "Enter to send: the chat starts in the folder above · Shift+Enter for a new line"
+              "Enter to send: choose a folder above first · Shift+Enter for a new line"
             )
           ) : (
             <>

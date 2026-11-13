@@ -90,6 +90,36 @@ async fn questions_wait_until_skipped() {
     assert!(s.settle(&card.ask.id, outcome.clone()));
     assert_eq!(card.closed().await, outcome);
 }
+/// PREDICT: both held-browser results named "the person"; the agent-facing actor word is "the user", so the exact
+/// texts differ until they say "the user".
+#[test]
+fn a_held_browser_tells_the_agent_to_wait_for_the_user() {
+    let s = service();
+    let card = s.open(
+        "user_input",
+        Some("chat".into()),
+        AnsweredBy::Person,
+        vec![Choice::No],
+        None,
+    );
+    assert_eq!(
+        s.question_hold("chat"),
+        Some(
+            "Not run: this chat's browser is waiting for the user's answer. Let the user finish in the browser and answer the open question before continuing."
+        )
+    );
+    let skipped = Outcome::Cancelled {
+        reason: "the user skipped this question".into(),
+    };
+    assert!(s.settle(&card.ask.id, skipped));
+    assert_eq!(
+        s.question_hold("chat"),
+        Some(
+            "Not run: the browser remains handed back because the question was not answered. Wait for a new message from the user before using this chat's browser again."
+        )
+    );
+    assert_eq!(s.question_hold("other"), None);
+}
 #[tokio::test]
 async fn every_native_policy_and_both_card_kinds_leave_exactly_one_record() {
     let s = service();

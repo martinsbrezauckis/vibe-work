@@ -41,7 +41,9 @@ async fn removing_chrome_keeps_edge_setup_pairing_and_shared_owner() {
     #[cfg(windows)]
     assert_native_hosts(chrome, true, true);
     *chrome.owner.edge_pairing.lock().unwrap() = (PairingState::Paired, Some(OURS.into()));
-    chrome.owner.connected_profiles.observe(&json!({"profiles":[{"profileId":"chrome:p","connected":true},{"profileId":"edge:p","connected":true}]}));
+    let status = json!({"profiles":[{"profileId":"chrome:p","connected":true},{"profileId":"edge:p","connected":true}]});
+    chrome.owner.connected_profiles.observe(&status);
+    profiles::observe(chrome, &status);
     let edge_generation = chrome.browser_generation(agent_browser::Browser::Edge);
     rig.core
         .chrome_control(Origin::Ui, ChromeControlRequest::Remove {})
@@ -93,6 +95,9 @@ async fn removing_chrome_keeps_edge_setup_pairing_and_shared_owner() {
         "an old status reply cannot restore a removed pairing"
     );
     assert_eq!(chrome.owner.connected_profiles.snapshot().len(), 1);
+    // PREDICT: fails before the change. Removing Chrome left its identity in the inventory, so after Connect again
+    // it came back as an Offline Chrome profile next to the new pairing. It is removed with the browser.
+    assert_eq!(shown_profiles(&rig.core), ["edge:p"]);
     assert!(
         rig.calls
             .lock()
@@ -129,6 +134,13 @@ fn assert_native_hosts(chrome: &ChromeControl, chrome_present: bool, edge_presen
     }
 }
 
+fn shown_profiles(core: &crate::Core) -> Vec<String> {
+    profiles::view(&core.shared)
+        .into_iter()
+        .map(|row| row.profile_id)
+        .collect()
+}
+
 #[tokio::test]
 async fn removing_last_browser_cleans_shared_setup_after_owner_unpair() {
     let rig = Rig::new("remove-last-browser", |name, _| {
@@ -140,11 +152,18 @@ async fn removing_last_browser_cleans_shared_setup_after_owner_unpair() {
     })
     .await;
     let chrome = &rig.core.shared.chrome_control;
+    profiles::observe(
+        chrome,
+        &json!({"profiles":[{"profileId":"chrome:p","connected":true}]}),
+    );
     rig.core
         .chrome_control(Origin::Ui, ChromeControlRequest::Remove {})
         .await
         .unwrap();
     assert!(!chrome.dir().unwrap().exists());
+    // PREDICT: fails before the change. The deleted folder took the saved inventory, but the records stayed in
+    // memory and the next save wrote them back. Nothing of the removed inventory is kept.
+    assert!(chrome.profiles.lock().unwrap().records.is_empty());
     assert!(!chrome.owner.is_running());
     assert!(
         rig.calls

@@ -69,6 +69,11 @@ async fn restart_card_shows_and_retains_the_launch_command_folder_and_port() {
     )
     .unwrap();
     let mut args = job.await.unwrap().unwrap();
+    // Stands in for Vibe carrying the decision into its running call.
+    assert!(receipts::announce_for_fixture(
+        shared,
+        args["_vwReceipt"].as_str().unwrap()
+    ));
     assert!(
         receipts::take(shared, "s", "process_restart", &mut args)
             .unwrap()

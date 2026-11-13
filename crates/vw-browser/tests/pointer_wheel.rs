@@ -87,6 +87,15 @@ async fn a_cover_inserted_by_native_motion_cannot_receive_wheel_input() {
         .act(SESSION, action, Actor::User, &NoNavigation)
         .await
         .unwrap_err();
-    assert!(error.text.contains("blocked native input"), "{error:?}");
+    // Several guards can stop this, whichever sees the cover first: the native input block after the pointer moved
+    // (reported as failed after input was sent), or a check before dispatch that the node under the point is still
+    // the one that was read (refused). What must hold: the act ends unsuccessfully and no wheel event reaches the page.
+    assert!(
+        matches!(
+            error.outcome,
+            vw_browser::Outcome::Refused | vw_browser::Outcome::Failed
+        ),
+        "{error:?}"
+    );
     assert_eq!(rig.engine.eval("wheels").await, 0);
 }

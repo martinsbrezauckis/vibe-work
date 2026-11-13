@@ -343,7 +343,7 @@ pub struct PageAnswer {
     /// The element covering the target.
     #[serde(default)]
     pub covering: Option<Covering>,
-    /// Secret kind (`password`, `otp`, `card`).
+    /// Secret kind (`password`, `card`).
     #[serde(default)]
     pub kind: Option<String>,
     /// Options of a select box (when the option was not found).

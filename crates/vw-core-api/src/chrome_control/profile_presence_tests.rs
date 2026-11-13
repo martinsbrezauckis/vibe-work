@@ -167,7 +167,7 @@ async fn a_chat_bound_to_a_deleted_profile_keeps_the_row_and_names_the_next_step
     let error = super::profiles::check(chrome, ID).unwrap_err();
     assert_eq!(
         error,
-        "Chrome · Work was removed; no action ran. Choose another profile in this chat or reconnect this profile."
+        "Chrome · Work was removed; no action ran. Open the session again so the user can pick another profile, or ask the user to reconnect this profile."
     );
     let chat = super::profile_selection::view(chrome).unwrap();
     assert_eq!(chat[0].state, "removed");
@@ -222,5 +222,194 @@ async fn a_pending_browser_approval_keeps_a_deleted_profile_until_it_settles() {
     drop(held);
     status(&core.shared, false);
     assert_eq!(row(&core), None);
+    core.shutdown().await;
+}
+
+/// Chrome's own record of the extension in the proven folder, with the given `disable_reasons`.
+fn extension_record(folder: &Path, reasons: &serde_json::Value) {
+    let id = super::setup::EXTENSION_ID;
+    std::fs::write(
+        folder.join("Preferences"),
+        json!({"extensions":{"settings":{id:{"disable_reasons":reasons}}}}).to_string(),
+    )
+    .unwrap();
+}
+
+// PREDICT (red before the change): every offline Chrome/Edge row read only "Offline", whether the extension was
+// turned off in that profile or the profile simply had no window open, so the person could not tell what to do. The
+// reason now comes from Chrome's own record in that row's proven folder; with no proven folder or no readable record
+// the row stays a plain "Offline".
+#[tokio::test]
+async fn an_offline_row_says_whether_the_extension_is_off_or_no_window_is_open() {
+    let core = fixture("presence-offline-reason", json!([])).await;
+    let (_data, folder) = browser_data(&core, true);
+    status(&core.shared, true);
+    status(&core.shared, false);
+    assert_eq!(
+        row(&core).unwrap().reason,
+        None,
+        "no record read: plain Offline"
+    );
+    extension_record(&folder, &json!([1]));
+    let off = row(&core).unwrap();
+    assert_eq!(off.state, super::ProfileState::Offline);
+    assert_eq!(off.reason.as_deref(), Some("Extension off in this profile"));
+    extension_record(&folder, &json!([]));
+    assert_eq!(
+        row(&core).unwrap().reason.as_deref(),
+        Some("No window of this profile open")
+    );
+    let tools = std::mem::take(&mut *core.shared.chrome_control.owner.tools.lock().unwrap());
+    assert_eq!(
+        row(&core).unwrap().reason,
+        None,
+        "helper down: a window would not connect either"
+    );
+    *core.shared.chrome_control.owner.tools.lock().unwrap() = tools;
+    status(&core.shared, true);
+    assert_eq!(
+        row(&core).unwrap().reason,
+        None,
+        "a connected row has no reason"
+    );
+    core.shutdown().await;
+}
+
+// Chrome writes its preferences some seconds after the person turns the extension off, when the profile is already
+// offline and its row was published as "No window of this profile open". The next helper status must publish the new
+// reason (the status path compares the whole browser view), and an unchanged one publishes nothing.
+#[tokio::test]
+async fn a_later_preferences_write_republishes_the_offline_reason() {
+    let core = fixture("presence-offline-republish", json!([])).await;
+    let (_data, folder) = browser_data(&core, true);
+    extension_record(&folder, &json!([]));
+    status(&core.shared, true);
+    status(&core.shared, false);
+    status(&core.shared, false);
+    let mut events = core.shared.events.subscribe();
+    extension_record(&folder, &json!([1]));
+    status(&core.shared, false);
+    let mut published = None;
+    while let Ok(event) = events.try_recv() {
+        if let crate::CoreEvent::ChromeControl { view } = event {
+            published = view.paired_profiles.and_then(|rows| {
+                rows.into_iter()
+                    .find(|row| row.profile_id == ID)
+                    .and_then(|row| row.reason)
+            });
+        }
+    }
+    assert_eq!(published.as_deref(), Some("Extension off in this profile"));
+    status(&core.shared, false);
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .all(|event| !matches!(event, crate::CoreEvent::ChromeControl { .. })),
+        "an unchanged reason publishes nothing"
+    );
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): a paired Chrome whose profiles are all offline shows the reconnecting card, which
+// always said "Turn on in Chrome … click Re-enable", also when Chrome only shows its profile picker and the extension
+// is on in every paired profile. Once the browser's preferences would record an extension the person turned off
+// (15 s), a proven paired folder that says "on" means no window is open: the card says to open one, no Re-enable.
+#[tokio::test]
+async fn the_card_asks_for_a_window_not_re_enable_when_the_extension_is_on() {
+    let core = fixture("presence-card-window", json!([])).await;
+    let (_data, folder) = browser_data(&core, true);
+    extension_record(&folder, &json!([]));
+    status(&core.shared, true);
+    status(&core.shared, false);
+    let chrome = &core.shared.chrome_control;
+    let card = || super::commands::addon(&core.shared);
+    assert!(
+        !super::profile_reason::no_window(chrome, super::agent_browser::Browser::Chrome),
+        "inside the preferences delay nothing is known yet"
+    );
+    super::profile_reason::offline_for_test(
+        chrome,
+        super::agent_browser::Browser::Chrome,
+        super::profile_reason::PREFERENCES_DELAY,
+    );
+    assert!(super::profile_reason::no_window(
+        chrome,
+        super::agent_browser::Browser::Chrome
+    ));
+    assert_eq!(
+        card().state,
+        super::AddonState::ChromeClosed,
+        "a closed Chrome keeps its own card"
+    );
+    let mut view = super::addon::view(super::AddonState::Connecting, "");
+    super::addon::reconnecting(&mut view, true);
+    super::addon::window_closed_for(&mut view, super::agent_browser::Browser::Chrome);
+    assert_eq!(view.label, "Open a Chrome window");
+    assert!(
+        !view.instruction.contains("Re-enable"),
+        "{}",
+        view.instruction
+    );
+    assert!(
+        !view
+            .step
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Re-enable")
+    );
+    extension_record(&folder, &json!([1]));
+    assert!(
+        !super::profile_reason::no_window(chrome, super::agent_browser::Browser::Chrome),
+        "an extension that is off keeps the Turn on guidance"
+    );
+    status(&core.shared, true);
+    assert!(!super::profile_reason::no_window(
+        chrome,
+        super::agent_browser::Browser::Chrome
+    ));
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): macOS never reads a Chrome profile folder, so no folder could say the extension is
+// on, and a paired Chrome with no connected profile kept "Turn on in Chrome … click Re-enable" for good, also when
+// the extension was on and only waited for approval or had no window. After the preferences delay, with no folder
+// readable, the card names those two steps instead; Re-enable stays for an extension a folder shows to be off.
+#[tokio::test]
+async fn without_readable_profile_folders_the_card_asks_for_a_window_or_approval_not_re_enable() {
+    let core =
+        super::edge_agent_tests::fixture_with("presence-card-unreadable", json!([]), |config| {
+            config.macos = Some(true);
+        })
+        .await;
+    let (_data, folder) = browser_data(&core, true);
+    extension_record(&folder, &json!([]));
+    status(&core.shared, true);
+    status(&core.shared, false);
+    let chrome_browser = super::agent_browser::Browser::Chrome;
+    let card = || {
+        let mut view = super::addon::view(super::AddonState::Connecting, "");
+        super::profile_reason::reconnecting(&core.shared, &mut view, true, chrome_browser);
+        view
+    };
+    assert_eq!(
+        card().label,
+        "Turn on in Chrome",
+        "inside the preferences delay"
+    );
+    super::profile_reason::offline_for_test(
+        &core.shared.chrome_control,
+        chrome_browser,
+        super::profile_reason::PREFERENCES_DELAY,
+    );
+    let view = card();
+    assert_eq!(
+        view.step.as_deref(),
+        Some("Open a window of a paired Chrome profile, or approve it in Vibe Work.")
+    );
+    assert_eq!(view.label, "Open a Chrome window");
+    assert!(
+        !view.instruction.contains("Re-enable"),
+        "{}",
+        view.instruction
+    );
     core.shutdown().await;
 }

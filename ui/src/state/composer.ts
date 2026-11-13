@@ -95,6 +95,8 @@ export function createComposer(deps: {
   keyGuard?: () => string | null;
   /** Opens the Tools page (`/mcp`, `/connectors`); bound late by the app (connectors are made after the composer). */
   openTools?: () => void;
+  /** True for a Temporary chat; bound late by the app (session tools are made after the composer). */
+  isTemporary?: (sessionId: string) => boolean;
 }) {
   const { core } = deps;
   const composer = createComposerStore(deps.persist);

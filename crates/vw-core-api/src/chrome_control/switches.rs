@@ -116,6 +116,9 @@ pub(super) async fn synchronize(shared: &Shared, pipe: &mut super::pipe::Pipe) -
     }
 }
 
+/// What to do while another Vibe Work browser helper holds the connection (after "… setting saved.").
+pub(super) const OTHER_HELPER_STEP: &str = "Another Vibe Work browser helper is still running, so this one cannot start. Quit the other Vibe Work copy; if none is open, restart the computer. Vibe Work then connects by itself.";
+
 pub(super) async fn deliver(shared: &Arc<Shared>) -> Result<(), CoreError> {
     let chrome = &shared.chrome_control;
     if !chrome.owner.is_running() {
@@ -127,6 +130,13 @@ pub(super) async fn deliver(shared: &Arc<Shared>) -> Result<(), CoreError> {
         .await;
     if result.is_some_and(|value| value["applied"] == true) {
         return Ok(());
+    }
+    if chrome.owner.helper_conflict.load(Ordering::SeqCst) {
+        // No helper of this app runs, so none can act on a stale setting; every new connection receives the saved
+        // setting before it serves (`synchronize`). Keep the owner retrying: it connects once the other helper ends.
+        return Err(super::commands::invalid(&format!(
+            "Browser setting saved. {OTHER_HELPER_STEP}"
+        )));
     }
     // An unacknowledged switch cannot leave an old helper executing with stale availability.
     super::stop_owner(shared).await;
@@ -205,6 +215,7 @@ impl Core {
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
+            hint: None,
         })
     }
 }

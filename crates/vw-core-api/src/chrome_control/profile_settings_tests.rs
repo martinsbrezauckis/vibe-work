@@ -36,12 +36,13 @@ async fn settings_keep_named_profiles_separate_with_persisted_names_and_defaults
         rows.iter().filter(|row| row["browser"] == "chrome").count(),
         2
     );
-    command(
-        &core,
-        json!({"op":"renameProfile","profileId":"chrome:work","name":"Business"}),
-    )
-    .await
-    .unwrap();
+    // Names come from the browser only: there is no rename command any more.
+    assert!(
+        serde_json::from_value::<crate::Command>(json!({"type":"chromeControl","request":
+            {"op":"renameProfile","profileId":"chrome:work","name":"Business"}}))
+        .is_err(),
+        "a rename request does not decode"
+    );
     command(
         &core,
         json!({"op":"setDefaultProfile","profileId":"chrome:work"}),
@@ -55,10 +56,14 @@ async fn settings_keep_named_profiles_separate_with_persisted_names_and_defaults
         .iter()
         .find(|row| row["profileId"] == "chrome:work")
         .unwrap();
-    assert_eq!(work["name"], "Business");
+    let before = rows
+        .iter()
+        .find(|row| row["profileId"] == "chrome:work")
+        .unwrap();
+    assert_eq!(work["name"], before["name"]);
     assert_eq!(work["isDefault"], true);
     let loaded = super::profiles::Profiles::load(core.shared.chrome_control.dir());
-    assert_eq!(loaded.name("chrome:work"), "Business");
+    assert_eq!(json!(loaded.name("chrome:work")), work["name"]);
     assert_eq!(
         loaded.defaults.get("chrome").map(String::as_str),
         Some("chrome:work")
@@ -69,6 +74,53 @@ async fn settings_keep_named_profiles_separate_with_persisted_names_and_defaults
         view["pairedProfiles"].as_array().unwrap().len(),
         3,
         "offline identities stay visible"
+    );
+    core.shutdown().await;
+}
+
+/// "Ask in each chat" in Settings clears this browser's default; the other browser's default stays.
+///
+/// PREDICT (written before the change): fails. The request has no `clearDefaultProfile` op, so the command does not
+/// decode (`unwrap` on `from_value` panics) and once a default is set nothing returns the browser to asking.
+#[tokio::test]
+async fn ask_in_each_chat_clears_only_this_browsers_default() {
+    let core = fixture(
+        "profile-settings-clear-default",
+        json!([
+            {"profileId":"chrome:work","name":"Work","connected":true},
+            {"profileId":"chrome:personal","name":"Personal","connected":true},
+            {"profileId":"edge:work","name":"Work","connected":true}
+        ]),
+    )
+    .await;
+    for id in ["chrome:work", "edge:work"] {
+        command(&core, json!({"op":"setDefaultProfile","profileId":id}))
+            .await
+            .unwrap();
+    }
+    command(
+        &core,
+        json!({"op":"clearDefaultProfile","profileId":"chrome:work"}),
+    )
+    .await
+    .unwrap();
+    let view = serde_json::to_value(super::commands::view(&core.shared)).unwrap();
+    let default_of = |id: &str| {
+        view["pairedProfiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["profileId"] == id)
+            .unwrap()["isDefault"]
+            .clone()
+    };
+    assert_eq!(default_of("chrome:work"), false);
+    assert_eq!(default_of("edge:work"), true);
+    let loaded = super::profiles::Profiles::load(core.shared.chrome_control.dir());
+    assert_eq!(loaded.defaults.get("chrome"), None);
+    assert_eq!(
+        loaded.defaults.get("edge").map(String::as_str),
+        Some("edge:work")
     );
     core.shutdown().await;
 }

@@ -484,6 +484,8 @@ impl Pump {
                         );
                     }
                 }
+                // Before any projection changes the entry: the receipt as Vibe reported it on this channel.
+                crate::ask::tool_calls::receipts::observe(&shared, item.key, &n.method, &n.params);
                 crate::agent_tools::shell_commands::project(&shared, &mut n.params);
                 #[cfg(feature = "video")]
                 crate::video_projection::apply(&shared, &mut n.params);

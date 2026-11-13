@@ -4,6 +4,16 @@ import { SettingsRow, Switch } from "../../components/Controls";
 import type { BrowserRequest, ComposerBrowser } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
+import { TEXT } from "../../vocabulary";
+
+/** The card each switch sits in; screen readers hear it with the switch, since every card has one. */
+const cardNames: Record<ComposerBrowser, string> = {
+  Builtin: "Vibe Work browser",
+  Chrome: TEXT.chromeName,
+  Edge: TEXT.edgeName,
+  Safari: TEXT.safariName,
+  Firefox: TEXT.firefoxName,
+};
 
 export function BrowserComposerSettings({ browser }: { browser: ComposerBrowser }) {
   const app = useApp();
@@ -44,7 +54,7 @@ export function BrowserComposerSettings({ browser }: { browser: ComposerBrowser 
         <span>Show in composer</span>
         <Switch
           data-testid={`settings.${prefix}-composer`}
-          aria-label="Show in composer"
+          aria-label={`Show in composer: ${cardNames[browser]}`}
           aria-checked={prefs?.shown.includes(browser) ?? true}
           disabled={busy || view == null}
           onClick={() => {

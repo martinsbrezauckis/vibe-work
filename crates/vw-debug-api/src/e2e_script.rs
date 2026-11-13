@@ -1,6 +1,8 @@
 //! Test builds only: the in-page channel the end-to-end runs use where no WebDriver exists (macOS:
 //! WKWebView has none). `POST /e2e/script` evaluates a script in the main webview and answers its JSON result;
-//! `GET /e2e/windows` lists the app's webview windows (what WebDriver calls window handles). The private e2e
+//! `GET /e2e/windows` lists the app's webview windows (what WebDriver calls window handles); `POST /e2e/tool-call`
+//! stands in for Vibe's report of a running tool call, for e2e groups that call the hook and the tool route
+//! themselves without a model (`Core::announce_tool_call_for_fixture`). The private e2e
 //! suite's direct driver builds the WebDriver subset its checks use on top of these two routes, `GET /screenshot`
 //! and `POST /window`.
 //!
@@ -95,6 +97,7 @@ pub(crate) fn router() -> Router<ApiState> {
     Router::new()
         .route("/e2e/script", post(script))
         .route("/e2e/windows", get(windows))
+        .route("/e2e/tool-call", post(tool_call))
 }
 
 fn no_window() -> Response {
@@ -143,6 +146,22 @@ async fn script(State(state): State<ApiState>, headers: HeaderMap, body: Bytes) 
 /// The error text an [`crate::AppWindow::script`] implementation returns when the engine did not answer in time;
 /// the route answers it as `504 scriptTimeout`.
 pub const TIMEOUT: &str = "the page did not answer the script within 30 s";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolCallRequest {
+    receipt: String,
+}
+
+/// Marks the live tool decision `receipt` as carried by Vibe into a running call of its own chat. Answers
+/// `{"marked": bool}` (false: unknown, already used or already reported).
+async fn tool_call(State(state): State<ApiState>, headers: HeaderMap, body: Bytes) -> Response {
+    let request: ToolCallRequest = match decode(&headers, &body) {
+        Ok(r) => r,
+        Err(refusal) => return *refusal,
+    };
+    ok(&json!({ "marked": state.core.announce_tool_call_for_fixture(&request.receipt) }))
+}
 
 async fn windows(State(state): State<ApiState>) -> Response {
     let Some(app) = state.window.clone() else {
