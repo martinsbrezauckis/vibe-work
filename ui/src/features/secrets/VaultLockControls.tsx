@@ -10,7 +10,9 @@ import { term, TEXT } from "../../vocabulary";
 import { useKeyUi } from "../setup/useKeys";
 import { useVaultAccess } from "./useVaultAccess";
 
+/** What `VaultLockControls` toggles: agent access to the vault (pause and resume), or the vault lock itself. */
 export type VaultLockMode = "agent" | "vault";
+/** How `VaultLockControls` renders: an icon button, a status-bar button with the state text, or a labelled button. */
 export type VaultLockDisplay = "icon" | "status" | "button";
 
 /** Direct action; its label, icon and tooltip always describe the current state and click. */

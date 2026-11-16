@@ -5,8 +5,25 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// Core-only preflight marker; execution receives it only after consent. Never deserialized from tool input.
+/// The second field records that the person answered a card naming a form send (see [`names_send`]).
 #[derive(Clone, Copy)]
-pub(crate) struct Consent(pub(super) vw_ask::chrome::Tier);
+pub(crate) struct Consent(pub(super) vw_ask::chrome::Tier, pub(super) bool);
+
+impl Consent {
+    /// Whether this consent covers sending a form for this exact call: a card named the send, or the call's own
+    /// card wording does.
+    pub(super) fn sends(self, args: &Value) -> bool {
+        self.1 || names_send(args)
+    }
+}
+
+/// A write card whose own words name a form send: "Submit a form", "Accept a dialog", "Type … and submit it".
+/// Any other write card ("Drag an element", "Press Enter", "Type into a field") approves that input only; a send
+/// it causes is blocked by the helper before dispatch and asks again with the send's own card.
+pub(super) fn names_send(args: &Value) -> bool {
+    super::mapping::capability("chrome_execute", args) == Some("page.commit")
+        || args["action"] == "page.type" && args["args"]["submit"] == true
+}
 
 pub(crate) fn personal_read(tool: &str, args: &Value) -> bool {
     tool == "chrome_execute"
@@ -32,12 +49,14 @@ pub(crate) async fn prepare(
     call: &str,
     args: Value,
 ) -> Result<tool_calls::receipts::Execution, String> {
-    super::gateway::validate_execute_args(&args)?;
+    let browser = super::agent_browser::selected(shared, owner, "chrome_execute", &args);
+    super::gateway::validate_execute_args(&args, browser)?;
     // Check availability, chat ownership and the current mode before opening any card.
-    let consent =
-        Consent(super::mapping::ask_required("chrome_execute", &args).ok_or(
-            "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
-        )?);
+    let consent = Consent(
+        super::mapping::ask_required("chrome_execute", &args)
+            .ok_or_else(|| super::browser_text::Fixed::UnknownAction.text(browser))?,
+        false,
+    );
     super::check::authorize_read(shared, owner, "chrome_execute", &args, Some(&consent))?;
     super::gateway::validate_session(shared, owner, "chrome_execute", &args)?;
     let detail = json!({"kind":"approval","vwBrowserTier":consent.0 as u8,"effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]});

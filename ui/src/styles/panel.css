@@ -94,7 +94,7 @@
 }
 .empty {
   color: var(--text-3);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   padding: 30px 6px;
   text-align: center;
 }

@@ -23,8 +23,9 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tokio::sync::watch;
 use tracing::info;
@@ -118,6 +119,9 @@ pub(crate) struct State {
     pub(crate) cancel: Option<watch::Sender<bool>>,
     /// After a failed start: the server and the `installed` phase a retry starts again ([`VibeInstaller::retry_start`]).
     pub(crate) start_again: Option<(PathBuf, InstallPhase)>,
+    /// The server output of the start that is failing now ([`InstallManager::note_start_output`]): the failed
+    /// view's output tail, so Details shows why Vibe did not start.
+    pub(crate) start_output: String,
     /// The Vibe update install.
     pub(crate) update: VibeUpdatePhase,
     /// The last manifest check's result.
@@ -131,6 +135,8 @@ pub(crate) struct State {
     pub(crate) extension_store: Option<crate::support::ExtensionStore>,
     /// The oldest Chrome extension version the last accepted manifest accepts (same record and rules).
     pub(crate) extension_min_version: Option<String>,
+    /// A runtime refresh is running ([`crate::refresh`]).
+    pub(crate) refreshing: bool,
 }
 
 pub(crate) struct Inner {
@@ -205,6 +211,7 @@ impl VibeInstaller {
             replacing: None,
             cancel: None,
             start_again: None,
+            start_output: String::new(),
             update: VibeUpdatePhase::Idle {},
             support: crate::update::SupportState::default(),
             deferred_support: None,
@@ -212,6 +219,7 @@ impl VibeInstaller {
             extension_store: crate::extension_store::load(&config.root),
             extension_min_version: crate::extension_store::load_record(&config.root)
                 .and_then(|c| c.min_version),
+            refreshing: false,
         };
         let view = watch::Sender::new(snapshot(&pinned, &state));
         Self {
@@ -228,11 +236,7 @@ impl VibeInstaller {
 
     /// Sets the hook that starts Vibe once it is installed (or chosen).
     pub fn set_on_ready(&self, hook: OnReady) {
-        *self
-            .inner
-            .on_ready
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(hook);
+        *self.inner.on_ready.lock_or_recover() = Some(hook);
     }
 
     /// The server to start now, if Vibe is installed or an existing install was chosen.
@@ -348,9 +352,10 @@ impl VibeInstaller {
         Ok(())
     }
 
-    /// The first start of the installed Vibe at app start failed (`error` says why): the view shows a failed start, and
-    /// Try again ([`Self::retry_start`]) starts the same server again. Nothing happens unless Vibe is installed.
-    pub fn start_failed(&self, error: String) {
+    /// The first start of the installed Vibe at app start failed (`error` says why, `output_tail` is the server's last
+    /// output): the view shows a failed start with that output in its Details, and Try again ([`Self::retry_start`])
+    /// starts the same server again. Nothing happens unless Vibe is installed.
+    pub fn start_failed(&self, error: String, output_tail: String) {
         let mut state = self.inner.lock();
         let InstallPhase::Installed { server, .. } = &state.phase else {
             return;
@@ -358,13 +363,18 @@ impl VibeInstaller {
         let server = PathBuf::from(server);
         let failed = InstallPhase::Failed {
             step: crate::run::START_STEP.to_owned(),
-            kind: FailKind::Start,
+            kind: FailKind::for_start(&error),
             error,
-            output_tail: String::new(),
+            output_tail,
         };
         let installed = std::mem::replace(&mut state.phase, failed);
         state.start_again = Some((server, installed));
         self.inner.publish(&state);
+    }
+
+    /// The server output of a start the ready hook is about to report as failed: the failed view shows it in Details.
+    pub fn note_start_output(&self, output_tail: String) {
+        self.inner.lock().start_output = output_tail;
     }
 
     /// Try again after a failed start: the install is complete (or the chosen existing install is there), so only
@@ -378,7 +388,7 @@ impl VibeInstaller {
             if !matches!(
                 state.phase,
                 InstallPhase::Failed {
-                    kind: FailKind::Start,
+                    kind: FailKind::Start | FailKind::Unsupported,
                     ..
                 }
             ) {
@@ -531,7 +541,7 @@ impl VibeInstaller {
 
 impl Inner {
     pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     pub(crate) fn publish(&self, state: &State) {
@@ -539,10 +549,7 @@ impl Inner {
     }
 
     pub(crate) fn on_ready(&self) -> Option<OnReady> {
-        self.on_ready
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.on_ready.lock_or_recover().clone()
     }
 }
 
@@ -570,7 +577,8 @@ fn snapshot(pinned: &str, state: &State) -> InstallView {
 
 /// The private install that runs at start: a finished update named by `active.json` when it is not
 /// older than the pin, else the pinned install. The folder of any other version is removed then (the update it
-/// was replaced by is the one starting; or a newer pin replaced an older update).
+/// was replaced by is the one starting; or a newer pin replaced an older update), and so is any venv of the chosen
+/// version that `installed.json` does not name.
 fn current_private(pinned: &Layout) -> Option<Installed> {
     let root = &pinned.root;
     let updated = crate::layout::active_version(root)
@@ -582,6 +590,10 @@ fn current_private(pinned: &Layout) -> Option<Installed> {
         .and_then(|l| l.installed());
     let chosen = updated.or_else(|| pinned.installed())?;
     crate::layout::remove_other_versions(root, &chosen.version);
+    // The venv a runtime refresh replaced (or an interrupted refresh's) goes before any server starts from here.
+    if let Some(layout) = Layout::new(root.clone(), &chosen.version) {
+        layout.remove_other_venvs();
+    }
     Some(chosen)
 }
 

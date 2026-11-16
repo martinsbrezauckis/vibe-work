@@ -1,6 +1,6 @@
 //! Windows and macOS scan: IP Helper listener-only tables on Windows, `listeners` on macOS; `sysinfo` for the
 //! process table (command line, cwd, parent, owner), and `vw-platform::process` for what `sysinfo` lacks or
-//! rounds: the precise start token, and on macOS the process group and owner uid.
+//! rounds: the precise start token, and on macOS the process group, POSIX session and owner uid.
 //!
 //! Depends on: listeners 0.6.1 (macOS), sysinfo 0.38.4, vw-platform (TCP tables and identity), `types`. Called by:
 //! `os::snapshot`, `os::is_alive`. Native execution requires Windows/macOS; the Windows table decoder
@@ -26,6 +26,37 @@ use crate::types::{ProcessInfo, ProcessRef, SelfInfo, Snapshot, SocketListener, 
 pub(crate) fn is_alive(process: ProcessRef) -> bool {
     vw_platform::process_facts(process.pid)
         .is_some_and(|f| f.start_token == process.start.0 && !f.zombie)
+}
+
+/// See `os::port_held_by`: the pids of the port's listeners from the socket table (no process table), each one
+/// of `processes`.
+pub(crate) fn port_held_by(port: u16, processes: &[ProcessRef]) -> bool {
+    #[cfg(target_os = "macos")]
+    let holders: Option<Vec<u32>> = listeners::get_all().ok().map(|all| {
+        all.into_iter()
+            .filter(|l| {
+                l.protocol == Protocol::TCP
+                    && l.state == SocketState::Listen
+                    && l.socket.port() == port
+            })
+            .map(|l| l.process.pid)
+            .collect()
+    });
+    #[cfg(windows)]
+    let holders: Option<Vec<u32>> = vw_platform::windows_tcp_listeners().ok().map(|all| {
+        all.into_iter()
+            .filter(|l| l.port == port)
+            .map(|l| l.pid)
+            .collect()
+    });
+    // Identity checked after the table was read: a pid reused meanwhile has another start token.
+    holders.is_some_and(|holders| {
+        !holders.is_empty()
+            && holders
+                .iter()
+                .all(|pid| processes.iter().any(|p| p.pid == *pid))
+    }) && !processes.is_empty()
+        && processes.iter().all(|p| is_alive(*p))
 }
 
 /// One full scan.
@@ -91,6 +122,7 @@ pub(crate) fn snapshot() -> Result<Snapshot, ScanError> {
                 pid,
                 ppid: process.parent().map(Pid::as_u32),
                 pgid: facts.and_then(|f| f.pgid),
+                sid: session_of(pid),
                 start: facts.map(|f| StartToken(f.start_token)),
                 same_user,
                 name: process.name().to_string_lossy().into_owned(),
@@ -133,4 +165,19 @@ fn command_line(pid: u32, process: &sysinfo::Process) -> Vec<String> {
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect()
+}
+
+/// The POSIX session of `pid` (macOS answers for any process, as Linux does; Windows has none). A process can
+/// leave its session but never join another, so this is the attribution fact a chat's terminal shell leads.
+fn session_of(pid: u32) -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    return i32::try_from(pid)
+        .ok()
+        .and_then(|pid| nix::unistd::getsid(Some(nix::unistd::Pid::from_raw(pid))).ok())
+        .and_then(|sid| u32::try_from(sid.as_raw()).ok());
+    #[cfg(not(target_os = "macos"))]
+    return {
+        let _ = pid;
+        None
+    };
 }

@@ -650,3 +650,77 @@ async fn open_pairing_page_returns_the_toolbar_hint_as_guidance_only_when_the_no
     assert!(without.get("hint").is_none(), "{without}");
     core.shutdown().await;
 }
+
+// Open pairing page wakes an idle extension before it sends the notice.
+// PREDICT (before the fix): `wake_first` and `wake_page` do not exist, so this does not compile. Natively, with Safari
+// running and the extension page idle, Open pairing page only brought Safari forward: the notice was dropped and the
+// person saw no pairing page. Loading any page in Safari runs the extension's page again (it listens to tab updates).
+#[test]
+fn an_idle_extension_is_woken_by_a_local_page_before_the_pairing_notice() {
+    use super::safari::{wake_first, wake_page};
+    let now = std::time::Instant::now();
+    let ago = |seconds| now.checked_sub(std::time::Duration::from_secs(seconds));
+    assert!(
+        !wake_first(true, None, now),
+        "a launch runs the page by itself"
+    );
+    assert!(
+        !wake_first(false, ago(3), now),
+        "the page reported just now"
+    );
+    assert!(
+        wake_first(false, None, now),
+        "no report since this app started"
+    );
+    assert!(wake_first(false, ago(25), now), "the page has been idle");
+    let dir = tempfile::tempdir().unwrap();
+    let page = wake_page(&dir.path().join("ChromeControl")).unwrap();
+    assert!(page.starts_with(dir.path()), "{page:?}");
+    assert_eq!(page.extension().and_then(|e| e.to_str()), Some("html"));
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(text.contains("pairing page"), "{text}");
+    assert!(
+        !text.to_lowercase().contains("<script"),
+        "static text only: {text}"
+    );
+    assert!(text.contains("default-src 'none'"), "{text}");
+    // Written again on each use: a changed file never survives into the next wake.
+    std::fs::write(&page, "changed").unwrap();
+    assert_eq!(wake_page(&dir.path().join("ChromeControl")).unwrap(), page);
+    assert_eq!(std::fs::read_to_string(&page).unwrap(), text);
+}
+
+// A paired Safari that stops answering (for example while a page's "Leave page?" sheet holds it) is not unpaired.
+// PREDICT (before the fix): `diagnose` has no input for the extension's last pairing report, so this does not compile;
+// natively, with no connected Safari profile the view was `NotPaired` and told the agent to have the user pair again,
+// although the extension's last report was `paired`.
+#[test]
+fn a_paired_safari_that_goes_silent_is_shown_as_not_connected_not_unpaired() {
+    let silent = safari::diagnose(true, true, None, true);
+    assert_eq!(silent.state, AddonState::NotConnected);
+    assert!(
+        silent.instruction.contains("sheet"),
+        "{}",
+        silent.instruction
+    );
+    assert!(
+        !silent.instruction.contains("Pair") && !silent.instruction.contains("pairing page"),
+        "no advice to pair again: {}",
+        silent.instruction
+    );
+    // An extension that waits for pairing, or one never heard from, is still shown as not paired.
+    assert_eq!(
+        safari::diagnose(true, true, None, false).state,
+        AddonState::NotPaired
+    );
+    // A connected or switched-off Safari is unchanged.
+    let version = Some(crate::version().to_owned());
+    assert_eq!(
+        safari::diagnose(true, true, version, true).state,
+        AddonState::Connected
+    );
+    assert_eq!(
+        safari::diagnose(true, false, None, true).state,
+        AddonState::SwitchedOff
+    );
+}

@@ -16,7 +16,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +31,7 @@ mod rename;
 static RECORDS_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_records() -> MutexGuard<'static, ()> {
-    RECORDS_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    RECORDS_LOCK.lock_or_recover()
 }
 
 /// What the user decided about a copy at the end of its session.

@@ -405,3 +405,58 @@ fn missing_link_privilege_fails_a_required_gate() {
         true
     ));
 }
+
+// PREDICT (red before `overlaps`): only `excludes` existed, which answers for a path INSIDE a protected root, so the
+// vault's container (`Vibe Work Vault`, beside the app data on every OS) and every folder above it passed a whole-folder
+// check. Runs on each OS with that OS's own path shape (drive letters and letter case on Windows).
+#[test]
+fn a_folder_holding_the_vault_or_app_data_overlaps_but_a_sibling_does_not() {
+    let (root, policy, _) = fixture("overlaps");
+    let vault = vw_vault::private_location::private_vault_dir(&root.join("app-data")).unwrap();
+    let container = vault.parent().unwrap();
+    for folder in [
+        container.to_path_buf(),
+        root.clone(),
+        vault.join("local-vault-server"),
+        root.join("app-data"),
+        root.join("selected"),
+    ] {
+        assert!(
+            policy.overlaps(&folder),
+            "{} was not refused",
+            folder.display()
+        );
+    }
+    #[cfg(windows)]
+    {
+        let shouted = PathBuf::from(container.to_string_lossy().to_uppercase());
+        assert!(policy.overlaps(&shouted), "{}", shouted.display());
+    }
+    let library = root.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    assert!(!policy.overlaps(&library), "a sibling folder was refused");
+    assert!(
+        !policy.excludes(container),
+        "a file read beside the vault is not refused by this rule"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+// The agent's folder guard names the vault's folder itself (its binary does not link the vault): it must be the
+// same folder the vault is created in, for each OS's app data spelling.
+#[test]
+fn the_folder_guard_reserves_the_same_vault_folder_the_vault_uses() {
+    let (root, _, _) = fixture("guard-vault");
+    for data in [
+        root.join("AppData/Roaming/app.vibework.desktop"),
+        root.join("Library/Application Support/app.vibework.desktop"),
+        root.join(".local/share/app.vibework.desktop"),
+    ] {
+        let vault = vw_vault::private_location::private_vault_dir(&data).unwrap();
+        assert_eq!(
+            vw_agent_tools::folders::private_vault_container(&data).as_deref(),
+            vault.parent()
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

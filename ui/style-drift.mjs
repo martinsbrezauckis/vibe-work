@@ -7,14 +7,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import {
-  rawClasses,
-  rawExpressions,
-  bareControls,
-  passiveClasses,
-  nativeSelectors,
-  optionLists,
-} from "./style-exceptions.js";
+import * as styleExceptions from "./style-exceptions.js";
 
 const uiRoot = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = join(uiRoot, "src");
@@ -107,7 +100,17 @@ function inspectInlineStyle(expression, report, tree) {
   return true;
 }
 
-function scanTsx(file, source, scopeName) {
+/**
+ * Scans one feature module. `tables` is the exception table (style-exceptions.js); every entry that lets a node
+ * through is added to `used` as `table|file|entry`, so a full scan can name the entries nothing needs any more.
+ */
+function scanTsx(file, source, scopeName, tables, used) {
+  const { rawClasses, rawExpressions, bareControls, passiveClasses, optionLists } = tables;
+  const mark = (table, entries) => {
+    for (const entry of entries) {
+      if (tables[table].get(scopeName)?.has(entry)) used.add(`${table}|${scopeName}|${entry}`);
+    }
+  };
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const findings = [];
   function report(node, message) {
@@ -130,18 +133,21 @@ function scanTsx(file, source, scopeName) {
       const expression = classAttribute?.initializer?.getText(tree).replace(/\s+/g, " ");
       const exactExpression =
         expression !== undefined && rawExpressions.get(scopeName)?.has(expression);
-      if (
-        tag === "select" &&
-        !classValues(hook)?.every((id) => nativeSelectors.get(scopeName)?.has(id))
-      )
-        report(node, "raw <select> needs the shared Selector component");
+      if (tag === "select") report(node, "raw <select> needs the shared Selector component");
       const typeAttribute = node.attributes.properties.find((a) => a.name?.text === "type");
       const optionList = classValues(hook)?.every((id) => optionLists.get(scopeName)?.has(id));
-      if (
-        tag === "Segmented" ||
-        (tag === "input" && classValues(typeAttribute)?.includes("radio") && !optionList)
-      )
+      const radio = tag === "input" && classValues(typeAttribute)?.includes("radio");
+      if (radio && optionList) mark("optionLists", classValues(hook));
+      if (tag === "Segmented" || (radio && !optionList))
         report(node, "pick-one controls need the shared Selector component");
+      if ((tag === "button" || tag === "a") && bare) mark("bareControls", classValues(hook));
+      if ((tag === "button" || tag === "a") && exactExpression)
+        mark("rawExpressions", [expression]);
+      if ((tag === "button" || tag === "a") && classes !== null)
+        mark(
+          "rawClasses",
+          classes.flatMap((entry) => entry.split(/\s+/)),
+        );
       if ((tag === "button" || tag === "a") && !bare && !exactExpression) {
         if (
           classes === null ||
@@ -158,6 +164,11 @@ function scanTsx(file, source, scopeName) {
             `<${tag}> needs Button, IconButton, Selector, or an exact navigation/disclosure exception`,
           );
       }
+      if (tag === "span" && classes !== null)
+        mark(
+          "passiveClasses",
+          classes.flatMap((entry) => entry.split(/\s+/)),
+        );
       if (
         tag === "span" &&
         classes?.some((entry) =>
@@ -295,10 +306,16 @@ function componentImports(file, source) {
   return imports;
 }
 
-/** Scan every feature JSX module and stylesheet, plus local imports. */
+/**
+ * Scan every feature JSX module and stylesheet, plus local imports. A full scan (no `files`) also reports every
+ * exception entry that no control needs any more, so the table only lists live exceptions.
+ * `exceptions` replaces the table from style-exceptions.js; `reportUnused` forces or skips the unused report.
+ */
 export function checkStyleDrift(options = {}) {
   const read = options.read ?? ((path) => readFileSync(path, "utf8"));
   const files = options.files ?? filesWithExtension(featureRoot, ".tsx");
+  const tables = options.exceptions ?? styleExceptions;
+  const used = new Set();
   const cssFiles =
     options.cssFiles ??
     filesWithExtension(sourceRoot, ".css").filter((file) => file !== join(styleRoot, "tokens.css"));
@@ -314,7 +331,9 @@ export function checkStyleDrift(options = {}) {
     const source = read(file);
     const name = relative(featureRoot, file).replaceAll("\\", "/");
     // Findings name files with `/` on every OS (as `name` and the unused-class report do), so Windows output matches.
-    findings.push(...scanTsx(relative(uiRoot, file).replaceAll("\\", "/"), source, name));
+    findings.push(
+      ...scanTsx(relative(uiRoot, file).replaceAll("\\", "/"), source, name, tables, used),
+    );
     if (options.followImports !== false) {
       // Shell entry files are complete as a group. Cross-feature children belong to their own screens.
       if (!name.startsWith("shell/")) pending.push(...componentImports(file, source));
@@ -329,6 +348,19 @@ export function checkStyleDrift(options = {}) {
     const source = read(file);
     findings.push(...scanCss(relative(uiRoot, file).replaceAll("\\", "/"), source));
     if (options.cssFiles === undefined) stylePending.push(...localCssImports(file, source));
+  }
+  if (options.reportUnused ?? options.files === undefined) {
+    for (const [table, byFile] of Object.entries(tables)) {
+      if (!(byFile instanceof Map)) continue;
+      for (const [scope, entries] of byFile) {
+        for (const entry of entries) {
+          if (!used.has(`${table}|${scope}|${entry}`))
+            findings.push(
+              `style-exceptions.js: ${table} ${scope} ${JSON.stringify(entry)} is not used; remove it`,
+            );
+        }
+      }
+    }
   }
   return findings.sort();
 }

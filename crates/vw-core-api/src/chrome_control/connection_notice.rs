@@ -5,8 +5,9 @@ use crate::{Core, core::Shared};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 pub(super) struct Waiting(Mutex<HashMap<String, Notice>>);
@@ -37,6 +38,12 @@ pub(super) fn refused(shared: &Shared, session: &str, browser: Browser, answer: 
     {
         return;
     }
+    // Only a real reconnect is announced: a browser that is connected now has nothing to reconnect.
+    if super::availability::live(shared, browser)
+        && browser.addon(shared).state == AddonState::Connected
+    {
+        return;
+    }
     let Some(turn) = turn(shared, session) else {
         return;
     };
@@ -46,8 +53,7 @@ pub(super) fn refused(shared: &Shared, session: &str, browser: Browser, answer: 
         .owner
         .connection_waiting
         .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(
             session.into(),
             Notice {
@@ -65,8 +71,7 @@ pub(super) fn take(shared: &Shared) -> Vec<Notice> {
         .owner
         .connection_waiting
         .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+        .lock_or_recover();
     let mut ready = Vec::new();
     let mut remaining = HashMap::new();
     for (session, notice) in waiting.drain() {

@@ -10,6 +10,7 @@ import type { InstallProgress, MarketEntryView, MarketView, ServerView } from ".
 /** The filter chips. */
 export type MarketFilter = "all" | "installed" | "updates";
 
+/** The Marketplace filter chips in display order, each with its label. */
 export const MARKET_FILTERS: readonly { id: MarketFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "installed", label: "Installed" },

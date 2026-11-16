@@ -10,17 +10,12 @@
  * Invariants: bodies are validated (`invalidParams`); `sessionId` is the shown session.
  */
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { commentAction, commentsState } from "./commentRoutes";
 import type { LineComments } from "./lineComments";
 import { fileNote, hasChanges, historyOfferShown, shownFile, fileTurnText } from "./model";
 import type { Changes } from "./store";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** Registers `ui/changes`; returns the function that removes it. */
 export function registerChangesRoute(
@@ -80,7 +75,7 @@ export function registerChangesRoute(
     };
   };
   return app.uiControl.register("changes", async (body) => {
-    const { action, path, layout } = asObject(body);
+    const { action, path, layout } = bodyObject(body);
     const sessionId = app.shell.store.get().selected;
     switch (action ?? "state") {
       case "state":
@@ -105,7 +100,7 @@ export function registerChangesRoute(
       case "sendComments":
         if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");
         await comments.load(sessionId);
-        await commentAction(String(action), asObject(body), { changes, comments, sessionId });
+        await commentAction(String(action), bodyObject(body), { changes, comments, sessionId });
         return state();
       default:
         throw new UiControlError(

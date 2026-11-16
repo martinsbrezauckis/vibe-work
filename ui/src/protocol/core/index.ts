@@ -21,7 +21,8 @@ import type { GitRequest } from "./git_request";
 import type { ProtectedChangeView } from "./proposals";
 import type { TerminalRequest, TerminalResult } from "./terminal";
 import type { KeyRequest, MistralKeyView, KeyStatusView, VibeKeyView } from "./keys";
-import type { InstructionsRequest, InstructionsResult, ProjectInstructionsRequest, ProjectInstructionsResult } from "./instructions";
+import type { CallbackInfo } from "./callbacks";
+import type { InstructionsRequest, InstructionsResult, ImportRequest, ImportResult, ProjectInstructionsRequest, ProjectInstructionsResult } from "./instructions";
 import type { DocumentsRequest, DocumentsResult } from "./documents";
 import type { SpeechRequest, SpeechResult } from "./speech";
 import type { ConnectorsRequest, ConnectorsResult } from "./connectors";
@@ -36,6 +37,8 @@ import type { LibrariesRequest, LibrariesResult, ImagesRequest, ImagesResult } f
 import type { GithubReadsView, GithubReadsRequest } from "./github_reads";
 import type { AskGrantsRequest, SessionGrant, GrantOffer, VibeRulesRequest, VibeRule, ChromeControlRequest, ChromeControlView, ChromeSelection, ChromeTab } from "./ask";
 import type { KeepAwakeView, KeepAwakeRequest } from "./keep_awake";
+import type { PausedToolsView, PausedToolsRequest } from "./paused_tools";
+import type { KnowledgeView, KnowledgeRequest } from "./knowledge";
 import type { NewChatRequest, NewChatView } from "./new_chat";
 import type { FeedbackView, FeedbackRequest } from "./feedback";
 import type { SecretScanRequest, SecretScanView } from "./secret_scan";
@@ -54,6 +57,7 @@ export type * from "./git_request";
 export type * from "./proposals";
 export type * from "./terminal";
 export type * from "./keys";
+export type * from "./callbacks";
 export type * from "./instructions";
 export type * from "./documents";
 export type * from "./speech";
@@ -69,6 +73,8 @@ export type * from "./work";
 export type * from "./github_reads";
 export type * from "./ask";
 export type * from "./keep_awake";
+export type * from "./paused_tools";
+export type * from "./knowledge";
 export type * from "./new_chat";
 export type * from "./feedback";
 export type * from "./secret_scan";
@@ -81,7 +87,11 @@ request: FeedbackRequest, } | { "type": "promptHistory",
 /**
  * Absent reads; present appends in CLI format before reading.
  */
-text?: string, } | { "type": "copyText",
+text?: string,
+/**
+ * The chat `text` was sent in. A temporary chat's prompt, or one without its chat, is not appended.
+ */
+sessionId?: string, } | { "type": "copyText",
 /**
  * The text to copy (at most one million bytes).
  */
@@ -313,7 +323,7 @@ request: TerminalRequest, } | { "type": "instructions",
 /**
  * What to do.
  */
-request: InstructionsRequest, } | { "type": "projectInstructions",
+request: InstructionsRequest, } | { "type": "importSetup", request: ImportRequest, } | { "type": "projectInstructions",
 /**
  * The operation.
  */
@@ -409,7 +419,15 @@ request: VibeRulesRequest, } | { "type": "chromeControl",
 /**
  * What to do.
  */
-request: ChromeControlRequest, } | { "type": "keepAwake",
+request: ChromeControlRequest, } | { "type": "knowledge",
+/**
+ * List, add, rename or remove.
+ */
+request: KnowledgeRequest, } | { "type": "pausedTools",
+/**
+ * The operation.
+ */
+request: PausedToolsRequest, } | { "type": "keepAwake",
 /**
  * Read or save the preference.
  */
@@ -532,7 +550,7 @@ result: TerminalResult, } | { "type": "instructions",
 /**
  * The instructions request's answer.
  */
-result: InstructionsResult, } | { "type": "projectInstructions",
+result: InstructionsResult, } | { "type": "importSetup", result: ImportResult, } | { "type": "projectInstructions",
 /**
  * The project instruction request's answer.
  */
@@ -661,7 +679,15 @@ defaultsKnown: boolean,
 /**
  * How many rules the request removed (0 for `list`).
  */
-removed: number, } | { "type": "keepAwake",
+removed: number, } | { "type": "knowledge",
+/**
+ * The knowledge base.
+ */
+view: KnowledgeView, } | { "type": "pausedTools",
+/**
+ * The chat's paused tools.
+ */
+view: PausedToolsView, } | { "type": "keepAwake",
 /**
  * Core-owned view.
  */
@@ -765,17 +791,3 @@ version: number | null,
 expiresAt: number, };
 
 export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable" | "browserPairingFailed";
-
-export type CallbackInfo = {
-/**
- * Callback id.
- */
-callbackId: string,
-/**
- * Session it belongs to.
- */
-sessionId: string,
-/**
- * `approval`, `user_input`, `connector_auth` or a newer kind.
- */
-kind: string, };

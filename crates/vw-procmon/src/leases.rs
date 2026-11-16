@@ -19,7 +19,8 @@
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::ops::RangeInclusive;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -96,7 +97,7 @@ impl PortReservation {
 
     /// Associates a successful start with its OS identity before acknowledging it.
     pub fn record(mut self, process: ProcessRef) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if let Some(claim) = state.claims.get_mut(&self.port).filter(|c| c.id == self.id) {
             claim.process = Some(process);
         }
@@ -107,7 +108,7 @@ impl PortReservation {
 impl Drop for PortReservation {
     fn drop(&mut self) {
         if !self.recorded {
-            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = self.state.lock_or_recover();
             if state
                 .claims
                 .get(&self.port)
@@ -155,7 +156,7 @@ impl PortLeases {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// The configuration.
@@ -399,6 +400,12 @@ impl PortLeases {
             .get(session_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Every leased port, of any session (sorted).
+    #[must_use]
+    pub fn all_ports(&self) -> Vec<u16> {
+        self.lock().holder.keys().copied().collect()
     }
 
     /// Which session holds `port`, if any.

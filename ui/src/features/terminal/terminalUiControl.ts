@@ -8,16 +8,11 @@
  */
 import { panelOwner } from "../../state/shellState";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { activeOf } from "./model";
 import { shownTerminal } from "./selection";
 import type { Terminals } from "./store";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** Registers `ui/terminal`; returns the function that removes it. */
 export function registerTerminalRoute(app: App, terminals: Terminals): () => void {
@@ -43,7 +38,7 @@ export function registerTerminalRoute(app: App, terminals: Terminals): () => voi
     };
   };
   return app.uiControl.register("terminal", async (body) => {
-    const { action, terminalId } = asObject(body);
+    const { action, terminalId } = requiredBodyObject(body);
     const sessionId = panelOwner(app.shell.store.get());
     switch (action) {
       case "state":

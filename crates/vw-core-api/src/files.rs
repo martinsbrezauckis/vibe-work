@@ -22,7 +22,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde_json::json;
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer as _};
@@ -127,10 +128,7 @@ impl FilesState {
     /// The New chat screen's handles (key `from`) become the started session's (`to`); every use still re-checks
     /// the path against the session's own scope.
     pub(crate) fn hand_over(&self, from: &str, to: &str) {
-        self.handles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .hand_over(from, to);
+        self.handles.lock_or_recover().hand_over(from, to);
     }
 
     pub(crate) fn new(viewer: Option<Arc<PagesHub>>) -> Self {
@@ -233,8 +231,7 @@ impl Core {
             .shared
             .files
             .handles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .by_token
             .get(file)
             .cloned()
@@ -365,7 +362,7 @@ impl Core {
             crate::files_lookup::lookup(
                 &scope,
                 paths,
-                &mut listings.lock().unwrap_or_else(PoisonError::into_inner),
+                &mut listings.lock_or_recover(),
                 std::time::Instant::now(),
                 crate::search_files::candidates,
             )
@@ -373,12 +370,7 @@ impl Core {
         .await?;
         let own = self.own_folder(session_id).await?;
         let own = own.as_deref();
-        let mut handles = self
-            .shared
-            .files
-            .handles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut handles = self.shared.files.handles.lock_or_recover();
         let refs = hits
             .into_iter()
             .map(|(text, mut hits)| {

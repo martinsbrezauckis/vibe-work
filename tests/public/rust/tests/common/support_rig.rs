@@ -191,12 +191,28 @@ pub fn running_rig(dir: &Path, channel: &Channel) -> Rig {
     )
 }
 
-/// The check's config for `channel`, verified with `key`.
+/// The inert Vibe versions the fixture manifests list. [`support`] counts them as guarded so those tests exercise the
+/// other offer rules; the guard rule itself is tested with [`support_guarding`].
+pub const FIXTURE_GUARDED: [&str; 7] = [
+    "2.25.0", "2.26.0", "2.26.2", "2.26.3", "2.26.4", "2.26.5", "3.1.3",
+];
+
+/// The check's config for `channel`, verified with `key`: this build's guarded versions plus [`FIXTURE_GUARDED`].
 pub fn support(channel: &Channel, key: &Key) -> SupportConfig {
+    let mut config = support_guarding(channel, key, &FIXTURE_GUARDED);
+    config
+        .guarded
+        .extend(vw_vibe_install::guarded_vibe_versions());
+    config
+}
+
+/// The check's config for `channel`, verified with `key`, whose guards were checked with exactly `guarded`.
+pub fn support_guarding(channel: &Channel, key: &Key, guarded: &[&str]) -> SupportConfig {
     SupportConfig {
         manifest_url: channel.url("vibe-support.json"),
         pubkey: key.pubkey(),
         app_version: APP.to_owned(),
         target: vw_vibe_install::this_target(),
+        guarded: guarded.iter().map(|v| (*v).to_owned()).collect(),
     }
 }

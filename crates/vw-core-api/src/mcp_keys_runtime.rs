@@ -1,6 +1,8 @@
 //! Per-request vault-key resolution and forwarder lifecycle for MCP servers.
-//! Depends on the parent's grant counters, current vault records and key proxy; called at core start/stop.
-//! Values stay in the outgoing request and every request checks current authority and binding state.
+//! Depends on the parent's checked key path (`mcp_keys_gate`), grant counters and key proxy; called at core start/stop.
+//! Values stay in the outgoing request. Every request reads the key only through the gate, which checks current
+//! authority and binding state before and after the read. A request to a server without a grant may first wait for
+//! the person's answer to the first-use dialog (`mcp_keys_first_use`).
 use crate::core::Shared;
 use std::sync::{Arc, Weak};
 use vw_keyproxy::{McpFuture, McpRefusal, McpResolver, McpTarget};
@@ -16,83 +18,22 @@ impl McpResolver for Resolver {
     fn resolve<'a>(&'a self, id: &'a str) -> McpFuture<'a> {
         Box::pin(async move {
             let shared = self.shared.upgrade().ok_or(McpRefusal::Unknown)?;
-            if crate::agent_access::locked(&shared) {
-                return Err(McpRefusal::AgentAccessLocked);
-            }
             let Some(keys) = shared.config.keys.as_ref() else {
                 return Err(McpRefusal::Unknown);
             };
-            // The vault's current record, read for this request (never a copy): a record revoked or removed by
-            // another window, another app on the same vault or a restore is seen at once. Any read failure refuses.
-            let binding = match keys.mcp_binding(id.to_owned()).await {
-                Ok(Some(binding)) => binding,
-                Ok(None) => return Err(McpRefusal::Unknown),
-                Err(e) if vw_keys::is_locked(&e) => return Err(McpRefusal::Locked),
-                Err(_) => return Err(McpRefusal::NotAllowed),
+            let paused = || crate::agent_access::locked(&shared);
+            let gate = super::gate::Gate {
+                vault: keys.as_ref(),
+                grants: &shared.connectors.mcp_keys,
+                paused: &paused,
+                id,
             };
-            // This connection is shared across chats, so even an existing Always grant cannot prove Full access.
-            if binding.secret_id == vw_keys::DEBUG_TOKEN_ITEM {
-                return Err(McpRefusal::DebugTokenRequiresChat);
-            }
-            if shared.connectors.mcp_keys.grant_word(&binding) == "none" {
-                return Err(McpRefusal::NotAllowed);
-            }
-            // The MCP proxy has no originating session/project. Never is conservative across project records;
-            // Allowed cannot be promoted to a global grant and still needs this server's existing grant.
-            if keys
-                .default_entry_permission(&binding.secret_id)
-                .await
-                .map_err(|_| McpRefusal::PermissionsUnreadable)?
-                .0
-                == vw_keys::EntryPermission::Never
-                || keys
-                    .entry_permissions_for(&binding.secret_id)
-                    .await
-                    .map_err(|_| McpRefusal::PermissionsUnreadable)?
-                    .iter()
-                    .any(|p| p.permission == vw_keys::EntryPermission::Never)
-            {
-                return Err(McpRefusal::NotAllowed);
-            }
-            let key = keys
-                .secret_value(binding.secret_id.clone(), None)
-                .await
-                .map_err(|e| {
-                    if vw_keys::is_locked(&e) {
-                        McpRefusal::Locked
-                    } else {
-                        McpRefusal::SecretMissing
-                    }
-                })?;
-            if keys
-                .default_entry_permission(&binding.secret_id)
-                .await
-                .map_err(|_| McpRefusal::PermissionsUnreadable)?
-                .0
-                == vw_keys::EntryPermission::Never
-                || keys
-                    .entry_permissions_for(&binding.secret_id)
-                    .await
-                    .map_err(|_| McpRefusal::PermissionsUnreadable)?
-                    .iter()
-                    .any(|p| p.permission == vw_keys::EntryPermission::Never)
-            {
-                return Err(McpRefusal::NotAllowed);
-            }
-            // Re-read after every awaited secret/policy check: the earlier binding cannot prove that a grant
-            // still holds. A changed destination or secret also refuses this request rather than using stale data.
-            let current = match keys.mcp_binding(id.to_owned()).await {
-                Ok(Some(binding)) => binding,
-                Ok(None) => return Err(McpRefusal::Unknown),
-                Err(e) if vw_keys::is_locked(&e) => return Err(McpRefusal::Locked),
-                Err(_) => return Err(McpRefusal::NotAllowed),
-            };
-            if current != binding || !shared.connectors.mcp_keys.permit(&current) {
-                return Err(McpRefusal::NotAllowed);
-            }
-            if crate::agent_access::locked(&shared) {
-                return Err(McpRefusal::AgentAccessLocked);
-            }
+            // No grant yet: a never-revoked server asks the person once per run (`first_use`); the gate asks only
+            // after its Never checks, so a User only key never opens a dialog, and checks the answer on a new read.
+            let shared_ref = &shared;
+            let (binding, key) = gate
+                .open(move |shown| async move { super::first_use::ask(shared_ref, &shown).await })
+                .await?;
             let value = if binding.bearer {
                 Zeroizing::new(format!("Bearer {}", key.expose()))
             } else {

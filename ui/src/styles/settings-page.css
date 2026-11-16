@@ -8,6 +8,7 @@
 @import "./vault-actions.css";
 @import "./vault-page.css";
 @import "./allowed.css";
+@import "./knowledge.css";
 
 /* The column. The session list stays mounted under it (its scroll and folds kept), invisible and inert. */
 .column.is-settings {
@@ -30,7 +31,7 @@
 }
 .set-title {
   margin: 4px 6px 4px;
-  font-size: var(--text-16);
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
 }
@@ -41,7 +42,7 @@
   height: var(--control-height-search);
   padding: 0 8px 0 10px;
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-9);
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text-3);
   flex: none;
@@ -56,7 +57,7 @@
   all: unset;
   flex: 1;
   min-width: 0;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text);
 }
 .set-search input::placeholder {
@@ -71,7 +72,7 @@
   border-radius: var(--radius-sm);
   background: var(--active);
   color: var(--text);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
   flex: none;
@@ -111,7 +112,7 @@
   border-radius: var(--radius-md);
   background: none;
   color: var(--text-2);
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
 }
@@ -150,14 +151,14 @@
   text-align: left;
   cursor: pointer;
   color: var(--text);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .set-result:hover:where(:not(:disabled)),
 .set-result:focus-visible {
   background: var(--active);
 }
 .set-result-path {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 
@@ -179,30 +180,30 @@
 }
 .set-head h2 {
   margin: 0;
-  font-size: var(--text-22);
+  font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
 }
 .set-path {
   margin: 4px 0 18px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 .set-cat-body {
-  animation: vw-fade-in var(--t-fade) var(--ease-std);
+  animation: vw-fade-in var(--t-hover) var(--ease-std);
 }
 .set-cat-body > section,
 .set-group {
   background: var(--raised);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   padding: var(--space-toolbar-block) var(--space-card-inline) var(--space-card-bottom);
   margin-bottom: var(--space-card-gap);
 }
 .set-cat-body > section > h3,
 .set-group > h3 {
   margin: 10px 0 4px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--text-2);
 }
@@ -224,7 +225,7 @@
 }
 .set-cat-body section h4 {
   margin: 14px 0 6px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--text-2);
 }
@@ -261,7 +262,7 @@
   color: var(--text);
   text-align: left;
   cursor: pointer;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .set-group > h3 + .set-hit {
   border-top: 0;
@@ -276,7 +277,7 @@
 }
 .set-hit .d {
   display: block;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .set-hit svg.i {
@@ -315,7 +316,7 @@
 /* Paths in the data rows: the app's mono face, sized with the detail text around them. */
 .about-data code {
   font-family: var(--font-mono);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
 }
 
 @container window (max-width: 640px) {
@@ -331,7 +332,7 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   max-height: min(600px, 82vh);
-  animation: vw-palette-in var(--t-layout) var(--ease-out);
+  animation: vw-palette-in var(--t-ui) var(--ease-out);
 }
 @keyframes vw-palette-in {
   from {
@@ -359,7 +360,7 @@
 }
 .plist .secl .c {
   font-family: var(--font-mono);
-  font-size: var(--text-10-5);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .pal-b {
@@ -395,7 +396,7 @@
   text-overflow: ellipsis;
 }
 .pr-path {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .plist .secl {
@@ -408,25 +409,25 @@
   padding: 28px 16px;
   text-align: center;
   color: var(--text-2);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   cursor: default;
 }
 .pal-pv {
   overflow-y: auto;
   padding: 14px 16px;
   background: var(--panel);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .pv-kind {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   margin-bottom: 6px;
 }
 .pv-path {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   margin-bottom: 10px;
 }
@@ -443,14 +444,14 @@
 }
 .pv-card span {
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .pv-go {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 12px 0 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 @media (max-width: 760px) {

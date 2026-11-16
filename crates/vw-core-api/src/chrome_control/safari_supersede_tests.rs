@@ -9,6 +9,10 @@
 //! profile) brings it back. Two identities that are both connected are never folded together.
 //!
 //! Uses the real ask service with a controlled native presenter and an owner pipe that answers every request.
+//!
+//! PREDICT (the wait after an approval): a fixed 100 ms sleep let the checks run before the approval task had saved
+//! the pairing when the machine was loaded (every full parallel lib run on Windows: Settings still showed two Safari
+//! rows). `pair` now waits for the approval's own end.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -79,8 +83,13 @@ async fn pair(core: &crate::Core, prompts: &mut Prompts, profile: &str) {
         .await
         .expect("pairing must reach the native presenter")
         .unwrap();
+    core.shared
+        .chrome_control
+        .owner
+        .safari_approved
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     answer.send(Confirmation::Approved).unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    super::test_support::until_safari_approved(&core.shared).await;
 }
 
 fn safari_rows(core: &crate::Core) -> Vec<super::profiles::BrowserProfile> {
@@ -158,7 +167,7 @@ async fn a_superseded_identity_that_connects_again_is_its_own_profile() {
             !name.chars().any(|c| c.is_ascii_digit()) || name.contains("paired"),
             "a bare number names a Safari profile: {names:?}"
         );
-        assert!(!name.contains('('), "{names:?}");
+        assert!(!name.contains([',', '—']), "{names:?}");
     }
     let mut offered = card_choices(&core, "s").unwrap();
     offered.sort();

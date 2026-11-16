@@ -1,4 +1,6 @@
-//! Bounded main-world JavaScript with one dispatch and a separately polled result.
+//! Bounded main-world JavaScript with one dispatch and a separately polled result. On a page whose
+//! Content-Security-Policy refuses `eval`, the expression runs as the source of the browser's own evaluation instead
+//! (one expression only; the page's policy is not changed).
 //! Shared core policy requires Full access; the preview service enforces document identity and vault exclusion.
 use crate::{
     ActError, Actor, Browser,
@@ -80,7 +82,12 @@ impl Browser {
             )
             .await
             .map_err(|e| failed(crate::driver::preview_text(&e)))?;
-        let admitted: Value = crate::model::parse_answer(&admitted).map_err(failed)?;
+        let mut admitted: Value = crate::model::parse_answer(&admitted).map_err(failed)?;
+        if admitted["evalRefused"] == true {
+            admitted = self
+                .page_script_inline(session, by, mount, &state, &key, request)
+                .await?;
+        }
         if let Some(error) = admitted["error"].as_str() {
             return Err(failed(error));
         }
@@ -129,5 +136,65 @@ impl Browser {
             }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
+    }
+
+    /// The page's policy refused `eval` before anything ran: the expression goes again as the source of the
+    /// browser's own evaluation (which that policy does not cover); the page's policy itself is left as it is.
+    async fn page_script_inline(
+        &self,
+        session: &str,
+        by: Actor,
+        mount: &vw_preview::MountId,
+        state: &vw_preview::LoadState,
+        key: &str,
+        request: &Request,
+    ) -> Result<Value, ActError> {
+        let request_json =
+            json!({"key":key,"timeoutMs":request.timeout_ms,"url":state.url}).to_string();
+        let (head, tail) = include_str!("js/page_script_inline.js")
+            .split_once("__EXPRESSION__")
+            .unwrap_or_default();
+        let inline = format!(
+            "{}{}{tail}",
+            head.replace("__REQUEST__", &request_json),
+            request.expression
+        );
+        let raw = self
+            .service
+            .page_script(
+                mount,
+                state.loads,
+                inline,
+                true,
+                self.dispatch_permission_check(session, by),
+            )
+            .await
+            .map_err(|e| failed(crate::driver::preview_text(&e)))?;
+        if let Ok(answer) = crate::model::parse_answer(&raw) {
+            return Ok(answer);
+        }
+        // No readable answer: a script that did not compile (a statement list) gives none and leaves no record on
+        // the same document; anything else is reported as the failure it is, never as "did not start".
+        let probe = format!("JSON.stringify({{started: {} in window}})", json!(key));
+        let probed = self
+            .service
+            .page_script(
+                mount,
+                state.loads,
+                probe,
+                false,
+                self.dispatch_permission_check(session, by),
+            )
+            .await
+            .map_err(|e| failed(crate::driver::preview_text(&e)))?;
+        let probed: Value = crate::model::parse_answer(&probed).map_err(failed)?;
+        if probed["started"] == false {
+            return Err(failed(
+                "Page JavaScript did not start: this page's Content-Security-Policy refuses eval, so the script must be one expression, such as an immediately invoked function. Read the page before trying again.",
+            ));
+        }
+        Err(failed(
+            "The page gave no readable answer to the script; read the page before continuing, and do not repeat side effects automatically.",
+        ))
     }
 }

@@ -22,7 +22,7 @@
   flex: 1 1 160px;
   min-width: 120px;
   font: inherit;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   padding: 4px 8px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
@@ -44,7 +44,7 @@
   background: var(--hover);
 }
 .find-scope {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   border: 1px solid var(--line-2) !important;
   border-radius: var(--radius-pill) !important;
@@ -52,7 +52,7 @@
   white-space: nowrap;
 }
 .find-count {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   min-width: 64px;
   text-align: right;
@@ -60,7 +60,7 @@
 .find-note {
   flex-basis: 100%;
   margin: 2px 0 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 ::highlight(vw-find) {
@@ -79,7 +79,7 @@
 .pal-note {
   margin: 0;
   padding: 6px 14px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   border-top: 1px solid var(--line);
 }
@@ -101,7 +101,7 @@
 }
 .file-edit-hint {
   flex: 1 1 auto;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .file-edit-area {
@@ -113,7 +113,7 @@
   border: 0;
   padding: 10px 12px;
   font-family: var(--font-mono);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   line-height: 1.55;
   tab-size: 4;
   background: var(--bg);
@@ -132,7 +132,7 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 
@@ -141,7 +141,7 @@
   padding: 0 4px;
 }
 .proc-section h3 {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-2);
   margin: 10px 0 6px;
@@ -170,7 +170,7 @@
   background: var(--bg);
   border: 1px solid var(--line);
   font-family: var(--font-mono);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   white-space: pre-wrap;
   word-break: break-word;
 }

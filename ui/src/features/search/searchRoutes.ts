@@ -11,6 +11,7 @@
  * Invariants: bodies are validated (`invalidParams`); `run` of an id not on screen is `notFound`.
  */
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import type { Result } from "./paletteTypes";
 
@@ -20,12 +21,6 @@ const shown = new WeakMap<App, { query: string; rows: readonly Result[] }>();
 /** Called by the palette on every render. */
 export function publishResults(app: App, query: string, rows: readonly Result[]): void {
   shown.set(app, { query, rows });
-}
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
 }
 
 function optionalText(value: unknown, name: string): string | undefined {
@@ -58,7 +53,7 @@ export function publishCount(app: App, scope: "conversation" | "file", count: nu
 /** Registers the route; returns the function that removes it. */
 export function registerSearchRoutes(app: App): () => void {
   return app.uiControl.register("search", (body) => {
-    const input = asObject(body);
+    const input = bodyObject(body);
     const action = input["action"] ?? "results";
     const selected = () => {
       const id = optionalText(input["sessionId"], "sessionId") ?? app.shell.store.get().selected;

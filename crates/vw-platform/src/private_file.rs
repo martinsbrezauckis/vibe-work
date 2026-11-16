@@ -323,11 +323,9 @@ mod os {
     }
 
     /// Refuses a directory owned by anyone but the current user, the Administrators group (the owner of
-    /// what an elevated administrator creates) or SYSTEM: replacing the DACL leaves another owner its
+    /// what an elevated administrator creates) or SYSTEM ([`trusted_owner`]): replacing the DACL leaves another owner its
     /// implicit right to change the DACL back (a pre-created folder can otherwise be accepted).
     pub(super) fn check_owner(path: &Path) -> Result<(), PrivateFileError> {
-        const ADMINISTRATORS: &str = "S-1-5-32-544";
-        const SYSTEM: &str = "S-1-5-18";
         let fail = |e: std::io::Error| PrivateFileError::Io {
             action: "read the owner of",
             path: path.display().to_string(),
@@ -335,7 +333,7 @@ mod os {
         };
         let sid = acl::current_user_sid().map_err(fail)?;
         let owner = acl::owner_sid(path).map_err(fail)?;
-        if owner == sid || owner == ADMINISTRATORS || owner == SYSTEM {
+        if trusted_owner(&owner, &sid) {
             Ok(())
         } else {
             Err(PrivateFileError::Unusable {
@@ -343,6 +341,14 @@ mod os {
                 reason: format!("owned by {owner}, not by the current user"),
             })
         }
+    }
+
+    /// The owners that cannot take a private path back: the current user, the Administrators group (the owner of
+    /// what an elevated administrator creates) and SYSTEM.
+    fn trusted_owner(owner: &str, user: &str) -> bool {
+        const ADMINISTRATORS: &str = "S-1-5-32-544";
+        const SYSTEM: &str = "S-1-5-18";
+        owner == user || owner == ADMINISTRATORS || owner == SYSTEM
     }
 
     #[allow(
@@ -675,7 +681,8 @@ mod os {
     }
 
     /// The path is user-only when its DACL holds exactly one entry: access allowed to the current
-    /// user's SID ([`acl::is_only_user`]). Compared by SID through the Win32 API, never by a printed
+    /// user's SID ([`acl::is_only_user`]), and its owner is one `check_owner` accepts (another owner keeps the
+    /// implicit right to change the DACL back). Compared by SID through the Win32 API, never by a printed
     /// name, so a path with any characters (`C:\Users\Jānis\...`) reads back the same on every console
     /// code page.
     pub(super) fn is_user_only(path: &Path) -> Result<bool, PrivateFileError> {
@@ -685,6 +692,7 @@ mod os {
             source: e,
         };
         let sid = acl::current_user_sid().map_err(fail)?;
-        acl::is_only_user(path, &sid).map_err(fail)
+        Ok(acl::is_only_user(path, &sid).map_err(fail)?
+            && trusted_owner(&acl::owner_sid(path).map_err(fail)?, &sid))
     }
 }

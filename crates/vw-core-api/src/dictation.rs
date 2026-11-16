@@ -20,8 +20,9 @@
 //! - Logs carry stream ids, sizes and outcomes; never audio, text or the key.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -161,7 +162,7 @@ impl Dictations {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Stream>> {
-        self.streams.lock().unwrap_or_else(PoisonError::into_inner)
+        self.streams.lock_or_recover()
     }
 
     fn emit(&self, stream_id: &str, update: DictationUpdate) {

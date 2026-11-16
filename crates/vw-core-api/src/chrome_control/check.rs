@@ -1,9 +1,11 @@
 //! Browser authority from the current chat mode. Called at execution and by tool discovery.
 //! No Chrome check opens a card or waits for a decision.
+use super::browser_text::Fixed;
 use crate::core::Shared;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use vw_ask::chrome::Tier;
+use vw_platform::sync::LockRecover;
 
 pub(crate) fn mode(shared: &Shared, session: &str) -> Option<String> {
     shared.access.remembered(session).or_else(|| {
@@ -120,10 +122,11 @@ fn authorize_mode(
     })?;
     super::mapping::check_full(Some(&mode), tool, args)?;
     let required = (if tier == Tier::Ask { super::mapping::ask_required(tool,args) } else { super::mapping::required(tool, args) }).ok_or_else(|| {
+        let browser = super::agent_browser::selected(shared, session, tool, args);
         match super::mapping::action(tool, args).as_str() {
-            "client.selection" => "Not run: selection is sent by the user from Chrome. Ask the user to use Ask Vibe Work in Chrome's context menu.",
-            "page.dragdrop" => "Not run: page.dragdrop is a permission name. Use page.drag; ask chrome_status for its schema.",
-            _ => "Not run: unknown Chrome action. Use chrome_status to find supported actions.",
+            "client.selection" => Fixed::SelectionFromUser.text(browser),
+            "page.dragdrop" => "Not run: page.dragdrop is a permission name. Use page.drag; ask chrome_status for its schema.".to_owned(),
+            _ => Fixed::UnknownAction.text(browser),
         }
     })?;
     let authority = tier.max(consent.unwrap_or(tier));
@@ -168,8 +171,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     let selected_profile = shared
         .chrome_control
         .chat_profiles
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_or_recover()
         .get(session)
         .cloned();
     super::capabilities::filter(result, selected_profile.as_deref());
@@ -268,7 +270,7 @@ pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
     // Without the package every Chrome tool is refused here too, with the same sentence as the tool itself.
     if !shared.chrome_control.config.available() {
         let browser = super::agent_browser::selected(shared, session, tool, &args["toolInput"]);
-        return json!({"decision":"deny","reason":browser.text(super::setup::ABSENT)});
+        return json!({"decision":"deny","reason":Fixed::Unavailable.text(browser)});
     }
     let child = args["parentSessionId"]
         .as_str()

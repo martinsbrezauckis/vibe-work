@@ -19,14 +19,81 @@ import html
 import os
 import re
 import sys
+from html.parser import HTMLParser
 
 REQUIRED = ("scope", "method", "results")
 MARKER = re.compile(r"<!--\s*chart:\s*([^\s>]+)\s*-->")
 SLUG = re.compile(r"[^a-z0-9]+")
+# Tags that run code, embed another page or redirect the reader, and the tags a browser reads as raw text (where the
+# check below would see markup the browser does not, or the reverse); a page made from data needs none of them.
+ACTIVE_TAGS = {"script", "iframe", "frame", "frameset", "object", "embed", "applet", "meta", "base", "style",
+               "noscript", "xmp", "noembed", "noframes", "plaintext", "textarea"}
+PAGE_TAGS = {"html", "head", "body", "h1"}
+CODE_SCHEMES = ("javascript:", "vbscript:")
 
 
 def die(message):
     sys.exit(f"report_page.py: {message}")
+
+
+def inside(root, path):
+    """True when `path` is `root` or below it (both already real paths)."""
+    try:
+        return os.path.commonpath([root, path]) == root
+    except ValueError:  # another drive on Windows
+        return False
+
+
+class _Scan(HTMLParser):
+    """Collects what a browser would treat as active content: the tags above, on* attributes, script links."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)  # raw text reaches handle_data; attributes are still decoded
+        self.found = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ACTIVE_TAGS:
+            self.found.append(f"<{tag}>")
+        if tag in PAGE_TAGS:
+            self.found.append(f"page:<{tag}>")
+        if "<" in (self.get_starttag_text() or "")[1:]:
+            self.found.append("markup inside a tag")
+        for name, value in attrs:
+            if name.startswith("on"):
+                self.found.append("on* attributes")
+            # Browsers drop spaces and control characters inside a URL scheme ("jav\tascript:"); an SVG animation
+            # value list ("0;javascript:...") sets a link too, so the scheme counts anywhere in the value.
+            squeezed = "".join(ch for ch in (value or "") if ord(ch) > 32).lower()
+            if any(scheme in squeezed for scheme in CODE_SCHEMES):
+                self.found.append("javascript: links")
+
+    handle_startendtag = handle_starttag
+
+    def handle_data(self, data):
+        # Text the parser reads as raw (a <title> on newer Pythons) is markup to a browser inside SVG.
+        if getattr(self, "cdata_elem", None) and "<" in data:
+            self.found.append("markup inside a tag")
+
+    def handle_comment(self, data):
+        # Only chart markers: a browser may end a comment earlier ("<!-->") and read the rest as markup.
+        if not re.fullmatch(r"\s*chart:\s*[^\s>]+\s*", data):
+            self.found.append("comments other than chart markers")
+
+    def handle_decl(self, data):
+        self.found.append("declarations")
+
+    handle_pi = unknown_decl = handle_decl
+
+
+def problems(text):
+    """The active-content findings in an HTML fragment, in document order, each once."""
+    scan = _Scan()
+    scan.feed(text)
+    # An unfinished tag at the end would close against the page's own markup after it.
+    if "<" in scan.rawdata:
+        scan.found.append("an unfinished tag")
+    scan.close()
+    return list(dict.fromkeys(scan.found))
 
 
 def fill_charts(body):
@@ -36,14 +103,14 @@ def fill_charts(body):
     def one(match):
         rel = match.group(1)
         path = os.path.realpath(os.path.join(root, rel))
-        if os.path.isabs(rel) or not path.startswith(root + os.sep):
+        if os.path.isabs(rel) or not inside(root, path):
             die(f"chart {rel!r}: give a path inside the current folder")
         try:
             with open(path, encoding="utf-8") as f:
                 figure = f.read().strip()
         except OSError:
             die(f"chart {rel!r} not found (make it with svg_chart.py --out {rel})")
-        if not figure.startswith(("<figure", "<svg")) or re.search(r"<script|\son\w+\s*=", figure, re.I):
+        if not figure.startswith(("<figure", "<svg")) or problems(figure):
             die(f"chart {rel!r} is not a chart made by svg_chart.py")
         return figure
 
@@ -51,10 +118,12 @@ def fill_charts(body):
 
 
 def check_body(body):
-    if re.search(r"<script|\son\w+\s*=", body, re.I):
-        die("no <script> and no on* attributes in a report page")
-    if re.search(r"<(html|head|body|h1)[\s>]", body, re.I):
+    found = problems(body)
+    if any(f.startswith("page:") for f in found):
         die("BODY.html holds only the content (sections), not <html>, <head>, <body> or <h1>")
+    if found:
+        die(f"BODY.html has {', '.join(found)}: a report page holds no <script>, no on* attributes, "
+            "no embedded pages or redirects and no javascript: links")
     missing = [s for s in REQUIRED if not re.search(rf'<section\s[^>]*id="{s}"', body)]
     if missing:
         die("missing " + ", ".join(f'<section id="{s}">' for s in missing))
@@ -174,11 +243,18 @@ def main():
     check_body(body)
     charts = len(MARKER.findall(body))
     body = fill_charts(body)
+    check_body(body)
     title, description = " ".join(a.title.split()), " ".join(a.description.split())
     hb = a.handbook
-    os.makedirs(os.path.join(hb, "reports"), exist_ok=True)
+    root = os.path.realpath(os.getcwd())
+    if not inside(root, os.path.realpath(hb)):
+        die(f"--handbook {hb!r}: give a folder inside the current folder")
     rel = f"reports/{a.date}-{slug}.html"
     path = os.path.join(hb, rel)
+    for target in (path, os.path.join(hb, "index.html")):
+        if not inside(root, os.path.realpath(target)):
+            die(f"{target!r} leads outside the current folder (a link); give a handbook folder inside it")
+    os.makedirs(os.path.join(hb, "reports"), exist_ok=True)
     created = a.date
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:

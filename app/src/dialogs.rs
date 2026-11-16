@@ -13,7 +13,9 @@
 //!   vault, website login, tabs): that one is a window of its own, so only the waiting chat is held and the person
 //!   can work in other chats meanwhile. Pickers are always modal over the main window.
 //! - Such a window can go behind the main window; [`raise_prompt`] brings it back by its ask id (the window does so
-//!   when its chat is shown, and from the chat's "waiting" hint). Raising never answers.
+//!   when its chat is shown, and from the chat's "waiting" hint). Raising never answers. Only a modal confirmation
+//!   brings the main window forward when it opens ([`present_for`]); an agent's window of its own never does: the
+//!   chat's badge and the app badge say it waits.
 //! - A closed dialog, a failed dialog and a dropped channel all count as "declined" / "no folder":
 //!   the confirmer fails closed. The declining button is the default (Return) on every OS, so a stray Enter never
 //!   approves; Escape declines on every OS; a screen reader's or voice control's press is the button's own click.
@@ -27,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, FileDialogBuilder, FilePath};
 use tokio::sync::oneshot;
 use vw_gate::{Confirmation, ConfirmationRequest};
 use vw_host::SharedConfirmer;
@@ -142,6 +144,24 @@ fn modal(request: &ConfirmationRequest) -> bool {
     request.requester != vw_gate::Requester::Agent
 }
 
+/// Whether a confirmation brings the main window forward before it shows: only a modal one (a sheet or a dialog
+/// over the main window, which could otherwise wait unseen on a hidden or background window). An agent's request
+/// is a window of its own that never brings the app forward or takes the focus from another app: the waiting
+/// chat's badge and the app badge (Dock, taskbar, tray) say that it waits, and showing that chat raises it.
+#[cfg(any(test, not(target_os = "linux")))]
+const fn reveals_main_window(modal: bool) -> bool {
+    modal
+}
+
+/// Brings the main window forward for a confirmation when [`reveals_main_window`] says so; the per-OS windows call
+/// this instead of revealing by themselves.
+#[cfg(not(target_os = "linux"))]
+fn present_for<R: Runtime>(app: &AppHandle<R>, modal: bool) {
+    if reveals_main_window(modal) {
+        let _ = crate::tray::reveal_main_window(app);
+    }
+}
+
 /// The confirmer the host hands to the core: shows [`vw_host::dialog_text`] in a native warning
 /// dialog with Continue / Cancel buttons (three labelled buttons when the request offers "always"; their
 /// order: `vw_host::dialog_buttons`; the declining one is the default on every OS). A request too long to show in full is never clipped (the hidden
@@ -179,20 +199,59 @@ const DOCUMENT_TYPES: &[&str] = &[
     "tiff", "bmp", "avif",
 ];
 
-/// Opens the native file picker for documents (several files allowed) and returns the chosen
-/// files; empty when cancelled. The webview supplies nothing.
-pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
-    let modal = hold_modal(app, "Choose documents to send with your message");
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Choose documents to send with your message")
-        .add_filter("Documents and images", DOCUMENT_TYPES);
+/// Which one-path dialog [`choose_one`] shows.
+enum Chooser {
+    File,
+    Folder,
+    Save,
+}
+
+/// A file dialog titled `title` over the main window, with `configure`'s filters and names. Every picker and save
+/// dialog of the app goes through [`choose_one`] or [`choose_files`]: held as the app's open dialog (`hold_modal`)
+/// while it shows, the chosen path(s) back, none when cancelled.
+fn file_dialog<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    configure: impl FnOnce(FileDialogBuilder<R>) -> FileDialogBuilder<R>,
+) -> FileDialogBuilder<R> {
+    let mut dialog = configure(app.dialog().file().set_title(title));
     if let Some(window) = crate::main_window(app) {
         dialog = dialog.set_parent(&window);
     }
-    dialog.pick_files(move |chosen| {
+    dialog
+}
+
+/// Shows a one-path dialog (`kind`) and returns the chosen path; `None` when cancelled.
+async fn choose_one<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    kind: Chooser,
+    configure: impl FnOnce(FileDialogBuilder<R>) -> FileDialogBuilder<R>,
+) -> Option<PathBuf> {
+    let modal = hold_modal(app, title);
+    let (send, receive) = oneshot::channel();
+    let dialog = file_dialog(app, title, configure);
+    let reply = move |chosen: Option<FilePath>| {
+        drop(modal);
+        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
+    };
+    match kind {
+        Chooser::File => dialog.pick_file(reply),
+        Chooser::Folder => dialog.pick_folder(reply),
+        Chooser::Save => dialog.save_file(reply),
+    }
+    receive.await.ok().flatten()
+}
+
+/// Shows a several-files picker and returns the chosen files; empty when cancelled.
+async fn choose_files<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    configure: impl FnOnce(FileDialogBuilder<R>) -> FileDialogBuilder<R>,
+) -> Vec<PathBuf> {
+    let modal = hold_modal(app, title);
+    let (send, receive) = oneshot::channel();
+    file_dialog(app, title, configure).pick_files(move |chosen| {
         drop(modal);
         let paths = chosen
             .unwrap_or_default()
@@ -202,6 +261,17 @@ pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
         let _ = send.send(paths);
     });
     receive.await.unwrap_or_default()
+}
+
+/// Opens the native file picker for documents (several files allowed) and returns the chosen
+/// files; empty when cancelled. The webview supplies nothing.
+pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    choose_files(
+        app,
+        "Choose documents to send with your message",
+        |dialog| dialog.add_filter("Documents and images", DOCUMENT_TYPES),
+    )
+    .await
 }
 
 /// The file types the certificate picker offers; the core reads the file again and checks that it holds a PEM
@@ -211,106 +281,112 @@ const CERTIFICATE_TYPES: &[&str] = &["pem", "crt", "cer", "cert"];
 /// Opens the native file picker for a company's certificate file (one file) and returns it; `None` when cancelled.
 /// The path is shown to the user and checked by the core when the setting is saved; the webview names no file.
 pub async fn pick_certificate<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    let modal = hold_modal(app, "Choose your company's certificate file");
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Choose your company's certificate file")
-        .add_filter("Certificate files", CERTIFICATE_TYPES);
-    if let Some(window) = crate::main_window(app) {
-        dialog = dialog.set_parent(&window);
-    }
-    dialog.pick_file(move |chosen| {
-        drop(modal);
-        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
-    });
-    receive.await.ok().flatten()
+    choose_one(
+        app,
+        "Choose your company's certificate file",
+        Chooser::File,
+        |dialog| dialog.add_filter("Certificate files", CERTIFICATE_TYPES),
+    )
+    .await
 }
 
 /// Opens the native file picker for a library upload (several files, any type Mistral's Libraries
 /// take) and returns the chosen files; empty when cancelled. The webview supplies nothing.
 pub async fn pick_library_files<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
-    let modal = hold_modal(
+    choose_files(
         app,
         "Choose files to add to the library (they are sent to Mistral)",
-    );
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Choose files to add to the library (they are sent to Mistral)");
-    if let Some(window) = crate::main_window(app) {
-        dialog = dialog.set_parent(&window);
-    }
-    dialog.pick_files(move |chosen| {
-        drop(modal);
-        let paths = chosen
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|path| path.into_path().ok())
-            .collect::<Vec<_>>();
-        let _ = send.send(paths);
-    });
-    receive.await.unwrap_or_default()
+        |dialog| dialog,
+    )
+    .await
 }
 
-/// Opens the native folder picker and returns the chosen folder, or `None` when cancelled.
-pub async fn pick_folder<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    let modal = hold_modal(app, "Choose the folder Vibe should work in");
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Choose the folder Vibe should work in");
-    if let Some(window) = crate::main_window(app) {
-        dialog = dialog.set_parent(&window);
+/// What a picked folder is for; the webview names one of these (`work`, `knowledge`), the titles stay in the host.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FolderPurpose {
+    /// A project folder: Vibe works in it.
+    #[default]
+    Work,
+    /// A Knowledge base place: the agent only reads it.
+    Knowledge,
+}
+
+impl FolderPurpose {
+    /// The purpose the webview named; `None` for any other word.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "work" => Some(Self::Work),
+            "knowledge" => Some(Self::Knowledge),
+            _ => None,
+        }
     }
-    dialog.pick_folder(move |chosen| {
-        drop(modal);
-        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
-    });
-    receive.await.ok().flatten()
+}
+
+/// The native folder picker's title for `purpose` (shared vocabulary).
+fn folder_title(purpose: FolderPurpose) -> &'static str {
+    match purpose {
+        FolderPurpose::Work => vw_vocabulary::texts::FOLDER_PICKER_WORK,
+        FolderPurpose::Knowledge => vw_vocabulary::texts::FOLDER_PICKER_KNOWLEDGE,
+    }
+}
+
+/// Opens the native folder picker titled for `purpose` and returns the chosen folder, or `None` when cancelled.
+pub async fn pick_folder<R: Runtime>(
+    app: &AppHandle<R>,
+    purpose: FolderPurpose,
+) -> Option<PathBuf> {
+    choose_one(app, folder_title(purpose), Chooser::Folder, |dialog| dialog).await
 }
 
 /// Opens the native save dialog for a session exported as Markdown with `name` suggested; returns the
 /// chosen file, or `None` when cancelled. The webview never supplies the destination.
 pub async fn save_markdown<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<PathBuf> {
-    let modal = hold_modal(app, "Export the session as Markdown");
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Export the session as Markdown")
-        .set_file_name(name)
-        .add_filter("Markdown", &["md"]);
-    if let Some(window) = crate::main_window(app) {
-        dialog = dialog.set_parent(&window);
-    }
-    dialog.save_file(move |chosen| {
-        drop(modal);
-        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
-    });
-    receive.await.ok().flatten()
+    choose_one(
+        app,
+        "Export the session as Markdown",
+        Chooser::Save,
+        |dialog| dialog.set_file_name(name).add_filter("Markdown", &["md"]),
+    )
+    .await
 }
 
 /// Opens the native save dialog for an exported handbook page with `name` suggested and returns the chosen
 /// file, or `None` when cancelled. The webview supplies only the suggested name's page, never the destination.
 pub async fn save_page<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<PathBuf> {
-    let modal = hold_modal(app, "Save the page as one file");
-    let (send, receive) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Save the page as one file")
-        .set_file_name(name)
-        .add_filter("Web page", &["html"]);
-    if let Some(window) = crate::main_window(app) {
-        dialog = dialog.set_parent(&window);
+    choose_one(app, "Save the page as one file", Chooser::Save, |dialog| {
+        dialog.set_file_name(name).add_filter("Web page", &["html"])
+    })
+    .await
+}
+
+#[cfg(test)]
+#[path = "dialogs/present_tests.rs"]
+mod present_tests;
+
+#[cfg(test)]
+mod folder_title_tests {
+    //! PREDICT: did not compile before the change: one fixed title served every folder picker, so a Knowledge base
+    //! place was asked for with the project-folder title.
+    use super::{FolderPurpose, folder_title};
+
+    #[test]
+    fn each_folder_purpose_has_its_own_title_and_the_default_is_the_project_folder() {
+        let purpose = |name: &str| FolderPurpose::named(name).unwrap();
+        let text = |id: &str| vw_vocabulary::text(id).unwrap();
+        assert_eq!(
+            folder_title(purpose("knowledge")),
+            text("folderPickerKnowledge")
+        );
+        assert_eq!(folder_title(purpose("work")), text("folderPickerWork"));
+        assert_ne!(
+            folder_title(FolderPurpose::Knowledge),
+            folder_title(FolderPurpose::Work)
+        );
+        assert_eq!(
+            folder_title(FolderPurpose::default()),
+            folder_title(FolderPurpose::Work)
+        );
+        assert_eq!(FolderPurpose::named("Choose anything"), None);
     }
-    dialog.save_file(move |chosen| {
-        drop(modal);
-        let _ = send.send(chosen.and_then(|path| path.into_path().ok()));
-    });
-    receive.await.ok().flatten()
 }

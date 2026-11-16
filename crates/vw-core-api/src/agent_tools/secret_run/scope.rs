@@ -20,7 +20,6 @@ impl Job {
 
 /// Capture asks about saving before preparing the command. Refuse this input before that first card,
 /// without changing when other input errors or ordinary vault permissions are decided.
-#[cfg(feature = "agent-vault")]
 pub(crate) async fn check_inputs(
     shared: &Shared,
     session: &str,

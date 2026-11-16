@@ -13,6 +13,10 @@ import { type FileReader, tabOf } from "../../state/files";
 import { useApp } from "../shell/AppContext";
 import { MarkdownView } from "./FileViews";
 
+/**
+ * The preview beside a file's code: Markdown rendered from the editor's current text, or the HTML page in the
+ * isolated viewer, reloaded after each save. `onClose` closes the preview.
+ */
 export function SidePreview({
   reader,
   sessionId,

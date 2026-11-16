@@ -210,6 +210,7 @@ async fn main_frame_refs_still_work_with_user_annotations() {
         .unwrap();
     let page = rig.service.page_accessor(SESSION).unwrap();
     let annotation = vw_browser::annotate::annotate(
+        &rig.browser,
         &rig.service,
         &page,
         SESSION,
@@ -249,6 +250,7 @@ async fn same_origin_frame_uses_its_own_document_and_preserves_annotation_refs()
         .unwrap();
     let page = rig.service.page_accessor(SESSION).unwrap();
     let annotation = vw_browser::annotate::annotate(
+        &rig.browser,
         &rig.service,
         &page,
         SESSION,

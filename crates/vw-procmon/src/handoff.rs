@@ -11,6 +11,7 @@
 
 use crate::error::LedgerError;
 use crate::monitor::ProcMon;
+use vw_platform::sync::LockRecover;
 
 /// What moved in a hand-off (for the log and tests).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -38,22 +39,14 @@ impl ProcMon {
             ..HandOffReport::default()
         };
         {
-            let mut adopted = self
-                .inner
-                .adopted
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut adopted = self.inner.adopted.lock_or_recover();
             for item in adopted.iter_mut().filter(|a| a.session_id == old) {
                 new.clone_into(&mut item.session_id);
                 report.adopted += 1;
             }
         }
         {
-            let mut outputs = self
-                .inner
-                .outputs
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut outputs = self.inner.outputs.lock_or_recover();
             let moved: Vec<((String, String), String)> = outputs
                 .iter()
                 .filter(|((session, _), _)| session == old)

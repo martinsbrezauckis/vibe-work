@@ -2,14 +2,14 @@
  * The Changes tab's confirmations, each naming exactly what will happen: the file or lines a revert puts back,
  * files a revert deletes, what an undo restores and cannot restore (and that later turns go too), what
  * `git init` + a first commit adds.
- * Depends on: store.ts (pending confirmation, accept/cancel), hooks/useModalFocus. Called by: ChangesTab.
+ * Depends on: store.ts (pending confirmation, accept/cancel), components/Modal. Called by: ChangesTab.
  * Invariants: nothing is sent until the confirm button is pressed; Escape and Cancel send nothing; file
  * names are text, never rendered markup.
  */
 import { Button } from "../../components/Controls";
-import { type ReactElement, type ReactNode, useRef } from "react";
+import { type ReactElement, type ReactNode } from "react";
 
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { useStore } from "../../state/createStore";
 import { fileNote, hunkRange } from "./model";
 import type { Confirm } from "./store";
@@ -167,87 +167,73 @@ function content(confirm: Confirm): { title: string; action: string; body: React
 /** The pending confirmation, if any. */
 export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | null {
   const confirm = useStore(changes.store, (s) => s.confirm);
-  const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(confirm !== null, dialog, () => {
-    changes.cancel();
-  });
   if (confirm === null) return null;
   const { title, action, body } = content(confirm);
   return (
-    <>
-      <div
-        data-testid="changes.confirm-box-cancel"
-        className="scrim"
-        onClick={() => {
-          changes.cancel();
-        }}
-      />
-      <div
-        data-testid="changes.confirm-box-modal"
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        ref={dialog}
-        tabIndex={-1}
-        data-confirm={confirm.kind}
-      >
-        <header>
-          <h2>{title}</h2>
-        </header>
-        <section>
-          {body}
-          {confirm.kind === "history" && confirm.needsIdentity && (
-            <>
-              <p>
-                Enter your name and email for commits. Saved in Vibe Work for future repositories
-                and locally in this new repository.
-              </p>
-              <GitIdentityFields
-                identity={confirm.identity}
-                onChange={(identity) => {
-                  changes.editHistoryIdentity(identity);
-                }}
-              />
-            </>
-          )}
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="changes.confirm-box-cancel-2"
-            type="button"
+    <Modal
+      onClose={() => {
+        changes.cancel();
+      }}
+      scrimTestId="changes.confirm-box-cancel"
+      data-testid="changes.confirm-box-modal"
+      aria-label={title}
+      data-confirm={confirm.kind}
+    >
+      <header>
+        <h2>{title}</h2>
+      </header>
+      <section>
+        {body}
+        {confirm.kind === "history" && confirm.needsIdentity && (
+          <>
+            <p>
+              Enter your name and email for commits. Saved in Vibe Work for future repositories and
+              locally in this new repository.
+            </p>
+            <GitIdentityFields
+              identity={confirm.identity}
+              onChange={(identity) => {
+                changes.editHistoryIdentity(identity);
+              }}
+            />
+          </>
+        )}
+      </section>
+      <footer className="modal-actions">
+        <Button
+          data-testid="changes.confirm-box-cancel-2"
+          type="button"
 
-            data-dialog-initial-focus="true"
-            onClick={() => {
-              changes.cancel();
-            }}
+          data-dialog-initial-focus="true"
+          onClick={() => {
+            changes.cancel();
+          }}
+        >
+          Cancel
+        </Button>
+        {confirm.kind !== "keepUnseen" && confirm.kind !== "history" ? (
+          <Button
+            data-testid="changes.confirm-box-accept"
+            shape="outlined"
+            variant="danger"
+            data-action="confirm"
+            onClick={() => void changes.accept()}
           >
-            Cancel
+            {action}
           </Button>
-          {confirm.kind !== "keepUnseen" && confirm.kind !== "history" ? (
-            <Button
-              data-testid="changes.confirm-box-accept"
-              shape="outlined"
-              variant="danger"
-              data-action="confirm"
-              onClick={() => void changes.accept()}
-            >
-              {action}
-            </Button>
-          ) : (
-            <Button
-              data-testid="changes.confirm-box-accept"
-              type="button"
-              appearance="dialog"
-              data-action="confirm"
-              disabled={confirm.kind === "history" && !validIdentity(confirm.identity)}
-              onClick={() => void changes.accept()}
-            >
-              {action}
-            </Button>
-          )}
-        </footer>
-      </div>
-    </>
+        ) : (
+          <Button
+            data-testid="changes.confirm-box-accept"
+            type="button"
+            appearance="dialog"
+            data-action="confirm"
+            disabled={confirm.kind === "history" && !validIdentity(confirm.identity)}
+            onClick={() => void changes.accept()}
+          >
+            {action}
+          </Button>
+        )}
+      </footer>
+    </Modal>
   );
 }

@@ -18,7 +18,8 @@
 //! last state) drops the session and keeps it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use vault_core::MasterKey;
@@ -246,23 +247,17 @@ impl Vault {
     }
 
     fn session(&self) -> std::sync::MutexGuard<'_, Option<Session>> {
-        self.session.lock().unwrap_or_else(PoisonError::into_inner)
+        self.session.lock_or_recover()
     }
 
     fn note(&self, note: Option<String>) {
-        *self
-            .remember_note
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = note;
+        *self.remember_note.lock_or_recover() = note;
     }
 
     /// Why the last attempt to remember this device failed, if it did (e.g. no Secret Service).
     #[must_use]
     pub fn remember_note(&self) -> Option<String> {
-        self.remember_note
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.remember_note.lock_or_recover().clone()
     }
 
     /// Current status.
@@ -419,7 +414,6 @@ impl Vault {
     /// Checks and writes a set of items against one sealed head (value and permission together).
     /// # Errors
     /// Locked vault, corrupt storage or a repeatedly moving head.
-    #[cfg(feature = "agent-vault")]
     pub fn update_items_checked(
         &self,
         change: impl Fn(&[VaultItem]) -> Option<Vec<VaultItem>>,

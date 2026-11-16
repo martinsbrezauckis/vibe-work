@@ -1,0 +1,28 @@
+<!-- Rare built-in browser actions; linked from actions.md. -->
+# Browser actions: site data, clipboard, media, diagnostics, page code
+
+Adds to [actions.md](actions.md) (index, refs, modes). The Full access rules in the skill apply.
+
+| Action | Arguments | Rule |
+|---|---|---|
+| `tabs.emulate` | `width`/`height` 240–4096, or `preset: "phone"\|"tablet"\|"desktop"` (390×844, 768×1024, 1280×800); `colorScheme: "light"\|"dark"\|"system"` (Windows/macOS); `reset:true` | Browser panel only; measures the native viewport; user agent, touch and pixel density unchanged; sizes that cannot fit refuse. Color readback is the native media query; WebKitGTK cannot override one view's color. Reset restores size and color |
+| `recording.start`, `recording.stop` | | GIF of screenshots after browser actions, saved in the chat folder: ≤30 frames, two minutes, 8 MiB of source screenshots (omitted frames reported), fits 800×600, intervals clipped to 0.1–5 s, no audio. The user's Stop discards the recording |
+| `recording.video.start`, `recording.video.stop` | | Report that this engine has no page-video encoder and name the GIF alternative |
+| `cookies.metadata`, `cookies.read` | `{names?}` | Metadata: current-site cookie attributes; read adds values and HttpOnly cookies |
+| `cookies.change` | `{operation: "set"\|"remove"\|"clear", name?, value?, path?, secure?, httpOnly?, sameSite?}` | Changes this site only; set needs name/value, remove needs name; path defaults to `/` |
+| `storage.metadata`, `storage.read`, `storage.change` | `{area: "local"\|"session"}`; read `{area, keys}`; change `{area, operation: "set"\|"remove"\|"clear", key?, value?}` | Keys; values or null; set needs key/value, remove needs key |
+| `clipboard.read`, `clipboard.write` | write `{text}` | Plain text ≤65536 UTF-8 bytes; empty text clears; read reports `truncated`. A live vault copy cannot be read |
+| `clipboard.read_rich`, `clipboard.write_rich` | `{mime}`; write `{mime, text? \| base64?}` | Native clipboard in Full access; text/html (text ≤60000 bytes) or image/png (base64 ≤256 KiB decoded); writes read back actual content, PNG reads return an image, active vault copies are withheld. HTML on Windows, macOS, Linux X11; Wayland refuses HTML with a reason, PNG/plain text work. The chat mode itself must be Full access because writes also read clipboard content back; a write approval in a lower mode cannot authorize that readback. |
+| `media.read`, `media.play`, `media.pause`, `media.seek`, `media.mute`, `media.transcript` | seek `{mediaId, timeMs}`, mute `{mediaId, muted}`, transcript `{mediaId}` | ≤32 main-document video/audio elements with `mediaId`, state, position, duration, errors; live state returned; transcript = loaded caption cues ≤12,000 characters, absent captions explicit. Autoplay policy or source can fail playback; handles expire with the document/element. These actions run in Ask, Accept edits and Full access |
+| `tabs.audio`, `tabs.mute` | mute `{muted}` (Chrome/Edge also `tabId`) | Native muted/audible state, read back. Built-in Linux/Windows: native tab audio; built-in macOS reports unavailable and offers `media.mute` |
+| `console.read`, `page.errors` | `level`, `text`, `offset`, `limit` 1–100 (default 25) or `last` | Log/info/debug/warn/error entries; uncaught exceptions, unhandled rejections and failed resources of the main document. `nextOffset` continues, `dropped` counts lost entries. The page can affect its own diagnostic capture. Reads and clears run in Ask |
+| `console.clear`, `page.errors.clear` | | Clear their buffers without reloading |
+| `network.list` | filters `url`, `method`, `status`, `failedOnly`; `offset`, `limit` or `last` | Native request log: method, status, completion, transport errors; ≤256 records / 2 MiB, resets on navigation, reports dropped records and coverage. Query values are removed from listed URLs. Windows/Linux native feeds; macOS reports unsupported. Request/response bodies are not captured |
+| `network.headers` | `{requestId, unredacted?}` | Request/response headers with sensitive and unknown values redacted. `unredacted:true` requires Full access and refuses after a vault login |
+| `page.inspect` | `{selector, attribute?, properties?}` (≤32 CSS names) | Exactly one main-document element: computed styles, bounds, literal attribute, sanitized HTML (200 nodes / 1200 characters, `htmlTruncated`). Scripts, event handlers, hidden inputs and form values are omitted. Markup inspection is unavailable after a vault fill. This read runs in Ask |
+| `raw.execute` | `{expression, timeoutMs?}` (100–5000, default 5000) | One main-document expression in the page world (Promise allowed), bounded JSON result. Exceptions, changed documents and timeouts report failures with potentially completed side effects |
+| `page.add_style` | `{css}` | Adds a current-document stylesheet; reports acceptance and rule count |
+
+`raw.execute` and `page.add_style` both require Full access and exclude vault-filled documents. A document that received page code cannot receive a later vault password fill; navigation to a new document resets that exclusion. Clearing all cookies or a complete storage area requires the chat itself to have Full access; a saved tool grant or browser approval card cannot substitute.
+
+Transport retries with the same authenticated browser call identity reuse its one-use decision or return the original result marked `requestReplay`. A changed input under that identity is refused. Interrupted requests and evicted results never dispatch again; a deliberate new action has a new call identity. Cached site-secret results still require the current Full access mode.

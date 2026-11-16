@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Sends one bounded keyboard operation to this native view.
 /// # Errors
-/// Refuses unavailable or unfocused native views before any input.
+/// [`super::super::NOT_IN_FRONT`] for an inactive app or a hidden or non-key window; refuses unavailable views.
 pub fn send(
     pointer: *mut std::ffi::c_void,
     point: (f64, f64),
@@ -26,15 +26,10 @@ pub fn send(
     let window = base
         .window()
         .ok_or("The browser window closed. Open the browser pane and try again.")?;
-    if !NSApplication::sharedApplication(main).isActive()
-        || !window.isKeyWindow()
-        || !window.isVisible()
-        || base.isHiddenOrHasHiddenAncestor()
-    {
-        return Err(
-            "Native keyboard needs the visible active browser pane. Open it and try again.".into(),
-        );
-    }
+    super::super::require_front(
+        window.isVisible() && !base.isHiddenOrHasHiddenAncestor(),
+        NSApplication::sharedApplication(main).isActive() && window.isKeyWindow(),
+    )?;
     let bounds = base.bounds();
     if !(0.0..1.0).contains(&point.0)
         || !(0.0..1.0).contains(&point.1)
@@ -129,7 +124,8 @@ fn characters(name: &str) -> (String, u16) {
         "ArrowDown" => ('\u{f701}', 125),
         "ArrowLeft" => ('\u{f702}', 123),
         "ArrowRight" => ('\u{f703}', 124),
-        "Insert" => ('\u{f727}', 0),
+        // No key position, never the "a" key's or the Help key's (see `key_positions`): code "Unidentified".
+        "Insert" => ('\u{f727}', crate::key_positions::NO_KEY_POSITION),
         "Delete" => ('\u{f728}', 117),
         "Home" => ('\u{f729}', 115),
         "End" => ('\u{f72b}', 119),
@@ -139,20 +135,37 @@ fn characters(name: &str) -> (String, u16) {
         "Control" => ('\0', 59),
         "Alt" => ('\0', 58),
         "Meta" => ('\0', 55),
+        // A letter or digit has its US key (code "KeyQ", also for Command+C and the other editing shortcuts); any
+        // other character has none (code "Unidentified").
         _ => {
             return (
                 name.to_owned(),
-                // "a" is key code 0, the same as the fallback arm.
-                match name.to_ascii_lowercase().as_str() {
-                    "c" => 8,
-                    "x" => 7,
-                    "v" => 9,
-                    "z" => 6,
-                    "y" => 16,
-                    _ => 0,
-                },
+                crate::key_positions::typed_character_key(name),
             );
         }
     };
     (character.to_string(), code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::characters;
+    use crate::key_positions::NO_KEY_POSITION;
+    // PREDICT (before the fix): fails. Insert and every typed character were sent as virtual key 0, so the page saw
+    // code "KeyA" for Insert, "q" and ",".
+    #[test]
+    fn insert_and_typed_characters_carry_a_true_code() {
+        assert_eq!(
+            characters("Insert"),
+            ("\u{f727}".to_owned(), NO_KEY_POSITION)
+        );
+        assert_eq!(characters("q"), ("q".to_owned(), 12));
+        assert_eq!(characters("7"), ("7".to_owned(), 26));
+        assert_eq!(characters(","), (",".to_owned(), NO_KEY_POSITION));
+        assert_eq!(characters("ā"), ("ā".to_owned(), NO_KEY_POSITION));
+        // The editing shortcuts keep their keys.
+        for (key, code) in [("a", 0), ("c", 8), ("x", 7), ("v", 9), ("z", 6), ("y", 16)] {
+            assert_eq!(characters(key).1, code, "{key}");
+        }
+    }
 }

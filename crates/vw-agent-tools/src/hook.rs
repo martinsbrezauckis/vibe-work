@@ -83,10 +83,14 @@ process_stop stops one of them.";
 /// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
 pub const DECLINED: &str = "Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.";
 
+/// The result of a command that may stop a process that is not this chat's (the kill guard asked) after the user said
+/// No: what was declined, in plain words, and the same instruction as [`DECLINED`]. The core returns it.
+pub const PROCESS_DECLINED: &str = "Not run: the user declined this command, which may stop a process that is not this chat's. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.";
+
 /// The kill guard's refusal. A guard refusal names the process tools; the user's own No is returned as it is,
 /// so nothing points the agent at another way to stop the same process.
 fn kill_refusal(reason: &str) -> String {
-    if reason == DECLINED {
+    if reason == DECLINED || reason == PROCESS_DECLINED {
         return deny(reason);
     }
     deny(&format!("{reason} {ADVICE}"))

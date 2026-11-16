@@ -10,6 +10,10 @@ import { useCoreState } from "../shell/hooks";
 import { useComposerState } from "./hooks";
 import { browserSignals, browserTabsPanelId, openBrowserTabs, usableBrowsers } from "./browserTabs";
 
+/**
+ * The composer's "Add a browser tab…" button with one readiness dot per browser. It opens or closes this chat's tab
+ * list, or opens Settings > Browser when no browser is usable; renders nothing when there is nothing to show.
+ */
 export function BrowserTabEntry({ sessionId }: { sessionId: string }) {
   const app = useApp();
   const view = useCoreState((state) => state.chromeControl);

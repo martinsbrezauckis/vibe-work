@@ -1,11 +1,13 @@
 //! Pins unsupported experiments off in the app-owned Vibe config and migrates retired keys.
-//! Depends on TOML parsing/editing; called by both launch paths before Vibe starts.
+//! Depends on TOML parsing/editing; written by [`crate::startup_config`] in both launch paths before Vibe starts.
 //! Registry skills default on because skill offers need them on this Vibe version; recheck at every Vibe pin bump.
 //! Migrates the former app-written registry false once, then preserves personal choices. A separate app-owned
 //! marker survives Vibe config rewrites. Preserves access mode, comments and unrelated values. Invalid TOML is left for
 //! Vibe to diagnose. The parsed result must match the intended migration before writing.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use crate::startup_config::{Draft, Staged, Written};
 
 use toml::{Table, Value};
 use toml_edit::{DocumentMut, value};
@@ -157,31 +159,69 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
     }
 }
 
-/// Migrates `vibe_home/config.toml` and pins experiments off. A missing file is created.
+/// The experiment step staged in a [`Draft`]: its outcome and the registry-migration marker state.
+pub(crate) struct Stage {
+    marker: PathBuf,
+    /// Whether the registry migration ran before, or why the marker could not be checked.
+    migrated: Result<bool, String>,
+    pins: Staged<ExperimentPins>,
+}
+
+/// Runs this step's edit over `draft` (the registry migration only while its marker is absent).
+pub(crate) fn stage(draft: &mut Draft, vibe_home: &Path) -> Stage {
+    let marker = vibe_home.join(REGISTRY_MIGRATION);
+    let migrated = marker
+        .try_exists()
+        .map_err(|e| format!("{}: {e}", marker.display()));
+    let pins = match migrated {
+        Ok(migrated) => draft.apply(
+            |text, _| {
+                let (updated, outcome) = edited(text, !migrated);
+                if updated.is_none() && outcome.skipped.is_none() {
+                    let notes = crate::config_comments::restored(text, None, REGISTRY, &[NOTE]);
+                    return (notes, outcome);
+                }
+                (updated, outcome)
+            },
+            |why| ExperimentPins::skipped(&why),
+        ),
+        Err(_) => Staged {
+            outcome: ExperimentPins::skipped("the registry migration marker could not be checked"),
+            changed: false,
+        },
+    };
+    Stage {
+        marker,
+        migrated,
+        pins,
+    }
+}
+
+/// The step's outcome after the combined write. Records the registry migration only when the file holds every
+/// startup edit (written, or nothing to write) and this step was not skipped: a refused, failed or invalid config
+/// must not consume the migration.
+///
+/// # Errors
+/// The marker could not be checked or written, or this step's edit was part of a failed write.
+pub(crate) fn finish(stage: Stage, written: &Written) -> Result<ExperimentPins, String> {
+    let migrated = stage.migrated?;
+    let pins = written.settle(stage.pins, |why| ExperimentPins::skipped(&why))?;
+    if !migrated && pins.skipped.is_none() && written.landed() {
+        std::fs::write(&stage.marker, b"1\n")
+            .map_err(|e| format!("{}: {e}", stage.marker.display()))?;
+    }
+    Ok(pins)
+}
+
+/// Migrates `vibe_home/config.toml` and pins experiments off, through the guarded startup write
+/// ([`crate::startup_config`]). A missing file is created.
 ///
 /// # Errors
 /// The I/O error text when the file cannot be read or written.
 pub fn ensure(vibe_home: &Path) -> Result<ExperimentPins, String> {
-    let path = vibe_home.join("config.toml");
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    let marker = vibe_home.join(REGISTRY_MIGRATION);
-    let migrated = marker
-        .try_exists()
-        .map_err(|e| format!("{}: {e}", marker.display()))?;
-    let (updated, outcome) = edited(&existing, !migrated);
-    if let Some(updated) = updated {
-        std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
-        vw_platform::replace_private(&path, updated.as_bytes()).map_err(|e| e.to_string())?;
-    } else if outcome.skipped.is_none() {
-        crate::config_comments::restore(&path, &existing, None, REGISTRY, &[NOTE])?;
-    }
-    // Record only after a verified config write (or no-op); invalid TOML must not consume the step.
-    if !migrated && outcome.skipped.is_none() {
-        std::fs::write(&marker, b"1\n").map_err(|e| format!("{}: {e}", marker.display()))?;
-    }
-    Ok(outcome)
+    let mut draft = Draft::open(vibe_home)
+        .map_err(|e| format!("{}: {e}", vibe_home.join("config.toml").display()))?;
+    let stage = stage(&mut draft, vibe_home);
+    let written = draft.commit();
+    finish(stage, &written)
 }

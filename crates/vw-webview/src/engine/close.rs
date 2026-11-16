@@ -66,6 +66,7 @@ impl TauriEngine {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id.label);
         crate::act_window::forget(&id.label);
+        vw_preview::person_block::forget(&id.label);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         self.filter_generations.forget(&id.label);
         self.shown

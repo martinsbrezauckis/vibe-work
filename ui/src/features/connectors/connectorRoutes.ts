@@ -19,14 +19,9 @@
 import { toCallError } from "../../protocol/client/types";
 import type { KeyChoice } from "../../state/connectors";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { FILTERS, type Filter, groups } from "./model/view";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -98,7 +93,7 @@ function keyOf(input: Record<string, unknown>): KeyChoice {
 
 /** Runs one `ui/connectors` request. */
 async function handleConnectors(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const connectors = app.connectors;
   if (connectors === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const a = connectors.debugApi;

@@ -48,6 +48,8 @@ pub(super) fn browser_decls(cfg: &Config) -> Vec<String> {
         crate::BrowserPreferences::decl(cfg),
         vw_preview::shields::Mode::decl(cfg),
         vw_preview::shields::Settings::decl(cfg),
+        vw_preview::SiteAnswer::decl(cfg),
+        crate::LocalNetworkSite::decl(cfg),
         crate::BrowserResult::decl(cfg),
         crate::BrowserShot::decl(cfg),
         crate::browser_view::SecretChoiceView::decl(cfg),

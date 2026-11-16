@@ -8,6 +8,7 @@
  */
 import type { CoreError } from "../protocol/core";
 import { TEXT, vaultTerm } from "../vocabulary";
+import { detectMac } from "./shortcuts";
 
 /** Shared notice wherever a cryptographically locked vault stops sessions. */
 export const VAULT_LOCKED_NOTICE = TEXT.vaultLockedNotice;
@@ -45,8 +46,6 @@ const REASONS: Readonly<Record<string, string>> = {
     "The selected vault could not be found. Check that its folder is still available.",
   selectionRequired: "Choose a vault before unlocking it.",
   io: "Vibe Work could not read or write the vault folder. Check that the folder is writable.",
-  rememberFailed:
-    "The vault was opened, but this computer's credential store could not keep its key. You will type the password at the next start.",
   noKey: "There is no Mistral key yet. Paste one to continue.",
   nothingToImport: "Vibe's saved key is gone. Paste a key instead.",
   notACandidate: "That saved key is no longer in the vault. Pick another or paste a key.",
@@ -66,10 +65,39 @@ const REASONS: Readonly<Record<string, string>> = {
   notConfigured: "This run keeps the key in the environment, so there is nothing to set up.",
 };
 
+/** The person's existing OS sign-in, with the platform's own name (the system unlock choice). */
+export function systemUnlockLabel(): string {
+  if (detectMac()) return TEXT.vaultUnlockMac;
+  const nav = typeof navigator === "undefined" ? undefined : navigator;
+  const platform =
+    (nav as (Navigator & { userAgentData?: { platform?: string } }) | undefined)?.userAgentData
+      ?.platform ??
+    nav?.platform ??
+    "";
+  return /win/i.test(platform) ? TEXT.vaultUnlockWindows : TEXT.vaultUnlockLinux;
+}
+
+/**
+ * The vault opened but the OS credential store kept nothing: the store's plain reason from the core (the login
+ * keychain, Windows Credential Manager or the system keyring by name, never the store's own error text) and the way
+ * back, as the setup result says it.
+ */
+function rememberFailed(message: string): string {
+  const reason = /^this device cannot be remembered: (.+)$/.exec(message)?.[1];
+  return (
+    `The vault was opened, but this computer's credential store could not keep its key` +
+    `${reason === undefined ? "" : ` (${reason})`}. You will type the password at the next start. ` +
+    `To unlock without it later, set up or unlock the system keyring, then choose “${systemUnlockLabel()}” in ` +
+    "Settings › Account."
+  );
+}
+
 /** The user-facing sentence for a failed `keys` command. */
 export function describeProblem(error: CoreError): string {
   if (error.code === "confirmationDeclined") return "The request was declined. Nothing changed.";
   const reason = error.serverCode;
+  if (error.code === "keyService" && reason === "rememberFailed")
+    return rememberFailed(error.message);
   if (error.code === "keyService" && reason !== null) {
     const known = REASONS[reason];
     if (known !== undefined) return known;

@@ -3,8 +3,8 @@
 //! files only, outside the profile lock; a folder that is not proven or not readable gives no reason.
 use super::{BrowserProfile, ChromeControl, ProfileState, agent_browser::Browser, probe};
 use std::path::PathBuf;
-use std::sync::PoisonError;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 /// The extension is off in the row's own profile: the person turns it on there.
 pub(super) const EXTENSION_OFF: &str = "Extension off in this profile";
@@ -14,10 +14,7 @@ pub(super) const NO_WINDOW: &str = "No window of this profile open";
 /// Fills the reason of each offline row whose folder is proven.
 pub(super) fn offline(chrome: &ChromeControl, rows: &mut [BrowserProfile]) {
     let folders: Vec<(usize, PathBuf)> = {
-        let saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let saved = chrome.profiles.lock_or_recover();
         rows.iter()
             .enumerate()
             .filter(|(_, row)| row.state == ProfileState::Offline && row.reason.is_none())
@@ -27,12 +24,7 @@ pub(super) fn offline(chrome: &ChromeControl, rows: &mut [BrowserProfile]) {
             .collect()
     };
     // Without the helper no profile can connect, so an open window would not show either: only "off" is then sure.
-    let helper_up = !chrome
-        .owner
-        .tools
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .is_empty();
+    let helper_up = !chrome.owner.tools.lock_or_recover().is_empty();
     for (index, folder) in folders {
         rows[index].reason =
             match probe::folder(&chrome.config, &folder, &chrome.config.extension_id) {
@@ -50,10 +42,7 @@ pub(super) const PREFERENCES_DELAY: Duration = Duration::from_secs(15);
 /// Owner status observed: records since when each browser has had no live paired profile.
 pub(super) fn observe(chrome: &ChromeControl) {
     let live: Vec<Browser> = {
-        let saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let saved = chrome.profiles.lock_or_recover();
         saved
             .records
             .keys()
@@ -61,10 +50,7 @@ pub(super) fn observe(chrome: &ChromeControl) {
             .map(|id| Browser::from_profile(id))
             .collect()
     };
-    let mut since = chrome
-        .offline_since
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut since = chrome.offline_since.lock_or_recover();
     for browser in [Browser::Chrome, Browser::Edge] {
         if live.contains(&browser) {
             since.remove(browser.id());
@@ -88,18 +74,14 @@ pub(super) enum Window {
 pub(super) fn window(chrome: &ChromeControl, browser: Browser) -> Option<Window> {
     let settled = chrome
         .offline_since
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .get(browser.id())
         .is_some_and(|since| since.elapsed() >= PREFERENCES_DELAY);
     if !settled {
         return None;
     }
     let folders: Vec<PathBuf> = {
-        let saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let saved = chrome.profiles.lock_or_recover();
         saved
             .records
             .iter()
@@ -154,7 +136,6 @@ pub(super) fn offline_for_test(chrome: &ChromeControl, browser: Browser, ago: Du
     let at = Instant::now().checked_sub(ago).unwrap_or_else(Instant::now);
     chrome
         .offline_since
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(browser.id(), at);
 }

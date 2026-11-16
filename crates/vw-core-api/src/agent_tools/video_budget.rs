@@ -1,10 +1,8 @@
 //! Optional video job reservations. Shares the composer image count ceiling and counts prior turn images.
 //! One active job per chat and two globally; reservations survive neither completion nor cancellation.
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    sync::{Mutex, PoisonError},
-};
+use std::{collections::HashMap, sync::Mutex};
+use vw_platform::sync::LockRecover;
 use vw_video_types::{Code, Error};
 #[derive(Default)]
 struct Turn {
@@ -30,7 +28,7 @@ impl Budget {
         image: bool,
     ) -> Result<Reservation<'_>, Error> {
         let (turn, observed) = usage(state)?;
-        let mut turns = self.turns.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut turns = self.turns.lock_or_recover();
         if turns.values().filter(|t| t.active).count() >= 2 {
             return Err(Error::new(Code::Busy, "two video jobs are active"));
         }
@@ -61,20 +59,13 @@ impl Budget {
         })
     }
     pub(super) fn forget(&self, owner: &str) {
-        self.turns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(owner);
+        self.turns.lock_or_recover().remove(owner);
     }
 }
 impl Reservation<'_> {
     pub(super) fn sent(&mut self, state: &Value, image: bool) -> Result<(), Error> {
         let (turn, observed) = usage(state)?;
-        let turns = self
-            .budget
-            .turns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let turns = self.budget.turns.lock_or_recover();
         let entry = turns
             .get(&self.owner)
             .ok_or(Error::new(Code::Cancelled, "video turn ended"))?;
@@ -96,13 +87,7 @@ impl Reservation<'_> {
 }
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
-        if let Some(t) = self
-            .budget
-            .turns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_mut(&self.owner)
-        {
+        if let Some(t) = self.budget.turns.lock_or_recover().get_mut(&self.owner) {
             t.active = false;
             if self.image && !self.sent {
                 t.spent = t.spent.saturating_sub(1);

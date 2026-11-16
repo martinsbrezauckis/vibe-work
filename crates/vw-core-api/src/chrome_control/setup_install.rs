@@ -47,15 +47,20 @@ fn install_inner(
     let home = home_of(config)?;
     let mut made = Made::default();
     let result = (|| -> Result<Receipt, String> {
+        let helper = state.join("bin").join(helper_name());
         for target in targets(&home, config)
             .into_iter()
             .filter(|t| t.name == browser)
         {
             if target.name == "Mozilla Firefox" {
-                firefox::require_unregistered(&target)?;
+                firefox::require_unregistered(
+                    config,
+                    &target,
+                    &helper,
+                    &manifest_path(state, target.name),
+                )?;
             }
         }
-        let helper = state.join("bin").join(helper_name());
         write_file(config, &mut made, &helper, &bytes)?;
         #[cfg(unix)]
         {
@@ -72,14 +77,14 @@ fn install_inner(
             match (&target.hosts, target.registry) {
                 (Some(hosts), _) => {
                     let file = hosts.join(format!("{HOST_NAME}.json"));
-                    registration::ensure_manifest(config, &file, &manifest, false)?;
+                    registration::ensure_manifest(config, &file, &manifest)?;
                     made.written.push((file.clone(), manifest.clone()));
                     made.files.push(file);
                 }
                 (None, Some(root)) => {
                     let file = manifest_path(state, target.name);
                     if !made.files.contains(&file) {
-                        registration::ensure_manifest(config, &file, &manifest, false)?;
+                        registration::ensure_manifest(config, &file, &manifest)?;
                         made.written.push((file.clone(), manifest.clone()));
                         made.files.push(file.clone());
                     }

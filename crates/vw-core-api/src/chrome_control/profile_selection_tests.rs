@@ -379,3 +379,38 @@ async fn debug_tab_context_cannot_bypass_the_persons_profile_selection() {
     assert_eq!(selected(&core), None);
     core.shutdown().await;
 }
+
+/// PREDICT (red before the change): the Debug API's first tab pick in a chat that has no profile yet is refused with
+/// "This chat uses another browser profile", which is untrue there: the chat has none. The refusal now says the chat
+/// has no profile yet and that the user picks it; a chat bound to another profile keeps the "another profile" text.
+#[tokio::test]
+async fn debug_tab_context_names_a_missing_profile_and_another_profile_apart() {
+    let core = fixture("profile-debug-tab-words", profiles()).await;
+    let pick = |profile: &str| super::ChromeControlRequest::TabContext {
+        session_id: Some("s".into()),
+        profile_id: profile.into(),
+        tab_id: 7,
+    };
+    let first = core
+        .chrome_control(crate::Origin::DebugApi, pick("chrome:work"))
+        .await
+        .unwrap_err()
+        .message;
+    assert!(!first.contains("another"), "{first}");
+    assert!(
+        first
+            .contains("has no browser profile yet, and only the user picks it; nothing was added."),
+        "{first}"
+    );
+    choose(&core, "chrome:personal").await.unwrap();
+    let other = core
+        .chrome_control(crate::Origin::DebugApi, pick("chrome:work"))
+        .await
+        .unwrap_err()
+        .message;
+    assert!(
+        other.contains("uses another browser profile; nothing was added."),
+        "{other}"
+    );
+    core.shutdown().await;
+}

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -35,11 +36,7 @@ struct Claims {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let mut claims = self
-            .claims
-            .entries
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut claims = self.claims.entries.lock_or_recover();
         // Weak::upgrade stops succeeding before Drop starts. Publish absence only after closing the OS handle.
         if let Some(lock) = self.lock.take() {
             let _ = lock.unlock();
@@ -139,11 +136,7 @@ impl Leases {
         }
         // A probe also briefly owns the OS lock. Serialize it with our claims and other probes so
         // this instance cannot mistake its own ownership check for a foreign owner.
-        let claims = self
-            .claims
-            .entries
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let claims = self.claims.entries.lock_or_recover();
         if claims.contains_key(id) {
             return Ok(None);
         }
@@ -161,11 +154,7 @@ impl Leases {
         let Some(data) = &self.data else {
             return Ok(None);
         };
-        let mut claims = self
-            .claims
-            .entries
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut claims = self.claims.entries.lock_or_recover();
         let mut lock = None;
         let mut waited = 0;
         loop {
@@ -194,11 +183,7 @@ impl Leases {
                     tests::pause(&self.before_wait);
                     std::thread::sleep(std::time::Duration::from_millis(1));
                     waited += 1;
-                    claims = self
-                        .claims
-                        .entries
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner);
+                    claims = self.claims.entries.lock_or_recover();
                 }
                 Err(TryLockError::WouldBlock) => {
                     return Err(crate::session_holder::held_refusal(self.holder(id)));
@@ -233,25 +218,16 @@ impl Leases {
     /// A channel keeps its claim until its acknowledged close or core shutdown.
     pub(crate) fn retain(&self, id: &str, lease: Option<Arc<Lease>>) {
         if let Some(lease) = lease {
-            self.active
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(id.to_owned(), lease);
+            self.active.lock_or_recover().insert(id.to_owned(), lease);
         }
     }
 
     pub(crate) fn release(&self, id: &str) {
-        self.active
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id);
+        self.active.lock_or_recover().remove(id);
     }
 
     pub(crate) fn release_all(&self) {
-        self.active
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.active.lock_or_recover().clear();
     }
 }
 

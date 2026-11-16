@@ -17,6 +17,8 @@ ts = ["dep:ts-rs"]
 
 [dependencies]
 vw-vocabulary = { workspace = true }
+# Binds its loopback listeners as Vibe Work's own ports (refused for every browser page).
+vw-netguard = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +27,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 # Project keys for app-data files (same version as vw-preview and vw-changes).
 sha2 = { workspace = true }
+hex = { workspace = true }
 # Random comment ids and pick accessor names (same version as the other crates).
 getrandom = { workspace = true }
 # Constant-time comparison of the viewer's path capability. subtle 2.6.1 (BSD-3-Clause), already in the lockfile.

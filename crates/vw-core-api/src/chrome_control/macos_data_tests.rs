@@ -42,7 +42,7 @@ fn macos_host_manifest_uses_the_excluded_directory_without_reading_its_parent() 
         .unwrap()
         .join(format!("{HOST_NAME}.json"));
     let bytes = host_manifest(&s.state().join("bin").join(helper_name()), EXTENSION_ID);
-    registration::ensure_manifest(&config, &host, &bytes, false).unwrap();
+    registration::ensure_manifest(&config, &host, &bytes).unwrap();
     assert_eq!(files::read(&config, &host).unwrap(), Some(bytes.clone()));
     files::remove(&config, &host, &bytes).unwrap();
     assert!(!host.exists());
@@ -339,7 +339,7 @@ fn macos_native_host_creation_rejects_linked_ancestors_and_host_directories() {
             .join("NativeMessagingHosts")
             .join(format!("{HOST_NAME}.json"));
         let bytes = host_manifest(&s.state().join("bin").join(helper_name()), EXTENSION_ID);
-        assert!(registration::ensure_manifest(&config, &host, &bytes, false).is_err());
+        assert!(registration::ensure_manifest(&config, &host, &bytes).is_err());
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
     }
 }

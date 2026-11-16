@@ -54,6 +54,24 @@ impl DelegationAuthorizer for NativeDelegation {
                     && crate::browser_tabs::agent_page_allowed(&hub.service, &owner, page_key)))
     }
 
+    /// Protected field values are delegated only to a Full access chat that owns the page.
+    fn protected_values_delegated(&self, page_key: &str) -> bool {
+        let Some(shared) = self.shared.upgrade() else {
+            return false;
+        };
+        let Some(owner) = shared
+            .preview
+            .as_ref()
+            .and_then(|hub| hub.service.owner_session_id(page_key))
+        else {
+            return false;
+        };
+        crate::chrome_control::check::mode(&shared, &owner)
+            .as_deref()
+            .and_then(vw_ask::chrome::Tier::from_mode)
+            == Some(vw_ask::chrome::Tier::FullAccess)
+    }
+
     fn record(&self, receipt: &vw_browser::delegation::DelegationReceipt) -> Result<(), String> {
         let shared = self
             .shared

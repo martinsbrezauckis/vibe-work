@@ -25,13 +25,8 @@
  */
 import { toCallError } from "../../protocol/client/types";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** What `read` answers. */
 function readVoice(app: App): unknown {
@@ -135,7 +130,7 @@ async function startUntilMicPending(
 
 /** Runs one `ui/voice` request. */
 async function handleVoice(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const voice = app.voice;
   if (voice === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const given = input["sessionId"];

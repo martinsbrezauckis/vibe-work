@@ -1,0 +1,44 @@
+# Vibe Work: unsupported experimental features stay off.
+# Vibe Work: Vibe checks HTTPS certificates with your system's certificate store, not the copy bundled with
+# Vibe's Python packages, which can lag behind removed certificate authorities.
+enable_system_trust_store = true
+
+# Vibe Work: the agent's commits carry no "Co-Authored-By: Mistral Vibe" line unless you set this to true.
+# (Your own commits: the Commit dialog's credit switch, per project.)
+include_commit_signature = false
+
+active_model = "large-4"
+tool_paths = [ "/opt/tools" ]
+agent_paths = [
+   # mine
+  "/abs/agents",
+]
+default_agent = "accept-edits"
+experimental_enable_registry_skills = true
+experimental_enable_mistral_mcp_connector = false
+experimental_local_runtime_session_api = false
+experimental_enable_document_library_connector = false
+experimental_enable_model_catalog = false
+experimental_enable_local_projects = false
+experimental_enable_tab_status = false
+enable_pr_monitoring = false
+
+[[models]]
+name = "mistral-large-4"
+provider = "mistral"
+alias = "large-4"
+display_name = "Mistral Large 4"
+supports_images = true
+max_context_length = 1048576
+max_output_tokens = 262144
+thinking_levels = ["low", "medium", "high"]
+thinking = "high"
+input_price = 0.7
+cached_input_price = 0.07
+output_price = 2.1
+auto_compact_threshold = 800000
+
+# Vibe Work: session titles are written by Mistral Medium 3.5, whatever model a session uses.
+# Write title = "active" to title sessions with their own model instead.
+[utility_models]
+title = "mistral-medium-3.5"

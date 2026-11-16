@@ -18,6 +18,7 @@ pub(super) fn git_decls(cfg: &Config) -> Vec<String> {
         crate::PrCreatedView::decl(cfg),
         crate::PrSource::decl(cfg),
         crate::PrStatusView::decl(cfg),
+        crate::PrListView::decl(cfg),
         crate::BringPlanView::decl(cfg),
         crate::GitSettings::decl(cfg),
         crate::GitIdentitySettings::decl(cfg),
@@ -43,6 +44,8 @@ pub(super) fn git_decls(cfg: &Config) -> Vec<String> {
         vw_git::pr::Mergeable::decl(cfg),
         vw_git::pr::Checks::decl(cfg),
         vw_git::pr::CheckItem::decl(cfg),
+        vw_git::pr_status::PrStatusLine::decl(cfg),
+        vw_git::pr_status::PrReason::decl(cfg),
     ]
     .into_iter()
     .map(|decl| trim_decl_lines(&decl))

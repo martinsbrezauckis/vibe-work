@@ -12,8 +12,6 @@ publish = false
 workspace = true
 
 [features]
-# Optional agent capture directly into the vault. Off in default builds.
-agent-vault = ["vw-agent-tools/agent-vault", "vw-browser/agent-vault", "vw-keys/agent-vault", "vw-ask/agent-vault", "dep:windows"]
 # Upstream proxy transports, enabled by the app default features.
 proxy-transports = ["vw-netguard/proxy-transports", "vw-mistral/proxy-transports", "vw-gate/proxy-transports"]
 video = ["dep:vw-video", "vw-agent-tools/video"]
@@ -29,7 +27,7 @@ your-safari = ["vw-platform/safari-input"]
 # outside the exported tree; private e2e builds only, a release build with it fails to compile (lib.rs). Off by default.
 vault-e2e = []
 e2e-script = ["vw-browser/e2e-script", "vw-preview/e2e-script"]
-ts = ["vw-ask/ts","dep:ts-rs", "vw-vibe-install/ts", "vw-changes/ts", "vw-preview/ts", "vw-browser/ts", "vw-pages/ts", "vw-worktrees/ts", "vw-projects/ts", "vw-git/ts", "vw-market/ts"]
+ts = ["vw-ask/ts","dep:ts-rs", "vw-vibe-install/ts", "vw-changes/ts", "vw-preview/ts", "vw-browser/ts", "vw-pages/ts", "vw-worktrees/ts", "vw-projects/ts", "vw-git/ts", "vw-market/ts", "vw-import/ts"]
 
 [[bin]]
 name = "gen-core-ts"
@@ -87,6 +85,8 @@ vw-changes = { workspace = true }
 vw-worktrees = { workspace = true }
 # The outer git loop: branch bar, commit, push, pull requests, PR card, bring a copy in.
 vw-git = { path = "../vw-git" }
+# Reads other coding agents' setups for `importSetup` (read only).
+vw-import = { path = "../vw-import" }
 # The PR card's public GitHub API reads with vw-mistral's HTTPS client (same version and TLS setup).
 reqwest = { workspace = true }
 # Preview pane model and engine seam.
@@ -132,8 +132,8 @@ process-wrap = { workspace = true, features = ["tokio1", "kill-on-drop", "proces
 rustix = { workspace = true, features = ["std", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
-# Optional private command capture starts its kill-on-close job without a console window.
-windows = { workspace = true, features = ["Win32_System_Threading"], optional = true }
+# Private command capture starts its kill-on-close job without a console window.
+windows = { workspace = true, features = ["Win32_System_Threading"] }
 # Rust-only BLAKE3 on Windows (same output), as vw-vault: no C/asm build in the msvc cross lint.
 blake3 = { workspace = true, features = ["pure"] }
 

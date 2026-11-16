@@ -15,7 +15,8 @@
 //! remain retryable in Vibe's paused queue (listed, never run, and logged).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::warn;
@@ -34,7 +35,7 @@ struct State {
 
 impl Returns {
     fn begin(&self, session: &str, items: Vec<Value>) -> Vec<Value> {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         if state.running.contains(session) {
             return Vec::new();
         }
@@ -54,7 +55,7 @@ impl Returns {
     }
 
     fn finish(&self, session: &str, returned: &[Value]) {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         state
             .returned
             .entry(session.to_owned())
@@ -68,7 +69,7 @@ impl Returns {
     }
 
     pub(crate) fn forget(&self, session: &str) {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         state.returned.remove(session);
     }
 }

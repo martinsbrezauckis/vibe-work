@@ -11,8 +11,9 @@ mod start;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use vw_platform::sync::LockRecover;
 
 use crate::access::Access;
 use crate::channels::Channels;
@@ -85,6 +86,9 @@ pub(crate) struct Shared {
     pub(crate) model_requests: Option<Arc<dyn vw_supervisor::ModelRequests>>,
     /// Per-chat Stop generation: a continuation scheduled before a Stop is never sent (`stops.rs`).
     pub(crate) stops: crate::stops::Stops,
+    /// Person-paused agent tools (the browser) and the calls waiting on them. Boxed: `Core::start` builds `Shared`
+    /// inside its future, which must stay within the large-future limit on every platform.
+    pub(crate) paused_tools: Box<crate::paused_tools::PausedTools>,
     pub(crate) queue_returns: crate::queue_return::Returns,
     /// Sessions Vibe could not reopen after a restart (`stuck.rs`).
     pub(crate) stuck: crate::stuck::StuckSessions,
@@ -127,6 +131,11 @@ pub(crate) struct Shared {
     /// The marketplace's catalog, downloader and running install (`market.rs`).
     pub(crate) market: crate::market::MarketState,
     pub(crate) plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
+    /// The home folder whose other agents' setups `importSetup` reads, when set ([`Core::set_import_home`]); else the
+    /// person's home. Kept here, not in `CoreConfig`, so the start future stays small.
+    pub(crate) import_home: std::sync::Mutex<Option<std::path::PathBuf>>,
+    /// What each `importSetup` bring of this run changed: Undo's only input (`import_setup`).
+    pub(crate) import_brings: crate::import_setup::Brings,
     /// The user's Chrome Control permissions, cards and setup (`chrome_control`).
     pub(crate) chrome_control: crate::chrome_control::ChromeControl,
     /// The session-scoped agent tools (`agent_tools`), when configured and started.
@@ -193,12 +202,7 @@ impl Shared {
 impl Drop for Shared {
     fn drop(&mut self) {
         self.secret_scan.stop();
-        if let Some(tick) = self
-            .procmon_tick
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(tick) = self.procmon_tick.lock_or_recover().take() {
             tick.abort();
         }
         for slot in [
@@ -207,7 +211,7 @@ impl Drop for Shared {
             &self.vibe_events,
             &self.title_events,
         ] {
-            if let Some(task) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            if let Some(task) = slot.lock_or_recover().take() {
                 task.abort();
             }
         }
@@ -257,6 +261,12 @@ impl Core {
     /// The gate's error when the path is not an existing directory.
     pub fn register_picked_folder(&self, path: &Path) -> Result<(), GateError> {
         self.shared.gate.register_picked_folder(path)
+    }
+
+    /// Points `importSetup` at another home folder (a fixture home in tests): the other agents' setups are read
+    /// there, and no environment variable (`XDG_CONFIG_HOME`, `CODEX_HOME`) is read.
+    pub fn set_import_home(&self, home: std::path::PathBuf) {
+        *self.shared.import_home.lock_or_recover() = Some(home);
     }
 
     /// Installs the host's answer to "is a Debug API `ui/*` request being served right now?" (once per core; a later
@@ -313,11 +323,11 @@ impl Core {
                 last_death: Some(death),
                 ..
             } => death.stderr_tail.clone(),
-            _ => shared
-                .supervisor
-                .current()
-                .map(|c| c.stderr_tail(shared.config.stderr_lines))
-                .unwrap_or_default(),
+            // Without a server, the last lines of a first start that failed (empty when none did).
+            _ => shared.supervisor.current().map_or_else(
+                || shared.supervisor.start_failure_stderr(),
+                |c| c.stderr_tail(shared.config.stderr_lines),
+            ),
         };
         CoreStatus {
             app_version: shared
@@ -381,12 +391,7 @@ impl Core {
         if let Some(clipboard) = &self.shared.config.clipboard {
             clipboard.shutdown().await;
         }
-        let tick = self
-            .shared
-            .procmon_tick
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let tick = self.shared.procmon_tick.lock_or_recover().take();
         if let Some(tick) = tick {
             tick.abort();
         }
@@ -410,7 +415,7 @@ impl Core {
             &self.shared.vibe_events,
             &self.shared.title_events,
         ] {
-            let task = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
+            let task = slot.lock_or_recover().take();
             if let Some(task) = task {
                 task.abort();
             }

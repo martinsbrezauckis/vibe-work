@@ -15,6 +15,7 @@ import { NEW_CHAT } from "../../state/newChatKey";
 import { pasteIntoDraft } from "../../state/composerPaste";
 import { lineCount, pastesIn } from "./model/pastes";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { configuredModeId, currentModeId } from "./model/access";
 import { currentPick, modelChoices, newChatPick } from "./model/models";
@@ -24,7 +25,7 @@ import type { CodeRef } from "../files/model/context";
 /** Optional display location, using the same absolute paths accepted by file links. */
 function contextRef(value: unknown): CodeRef | undefined {
   if (value === undefined) return undefined;
-  const ref = asObject(value);
+  const ref = requiredBodyObject(value);
   const path = text(ref["path"], "ref.path");
   const start = ref["start"];
   const end = ref["end"];
@@ -43,12 +44,6 @@ function contextRef(value: unknown): CodeRef | undefined {
       "ref must name an absolute path and a line range (or 0, 0 for the whole file)",
     );
   return { path, start, end };
-}
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
 }
 
 function text(value: unknown, name: string, allowEmpty = false): string {
@@ -217,7 +212,10 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         }
         const outcome = await actions.send(sessionId, mode);
         // From the new-chat view, `outcome.started` names the session the send created.
-        return { outcome: { ...outcome, result: undefined }, ...asObject(read(sessionId)) };
+        return {
+          outcome: { ...outcome, result: undefined },
+          ...requiredBodyObject(read(sessionId)),
+        };
       }
       case "insertContext": {
         const ref = contextRef(input["ref"]);
@@ -233,7 +231,7 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         const name = text(input["name"], "name");
         const file = new File([bytesOf(text(input["data"], "data"))], name);
         const added = await actions.attachFiles(sessionId, [file]);
-        return { added, ...asObject(read(sessionId)) };
+        return { added, ...requiredBodyObject(read(sessionId)) };
       }
       case "stop":
         return { stopped: await actions.stop(sessionId) };
@@ -249,7 +247,7 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         // Answers the composer as it then reads (like `model`), so a held new-chat pick is visible at once.
         return {
           ok: await actions.setAccess(sessionId, text(input["mode"], "mode")),
-          ...asObject(read(sessionId)),
+          ...requiredBodyObject(read(sessionId)),
         };
       case "model": {
         const alias = input["alias"] === undefined ? undefined : text(input["alias"], "alias");
@@ -274,7 +272,7 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
         }
         return {
           ok: await actions.pickModel(sessionId, alias, effort),
-          ...asObject(read(sessionId)),
+          ...requiredBodyObject(read(sessionId)),
         };
       }
       case "queueEdit":
@@ -314,5 +312,5 @@ export async function handleComposer(app: App, body: unknown): Promise<unknown> 
     }
   };
 
-  return act(asObject(body));
+  return act(requiredBodyObject(body));
 }

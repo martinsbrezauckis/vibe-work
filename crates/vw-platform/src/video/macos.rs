@@ -38,16 +38,10 @@ impl Decoder {
                 "AVFoundation video type",
             ))?);
             let Some(track) = tracks.firstObject() else {
-                // An ISO file that passed the structural preflight but shows no track at all was never opened
-                // by AVFoundation (an extensionless snapshot did this): a worker failure, not the file's format.
-                return Err(if asset.tracks().count() == 0 && iso_media(path) {
-                    Error::new(
-                        Code::MediaOpen,
-                        "AVFoundation could not open the video snapshot",
-                    )
-                } else {
-                    Error::new(Code::NoVideoTrack, "AVFoundation has no video track")
-                });
+                return Err(super::native_values::avfoundation_without_video(
+                    asset.tracks().count(),
+                    iso_media(path),
+                ));
             };
             let descriptions = track.formatDescriptions();
             let format = descriptions.firstObject().ok_or(Error::new(

@@ -1,7 +1,22 @@
-//! Reserves app data outside the readable Vibe home, except for the current chat's scratch folder.
+//! Reserves app data outside the readable Vibe home, except for the current chat's scratch folder, and the private
+//! vault beside the app data.
 //! Uses the folder guard's kernel-order path resolution; called alongside its existing control-file and copy checks.
 use super::{Access, Layout, Permits, resolve, shown};
 use std::path::{Component, Path, PathBuf};
+
+/// The folder beside the app data that holds the private vault on every OS. It must name the same folder as
+/// `vw_vault::private_location::private_vault_dir`'s parent (a core test compares the two; this binary does not link
+/// the vault).
+pub const PRIVATE_VAULT_CONTAINER: &str = "Vibe Work Vault";
+
+/// `<parent of app_data>/Vibe Work Vault`, or `None` when `app_data` has no parent. No filesystem access.
+#[must_use]
+pub fn private_vault_container(app_data: &Path) -> Option<PathBuf> {
+    app_data
+        .parent()
+        .filter(|parent| *parent != app_data)
+        .map(|parent| parent.join(PRIVATE_VAULT_CONTAINER))
+}
 
 fn contains(folder: &Path, path: &Path) -> bool {
     let mut parts = path.components();
@@ -61,6 +76,15 @@ pub(super) fn copy_permit(
 
 pub(super) fn check(layout: &Layout, real: &Path, access: Access, own: &str) -> Option<String> {
     let data = layout.vibe_home.parent()?;
+    // The private vault sits beside the app data (the vault's own place rule): never read, changed or worked in.
+    if let Some(vault) = private_vault_container(data)
+        && contains(&vault, real)
+    {
+        return Some(format!(
+            "Not run: this is the vault ({}); the agent never reads or changes it. {own} Use your own folder for this.",
+            shown::shown(real)
+        ));
+    }
     if !matches!(access, Access::Read | Access::Context) && contains(real, data) {
         return Some(format!(
             "Not run: this folder contains Vibe Work's own app data ({}); the agent does not read or change it. {own} Use your own folder for this.",

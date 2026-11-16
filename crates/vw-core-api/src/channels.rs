@@ -48,8 +48,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -143,7 +144,7 @@ pub(crate) struct Channels {
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.lock_or_recover()
 }
 
 /// Maps a supervisor failure to the transport's error: no ready server is `Timeout { id: 0 }`, which

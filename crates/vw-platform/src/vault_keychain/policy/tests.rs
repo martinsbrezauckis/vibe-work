@@ -240,6 +240,38 @@ fn repeated_callers_do_not_repeat_a_refused_prompt() {
     assert!(attempts.run("vault", "device", || Ok(())).is_ok());
 }
 
+// PREDICT (written before the fix): a Save the person cancelled at the Keychain prompt was cached like a refused
+// startup read, so every later Save returned that failure without asking the Keychain again, even after the person
+// unlocked it. Expected: each Save asks again; reads meanwhile do not; a saved item lets reads ask again.
+#[test]
+fn a_save_after_a_refused_save_asks_the_keychain_again() {
+    let mut attempts = Attempts::new();
+    let refused: Result<(), String> =
+        attempts.save("vault", "device", || Err("user canceled".to_owned()));
+    assert_eq!(refused.unwrap_err(), "user canceled");
+    let mut read_calls = 0;
+    let read: Result<(), String> = attempts.run("vault", "device", || {
+        read_calls += 1;
+        Ok(())
+    });
+    assert!(read.is_err());
+    assert_eq!(
+        read_calls, 0,
+        "a read after the refusal does not bring the prompt again"
+    );
+    let mut keychain_calls = 0;
+    let saved: Result<(), String> = attempts.save("vault", "device", || {
+        keychain_calls += 1;
+        Ok(())
+    });
+    assert_eq!(keychain_calls, 1, "the next Save asks the Keychain again");
+    assert!(saved.is_ok());
+    assert!(
+        attempts.run("vault", "device", || Ok(())).is_ok(),
+        "after a successful Save reads ask again"
+    );
+}
+
 #[test]
 fn failed_verification_keeps_the_old_item_for_reads_and_writes() {
     for write in [false, true] {

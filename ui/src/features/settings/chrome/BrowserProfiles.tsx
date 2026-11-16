@@ -37,11 +37,14 @@ function detail(profile: BrowserProfile): string {
   return [account, state].filter((part) => part !== undefined && part !== "").join(" · ");
 }
 
+// Row controls name the browser too: a Chrome and an Edge profile often share a name ("Work").
 function ProfileRow({
+  browser,
   profile,
   chrome,
   onRemove,
 }: {
+  browser: string;
   profile: BrowserProfile;
   chrome: ChromeControlState;
   onRemove: (profile: BrowserProfile) => void;
@@ -61,7 +64,7 @@ function ProfileRow({
         <Button
           data-testid="settings.browser-profile-remove"
           data-item-id={id}
-          aria-label={`Remove ${profile.name}`}
+          aria-label={`Remove ${browser} profile ${profile.name}`}
           appearance="compact"
           variant="danger"
           disabled={busy}
@@ -69,7 +72,7 @@ function ProfileRow({
             onRemove(profile);
           }}
         >
-          Remove
+          Remove…
         </Button>
         <label className="browser-profile-use" htmlFor={switchId}>
           {TEXT.browserProfileUse}
@@ -78,7 +81,7 @@ function ProfileRow({
           id={switchId}
           data-testid="settings.browser-profile-enabled"
           data-item-id={id}
-          aria-label={`Use ${profile.name}`}
+          aria-label={`Use ${browser} profile ${profile.name}`}
           aria-checked={profile.enabled}
           disabled={busy}
           onClick={() =>
@@ -93,6 +96,10 @@ function ProfileRow({
   );
 }
 
+/**
+ * Paired profiles of one browser: nothing for a single connected profile, one row for a single profile that is off or
+ * needs attention, and with several a default-profile dropdown plus one row each.
+ */
 export function BrowserProfiles({
   browser,
   chrome,
@@ -119,7 +126,7 @@ export function BrowserProfiles({
   if (only !== undefined)
     return (
       <>
-        <ProfileRow profile={only} chrome={chrome} onRemove={setRemoving} />
+        <ProfileRow browser={browser} profile={only} chrome={chrome} onRemove={setRemoving} />
         {dialog}
       </>
     );
@@ -163,6 +170,7 @@ export function BrowserProfiles({
       {rows.map((profile) => (
         <ProfileRow
           key={profile.profileId}
+          browser={browser}
           profile={profile}
           chrome={chrome}
           onRemove={setRemoving}

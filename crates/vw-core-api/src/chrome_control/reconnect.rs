@@ -3,9 +3,10 @@ use super::{AddonState, agent_browser::Browser};
 use crate::core::Shared;
 use serde_json::{Value, json};
 use std::{
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
     time::Duration,
 };
+use vw_platform::sync::LockRecover;
 
 // No separate Chrome reconnect bound existed: the helper RPC deadline is 35 s, the batch deadline 25 s.
 // A short shared wait leaves both budgets room for the action and its receipt.
@@ -18,14 +19,14 @@ pub(super) struct Wake(Mutex<[bool; 2]>);
 
 impl Wake {
     fn take(&self, browser: Browser) -> bool {
-        let mut attempts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut attempts = self.0.lock_or_recover();
         let attempted = &mut attempts[usize::from(browser == Browser::Edge)];
         !std::mem::replace(attempted, true)
     }
 
     pub(super) fn observe(&self, data: &Value) {
         if let Some(profiles) = data["profiles"].as_array() {
-            let mut attempts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut attempts = self.0.lock_or_recover();
             for browser in [Browser::Chrome, Browser::Edge] {
                 if profiles.iter().any(|p| {
                     p["connected"] == true
@@ -40,7 +41,7 @@ impl Wake {
     }
 
     pub(super) fn clear(&self) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = [false; 2];
+        *self.0.lock_or_recover() = [false; 2];
     }
 }
 
@@ -57,6 +58,39 @@ pub(super) fn retry(browser: Browser) -> Value {
     answer["structuredContent"]["addon"] = json!({
         "state":view.label, "stateCode":view.state, "instruction":instruction,
     });
+    json!({"vwMcpResult":answer})
+}
+
+/// Consecutive opens the helper answered "not ready" while the browser stayed connected, per browser. A port that
+/// has just rebound answers once and then opens; a browser that keeps refusing every start (its extension holds them
+/// until earlier cleanup is confirmed) is not reconnecting, so a repeat gets [`unconfirmed`] instead of a retry.
+#[derive(Default)]
+pub(super) struct NotReady(Mutex<[u8; 2]>);
+
+impl NotReady {
+    /// Records one more not-ready open of `browser`; true from the second in a row.
+    pub(super) fn repeated(&self, browser: Browser) -> bool {
+        let mut counts = self.0.lock_or_recover();
+        let count = &mut counts[usize::from(browser == Browser::Edge)];
+        *count = count.saturating_add(1);
+        *count > 1
+    }
+
+    /// An open of `browser` that the helper did not refuse as not ready.
+    pub(super) fn opened(&self, browser: Browser) {
+        self.0.lock_or_recover()[usize::from(browser == Browser::Edge)] = 0;
+    }
+}
+
+/// The browser is connected but again did not confirm a new session: the person's step, not a retry. Carries no
+/// connecting state, so no reconnect wait is registered for a browser that never disconnected.
+pub(super) fn unconfirmed(browser: Browser) -> Value {
+    let instruction = browser
+        .words("{yourBrowser} is connected, but {fullBrowser} did not confirm a new browser session. Ask the user to open {extension} from the {browser} toolbar and choose Check connection; if it still fails, ask the user to restart {browser}. Do not retry before that.")
+        .replace("{extension}", vw_vocabulary::label("workNames", "chromeExtension"));
+    let mut answer =
+        super::owner::own(&format!("Not run: {instruction}"), "SESSION_NOT_READY").into_value();
+    answer["structuredContent"]["retryable"] = json!(false);
     json!({"vwMcpResult":answer})
 }
 

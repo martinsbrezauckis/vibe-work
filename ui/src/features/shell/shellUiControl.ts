@@ -12,17 +12,12 @@ import { computeLayout } from "../../state/panelLayout";
 import { TAB_KINDS, type TabKind, panelOf } from "../../state/shellState";
 import { filterCommands } from "../../state/commands";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import { waitingSessions } from "../ask/waiting";
 import type { App } from "./AppContext";
 import { awayFromHome, goHome, homeTarget } from "./home";
 import { openNewChat } from "./newChat";
 import { coveringPage } from "./coveringPage";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function tabOf(value: unknown): TabKind {
   // "pages" is the Project tab's name before: accepted as an alias for one release (v0.1.x), then
@@ -50,7 +45,7 @@ export function registerShellRoutes(app: App): () => void {
   };
   const removers = [
     app.uiControl.register("panel", (body) => {
-      const { action, tab } = asObject(body);
+      const { action, tab } = requiredBodyObject(body);
       const a = shell.actions;
       if (action === "close") a.closePanel();
       else if (action === "open") a.openTab(tabOf(tab));
@@ -59,14 +54,14 @@ export function registerShellRoutes(app: App): () => void {
       return panelState();
     }),
     app.uiControl.register("theme", (body) => {
-      const { theme } = asObject(body);
+      const { theme } = requiredBodyObject(body);
       if (theme === "toggle") shell.actions.toggleTheme();
       else if (theme === "dark" || theme === "light") shell.actions.setTheme(theme);
       else throw new UiControlError("invalidParams", "theme must be dark, light or toggle");
       return { theme: shell.store.get().theme };
     }),
     app.uiControl.register("list", (body) => {
-      const { action } = asObject(body);
+      const { action } = requiredBodyObject(body);
       const drawer = layout().drawer;
       if (action === "show") {
         if (drawer) shell.actions.setDrawer(true);
@@ -85,7 +80,7 @@ export function registerShellRoutes(app: App): () => void {
     // newChat and the page items act like their buttons (home = back to the work exactly as it was, see home.ts;
     // newChat = the new-chat view, composer focused, no session until the first send, see newChat.ts).
     app.uiControl.register("rail", (body) => {
-      const input = body === undefined || body === null ? {} : asObject(body);
+      const input = body === undefined || body === null ? {} : requiredBodyObject(body);
       const action = input["action"] ?? "read";
       if (action === "home") goHome(app);
       else if (action === "newChat") openNewChat(app);
@@ -122,7 +117,7 @@ export function registerShellRoutes(app: App): () => void {
       };
     }),
     app.uiControl.register("session", (body) => {
-      const { sessionId } = asObject(body);
+      const { sessionId } = requiredBodyObject(body);
       if (sessionId !== null && typeof sessionId !== "string")
         throw new UiControlError("invalidParams", "sessionId must be a string or null");
       shell.actions.selectSession(sessionId);
@@ -164,7 +159,7 @@ export function registerShellRoutes(app: App): () => void {
     ),
     // the command palette and the toasts, like the keyboard and a click use them.
     app.uiControl.register("palette", (body) => {
-      const { action, query, id } = asObject(body ?? {});
+      const { action, query, id } = requiredBodyObject(body ?? {});
       const listed = () =>
         filterCommands(app.commands.list(), typeof query === "string" ? query : "").map(
           ({ id: itemId, label, section }) => ({ id: itemId, label, section }),
@@ -190,7 +185,7 @@ export function registerShellRoutes(app: App): () => void {
       }
     }),
     app.uiControl.register("toasts", (body) => {
-      const { action, id } = asObject(body ?? {});
+      const { action, id } = requiredBodyObject(body ?? {});
       if (action === "dismiss") {
         if (typeof id !== "number")
           throw new UiControlError("invalidParams", "id must be a number");

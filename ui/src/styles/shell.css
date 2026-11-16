@@ -32,7 +32,7 @@ svg.i {
 }
 kbd {
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
@@ -68,7 +68,7 @@ kbd {
   padding: 0 3px;
   background: var(--chrome);
   color: var(--text);
-  font-size: var(--text-10-5);
+  font-size: var(--text-xs);
   line-height: 12px;
 }
 .brand {
@@ -106,7 +106,7 @@ kbd {
   background: var(--panel);
   color: var(--text-3);
   cursor: pointer;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .search kbd {
   margin-left: auto;
@@ -123,7 +123,7 @@ kbd {
   align-items: center;
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   color: var(--accent-ink);
   background: var(--orange-3);
@@ -145,7 +145,7 @@ kbd {
   display: grid;
   grid-template-columns: 56px 284px minmax(0, 1fr) 0;
   min-height: 0;
-  transition: grid-template-columns var(--t-layout) var(--ease-std);
+  transition: grid-template-columns var(--t-ui) var(--ease-std);
 }
 .body.no-col {
   grid-template-columns: 56px 0 minmax(0, 1fr) 0;
@@ -251,8 +251,12 @@ kbd {
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
   color: var(--text-3);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   background: var(--bg);
+}
+/* The field inside is unstyled, so its box shows keyboard focus, like the search inside Settings. */
+.filter:focus-within {
+  border-color: var(--focus);
 }
 .filter input {
   all: unset;
@@ -277,7 +281,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   padding: 12px 8px 4px;
 }
@@ -293,7 +297,7 @@ kbd {
   border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   margin: 2px 0 4px;
 }
 .needs-row .t {
@@ -303,7 +307,7 @@ kbd {
 }
 .needs-row .p {
   color: var(--text-3);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   margin-left: auto;
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -324,7 +328,7 @@ kbd {
   color: var(--text);
   text-align: left;
   font-weight: var(--weight-medium);
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .proj-h:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -334,7 +338,7 @@ kbd {
   color: var(--text-3);
 }
 .proj-h .caret {
-  transition: transform var(--t-fade) var(--ease-native);
+  transition: transform var(--t-hover) var(--ease-std);
 }
 .proj[data-open="true"] .proj-h .caret {
   transform: rotate(90deg);
@@ -348,7 +352,7 @@ kbd {
 }
 .proj-h .cnt {
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
   font-weight: var(--weight-regular);
   display: inline-flex;
@@ -362,7 +366,7 @@ kbd {
   display: none;
 }
 .col-note {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   padding: 10px 10px 0;
 }
@@ -391,7 +395,7 @@ kbd {
   align-items: center;
   gap: 16px;
   padding: 0 12px;
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   background: var(--chrome);
   border-top: 1px solid var(--line);
@@ -430,7 +434,7 @@ kbd {
 }
 .left-running-intro {
   margin: 0 0 12px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .modal ul.left-running-list {
@@ -439,7 +443,7 @@ kbd {
   margin: 0;
   display: grid;
   gap: 8px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text);
 }
 .left-running-list li {
@@ -454,7 +458,7 @@ kbd {
   margin-right: auto;
 }
 .left-running-what .d {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -489,7 +493,7 @@ kbd {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .rbtn-wide:hover:where(:not(:disabled)) {
   background: var(--hover);

@@ -35,7 +35,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   background: var(--panel);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   min-width: 0;
 }
@@ -51,7 +51,7 @@
 }
 .dictation-time {
   color: var(--text-3);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
 }
 .rec-dot {
   width: 8px;
@@ -62,7 +62,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .rec-dot {
-    animation: recpulse var(--t-busy-fast) var(--ease-pulse) infinite;
+    animation: recpulse var(--t-loop) var(--ease-pulse) infinite;
   }
 }
 @keyframes recpulse {
@@ -80,7 +80,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   background: var(--raised);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   min-width: 0;
 }
@@ -136,7 +136,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .vchat-listening {
-    animation: vchat-pulse var(--t-busy) var(--ease-pulse) infinite;
+    animation: vchat-pulse var(--t-loop) var(--ease-pulse) infinite;
   }
 }
 @keyframes vchat-pulse {
@@ -162,6 +162,6 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .vchat-row-listening {
-    animation: recpulse var(--t-busy-fast) var(--ease-pulse) infinite;
+    animation: recpulse var(--t-loop) var(--ease-pulse) infinite;
   }
 }

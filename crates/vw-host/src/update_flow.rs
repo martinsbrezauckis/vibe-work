@@ -31,8 +31,9 @@
 //! Called by: `app` (`updater.rs`, `commands.rs`), the private tests.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tokio::runtime::Handle;
 use tokio::sync::watch;
@@ -205,7 +206,7 @@ impl UpdateManager {
 
     /// Runs `f` on the state under the lock and publishes the resulting view if it changed.
     pub(crate) fn with<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
-        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.state.lock_or_recover();
         let result = f(&mut state);
         let view = Self::view_of(&self.0.cfg, &state);
         drop(state);
@@ -235,11 +236,7 @@ impl UpdateManager {
     /// Attaches the check that runs together with every [`UpdateManager::check`] (the supported-Vibe
     /// manifest). Replaces an earlier one.
     pub fn set_companion_check(&self, check: CompanionCheck) {
-        *self
-            .0
-            .companion
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(check);
+        *self.0.companion.lock_or_recover() = Some(check);
     }
 
     /// Checks after `delay`, then every 24 hours while the application keeps running.
@@ -315,12 +312,7 @@ impl UpdateManager {
     /// `failed` phase.
     pub async fn check(&self) -> Result<(), UpdateError> {
         self.acquire()?;
-        let companion = self
-            .0
-            .companion
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let companion = self.0.companion.lock_or_recover().clone();
         let also = async move {
             if let Some(check) = companion {
                 check().await;

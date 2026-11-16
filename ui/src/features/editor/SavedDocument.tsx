@@ -5,6 +5,10 @@ import { savedWords } from "../files/openFiles";
 import { CodeEditor } from "./CodeEditor";
 import { useRef } from "react";
 import { registerCodeActions } from "../files/liveEditors";
+/**
+ * A read-only editor tab for a saved, disk or commit version of `file`, with a button that closes it. Its editor
+ * registers the same code actions as an open file.
+ */
 export function SavedDocument({
   files,
   sessionId,

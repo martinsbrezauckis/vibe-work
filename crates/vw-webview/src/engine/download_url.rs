@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::{Webview, Wry};
 use tokio::io::AsyncWriteExt;
 use url::Url;
+use vw_platform::sync::LockRecover;
 use vw_preview::EngineError;
 
 pub(super) async fn run(
@@ -125,8 +126,7 @@ impl super::TauriEngine {
     pub(super) fn remember_download_proxy(&self, label: &str, proxy: Option<&str>) {
         if let Some(proxy) = proxy {
             self.download_proxies
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .lock_or_recover()
                 .insert(label.to_owned(), proxy.to_owned());
         }
     }

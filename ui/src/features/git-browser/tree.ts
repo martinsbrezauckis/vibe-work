@@ -1,6 +1,7 @@
 /** Flattens expanded repository/copy/file nodes for virtua. Depends on browser model; called by GitBrowser. */
 import type { BrowserRepo, BrowserTarget } from "./model";
 
+/** One row of the flattened git browser tree: a repository, the Copies group, a copy or a changed file. */
 export type BrowserRow = {
   id: string;
   parent: string | null;
@@ -14,6 +15,10 @@ export type BrowserRow = {
   expandable: boolean;
 };
 
+/**
+ * Flattens `repos` into tree rows in display order: each repository, its Copies group and copies with their files,
+ * then its own files. Rows under a collapsed id are left out.
+ */
 export function treeRows(repos: BrowserRepo[], collapsed: ReadonlySet<string>): BrowserRow[] {
   const rows: BrowserRow[] = [];
   function files(

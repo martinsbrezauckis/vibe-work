@@ -391,7 +391,9 @@ async fn safari_repair_approval_uses_the_same_person_only_card() {
     assert!(core.asks().iter().all(|ask| ask.person_only));
     assert!(calls.lock().unwrap().is_empty());
     answer.send(Confirmation::Approved).unwrap();
-    settle().await;
+    // PREDICT: with the fixed 50 ms `settle` this failed in every full parallel lib run on Windows (the approval task
+    // had not finished); it waits for the approval's own end now.
+    super::test_support::until_safari_approved(&core.shared).await;
     assert!(calls.lock().unwrap().iter().any(|(method, params)| method == "owner.pairing.approve" && params["approved"] == true));
     core.shutdown().await;
 }
@@ -520,7 +522,10 @@ async fn after_not_now_the_persons_connect_lets_the_profile_ask_again_without_a_
     );
     assert_eq!(
         *calls.lock().unwrap(),
-        vec![("owner.profileUnpair".into(), json!({"profileId":profile}))],
+        vec![(
+            "owner.profileUnpair".into(),
+            json!({"profileId":profile,"keepPin":true})
+        )],
         "Connect only lets the helper ask again"
     );
     let card = {
@@ -585,7 +590,9 @@ async fn an_approved_safari_pairing_says_to_finish_in_the_toolbar_until_safari_c
     notify(&core, ID, "safari");
     let (_, answer) = prompt(&mut receive).await;
     answer.send(Confirmation::Approved).unwrap();
-    settle().await;
+    // PREDICT: with the fixed 50 ms `settle` this failed in every full parallel lib run on Windows (the approval task
+    // had not finished); it waits for the approval's own end now.
+    super::test_support::until_safari_approved(&core.shared).await;
     let view = card();
     assert_eq!(
         view.step.as_deref(),

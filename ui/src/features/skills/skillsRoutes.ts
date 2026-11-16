@@ -20,13 +20,8 @@ import { toCallError } from "../../protocol/client/types";
 import { offersReport } from "../../state/installOffers";
 import { isStateRead } from "../../state/routeInput";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -72,7 +67,7 @@ function row(app: App, name: string) {
 
 /** Runs one `ui/skills` request and answers the state after it. */
 async function handleSkills(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const skills = app.skills;
   if (skills === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const a = skills.debugApi;

@@ -102,7 +102,7 @@ fn authority(shared: &Shared, claim: &Value) -> Result<(), String> {
         chat,
         "chrome_execute",
         &request,
-        Some(&super::read_consent::Consent(needed)),
+        Some(&super::read_consent::Consent(needed, false)),
     )?;
     super::gateway::validate_session(shared, chat, "chrome_execute", &request)?;
     super::reconnect::stopped(shared, chat, super::agent_browser::Browser::Safari)

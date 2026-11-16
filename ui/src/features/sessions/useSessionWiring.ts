@@ -14,6 +14,7 @@ import { activateNotification } from "./notificationActivation";
 import { SEARCH_AUTOLOAD_PAGES } from "../../state/coreStore";
 import { documentFocused } from "../../state/notifyStore";
 import { publishContextPoint, publishContextSave } from "../preview/contextSaveEvents";
+import { publishTrayHost } from "../../state/trayHostEvents";
 import { SEARCH_DEBOUNCE_MS } from "../search/useCoreSearch";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
@@ -80,6 +81,7 @@ export function useSessionWiring(): void {
         if (event.type === "browserSaveContext") publishContextSave(event.sessionId);
         else if (event.type === "browserPointContext") publishContextPoint(event.sessionId);
         else if (event.type === "openUpdates") shell.actions.openSettings("updates");
+        else if (event.type === "trayHost") publishTrayHost();
         else void activateNotification(app, event);
       })
       .then((off) => {

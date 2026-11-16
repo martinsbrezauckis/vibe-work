@@ -15,7 +15,8 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, TryLockError};
+use std::sync::{Arc, Mutex, TryLockError};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::warn;
@@ -223,6 +224,7 @@ impl Core {
         let id = session_id.to_owned();
         let target = folder.clone();
         let hooks = self.shared.config.changes_test_hooks.clone();
+        let written = claim.written.clone();
         let mut work = tokio::task::spawn_blocking(move || {
             if let Some(hooks) = &hooks {
                 hooks.before_take(&id);
@@ -241,11 +243,12 @@ impl Core {
             "changes: baseline took too long; the review is off for this session"
         );
         // Late, the baseline could include the agent's first edits: "unavailable" now, in a new generation.
-        let generation = self.shared.changes.expire(
-            session_id,
-            &folder,
-            "Preparing the review took too long before the session started.",
-        );
+        let late = if written.load(std::sync::atomic::Ordering::SeqCst) {
+            "Watching the folder for changes took too long to start before the session started."
+        } else {
+            "Recording the folder took too long before the session started."
+        };
+        let generation = self.shared.changes.expire(session_id, &folder, late);
         let hub_owner = self.shared.clone();
         let id = session_id.to_owned();
         tokio::spawn(async move {
@@ -300,11 +303,7 @@ impl Core {
     fn plain_folder(&self, session_id: &str) -> Result<PathBuf, CoreError> {
         let folder = self.session_facts(session_id)?.1;
         if let Some(tracker) = self.shared.changes.tracker(session_id)
-            && tracker
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .review
-                .is_some()
+            && tracker.lock_or_recover().review.is_some()
         {
             return Err(CoreError::new(
                 ErrorCode::Denied,
@@ -324,7 +323,7 @@ impl Core {
         let id = session_id.to_owned();
         let view = blocking(move || {
             let tracker = hub_owner.changes.ensure(&id, &folder, None);
-            let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut guard = tracker.lock_or_recover();
             let before = guard.fingerprint.clone();
             let view = build_view(&hub_owner.changes, &id, &mut guard, &session);
             (before != guard.fingerprint, view)
@@ -345,7 +344,7 @@ impl Core {
         let id = session_id.to_owned();
         let view = blocking(move || {
             let tracker: Arc<Mutex<Tracker>> = hub_owner.changes.ensure(&id, &folder, None);
-            let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut guard = tracker.lock_or_recover();
             act(&mut guard)?;
             let before = guard.fingerprint.clone();
             let view = build_view(&hub_owner.changes, &id, &mut guard, &session);
@@ -452,13 +451,7 @@ impl Core {
                 .shared
                 .changes
                 .tracker(&view.session_id)
-                .and_then(|t| {
-                    t.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .last
-                        .as_ref()
-                        .map(|d| d.files.len())
-                })
+                .and_then(|t| t.lock_or_recover().last.as_ref().map(|d| d.files.len()))
                 .unwrap_or(0);
             let running = session.running.is_some();
             if running || changed > 0 {

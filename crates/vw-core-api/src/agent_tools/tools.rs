@@ -31,6 +31,12 @@ pub(crate) async fn call(
     crate::ask::tool_calls::receipts::await_vibe_call(shared, session_id, &args).await;
     let prepared = crate::ask::tool_calls::receipts::take(shared, session_id, tool, &mut args)?;
     let outcome = match prepared.execution {
+        // A prepared browser action (fill, window, close tab) waits for a pause that started after its receipt too.
+        Some(execution) if crate::paused_tools_gate::browser_call(tool, &args) => {
+            crate::paused_tools_gate::wait(shared, session_id, crate::paused_tools::GATEWAY_WAIT)
+                .await?;
+            execution.await
+        }
         Some(execution) => execution.await,
         None => call_prepared(shared, tools, session_id, tool, args).await,
     };
@@ -161,7 +167,9 @@ async fn small_tool(
     if names::is_chrome(tool) && !shared.chrome_control.config.available() {
         let browser =
             crate::chrome_control::agent_browser::selected(shared, session_id, tool, args);
-        return Some(Err(browser.text(crate::chrome_control::setup::ABSENT)));
+        return Some(Err(
+            crate::chrome_control::agent_browser::Fixed::Unavailable.text(browser),
+        ));
     }
     if tool == names::CHROME_TOOL_LIST {
         return Some(Ok(crate::chrome_control::gateway::list(shared)));

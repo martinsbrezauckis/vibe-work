@@ -12,7 +12,8 @@
 //! - Plain blocking calls; the lock is never held across an await (the core calls from the blocking pool).
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use crate::model::ProjectsError;
 use crate::state::State;
@@ -147,7 +148,7 @@ impl ProjectStore {
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// Reads the state.

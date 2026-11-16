@@ -215,3 +215,70 @@ fn raw_mentions_keep_spaces_and_quote_concatenations_in_every_path_form() {
         }
     }
 }
+
+// PREDICT (red before the change): the guard reserved only the app data folder, so the vault beside it
+// (`<parent of app data>/Vibe Work Vault/vault`, its key file and blobs) was readable with read_file or a shell
+// command, and a chat whose folder was inside the vault could work there.
+#[test]
+fn the_vault_beside_the_app_data_is_refused_in_every_app_data_layout() -> std::io::Result<()> {
+    let base = std::fs::canonicalize(std::env::temp_dir())?
+        .join(format!("vault-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let permits = |_: &Path, _: bool| Ok(());
+    for layout_root in [
+        "AppData/Roaming/app.vibework.desktop",
+        "Library/Application Support/app.vibework.desktop",
+        ".local/share/app.vibework.desktop",
+    ] {
+        let data = base.join(layout_root);
+        let container = data.parent().unwrap().join("Vibe Work Vault");
+        let keys = container.join("vault/local-vault-server/repos/default");
+        let work = base.join("work");
+        for dir in [&data.join("vibe-home"), &keys, &work] {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(keys.join("keyfile.json"), b"synthetic")?;
+        let layout = Layout::new(&data.join("vibe-home"), &work)?;
+        for path in [
+            keys.join("keyfile.json"),
+            container.join("vault/profile.json"),
+            container.clone(),
+        ] {
+            for access in [
+                Access::Read,
+                Access::Write,
+                Access::Unknown,
+                Access::Context,
+            ] {
+                let refused = layout.check(&path, &work, access, &permits);
+                assert!(
+                    refused.as_deref().is_some_and(|r| r.contains("vault")),
+                    "{path:?} {access:?}: {refused:?}"
+                );
+            }
+        }
+        assert!(
+            check_command(
+                &layout,
+                &format!("cat '{}'", keys.join("keyfile.json").display()),
+                None,
+                &permits
+            )
+            .is_some(),
+            "a shell read of the key file passed"
+        );
+        let inside = Layout::new(&data.join("vibe-home"), &container)?;
+        assert!(
+            inside
+                .check(&container, &container, Access::Context, &permits)
+                .is_some()
+        );
+        // A folder beside the vault stays the person's own.
+        assert_eq!(
+            layout.check(&work.join("notes.txt"), &work, Access::Read, &permits),
+            None
+        );
+    }
+    std::fs::remove_dir_all(&base)?;
+    Ok(())
+}

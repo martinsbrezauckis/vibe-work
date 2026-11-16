@@ -169,6 +169,7 @@ fn attach_vibe_check<R: Runtime>(app: &AppHandle<R>, manager: &UpdateManager) {
         pubkey,
         app_version: app.package_info().version.to_string(),
         target: vw_vibe_install::this_target(),
+        guarded: vw_vibe_install::guarded_vibe_versions(),
     };
     let app = app.clone();
     manager.set_companion_check(Arc::new(move || {

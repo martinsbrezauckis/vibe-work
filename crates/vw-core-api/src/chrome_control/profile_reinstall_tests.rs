@@ -234,6 +234,31 @@ async fn removing_a_profile_paired_again_after_a_reinstall_leaves_no_row_of_its_
     core.shutdown().await;
 }
 
+/// PREDICT: fails on the base. Remove unpairs the older identity of the folder in the helper, but its own record
+/// stayed `removed: false, enabled: true`; only the retired rule hid it, so any later change to that rule would
+/// bring back an Offline row for a pairing that no longer exists. Its record is marked removed with the newer one.
+#[tokio::test]
+async fn the_older_identity_unpaired_with_a_remove_is_recorded_as_removed() {
+    let (core, mut prompts, data) = paired_core("reinstall-remove-record").await;
+    reinstall(&core, &data);
+    status(&core, &[(HOME, true)]);
+    approve(&core, &mut prompts).await;
+    status(&core, &[(HOME, true), (NEW, true), (OLD, false)]);
+    remove(&core, NEW).await;
+    let saved = core.shared.chrome_control.profiles.lock().unwrap().clone();
+    let (old, home) = (&saved.records[OLD], &saved.records[HOME]);
+    assert!(
+        old.removed && !old.enabled,
+        "the unpaired older identity is removed too"
+    );
+    assert!(
+        !home.removed && home.enabled,
+        "another real profile is untouched"
+    );
+    drop(saved);
+    core.shutdown().await;
+}
+
 #[tokio::test]
 async fn removing_every_shown_profile_after_a_reinstall_counts_as_every_pairing_removed() {
     let (core, mut prompts, data) = paired_core("reinstall-remove-all").await;

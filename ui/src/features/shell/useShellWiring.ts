@@ -14,6 +14,7 @@ import { startReplyAnnouncements } from "../transcript/replyAnnouncements";
 import { startAccessibility } from "./accessibilityWiring";
 import { guardActivationClick } from "./activationClick";
 import { startPromptActivity } from "../ask/permissionArrival";
+import { startCardKeys } from "../ask/cardKeys";
 import { editorLayoutOf } from "../../state/editorLayout";
 import { startChromeSelections } from "../composer/chromeSelections";
 import { useEffect } from "react";
@@ -88,6 +89,7 @@ export function useShellWiring(): void {
   useEffect(() => startReplyAnnouncements(app), [app]);
   useEffect(() => guardActivationClick(app.core?.client.desktop?.subscribeFocus), [app]);
   useEffect(startPromptActivity, []);
+  useEffect(() => startCardKeys(app.core), [app]);
   useEffect(
     () =>
       app.core === null ? undefined : registerClipboard(app.core, () => app.uiControl.serving()),

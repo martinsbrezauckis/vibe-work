@@ -15,8 +15,8 @@
 //!    unchanged, so the key only goes to the host the proxy chose); an unreachable upstream gives 502
 //!    (`vibe_work_upstream_unreachable`).
 //!
-//! Compaction calls omit image payloads and have a 60 s end-to-end deadline. Other
-//! calls bringing a new attachment have a 120 s deadline up to headers, then a 120 s idle limit.
+//! Compaction calls replace inline image payloads with a text note (`compaction`) and have a 60 s end-to-end
+//! deadline. Other calls bringing a new attachment have a 120 s deadline up to headers, then a 120 s idle limit.
 //! Every received chunk renews the idle limit; historical attachments do not bound later calls. Pre-header timeouts
 //! and retryable upstream failures return a nonretryable 422; an already started stream ends with
 //! a read error on timeout.
@@ -187,7 +187,7 @@ impl ProxyHandle {
         key: KeyCell,
     ) -> Result<Self, ProxyError> {
         let client = vw_mistral::ClientSlot::new()?;
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        let (listener, own) = vw_netguard::listeners::bind_own_tokio()
             .await
             .map_err(ProxyError::Bind)?;
         let addr = listener.local_addr().map_err(ProxyError::Bind)?;
@@ -208,6 +208,8 @@ impl ProxyHandle {
         let app = axum::Router::new().fallback(handle).with_state(shared);
         let (stop, stopped) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
+            // The port stays one of Vibe Work's own (refused for every browser page) until the listener closes.
+            let _own = own;
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async {
                     let _ = stopped.await;

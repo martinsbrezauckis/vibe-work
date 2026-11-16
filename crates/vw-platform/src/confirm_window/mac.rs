@@ -4,27 +4,46 @@
 //! Every key is set here (Return on the declining button only, Escape through a key monitor), and the window can be
 //! closed from outside. Nothing here keeps or restores another window's focus: `AppKit` gives the key back to the
 //! parent when a sheet ends, so with several confirmations in a row only the one shown can take the key.
+//!
+//! A window of its own (an agent's question) never comes in front of another app: asked while Vibe Work is not the
+//! active app it is not shown yet (the Dock badge says it waits) and comes forward, key, when the person makes Vibe
+//! Work active (also over the main window a Dock click shows: `raise_shown`) or shows its chat (`raise`); shown in
+//! front it is a child window of the app's main window, so it stays above that window. When the person answers one, the
+//! next waiting one comes forward, key, in its place. A key press meant for it while
+//! it cannot be seen (behind another window) never answers it: the press is dropped and the window comes forward
+//! instead.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSAccessibility, NSAlert, NSAlertStyle, NSButton, NSEvent, NSEventMask, NSResponder, NSView,
-    NSWindow,
+    NSAccessibility, NSAlert, NSAlertStyle, NSApplication,
+    NSApplicationDidBecomeActiveNotification, NSButton, NSEvent, NSEventMask, NSResponder, NSView,
+    NSWindow, NSWindowOrderingMode,
 };
-use objc2_foundation::NSString;
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSString, NSTimer};
 
 use super::{ConfirmSpec, Reply};
 
 /// The key code of Escape on every Mac keyboard (`kVK_Escape`).
 const ESCAPE: u16 = 53;
+/// `NSWindowOcclusionStateVisible`: some part of the window can be seen on screen.
+const OCCLUSION_VISIBLE: usize = 1 << 1;
+/// After a window of its own comes forward by itself (the app became active, a hidden key press), presses on it are
+/// ignored this long, so a click or key meant for something else at that moment never answers it.
+const SETTLE: Duration = Duration::from_millis(500);
+/// When after the app became active (or a raise) the shown window of its own is checked again: the app's own reopen
+/// handling (a Dock click shows the main window) runs after the activation and can cover it.
+const RECHECK_SECONDS: [f64; 2] = [0.3, 1.0];
 
 /// One shown or waiting confirmation.
 struct Open {
@@ -48,6 +67,13 @@ thread_local! {
     /// where the person is about to click another.
     static PANEL: RefCell<Option<u64>> = const { RefCell::new(None) };
     static PANELS_WAITING: RefCell<VecDeque<u64>> = const { RefCell::new(VecDeque::new()) };
+    /// The observer that brings the shown window of its own forward when the app becomes active (added once).
+    static ACTIVATION: RefCell<Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>> =
+        const { RefCell::new(None) };
+    /// The click monitor that lets a click on the main window bring it in front of the prompt (added once).
+    static CLICKS: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    /// When a window of its own last came forward by itself ([`SETTLE`]).
+    static BROUGHT_FORWARD: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -70,7 +96,11 @@ define_class!(
         /// Every button's action (a click, Return, Space, an accessibility press): the tag is the button's index.
         #[unsafe(method(pressed:))]
         fn pressed(&self, sender: &NSButton) {
-            finish(self.ivars().id, usize::try_from(sender.tag()).ok());
+            let settling = BROUGHT_FORWARD.with(Cell::get).is_some_and(|at| at.elapsed() < SETTLE);
+            if settling && PANEL.with(|panel| *panel.borrow() == Some(self.ivars().id)) {
+                return;
+            }
+            finish(self.ivars().id, usize::try_from(sender.tag()).ok(), Ended::ByPerson);
         }
     }
 );
@@ -83,9 +113,16 @@ impl Target {
     }
 }
 
+/// How a confirmation ended: the person answered it (a button, Return, Escape), or it was closed from outside.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ended {
+    ByPerson,
+    FromOutside,
+}
+
 /// Ends confirmation `id` with `answer` and shows the next waiting one. An id that already ended does nothing, so
 /// a press after a close (or a second press) is never reported.
-fn finish(id: u64, answer: Option<usize>) {
+fn finish(id: u64, answer: Option<usize>, ended: Ended) {
     let Some(mut open) = OPEN.with(|all| all.borrow_mut().remove(&id)) else {
         return;
     };
@@ -94,8 +131,10 @@ fn finish(id: u64, answer: Option<usize>) {
         unsafe { NSEvent::removeMonitor(&monitor) };
     }
     let window = open.alert.window();
-    if PANEL.with(|panel| *panel.borrow() == Some(id)) {
+    let was_panel = PANEL.with(|panel| *panel.borrow() == Some(id));
+    if was_panel {
         PANEL.with(|panel| *panel.borrow_mut() = None);
+        detach(&window);
         window.orderOut(None);
         window.close();
     } else if SHOWN.with(|shown| *shown.borrow() == Some(id)) {
@@ -113,9 +152,12 @@ fn finish(id: u64, answer: Option<usize>) {
         reply(answer);
     }
     show_next();
-    // The next window of its own may belong to another chat than the one in front: it opens behind the app's
-    // windows, like a window that was already open there, and comes forward when its chat is shown (`raise`).
-    show_next_panel(false);
+    // The person just answered a window of its own: the next one takes its place in front, key, so the next Return
+    // answers it (after the settle time, so a repeated press never does). Ordered behind, macOS 27 shows it over the
+    // main window without the key, where a Return goes to the main window. Closed from outside,
+    // the next one may belong to another chat than the one in front: it opens behind the app's windows and comes
+    // forward when its chat is shown (`raise`).
+    show_next_panel(was_panel && ended == Ended::ByPerson);
 }
 
 /// Shows the oldest waiting confirmation when none is shown.
@@ -142,6 +184,10 @@ fn show_next() {
     SHOWN.with(|shown| *shown.borrow_mut() = Some(id));
     // Only sheets wait here; a window of its own is shown by `show_next_panel`.
     if let Some(parent) = parent {
+        // A prompt attached to the main window would stay above this sheet: it goes back to the ordinary order.
+        if let Some(panel) = shown_panel() {
+            detach(&panel);
+        }
         parent.beginSheet_completionHandler(&window, None);
     }
     // With Full Keyboard Access `AppKit` starts the focus on the leftmost button (an approving one), where a stray
@@ -193,13 +239,27 @@ fn build(
 }
 
 /// A local key monitor: Escape in alert `id`'s window, while it is the shown one, declines it (the event is used
-/// up); every other key event goes on unchanged.
+/// up); a key press for it while it is a window of its own that cannot be seen is used up and brings it forward
+/// instead (never an answer to a question the person cannot see); every other key event goes on unchanged.
 fn escape_monitor(id: u64) -> Option<Retained<AnyObject>> {
     let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         // SAFETY: `AppKit` hands a local monitor a valid event, on the main thread.
         let key = unsafe { event.as_ref() };
-        let shown = SHOWN.with(|shown| *shown.borrow() == Some(id))
-            || PANEL.with(|panel| *panel.borrow() == Some(id));
+        let panel = PANEL.with(|panel| *panel.borrow() == Some(id));
+        if panel {
+            let hidden = OPEN.with(|all| {
+                all.borrow().get(&id).and_then(|open| {
+                    let window = open.alert.window();
+                    (window.windowNumber() == key.windowNumber() && !seen(&window))
+                        .then_some(window)
+                })
+            });
+            if let Some(window) = hidden {
+                bring_forward(&window);
+                return std::ptr::null_mut();
+            }
+        }
+        let shown = SHOWN.with(|shown| *shown.borrow() == Some(id)) || panel;
         if key.keyCode() == ESCAPE && shown {
             let ours = OPEN.with(|all| {
                 all.borrow()
@@ -207,7 +267,7 @@ fn escape_monitor(id: u64) -> Option<Retained<AnyObject>> {
                     .is_some_and(|open| open.alert.window().windowNumber() == key.windowNumber())
             });
             if ours {
-                finish(id, None);
+                finish(id, None, Ended::ByPerson);
                 return std::ptr::null_mut();
             }
         }
@@ -269,8 +329,159 @@ pub fn show(parent: *mut c_void, spec: &ConfirmSpec, reply: Reply) -> Result<u64
     Ok(id)
 }
 
+/// Brings a window of its own forward, key, by itself (not by the person's click on it): presses settle first.
+/// While the app shows a main window, the prompt becomes that window's child window: `AppKit` then keeps it directly
+/// above the main window whatever orders the main window forward afterwards (the app's Dock-click handling shows and
+/// focuses the main window after the activation), and a child window never comes over another app's windows. The
+/// person's click on the main window ends that ([`watch_clicks`]), so the main window and a sheet opened there come in
+/// front of the prompt as with any other window.
+fn bring_forward(window: &NSWindow) {
+    BROUGHT_FORWARD.with(|at| at.set(Some(Instant::now())));
+    let Some(main) = shown_main_window(window) else {
+        detach(window);
+        window.makeKeyAndOrderFront(None);
+        window.orderFrontRegardless();
+        return;
+    };
+    let attached = window
+        .parentWindow()
+        .is_some_and(|parent| parent.windowNumber() == main.windowNumber());
+    if !attached {
+        detach(window);
+        // SAFETY: both are live windows of this process on the main thread; the child is removed again in
+        // `detach` before it is closed or ordered out.
+        unsafe { main.addChildWindow_ordered(window, NSWindowOrderingMode::Above) };
+    }
+    window.makeKeyAndOrderFront(None);
+}
+
+/// The app's visible main (document) window other than `prompt`: the one `AppKit` calls main, else a visible window
+/// that can become main (the app has one such window).
+fn shown_main_window(prompt: &NSWindow) -> Option<Retained<NSWindow>> {
+    let app = NSApplication::sharedApplication(MainThreadMarker::from(prompt));
+    let usable = |candidate: &NSWindow| {
+        candidate.windowNumber() != prompt.windowNumber()
+            && candidate.isVisible()
+            && !candidate.isMiniaturized()
+            && candidate.canBecomeMainWindow()
+    };
+    if let Some(main) = app.mainWindow().filter(|main| usable(main)) {
+        return Some(main);
+    }
+    app.windows().iter().find(|candidate| usable(candidate))
+}
+
+/// Takes a prompt off the window it was attached to by [`bring_forward`] (before it is ordered out or closed).
+fn detach(window: &NSWindow) {
+    if let Some(parent) = window.parentWindow() {
+        parent.removeChildWindow(window);
+    }
+}
+
+/// A press of a mouse button in the window the shown prompt is attached to takes the prompt off it first, so the
+/// click brings that window (and a sheet the person then opens there) in front of the prompt as usual. Every event
+/// goes on unchanged. Added once, on the main thread.
+fn watch_clicks() {
+    if CLICKS.with(|monitor| monitor.borrow().is_some()) {
+        return;
+    }
+    let block = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: `AppKit` hands a local monitor a valid event, on the main thread.
+        let click = unsafe { event.as_ref() };
+        if let Some(window) = shown_panel()
+            && window
+                .parentWindow()
+                .is_some_and(|parent| parent.windowNumber() == click.windowNumber())
+        {
+            detach(&window);
+        }
+        event.as_ptr()
+    });
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
+    // SAFETY: `AppKit` copies the block and keeps it as long as the monitor exists (never removed: it lives as long as
+    // the app); the block touches only main-thread state.
+    let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
+    CLICKS.with(|slot| *slot.borrow_mut() = monitor);
+}
+
+/// The shown window of its own, when there is one.
+fn shown_panel() -> Option<Retained<NSWindow>> {
+    PANEL
+        .with(|panel| *panel.borrow())
+        .and_then(|id| OPEN.with(|all| all.borrow().get(&id).map(|open| open.alert.window())))
+}
+
+/// Checks again shortly ([`RECHECK_SECONDS`]) that the shown window of its own can be seen while the app is active,
+/// and brings it forward when another window of the app covered it meanwhile.
+fn check_soon() {
+    for delay in RECHECK_SECONDS {
+        check_after(delay);
+    }
+}
+
+fn check_after(delay: f64) {
+    let block = RcBlock::new(|_: NonNull<NSTimer>| {
+        let Some(window) = shown_panel() else {
+            return;
+        };
+        let active = NSApplication::sharedApplication(MainThreadMarker::from(&*window)).isActive();
+        if active && !seen(&window) {
+            bring_forward(&window);
+        }
+    });
+    // SAFETY: called on the main thread (its run loop fires the timer there); the timer copies the block and the
+    // block touches only main-thread state.
+    let _ = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(delay, false, &block) };
+}
+
+/// True when part of `window` can be seen on screen now (ordered in, not wholly behind other windows). A prompt
+/// attached to the shown main window ([`bring_forward`]) is above it by `AppKit`'s own ordering; its occlusion state
+/// was measured to stay "not visible" there (macOS 27), which would drop every key meant for it.
+fn seen(window: &NSWindow) -> bool {
+    if !window.isVisible() {
+        return false;
+    }
+    let above_main = window
+        .parentWindow()
+        .is_some_and(|parent| parent.isVisible() && !parent.isMiniaturized());
+    above_main || window.occlusionState().0 & OCCLUSION_VISIBLE != 0
+}
+
+/// Brings the shown window of its own forward, key, whenever the app becomes active (a Dock click, Command-Tab, a
+/// click in one of its windows): it may have been asked while another app was active, or gone behind the main window.
+/// Added once, on the main thread, the first time a window of its own is shown.
+fn watch_activation(_on_main_thread: MainThreadMarker) {
+    if ACTIVATION.with(|observer| observer.borrow().is_some()) {
+        return;
+    }
+    let block = RcBlock::new(|_: NonNull<NSNotification>| {
+        let Some(window) = PANEL
+            .with(|panel| *panel.borrow())
+            .and_then(|id| OPEN.with(|all| all.borrow().get(&id).map(|open| open.alert.window())))
+        else {
+            return;
+        };
+        bring_forward(&window);
+        check_soon();
+    });
+    // SAFETY: the notification is posted on the main thread (no queue: the block runs where it is posted), the block
+    // touches only main-thread state, and the center keeps the copied block until the observer is removed (never: it
+    // lives as long as the app).
+    let observer = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSApplicationDidBecomeActiveNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    ACTIVATION.with(|slot| *slot.borrow_mut() = Some(observer));
+}
+
 /// Shows the oldest waiting window of its own when none is shown, in `front` (else behind the app's windows, not
-/// key); the app's windows stay usable.
+/// key); the app's windows stay usable. Never in front of another app: while Vibe Work is not active it waits behind
+/// (and [`watch_activation`] brings it forward when the person makes the app active).
 fn show_next_panel(front: bool) {
     if PANEL.with(|panel| panel.borrow().is_some()) {
         return;
@@ -287,12 +498,19 @@ fn show_next_panel(front: bool) {
         return;
     };
     PANEL.with(|panel| *panel.borrow_mut() = Some(id));
+    let mtm = MainThreadMarker::from(&*window);
+    watch_activation(mtm);
+    watch_clicks();
+    let active = NSApplication::sharedApplication(mtm).isActive();
     // An ordinary window level, not a floating one: a click on the main window brings it (and a sheet the person
     // opens there) in front of this prompt, so this prompt's buttons never lie over the person's own sheet.
     window.center();
-    if front {
-        window.makeKeyAndOrderFront(None);
-    } else {
+    // While another app is active the window is not ordered in at all: even `orderBack` placed a new window of an
+    // inactive app above the active app's windows (macOS 27). The activation observer shows it.
+    if front && active {
+        // It appears by itself, maybe under a click meant for something else: presses settle first.
+        bring_forward(&window);
+    } else if active {
         window.orderBack(None);
     }
     if let Some(declining) = declining {
@@ -301,7 +519,8 @@ fn show_next_panel(front: bool) {
     }
 }
 
-/// Brings confirmation `id` to the front when it is a window of its own (main thread only; never answers). Those are
+/// Brings confirmation `id` to the front when it is a window of its own (main thread only; never answers; never in
+/// front of another app: while Vibe Work is not active it comes forward when the app becomes active). Those are
 /// shown one at a time: when `id` still waits behind another one, the shown one steps back into the queue (first in
 /// line again) and `id` is shown in its place, so the prompt that comes forward is always the one asked for, never
 /// another chat's. False for a sheet (it is on the main window already), an id that ended, or off the main thread.
@@ -333,6 +552,7 @@ pub fn raise(id: u64) -> bool {
             if let Some(window) =
                 OPEN.with(|all| all.borrow().get(&current).map(|open| open.alert.window()))
             {
+                detach(&window);
                 window.orderOut(None);
             }
             PANELS_WAITING.with(|waiting| waiting.borrow_mut().push_front(current));
@@ -346,7 +566,31 @@ pub fn raise(id: u64) -> bool {
     else {
         return false;
     };
-    window.makeKeyAndOrderFront(None);
+    // While another app is active the window waits (its chat was shown in the background, a new ask of the shown
+    // chat): it comes forward when the person makes Vibe Work active (`watch_activation`).
+    if NSApplication::sharedApplication(MainThreadMarker::from(&*window)).isActive() {
+        bring_forward(&window);
+        check_soon();
+    }
+    true
+}
+
+/// Brings the shown window of its own forward (key) when Vibe Work is the active app; the app calls it after it showed
+/// its main window for the person (a Dock click), which would otherwise cover the waiting question. Main thread only;
+/// never answers. False when nothing is shown, the app is not active, or off the main thread.
+#[must_use]
+pub fn raise_shown() -> bool {
+    if MainThreadMarker::new().is_none() {
+        return false;
+    }
+    let Some(window) = shown_panel() else {
+        return false;
+    };
+    if !NSApplication::sharedApplication(MainThreadMarker::from(&*window)).isActive() {
+        return false;
+    }
+    bring_forward(&window);
+    check_soon();
     true
 }
 
@@ -354,6 +598,6 @@ pub fn raise(id: u64) -> bool {
 /// thread only (elsewhere nothing happens); an id that already ended does nothing.
 pub fn close(id: u64) {
     if MainThreadMarker::new().is_some() {
-        finish(id, None);
+        finish(id, None, Ended::FromOutside);
     }
 }

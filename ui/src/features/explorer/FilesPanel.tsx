@@ -16,6 +16,10 @@ import type { ExplorerMenuDeps } from "./explorerMenus";
 import { compareWithCommit } from "../files/fileMenu";
 import { workspaceModelOf } from "./workspaceModel";
 
+/**
+ * The Files tab body: the explorer for the panel's folder, with opening, Places, version history setup and the
+ * right-click menus wired to the app. Shows an error line when a file could not be opened.
+ */
 export function FilesPanel({
   app,
   explorer,

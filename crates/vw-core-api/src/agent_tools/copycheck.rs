@@ -24,7 +24,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -157,7 +158,7 @@ pub(super) fn decide(
     copy: &Path,
     own: bool,
 ) -> Result<(), String> {
-    let mut held = locks.0.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut held = locks.0.lock_or_recover();
     let mut users = users_in_store(shared, copy)?;
     if own && !users.iter().any(|(u, _)| u == caller) {
         users.push((caller.to_owned(), false));

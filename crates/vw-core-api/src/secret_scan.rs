@@ -10,7 +10,7 @@ use serde_json::json;
 use std::{
     path::PathBuf,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -20,6 +20,7 @@ use tokio::{
     task::JoinHandle,
     time::Instant,
 };
+use vw_platform::sync::LockRecover;
 
 pub(crate) const START_IDLE: Duration = Duration::from_secs(30);
 
@@ -81,15 +82,11 @@ impl ScanState {
         }
     }
     pub fn view(&self) -> SecretScanView {
-        self.view
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.view.lock_or_recover().clone()
     }
     pub fn file_errors(&self) -> Vec<String> {
         self.errors
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .iter()
             .map(|path| {
                 let text = path.to_string_lossy();
@@ -101,14 +98,11 @@ impl ScanState {
             .collect()
     }
     pub fn activity(&self) {
-        *self.activity.lock().unwrap_or_else(PoisonError::into_inner) = Instant::now();
+        *self.activity.lock_or_recover() = Instant::now();
         self.wake.notify_one();
     }
     pub fn idle(&self) -> Duration {
-        self.activity
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .elapsed()
+        self.activity.lock_or_recover().elapsed()
     }
     pub fn loaded(&self) {
         self.loaded.store(true, Ordering::Release);
@@ -116,8 +110,7 @@ impl ScanState {
     }
     pub fn send(&self, job: Job) -> Result<(), CoreError> {
         self.sender
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .as_ref()
             .ok_or_else(unavailable)?
             .send(job)
@@ -126,12 +119,7 @@ impl ScanState {
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
         self.pending.store(false, Ordering::Release);
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
         let _ = self.send(Job::Stop);
@@ -140,11 +128,7 @@ impl ScanState {
 
     pub async fn shutdown(&self) {
         self.stop();
-        let worker = self
-            .worker
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let worker = self.worker.lock_or_recover().take();
         if let Some(worker) = worker {
             let _ = tokio::task::spawn_blocking(move || worker.join()).await;
         }
@@ -171,11 +155,7 @@ pub(crate) fn publish(shared: &Shared) {
 }
 
 pub(crate) fn status(shared: &Shared, status: SecretScanStatus) {
-    let mut view = shared
-        .secret_scan
-        .view
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut view = shared.secret_scan.view.lock_or_recover();
     view.status = if view.settings.enabled {
         status
     } else {
@@ -217,16 +197,8 @@ pub(crate) fn start(shared: &Arc<Shared>) {
         .name("session-log-checker".to_owned())
         .spawn(move || crate::secret_scan_worker::run(&weak, &runtime, receiver))
     {
-        *shared
-            .secret_scan
-            .sender
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(sender);
-        *shared
-            .secret_scan
-            .worker
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(worker);
+        *shared.secret_scan.sender.lock_or_recover() = Some(sender);
+        *shared.secret_scan.worker.lock_or_recover() = Some(worker);
     } else {
         status(shared, SecretScanStatus::Error);
         return;
@@ -275,11 +247,7 @@ pub(crate) fn start(shared: &Arc<Shared>) {
             }
         }
     });
-    *shared
-        .secret_scan
-        .task
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *shared.secret_scan.task.lock_or_recover() = Some(task);
 }
 
 pub(crate) fn ready(loaded: bool, idle: Duration, busy: bool, immediate: bool) -> bool {
@@ -348,7 +316,7 @@ impl Core {
                     )
                 })?;
                 let saved = crate::app_settings::scan_settings(&data.join("settings.json"));
-                let mut view = state.view.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut view = state.view.lock_or_recover();
                 let first = !view.settings.enabled && saved.enabled;
                 view.settings = saved;
                 if !saved.enabled {

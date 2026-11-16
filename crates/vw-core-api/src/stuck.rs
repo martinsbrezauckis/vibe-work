@@ -18,7 +18,8 @@
 //! - A retry's completion clears only its own cancellation switch; a replacement keeps its owner.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -35,7 +36,7 @@ use crate::view::StuckView;
 pub(crate) const STUCK_TEXT: &str = "Vibe can't reopen this session right now";
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.lock_or_recover()
 }
 
 /// The stuck sessions and the running retries.

@@ -2,9 +2,10 @@
 //! called only by trusted owner notifications, with cancellation on helper loss or browser disable.
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::task::AbortHandle;
@@ -45,19 +46,16 @@ pub(super) struct Approvals(
 
 impl Approvals {
     pub(super) fn clear(&self) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.0.lock_or_recover().clear();
         self.declined().clear();
     }
 
     fn declined(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
-        self.1.lock().unwrap_or_else(PoisonError::into_inner)
+        self.1.lock_or_recover()
     }
 
     fn removed(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
-        self.2.lock().unwrap_or_else(PoisonError::into_inner)
+        self.2.lock_or_recover()
     }
 
     /// The person removed this Chrome/Edge identity: its next requests do not open the dialog.
@@ -105,8 +103,7 @@ impl Approvals {
 
     pub(super) fn cancel_browser(&self, browser: Browser) {
         self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .retain(|_, pending| !browser.owns_profile(&pending.profile));
         self.declined()
             .retain(|profile| !browser.owns_profile(profile));
@@ -114,20 +111,14 @@ impl Approvals {
 
     /// A native pairing approval still waits for this identity (an expired one no longer counts).
     pub(super) fn waiting(&self, profile: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .any(|pending| {
-                pending.opened.elapsed() < LIFE
-                    && super::profile_ids::same(&pending.profile, profile)
-            })
+        self.0.lock_or_recover().values().any(|pending| {
+            pending.opened.elapsed() < LIFE && super::profile_ids::same(&pending.profile, profile)
+        })
     }
 
     pub(super) fn cancel_profile(&self, profile: &str) {
         self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .retain(|_, pending| !super::profile_ids::same(&pending.profile, profile));
         self.forget_declined(profile);
     }
@@ -135,12 +126,7 @@ impl Approvals {
     pub(super) fn paired(&self, profile: &str) {
         self.forget_declined(profile);
         self.removal_failed(profile);
-        for pending in self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-        {
+        for pending in self.0.lock_or_recover().values() {
             if pending.profile == profile {
                 pending.task.abort();
             }
@@ -169,13 +155,7 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
     if decline_removed(shared, id, profile, name) {
         return;
     }
-    let mut pending = shared
-        .chrome_control
-        .owner
-        .approvals
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut pending = shared.chrome_control.owner.approvals.0.lock_or_recover();
     pending.retain(|_, request| request.opened.elapsed() < LIFE);
     if pending.contains_key(id) || pending.len() >= 128 {
         return;
@@ -192,8 +172,7 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
     let profile_generation = shared
         .chrome_control
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .generation(profile);
     let task = tokio::spawn(async move {
         let Some(shared) = weak.upgrade() else { return };
@@ -209,8 +188,7 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
             || shared
                 .chrome_control
                 .profiles
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .generation(&profile_id)
                 != profile_generation
             || !super::profiles::pairing_allowed(&shared.chrome_control, &profile_id)
@@ -375,9 +353,11 @@ fn approved_pairing(shared: &Shared, profile_id: &str, found: Option<Found>) {
 pub(super) const ASKED_AGAIN: &str = "Vibe Work asks again when {browser} reconnects, within half a minute. To be asked at once, click Check connection in the Vibe Work extension.";
 
 /// The person's Connect for a browser with a "Not now" identity: the helper forgets that answer
-/// (`owner.profileUnpair` of an identity that holds no pin), so the extension's next reconnect asks once more.
-/// Connect also ends the quiet of this browser's removed identities. Returns the hint for the person, or `None` when
-/// no such identity waits.
+/// (`owner.profileUnpair` with `keepPin`: the helper's own saved pin, its current pairing, stays), so the extension's
+/// next reconnect asks once more. This includes a paired identity whose key changed. An older helper refuses
+/// `keepPin`; for an identity Vibe Work does not hold as paired the plain request then forgets the answer as before,
+/// while a paired identity gets no plain request (it would end the pin). Connect also ends the quiet of this
+/// browser's removed identities. Returns the hint for the person, or `None` when no such identity waits.
 pub(super) async fn ask_again(
     shared: &Arc<Shared>,
     origin: crate::Origin,
@@ -394,16 +374,29 @@ pub(super) async fn ask_again(
         .approvals
         .declined_for(browser)
         .into_iter()
-        .filter(|profile| unpinned(chrome, profile))
+        .filter(|profile| super::profiles::pairing_allowed(chrome, profile))
         .collect();
     if waiting.is_empty() {
         return None;
     }
     for profile in waiting {
-        let forgotten = chrome
+        let forgotten = match chrome
             .owner
-            .rpc("owner.profileUnpair", json!({"profileId":profile}))
-            .await;
+            .rpc(
+                "owner.profileUnpair",
+                json!({"profileId":profile,"keepPin":true}),
+            )
+            .await
+        {
+            Some(result) => Some(result),
+            None if !unpinned(chrome, &profile) => None,
+            None => {
+                chrome
+                    .owner
+                    .rpc("owner.profileUnpair", json!({"profileId":profile}))
+                    .await
+            }
+        };
         if forgotten.is_some_and(|result| result["unpaired"] == true) {
             chrome.owner.approvals.forget_declined(&profile);
         }
@@ -412,14 +405,14 @@ pub(super) async fn ask_again(
     Some(browser.words(ASKED_AGAIN))
 }
 
-/// Only an identity Vibe Work does not hold as paired (never paired, or removed) is asked again this way: forgetting
-/// the answer of a paired identity's key change would also end its current pairing.
+/// An identity Vibe Work does not hold as paired (never paired, or removed): only such an identity may get the plain
+/// `owner.profileUnpair`. The helper checks its own pins as well (`keepPin`), so a pin Vibe Work has no record of is
+/// not ended by asking again.
 fn unpinned(chrome: &super::ChromeControl, profile: &str) -> bool {
     super::profiles::pairing_allowed(chrome, profile)
         && chrome
             .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .records
             .get(&super::profiles::canonical(profile))
             .is_none_or(|record| record.removed)
@@ -437,7 +430,7 @@ pub(super) fn not_now_card(
         .approvals
         .declined_for(browser)
         .into_iter()
-        .filter(|profile| unpinned(chrome, profile))
+        .filter(|profile| super::profiles::pairing_allowed(chrome, profile))
         .collect();
     if !matches!(
         view.state,
@@ -460,7 +453,12 @@ pub(super) fn not_now_card(
         // waiting profile. The card's label stays Connected; its step line below tells the person.
         view.instruction = format!("{} {waits}", view.instruction);
     } else {
-        view.label = browser.words("Waiting for your approval");
+        // Only a Not now waits for the person's approval; a profile they removed is plainly not connected.
+        view.label = browser.words(if removed {
+            "Not connected"
+        } else {
+            "Waiting for your approval"
+        });
         view.instruction = waits;
     }
     view.action = Some(super::addon::AddonAction::Connect);
@@ -479,8 +477,7 @@ pub(super) fn not_now_card(
 pub(super) fn removed_browser(chrome: &super::ChromeControl, browser: Browser) {
     let mut known: Vec<String> = chrome
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .records
         .keys()
         .filter(|profile| browser.owns_profile(profile))

@@ -12,7 +12,8 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use tokio::runtime::Handle;
 use tokio::sync::watch;
@@ -67,7 +68,7 @@ impl HostHandle {
     pub fn main_ui_load_started(&self, runtime: &Handle) {
         let (done, pending) = watch::channel(false);
         let (previous, generation) = {
-            let mut slot = self.ui_load.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut slot = self.ui_load.lock_or_recover();
             let generation = self.ui_generation.fetch_add(1, Ordering::SeqCst) + 1;
             (std::mem::replace(&mut *slot, pending), generation)
         };
@@ -97,7 +98,7 @@ impl HostHandle {
         let Some(doc) = doc else {
             return self.window_generation();
         };
-        let mut docs = self.docs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut docs = self.docs.lock_or_recover();
         if let Some((_, generation)) = docs.iter().find(|(id, _)| id == doc) {
             return *generation;
         }
@@ -136,13 +137,9 @@ impl HostHandle {
 
     async fn wait_for_ui_load(&self) {
         loop {
-            let pending = self
-                .ui_load
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
+            let pending = self.ui_load.lock_or_recover().clone();
             wait_for_load(pending.clone()).await;
-            if pending.same_channel(&self.ui_load.lock().unwrap_or_else(PoisonError::into_inner)) {
+            if pending.same_channel(&self.ui_load.lock_or_recover()) {
                 return;
             }
         }

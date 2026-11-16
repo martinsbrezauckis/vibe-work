@@ -67,6 +67,37 @@ export function checksText(card: PrCard): string {
   return `Checks: ${parts.join(", ")}`;
 }
 
+/** The card's status line with its cause (Vibe's order); `null` for closed, merged or draft pull requests. */
+export function statusText(card: PrCard): string | null {
+  switch (card.status.reason) {
+    case "changesRequested":
+      return "Blocked: changes requested";
+    case "checksFailing":
+      return "Blocked: checks failing";
+    case "conflicts":
+      return "Blocked: conflicts with the base branch";
+    case "checksPending":
+      return "Waiting: checks running";
+    case "reviewRequired":
+      return "Waiting: review required";
+    case "mergeBlocked":
+      return "Blocked: merge rules";
+    case "ready":
+      return "Ready to merge";
+    default:
+      return null;
+  }
+}
+
+/** The notes under the status line: failing optional checks, or that required checks could not be told apart. */
+export function statusNotes(card: PrCard): string[] {
+  const notes: string[] = [];
+  if (card.status.optionalFailing) notes.push("Optional checks failing");
+  if (!card.checks.requiredKnown && card.checks.failed + card.checks.pending > 0)
+    notes.push("Could not tell required checks apart; signed-in gh can.");
+  return notes;
+}
+
 /** The card's review line. */
 export function reviewText(card: PrCard): string {
   switch (card.review) {

@@ -43,6 +43,10 @@ const targetOf = (row: Row): ExplorerTarget =>
   row.directory
     ? { kind: "folder", path: row.path }
     : { kind: "file", path: row.path, place: "files" };
+/**
+ * The explorer's folder tree as a virtualized list with keyboard navigation: folders expand in place, files open
+ * through `onOpen`, and each row shows its change badge. Large folders end with a "Show 5,000 more" row.
+ */
 export function FileTree({
   state,
   explorer,

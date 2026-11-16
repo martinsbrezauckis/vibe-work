@@ -27,7 +27,7 @@
 }
 .shead h1 {
   flex: 1 1 0;
-  font-size: var(--text-15);
+  font-size: var(--text-reading);
   font-weight: var(--weight-semibold);
   margin: 0;
   white-space: nowrap;
@@ -47,10 +47,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   padding: 3px 8px;
   white-space: nowrap;
 }
@@ -63,9 +63,9 @@
   background: none;
   color: var(--text-3);
   padding: 6px 8px;
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .pbtn:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -79,11 +79,42 @@
 .has-panel .shead .temporary-more {
   display: none;
 }
-/* A chat area under 720 px (the 900 px window with the list open) shows the tab buttons as icons; each keeps its
-   name as its label and tooltip. The Temporary chip keeps its first word; its tooltip explains the rest. */
-@container (max-width: 720px) {
-  .shead .lbltxt,
+/* The Temporary chip's tooltip: its whole explanation, shown while the chip is hovered or focused (Esc hides it). */
+.temporary-explained {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.temporary-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-popover);
+  width: max-content;
+  max-width: 320px;
+  padding: 6px 9px;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: var(--text-sm);
+  white-space: normal;
+}
+.temporary-explained[data-shown="true"] .temporary-tooltip {
+  display: block;
+}
+/* The Temporary chip keeps its first word in a chat area under 1040 px (a 1280 px window with the list open); its
+   tooltip explains the rest. The labelled tabs and the title need that room. */
+@container (max-width: 1040px) {
   .shead .temporary-more {
+    display: none;
+  }
+}
+/* A chat area under 720 px (the 900 px window with the list open) shows the tab buttons as icons; each keeps its
+   name as its label and tooltip. */
+@container (max-width: 720px) {
+  .shead .lbltxt {
     display: none;
   }
 }
@@ -116,7 +147,7 @@
   flex-shrink: 0;
 }
 .welcome h2 {
-  font-size: var(--text-34);
+  font-size: var(--text-display);
   letter-spacing: -0.025em;
   font-weight: var(--weight-heading);
   margin: 0 0 6px;
@@ -135,7 +166,7 @@
   border-left: 3px solid var(--orange-3);
   border-radius: var(--radius-md);
   background: var(--panel);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 
@@ -153,17 +184,20 @@ ul.server-note {
   padding-left: 28px;
 }
 
-/* The one-time desktop menu question uses the same quiet helper row as other optional actions. */
-.send-to-offer {
+/* The one-time questions (desktop menus, another agent's setup) use the same quiet helper row as other optional
+   actions. */
+.send-to-offer,
+.import-hint {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-block: 8px;
   flex-wrap: wrap;
 }
-.send-to-offer p {
+.send-to-offer p,
+.import-hint p {
   flex: 1 1 auto;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .send-to-offer .key-problem {
   flex-basis: 100%;

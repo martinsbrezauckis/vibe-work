@@ -7,6 +7,8 @@
 //!     python/                   the Python uv installed (UV_PYTHON_INSTALL_DIR; no PATH link, no registry)
 //!     venv/                     mistral-vibe and its pinned dependencies
 //!     requirements.txt          the hash-locked requirements that were installed
+//!     venv-<hash>/              a runtime refresh: the same version from newer requirements (first 12 hex digits of
+//!     venv-<hash>.requirements.txt  their SHA-256), built beside the running venv; `installed.json` names the one in use
 //!     installed.json            written LAST: the install is complete only when it exists and matches
 //!     dl/, cache/               download and uv cache, deleted after a successful install
 //!   choice.json                 "use my existing install": the path the user chose (and its version)
@@ -16,7 +18,9 @@
 //! ```
 //! A venv cannot be moved (its scripts name their Python by absolute path), so the install is done in place and
 //! `installed.json` is the commit point; a folder without it is an unfinished install and is removed before the
-//! next attempt.
+//! next attempt. A refresh is a second venv in the same version folder, and switching `installed.json` to it is
+//! its commit point; the venv it replaced is removed at the next start ([`Layout::remove_other_venvs`]), when no
+//! server runs from it.
 //!
 //! Depends on: serde, `serde_json`. Called by: [`crate::manager`], the app (via the manager), tests.
 
@@ -61,6 +65,21 @@ pub struct Layout {
     pub root: PathBuf,
     /// The pinned version (a folder name: digits and dots only, checked by [`Layout::new`]).
     pub version: String,
+    /// The venv folder this layout installs into: `venv`, or `venv-<12 hex>` for a refresh ([`Layout::refresh`]).
+    venv_name: String,
+}
+
+const VENV: &str = "venv";
+
+/// `venv`, or `venv-` and exactly 12 lowercase hex digits: the only folder names the installer creates (and removes).
+fn is_venv_name(name: &str) -> bool {
+    name == VENV
+        || name.strip_prefix("venv-").is_some_and(|hash| {
+            hash.len() == 12
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
 }
 
 impl Layout {
@@ -74,7 +93,31 @@ impl Layout {
         plain.then(|| Self {
             root,
             version: version.to_owned(),
+            venv_name: VENV.to_owned(),
         })
+    }
+
+    /// The same version folder with a refresh venv named after `requirements_sha256` (its first 12 hex digits), or
+    /// `None` when that is not a lowercase hex SHA-256.
+    #[must_use]
+    pub fn refresh(&self, requirements_sha256: &str) -> Option<Self> {
+        let name = format!("venv-{}", requirements_sha256.get(..12)?);
+        (requirements_sha256.len() == 64 && is_venv_name(&name)).then(|| Self {
+            venv_name: name,
+            ..self.clone()
+        })
+    }
+
+    /// The hash-locked requirements file this layout installs (`requirements.txt`, or `<venv>.requirements.txt` for a
+    /// refresh, so the running install's file stays as it was).
+    #[must_use]
+    pub fn requirements(&self) -> PathBuf {
+        if self.venv_name == VENV {
+            self.install_dir().join("requirements.txt")
+        } else {
+            self.install_dir()
+                .join(format!("{}.requirements.txt", self.venv_name))
+        }
     }
 
     /// `<root>/<version>`.
@@ -92,7 +135,7 @@ impl Layout {
     /// The venv.
     #[must_use]
     pub fn venv(&self) -> PathBuf {
-        self.install_dir().join("venv")
+        self.install_dir().join(&self.venv_name)
     }
 
     /// The venv's Python.
@@ -130,15 +173,75 @@ impl Layout {
         self.root.join("probe")
     }
 
-    /// The finished install, if `installed.json` exists, names this version and its server exists.
+    /// The finished install, if `installed.json` exists, names this version and its server exists in one of this
+    /// version folder's venvs (`venv`, or a refresh's `venv-<hash>`).
     #[must_use]
     pub fn installed(&self) -> Option<Installed> {
         let text = std::fs::read_to_string(self.marker()).ok()?;
         let record: Installed = serde_json::from_str(&text).ok()?;
         (record.version == self.version
-            && record.server == self.server()
+            && self.venv_of(&record.server).is_some()
             && record.server.is_file())
         .then_some(record)
+    }
+
+    /// The venv folder name of `server` when it is exactly this version folder's `<venv>/<bin>/vibe-app-server`.
+    fn venv_of(&self, server: &Path) -> Option<String> {
+        let name = server.parent()?.parent()?.file_name()?.to_str()?.to_owned();
+        let layout = Self {
+            venv_name: name.clone(),
+            ..self.clone()
+        };
+        (is_venv_name(&name) && layout.server() == server).then_some(name)
+    }
+
+    /// Writes `record` as `installed.json` (temp file, then rename: a reader sees the old record or the new one).
+    ///
+    /// # Errors
+    /// The OS error.
+    pub fn save_installed(&self, record: &Installed) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(record).map_err(std::io::Error::other)?;
+        vw_platform::atomic_file::replace_file(
+            &self.marker(),
+            text.as_bytes(),
+            vw_platform::atomic_file::MetadataPolicy::NewFile,
+        )
+    }
+
+    /// Removes the venvs of this version folder that `installed.json` does not name (the one a refresh replaced, or an
+    /// interrupted refresh's), with their requirements files. Called at start, before any server runs from here; a
+    /// folder that cannot be removed now is tried again at the next start. Only installer-made names are touched.
+    pub fn remove_other_venvs(&self) {
+        let Some(keep) = self.installed().and_then(|r| self.venv_of(&r.server)) else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(self.install_dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // A venv folder, or the requirements file that belongs to one (`requirements.txt` is the first venv's).
+            let (venv, file) = match name.strip_suffix(".requirements.txt") {
+                Some(stem) => (stem, true),
+                None if name == "requirements.txt" => (VENV, true),
+                None => (name.as_str(), false),
+            };
+            if !is_venv_name(venv) || venv == keep {
+                continue;
+            }
+            let path = entry.path();
+            let removed = match entry.file_type() {
+                Ok(kind) if file && kind.is_file() => std::fs::remove_file(&path),
+                Ok(kind) if !file && kind.is_dir() => std::fs::remove_dir_all(&path),
+                _ => continue,
+            };
+            match removed {
+                Ok(()) => tracing::info!(folder = %name, "replaced Vibe environment removed"),
+                Err(error) => {
+                    tracing::warn!(folder = %name, %error, "replaced Vibe environment not removed");
+                }
+            }
+        }
     }
 
     /// The user's choice, if `choice.json` exists and its server is still an executable file.

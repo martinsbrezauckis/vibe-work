@@ -3,20 +3,18 @@
 //! Values go only to the child's environment; tool output passes the registered-secret scrubber.
 //! Permission holds in the hook; running commands retain their job result for later status reads.
 
-#[cfg(feature = "agent-vault")]
 mod capture;
 mod consent;
 mod scope;
-#[cfg(feature = "agent-vault")]
 pub(super) use capture::prepare_capture;
-#[cfg(feature = "agent-vault")]
 pub(super) use scope::check_inputs;
 mod status;
 use status::wait;
+use vw_platform::sync::LockRecover;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -67,7 +65,7 @@ pub(crate) struct SecretRuns {
 
 impl SecretRuns {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Run>> {
-        self.runs.lock().unwrap_or_else(PoisonError::into_inner)
+        self.runs.lock_or_recover()
     }
 
     fn handed_off(&self, id: &str) -> bool {
@@ -96,13 +94,7 @@ fn terminal(state: &RunState) -> bool {
     )
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+use crate::fill_grants::now_ms;
 
 /// Runs one secret tool for `session_id`.
 pub(crate) async fn call(

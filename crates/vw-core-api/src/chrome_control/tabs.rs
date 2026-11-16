@@ -2,6 +2,7 @@
 use super::{ChromeSelection, content};
 use crate::{CoreError, ErrorCode};
 use serde_json::{Value, json};
+use vw_platform::sync::LockRecover;
 
 /// One connected Chrome tab available to the composer picker.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -74,7 +75,10 @@ pub(super) fn selection(
     let text = data["text"].as_str().ok_or_else(unavailable)?;
     let mut marked = json!({"structuredContent":{"url":url,"title":title,"selection":text}});
     content::mark(&mut marked);
-    marked["structuredContent"]["browserTab"] = json!({"profileId":profile_id,"tabId":tab_id});
+    // A tab in the person's own Firefox is not one the agent can act in, so it gets no tab reference.
+    if !super::firefox_sharing::addon_profile(profile_id) {
+        marked["structuredContent"]["browserTab"] = json!({"profileId":profile_id,"tabId":tab_id});
+    }
     Ok(ChromeSelection {
         selection_id: body["requestId"].as_str().ok_or_else(unavailable)?.into(),
         session_id: None,
@@ -104,13 +108,7 @@ pub(super) async fn read(
         .into_iter()
         .filter(|tab| super::agent_browser::Browser::from_profile(&tab.profile_id).enabled(shared))
         .collect();
-    let tabs = shown_names(
-        tabs,
-        &chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
+    let tabs = shown_names(tabs, &chrome.profiles.lock_or_recover());
     Ok(crate::CommandResult::ChromeTabs { tabs })
 }
 pub(super) async fn pick(
@@ -146,6 +144,10 @@ pub(super) async fn pick_expected(
     let mut target = json!({"profileId":profile_id,"tabId":tab_id});
     super::profiles::check(chrome, profile_id)
         .map_err(|reason| super::commands::invalid(&reason))?;
+    let receiving = session_id;
+    // The person's Firefox (sharing add-on) is read for the composer only: the chat keeps its own browser and no
+    // window is handed to it, because the agent has no session there.
+    let session_id = session_id.filter(|_| !super::firefox_sharing::addon_profile(profile_id));
     let switching = session_id.is_some_and(|chat| {
         !super::profile_bindings::selected(chrome, chat)
             .is_some_and(|old| super::profile_ids::same(&old, profile_id))
@@ -157,11 +159,7 @@ pub(super) async fn pick_expected(
         target["expected"] = expected;
     }
     let generation = chrome.browser_generation(browser);
-    let profile_generation = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .generation(profile_id);
+    let profile_generation = chrome.profiles.lock_or_recover().generation(profile_id);
     let mut reply = chrome
         .owner
         .call("chrome_status", json!({"_tabContext":target.clone()}))
@@ -173,7 +171,7 @@ pub(super) async fn pick_expected(
             "Browser tab read was stopped by its switch",
         ));
     }
-    if let Some(session) = session_id
+    if let Some(session) = receiving
         && !crate::new_chat::known_owner(shared, session)
     {
         return Err(CoreError::not_loaded(session));
@@ -200,12 +198,7 @@ pub(super) async fn pick_expected(
     super::profiles::check(chrome, profile_id)
         .map_err(|reason| super::commands::invalid(&reason))?;
     if generation != chrome.browser_generation(browser)
-        || profile_generation
-            != chrome
-                .profiles
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .generation(profile_id)
+        || profile_generation != chrome.profiles.lock_or_recover().generation(profile_id)
     {
         return Err(super::commands::invalid(
             "This profile's tab read was stopped. Use a connected profile, or ask the user to reconnect this profile in Settings > Browser.",
@@ -241,7 +234,13 @@ mod tests {
             json!({"_tabs":true}),
             json!({"_tabContext":{"profileId":"p","tabId":1}}),
         ] {
-            assert!(super::super::gateway::validate_public_args(&args).is_err());
+            assert!(
+                super::super::gateway::validate_public_args(
+                    &args,
+                    super::super::agent_browser::Browser::Chrome
+                )
+                .is_err()
+            );
         }
         assert!(
             selection(

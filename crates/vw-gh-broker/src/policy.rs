@@ -213,7 +213,6 @@ fn api() -> Command {
             ("paginate", None),
             ("slurp", None),
             ("silent", None),
-            ("verbose", None),
             ("allow-escape-sequences", None),
         ],
     )

@@ -11,9 +11,10 @@ use crate::{
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
-    sync::{PoisonError, atomic::Ordering},
+    sync::atomic::Ordering,
 };
 use vw_keys::VaultScanSecret;
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 struct FileOutcome {
@@ -145,8 +146,7 @@ impl Worker {
         shared
             .secret_scan
             .view
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .findings
             .clone_from(&self.cache.findings);
         secret_scan::publish(shared);
@@ -372,8 +372,7 @@ impl Worker {
         shared
             .secret_scan
             .view
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .findings
             .clone_from(&self.cache.findings);
         secret_scan::publish(shared);

@@ -4,6 +4,7 @@ use super::{ChromeSelection, ChromeShareKind, selection::PendingSelection};
 use crate::{Core, CoreError, ErrorCode, core::Shared};
 use base64::Engine as _;
 use serde_json::{Value, json};
+use vw_platform::sync::LockRecover;
 use vw_preview::{FrameAnswer, MountId, PageTabOwner};
 
 const CHANGED: &str = "The shared page changed or closed. Share it again from the current page.";
@@ -137,11 +138,7 @@ pub(crate) async fn queue(shared: &Shared, page: &str, menu: bool) -> Result<(),
     proof.current(shared).await?;
     let id = selection.selection_id.clone();
     let queued = {
-        let mut selections = shared
-            .chrome_control
-            .selections
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut selections = shared.chrome_control.selections.lock_or_recover();
         selections.enqueue(PendingSelection {
             selection,
             handover: None,
@@ -232,8 +229,7 @@ impl Core {
             self.shared
                 .chrome_control
                 .selections
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .lock_or_recover()
                 .error = Some(error.message);
             super::owner::publish(&self.shared);
         }

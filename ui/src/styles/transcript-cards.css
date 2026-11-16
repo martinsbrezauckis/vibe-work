@@ -15,7 +15,7 @@
   max-height: var(--ask-max-height, none);
   margin: 4px 0 22px;
   border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   background: var(--panel);
   overflow: auto;
   overscroll-behavior: contain;
@@ -49,12 +49,12 @@
 }
 .approval .ah .sub {
   color: var(--text-3);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .approval .why {
   display: grid;
   gap: 4px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
   padding: 10px 14px 0;
 }
@@ -119,7 +119,7 @@
   display: grid;
   gap: 4px;
   padding: 0 14px 10px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 .q-other input {
@@ -127,7 +127,7 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   padding: 6px 8px;
 }
 .scopes {
@@ -136,7 +136,7 @@
   padding: 0 14px 6px;
   display: flex;
   gap: 14px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .scopes legend {
@@ -147,7 +147,7 @@
 .card-state {
   margin: 0;
   padding: 0 14px 12px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--orange-3);
 }
 .card-state:empty {
@@ -220,7 +220,7 @@
   align-items: baseline;
   padding: 5px 8px;
   border-radius: var(--radius-md);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   line-height: var(--leading-ui);
   cursor: pointer;
 }
@@ -251,7 +251,7 @@
 .q-desc {
   grid-column: 2;
   min-width: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   overflow-wrap: anywhere;
 }
@@ -261,7 +261,7 @@
 .q-footer {
   margin: 0;
   padding: 6px 14px 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 /* Browser profile card: one answer button per profile, the signed-in account dimmed on its own line under the
@@ -292,7 +292,7 @@
 /* Inline diff */
 .diff {
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   line-height: 1.65;
   overflow-x: auto;
 }
@@ -374,7 +374,7 @@
   padding: 2px 4px 2px 12px;
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .md-code pre {
@@ -382,7 +382,7 @@
   padding: 10px 12px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   line-height: 1.55;
 }
 .syn-token-keyword {
@@ -430,7 +430,7 @@
 }
 .todo-count {
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .todo-now {
   color: var(--text-2);
@@ -444,7 +444,7 @@
   padding: 0;
   display: grid;
   gap: 3px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .todo-list li {
   display: flex;

@@ -16,6 +16,7 @@ import {
 import type { Shell } from "./shellStore";
 import { summarize } from "./sessionSummary";
 
+/** The note on the Skills tab and its rows while the core reports the folder's chats as busy. */
 export const SKILLS_BUSY = "Wait until the chats in this folder finish, then change skills.";
 /**
  * The core's `serverCode` for an offered update that ran while Vibe now reports another version (or none) installed
@@ -27,6 +28,7 @@ type Mutation = Exclude<
   SkillsAction,
   { op: "read" } | { op: "detail" } | { op: "offerImport" } | { op: "offerUpdate" }
 >;
+/** Everything the Skills tab shows: the core's list, expanded rows with their details, pending changes and notes. */
 export interface SkillsState {
   view: SkillsView | null;
   loading: boolean;
@@ -41,6 +43,7 @@ export interface SkillsState {
   note: string | null;
   focus: { name: string; installed: boolean; serial: number } | null;
 }
+/** The Skills tab before its first read. */
 export const SKILLS_INITIAL: SkillsState = {
   view: null,
   loading: false,
@@ -328,4 +331,5 @@ export function createSkills({ core, shell }: { core: CoreController; shell: She
     },
   };
 }
+/** The skills controller: its store and actions. */
 export type Skills = ReturnType<typeof createSkills>;

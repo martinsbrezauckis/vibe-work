@@ -18,7 +18,7 @@
   background: var(--raised);
   border-bottom: 1px solid var(--line);
   padding: 8px 14px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   border-left: 3px solid var(--text-3);
 }
 .update-notice > .update-notice-text {
@@ -40,7 +40,7 @@
 }
 .update-notice-text .d {
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .update-notice progress {
   width: 100%;
@@ -56,7 +56,7 @@
 /* Show where "Open release page" goes beside the button. */
 .update-link-host {
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 
 /* The default-model card: one button per offered model, stacked. */

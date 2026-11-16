@@ -7,7 +7,8 @@ use crate::core::Shared;
 use serde_json::{Value, json};
 #[cfg(test)]
 use std::sync::Arc;
-use std::sync::{PoisonError, Weak};
+use std::sync::Weak;
+use vw_platform::sync::LockRecover;
 
 pub(in crate::chrome_control) fn publish(shared: &Shared) {
     shared.emit(crate::CoreEvent::ChromeControl {
@@ -35,8 +36,7 @@ pub(in crate::chrome_control) fn observe(shared: &Weak<Shared>, message: &Value)
         let changed = shared
             .chrome_control
             .selections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .receive(&message["params"], |id| shared.store.view(id).is_some());
         if changed {
             publish(&shared);
@@ -46,8 +46,7 @@ pub(in crate::chrome_control) fn observe(shared: &Weak<Shared>, message: &Value)
         let changed = shared
             .chrome_control
             .selections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .receive_share(&message["params"]);
         if changed {
             publish(&shared);
@@ -108,6 +107,9 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
             .connected_profiles
             .observe(&data);
     }
+    // The pairing states below (Edge's and Chrome's) leave out a profile the person removed, also while its
+    // extension still reaches the helper; the observers above keep the helper's own report.
+    super::super::profiles::removed_not_connected(&shared.chrome_control, &mut data);
     if cfg!(any(feature = "your-edge", feature = "your-firefox")) {
         super::super::edge_state::update(&shared, &data);
     }
@@ -145,22 +147,14 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
         .chrome_control
         .owner
         .enroll
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .waiting_reported();
     let state = PairingState::observe(code, connected, waiting);
     // A status poll has no registered profile while an enabled extension holds another identity.
     // Keep its signed mismatch until a pairing report, live connection or helper reset replaces it.
     if !connected
         && code.is_empty()
-        && shared
-            .chrome_control
-            .owner
-            .pairing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .0
-            == PairingState::OtherOwner
+        && shared.chrome_control.owner.pairing.lock_or_recover().0 == PairingState::OtherOwner
     {
         return;
     }
@@ -168,12 +162,7 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
 }
 
 fn apply_pairing_state(shared: &Shared, data: &Value, state: PairingState, connected: bool) {
-    let mut current = shared
-        .chrome_control
-        .owner
-        .pairing
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut current = shared.chrome_control.owner.pairing.lock_or_recover();
     // Removal clears this same lock after deleting the registration. A shared status
     // poll may still name the owner's fingerprint, even with no Chrome profiles left.
     if super::super::remove::is_removed(shared, super::super::agent_browser::Browser::Chrome) {
@@ -185,8 +174,7 @@ fn apply_pairing_state(shared: &Shared, data: &Value, state: PairingState, conne
             .chrome_control
             .owner
             .enroll
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .connected();
     }
     let fingerprint = data["ownerFingerprint"]
@@ -204,12 +192,7 @@ fn apply_pairing_state(shared: &Shared, data: &Value, state: PairingState, conne
 pub(in crate::chrome_control) fn publish_setup_if_changed(shared: &Shared, changed: bool) {
     let view = super::super::commands::view(shared);
     let next = view.clone();
-    let mut previous = shared
-        .chrome_control
-        .owner
-        .observed_setup
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut previous = shared.chrome_control.owner.observed_setup.lock_or_recover();
     if changed || previous.as_ref() != Some(&next) {
         *previous = Some(next);
         drop(previous);
@@ -233,16 +216,8 @@ pub(in crate::chrome_control) fn update_work(
     let Some(rows) = result["structuredContent"]["sessions"].as_array() else {
         return;
     };
-    let mut tasks = shared
-        .chrome_control
-        .tasks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let mut work = shared
-        .chrome_control
-        .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut tasks = shared.chrome_control.tasks.lock_or_recover();
+    let mut work = shared.chrome_control.work.lock_or_recover();
     // A live session the helper reports stopped without Vibe Work asking: the person's Stop in Chrome.
     let stopped = work.stopped_unasked(rows, started);
     let changed = work.observe(rows, &mut tasks, started);
@@ -250,6 +225,7 @@ pub(in crate::chrome_control) fn update_work(
     drop(tasks);
     super::super::profile_bindings::acknowledge(&shared.chrome_control, rows);
     super::super::person_stop::received(&shared, &stopped);
+    super::super::frames::observe(&shared, rows);
     if changed {
         publish(&shared);
     }

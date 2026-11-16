@@ -76,11 +76,6 @@ impl Core {
                 "This plugin is managed elsewhere. Only plugins in Vibe Work's own home or the opened project can be changed.",
             ));
         }
-        if (op == "turnOffPlugin" && off) || (op == "turnOnPlugin" && !off) {
-            return Err(refuse(
-                "The plugin's on/off state changed. Read the Tools page again.",
-            ));
-        }
         // Re-resolve before changing anything: a client path or a folder name is never evidence of a plugin.
         let discovered = self
             .discover_plugins(project.as_deref(), session_id.as_deref())
@@ -101,12 +96,24 @@ impl Core {
                 refuse("Vibe no longer discovers this plugin. Read the Tools page again.")
             })?;
         let name = row["name"].as_str().unwrap_or("plugin");
-        if op == "turnOnPlugin" && row["readable"] == false {
+        let project_plugin = row["scope"] == "project";
+        // Vibe's own switch decides for a folder in `plugins`; a folder in `plugins-off` is off by its place.
+        let switched_off = !off && row["nativeEnabled"] == false;
+        if (op == "turnOffPlugin" && (off || switched_off))
+            || (op == "turnOnPlugin" && !off && !switched_off)
+        {
             return Err(refuse(
-                "This plugin is not readable. Check its issues in Tools before turning it on.",
+                "The plugin's on/off state changed. Read the Tools page again.",
             ));
         }
-        self.confirm_plugin_change(origin, op, &path, name).await?;
+        refuse_change(op, name, row)?;
+        if let Err(declined) = self.confirm_plugin_change(origin, op, &path, name).await {
+            if op == "turnOnPlugin" && !off {
+                self.keep_declined_plugin_off(folder, name, project.as_deref(), project_plugin)
+                    .await;
+            }
+            return Err(declined);
+        }
         let held = self.shared.plugin_approvals.mutations.lock().await;
         // A dialog can remain open while an agent edits the tree. Check ownership again after it closes.
         if !self.plugin_owned(folder, project.as_deref(), off) {
@@ -115,13 +122,13 @@ impl Core {
             ));
         }
         let user_plugin = home_plugin(folder, home, off);
-        if user_plugin {
-            // Revoke before changing bytes. A failed move or delete leaves the plugin off on the next sweep.
-            self.shared.plugin_approvals.set(folder, None)?;
-        }
         let receipt = crate::market_local::receipt(folder);
         let mut notice = None;
         if op == "removePlugin" {
+            if user_plugin {
+                // Revoke before deleting bytes. A failed delete leaves the plugin off on the next sweep.
+                self.shared.plugin_approvals.set(folder, None)?;
+            }
             std::fs::remove_dir_all(folder).map_err(|e| {
                 CoreError::new(
                     ErrorCode::Internal,
@@ -129,18 +136,17 @@ impl Core {
                 )
             })?;
         } else {
-            move_plugin(folder, off)?;
-            if user_plugin && op == "turnOnPlugin" {
-                let target = home.join("plugins").join(
-                    folder
-                        .file_name()
-                        .ok_or_else(|| refuse("The plugin folder has no name."))?,
-                );
-                if let Err(error) = self.shared.plugin_approvals.set(&target, Some(name)) {
-                    move_plugin(&target, false)?;
-                    return Err(error);
-                }
-            }
+            notice = self
+                .switch_plugin(
+                    op,
+                    folder,
+                    off,
+                    user_plugin,
+                    name,
+                    project.as_deref(),
+                    project_plugin,
+                )
+                .await?;
         }
         drop(held);
         // Its tools leave the chats: their "Allow for this session" answers end (a plugin turned on again asks).
@@ -164,6 +170,79 @@ impl Core {
         })
     }
 
+    /// Turn off / Turn on: Vibe's own switch for a folder in `plugins`; a folder an earlier version moved to
+    /// `plugins-off` comes back, approved, and Vibe's switch is set on. Returns a notice for a partial result.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::fn_params_excessive_bools,
+        reason = "the facts change_plugin resolved once, passed on unchanged"
+    )]
+    async fn switch_plugin(
+        &self,
+        op: &str,
+        folder: &Path,
+        off: bool,
+        user_plugin: bool,
+        name: &str,
+        project: Option<&Path>,
+        project_plugin: bool,
+    ) -> Result<Option<String>, CoreError> {
+        if !off {
+            // The folder stays approved where it is: Vibe's switch alone turns it off or on.
+            self.set_plugin_switch(name, op == "turnOnPlugin", project, project_plugin)
+                .await?;
+            return Ok(None);
+        }
+        // A folder an earlier version moved aside comes back, approved, and Vibe's switch is set on.
+        if user_plugin {
+            self.shared.plugin_approvals.set(folder, None)?;
+        }
+        move_plugin(folder, off)?;
+        let target = folder
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| refuse("The plugin root is unavailable."))?
+            .join("plugins")
+            .join(
+                folder
+                    .file_name()
+                    .ok_or_else(|| refuse("The plugin folder has no name."))?,
+            );
+        if user_plugin && let Err(error) = self.shared.plugin_approvals.set(&target, Some(name)) {
+            move_plugin(&target, false)?;
+            return Err(error);
+        }
+        Ok(self
+            .set_plugin_switch(name, true, project, project_plugin)
+            .await
+            .err()
+            .map(|error| format!("Turned on; {}", error.message)))
+    }
+
+    /// The person's no to "Turn on …?" is their latest answer: Vibe's switch is written off, so the plugin is off
+    /// after Cancel even when Vibe's config turned it on while the question was open (a hand edit, or a Turn on
+    /// clicked from a view read before one). Its folder and approval stay. A failed write changes nothing more.
+    async fn keep_declined_plugin_off(
+        &self,
+        folder: &Path,
+        name: &str,
+        project: Option<&Path>,
+        project_plugin: bool,
+    ) {
+        let held = self.shared.plugin_approvals.mutations.lock().await;
+        if !self.plugin_owned(folder, project, false)
+            || self
+                .set_plugin_switch(name, false, project, project_plugin)
+                .await
+                .is_err()
+        {
+            return;
+        }
+        drop(held);
+        crate::ask::grants::plugin_changed(&self.shared);
+        self.reload_sessions().await;
+    }
+
     async fn confirm_plugin_change(
         &self,
         origin: Origin,
@@ -182,6 +261,22 @@ impl Core {
         }
         Ok(())
     }
+}
+
+/// Refusals that need no question: the bundled plugin's switch, a switch set elsewhere, an unreadable plugin.
+fn refuse_change(op: &str, name: &str, row: &serde_json::Value) -> Result<(), CoreError> {
+    if op != "removePlugin" && name == crate::plugin_switches::BUNDLED_PLUGIN {
+        return Err(refuse(crate::plugin_switches::BUNDLED_TEXT));
+    }
+    if op == "turnOnPlugin" && row["locked"] == true {
+        return Err(refuse(crate::plugin_switches::LOCKED_TEXT));
+    }
+    if op == "turnOnPlugin" && row["readable"] == false {
+        return Err(refuse(
+            "This plugin is not readable. Check its issues in Tools before turning it on.",
+        ));
+    }
+    Ok(())
 }
 
 /// `folder` lies directly in the home's `plugins` folder (`plugins-off` when `off`). Compared resolved as well:

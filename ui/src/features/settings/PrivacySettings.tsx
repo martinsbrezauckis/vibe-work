@@ -10,7 +10,7 @@
 import { Switch } from "../../components/Controls";
 import { useEffect, useState } from "react";
 
-import { sessionForPick } from "../../state/modelChoice";
+import { sessionForPick, settingsReadKey } from "../../state/modelChoice";
 import {
   type PrivacyView,
   type SwitchName,
@@ -33,14 +33,17 @@ export function PrivacySettings() {
   const running = useCoreState((s) => s.server.phase === "running");
   const selected = useShellState((s) => s.selected);
   const via = core === null ? null : sessionForPick(core, selected);
+  const readKey = core === null ? null : settingsReadKey(core, selected);
   const [view, setView] = useState<PrivacyView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<SwitchName | null>(null);
 
+  const readFor = readKey ?? "latest";
   useEffect(() => {
-    if (core === null || !running || via === null) return;
+    if (core === null || !running) return;
+    const at = sessionForPick(core, selected);
     let live = true;
-    readPrivacy(core, via)
+    readPrivacy(core, at)
       .then((v) => {
         if (live) {
           setView(v);
@@ -56,7 +59,7 @@ export function PrivacySettings() {
     return () => {
       live = false;
     };
-  }, [core, running, via]);
+  }, [core, running, readFor, selected]);
 
   if (core === null || !running) return null;
 
@@ -98,7 +101,11 @@ export function PrivacySettings() {
           aria-label={label}
           aria-checked={current?.on === true}
           disabled={
-            current === undefined || current.on === null || lockedBy !== null || saving !== null
+            current === undefined ||
+            current.on === null ||
+            lockedBy !== null ||
+            saving !== null ||
+            via === null
           }
           onClick={() => {
             if (current !== undefined) flip(which, current);
@@ -111,12 +118,8 @@ export function PrivacySettings() {
   return (
     <section aria-labelledby="privacy-settings-title">
       <h3 id="privacy-settings-title">Privacy</h3>
-      {via === null && (
-        <p className="key-line">Needs a chat: Vibe reads and saves these switches through one.</p>
-      )}
-      {via !== null && view === null && error === null && (
-        <p className="key-line">Reading the switches…</p>
-      )}
+      {via === null && view !== null && <p className="key-line">{SWITCHES_NEED_CHAT}</p>}
+      {view === null && error === null && <p className="key-line">Reading the switches…</p>}
       {view !== null && (
         <>
           {row(
@@ -138,3 +141,6 @@ export function PrivacySettings() {
     </section>
   );
 }
+
+/** Shown when the switches were read without a chat (there is none): Vibe saves them only through one. */
+const SWITCHES_NEED_CHAT = "Changing these switches needs a chat: Vibe saves them through one.";

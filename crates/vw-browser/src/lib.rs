@@ -62,6 +62,8 @@ mod point_receipt;
 mod point_resolve;
 mod pointer;
 mod postconditions;
+mod protected_capture;
+pub use protected_capture::protected_shown;
 mod read;
 pub mod receipt;
 pub mod recording;
@@ -90,7 +92,10 @@ pub use act::{
 };
 pub use action_loop::POST_INPUT_FAILED;
 pub use choices::ChoiceCursor;
-pub use driver::{ActError, Browser, HEADLINE_KEY, NOTHING_OPEN, NavFuture, Navigate, STOPPED};
+pub use driver::{
+    ActError, Browser, HEADLINE_KEY, NETWORK_GUARD_ACTIVE, NOTHING_OPEN, NavFuture, Navigate,
+    STOPPED,
+};
 pub use login_fill::{FillRefusal, FillTarget, LoginRole};
 pub use output::filter_agent_output;
 pub use read::ReadOptions;
@@ -101,9 +106,7 @@ pub use sessions::{
     ACTIVE_FOR_MS, Actor, BrowserState, LOG_CAP, LogEntry, Outcome, Sessions, now_ms,
 };
 
-#[cfg(feature = "agent-vault")]
 mod agent_secret;
-#[cfg(feature = "agent-vault")]
 pub use agent_secret::AgentSecret;
 pub use text_paging::TextCursor;
 

@@ -5,7 +5,8 @@
 //! Vibe has stopped, so a cancelled card cannot release a sibling hook into another model step.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use vw_ask::Outcome;
@@ -40,24 +41,41 @@ struct Chat {
 #[derive(Default)]
 pub(crate) struct Stops {
     chats: Mutex<HashMap<String, Chat>>,
+    /// Woken whenever a `session/compact` forward of any chat starts, so a waiting Stop re-checks at once
+    /// (`dispatch_compaction::stop_lock`).
+    compaction_started: tokio::sync::Notify,
+    /// Woken whenever a chat's generation rises (a Stop, a failed or interrupted turn) or a chat is removed, so a
+    /// job waiting in [`until_ended`] re-checks at once.
+    ended: tokio::sync::Notify,
 }
 
 impl Stops {
     fn chats(&self) -> MutexGuard<'_, HashMap<String, Chat>> {
-        self.chats.lock().unwrap_or_else(PoisonError::into_inner)
+        self.chats.lock_or_recover()
     }
 }
 
 /// A `session/compact` forward of the chat started (`true`) or ended (`false`).
 pub(crate) fn note_compaction(shared: &Shared, session: &str, started: bool) {
     let id = shared.channels.canonical(session);
-    let mut chats = shared.stops.chats();
-    let chat = chats.entry(id).or_default();
-    chat.compacting = if started {
-        chat.compacting + 1
-    } else {
-        chat.compacting.saturating_sub(1)
-    };
+    {
+        let mut chats = shared.stops.chats();
+        let chat = chats.entry(id).or_default();
+        chat.compacting = if started {
+            chat.compacting + 1
+        } else {
+            chat.compacting.saturating_sub(1)
+        };
+    }
+    if started {
+        shared.stops.compaction_started.notify_waiters();
+    }
+}
+
+/// Resolves at the next compaction start of any chat. Enable it before checking [`compacting`]: a start between that
+/// check and the wait still wakes it.
+pub(crate) fn compaction_started(shared: &Shared) -> tokio::sync::futures::Notified<'_> {
+    shared.stops.compaction_started.notified()
 }
 
 /// True while a `session/compact` forward of the chat is in flight.
@@ -68,6 +86,30 @@ pub(crate) fn compacting(shared: &Shared, session: &str) -> bool {
         .chats()
         .get(&id)
         .is_some_and(|c| c.compacting > 0)
+}
+
+/// How long [`until_ended`] goes without an event before it checks again: the longest a condition no event announces
+/// (tool registration, agent access, vault permission) goes unseen.
+pub(crate) const RECHECK: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Resolves once `ended()` is true: a running job's wait for its chat to be stopped, removed or to lose what it
+/// runs under (video jobs, secret captures). It checks at once on every generation rise and chat removal of any
+/// chat (registered before each check, so an event between the check and the wait still wakes it), and otherwise
+/// every [`RECHECK`]. Callers check their conditions again after the job, so a late wake never lets a stale result
+/// through.
+pub(crate) async fn until_ended(shared: &Shared, ended: impl Fn() -> bool) {
+    loop {
+        let event = shared.stops.ended.notified();
+        tokio::pin!(event);
+        event.as_mut().enable();
+        if ended() {
+            return;
+        }
+        tokio::select! {
+            () = event => {}
+            () = tokio::time::sleep(RECHECK) => {}
+        }
+    }
 }
 
 /// The chat's current generation.
@@ -103,6 +145,9 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
 /// Invalidate earlier decisions immediately and stop protected-change work.
 pub(crate) fn stopped(shared: &Shared, session: &str) {
     let id = shared.channels.canonical(session);
+    // A paused call waiting for the person never runs after Stop.
+    shared.paused_tools.stop_chat(session);
+    shared.paused_tools.stop_chat(&id);
     crate::chrome_control::stop_chat(shared, session);
     crate::browser::stop_for_chat(shared, session);
     if id != session {
@@ -115,6 +160,7 @@ pub(crate) fn stopped(shared: &Shared, session: &str) {
         chat.generation += 1;
         chat.stopped_by_person = true;
     }
+    shared.stops.ended.notify_waiters();
     crate::protected_changes::stop(shared, session);
     if id != session {
         crate::protected_changes::stop(shared, &id);
@@ -166,6 +212,7 @@ pub(crate) fn observe(shared: &Shared, change: &vw_session::Change) {
             let status = turn["status"].as_str();
             let turn_id = turn["id"].as_str();
             let id = shared.channels.canonical(session_id);
+            let mut rose = false;
             {
                 let mut chats = shared.stops.chats();
                 let ended = matches!(
@@ -187,18 +234,25 @@ pub(crate) fn observe(shared: &Shared, change: &vw_session::Change) {
                     if !counted {
                         chat.generation += 1;
                         chat.ended = turn_id.map(str::to_owned);
+                        rose = true;
                     }
                 }
+            }
+            if rose {
+                shared.stops.ended.notify_waiters();
             }
         }
         // A chat that never saw a Stop is forgotten (its lookups answer 0 either way); a stopped one keeps its
         // generation, so an old continuation never sees 0 again.
         vw_session::Change::Removed { session_id } => {
             let id = shared.channels.canonical(session_id);
-            let mut chats = shared.stops.chats();
-            if chats.get(&id).is_some_and(|c| c.generation == 0) {
-                chats.remove(&id);
+            {
+                let mut chats = shared.stops.chats();
+                if chats.get(&id).is_some_and(|c| c.generation == 0) {
+                    chats.remove(&id);
+                }
             }
+            shared.stops.ended.notify_waiters();
         }
         _ => {}
     }
@@ -375,3 +429,7 @@ pub(crate) fn retarget(shared: &Shared, method: &str, mut params: Value) -> Valu
 #[cfg(test)]
 #[path = "stops_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stops_wait_tests.rs"]
+mod wait_tests;

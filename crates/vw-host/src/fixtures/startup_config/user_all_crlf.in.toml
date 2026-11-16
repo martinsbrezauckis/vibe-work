@@ -1,0 +1,15 @@
+# my config
+active_model = "devstral"
+tool_paths = ["rel/tools"]
+experimental_enable_tab_status = true
+
+[[models]]
+name = "mistral-large-4"
+provider = "mistral"
+alias = "large-4"
+input_price = 1.5 # my own price
+
+[[models]]
+name = "devstral"
+provider = "mistral"
+alias = "devstral"

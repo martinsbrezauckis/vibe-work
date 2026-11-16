@@ -2,6 +2,10 @@
 import { useRef, type RefObject } from "react";
 import type { Files } from "../../state/files";
 import { useViewportWidth } from "../shell/hooks";
+/**
+ * The draggable divider between two editors, also moved with the arrow keys in 5% steps. It stacks the editors on a
+ * narrow window and stores the split in the session's file workspace.
+ */
 export function EditorDivider({
   files,
   sessionId,

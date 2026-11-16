@@ -76,7 +76,14 @@ fn version(shared: &Shared) -> Option<String> {
         })
 }
 
-fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
+/// `last_paired`: the extension's last pairing report was `paired`. A paired Safari that stops answering (Safari holds
+/// the extension while a page shows a sheet, or stopped running its page) is shown as not connected, not as unpaired.
+pub(super) fn diagnose(
+    package: bool,
+    on: bool,
+    version: Option<String>,
+    last_paired: bool,
+) -> AddonView {
     let package = package || version.is_some();
     let state = if !package {
         AddonState::Unavailable
@@ -91,6 +98,8 @@ fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
         AddonState::UpdateNeeded
     } else if version.is_some() {
         AddonState::Connected
+    } else if last_paired {
+        AddonState::NotConnected
     } else {
         AddonState::NotPaired
     };
@@ -102,6 +111,9 @@ fn diagnose(package: bool, on: bool, version: Option<String>) -> AddonView {
     }
     if state == AddonState::NotPaired {
         addon.instruction = Browser::Safari.words("Safari has no confirmed paired extension connection. Ask the user to click Open pairing page, enable {yourBrowser} in Safari Settings if asked, then pair after comparing its identity with Vibe Work.");
+    }
+    if state == AddonState::NotConnected {
+        addon.instruction = Browser::Safari.words("{yourBrowser} is paired but not answering now. Ask the user to answer any sheet or dialog open in Safari, such as \u{201c}Leave page?\u{201d}; if none is open, ask the user to click {yourBrowser} in Safari's toolbar. Then try again.");
     }
     if state == AddonState::UpdateNeeded {
         addon.instruction = "The connected Safari extension is older than this Vibe Work needs. Ask the user to update Vibe Work, then reconnect Safari.".into();
@@ -140,8 +152,8 @@ pub(super) fn view(shared: &Shared) -> Option<SafariView> {
         let version = version(shared);
         let package = version.is_some() || (cfg!(target_os = "macos")
             && shared.chrome_control.config.available() && super::safari_package::installed());
-        let mut addon = diagnose(package, enabled, version);
         let pairing = shared.chrome_control.owner.safari_pairing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut addon = diagnose(package, enabled, version, pairing.0 == "paired");
         if removed(shared) {
             addon = super::addon::view_for(AddonState::NotSetUp, "", Browser::Safari);
         } else if enabled && pairing.0 == "mismatch" {
@@ -226,6 +238,29 @@ pub(super) fn notice_reachable(
     now: std::time::Instant,
 ) -> bool {
     launching || last_report.is_some_and(|at| now.saturating_duration_since(at) < NOTICE_WINDOW)
+}
+
+/// Whether Open pairing page first wakes the extension: Safari runs (no launch) but the extension has not reported
+/// within [`NOTICE_WINDOW`], so Safari has stopped running its page and would drop the notice.
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) fn wake_first(
+    launching: bool,
+    last_report: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    !notice_reachable(launching, last_report, now)
+}
+
+/// Writes the local page Open pairing page loads in Safari to wake an idle extension: loading a page is a tab update,
+/// an event the extension listens to, so Safari runs its page again and it reports its pairing state; the notice
+/// follows that report. Static text with a policy that allows nothing; written again on each use.
+#[cfg(any(target_os = "macos", all(test, feature = "your-safari")))]
+pub(super) fn wake_page(dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    const PAGE: &str = "<!doctype html>\n<meta charset=\"utf-8\">\n<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'\">\n<title>Vibe Work pairing</title>\n<p>Vibe Work is opening its pairing page. You can close this tab.</p>\n";
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("safari-pairing.html");
+    std::fs::write(&path, PAGE)?;
+    Ok(path)
 }
 
 /// Native Safari keys and clicks need Accessibility; ask macOS for its own prompt while the user is pairing.

@@ -5,7 +5,10 @@
 //! own private network. The original Host header and TLS server name are retained.
 //!
 //! Depends on: `ip`, `resolve`. Called by: `serve`.
-//! A live browser scope admits every address; the proxy still resolves and pins its connection targets.
+//! A live browser scope admits public addresses; a target that is (or resolves to) anything else (this computer, the
+//! local network, link-local) is admitted only when [`Scope::local_access`] says so (Local Network Access: a public
+//! page is asked for first, a page opened on this computer or the local network is not). The proxy still resolves and
+//! pins its connection targets.
 //! Default/non-browser scope invariants:
 //! - This computer is reachable only as exactly `127.0.0.1`, `[::1]` or `localhost`, and only when the request's
 //!   [`Scope`] allows that port (Private Network Access idea: never Vibe Work's own ports, never
@@ -47,6 +50,56 @@ pub trait Scope: Send + Sync {
         let _ = host;
         false
     }
+
+    /// A live browser scope ([`Self::browser_addresses`]): `Ok` when this request may reach a target that is not
+    /// public ([`LocalRequest`]); else the reason. The answer may wait for the person (a public page is asked for
+    /// first); nothing is connected before it. Default: refused.
+    fn local_access<'a>(&'a self, request: &'a LocalRequest<'a>) -> ScopeFuture<'a> {
+        let _ = request;
+        Box::pin(async {
+            Err("this page cannot reach this computer or the local network".to_owned())
+        })
+    }
+}
+
+/// A browser request for a target that is not public: this computer, the local network, link-local, or another
+/// non-public class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalRequest<'a> {
+    /// The most private class among the target's addresses (loopback before everything else).
+    pub class: IpClass,
+    /// The target port.
+    pub port: u16,
+    /// The host as requested (lowercase, no brackets).
+    pub host: &'a str,
+    /// True when one of the target's addresses is one of this computer's own interface addresses ([`crate::own`]):
+    /// this computer, reached through an address other than loopback (`class` is then loopback).
+    pub own_address: bool,
+    /// The requesting document's origin when the request names one (its `Origin` header, else the origin of its
+    /// `Referer`): a page cannot write another site's origin there, but may leave both out. `None`: unknown.
+    pub initiator: Option<&'a str>,
+    /// True when the engine marks the request as a document of a frame or other nested context inside the page (its
+    /// `Sec-Fetch-Dest` is present and not `document`), or the request cannot show it is not (a tunnel where the
+    /// engine's navigation callback includes frames, `serve`): never the page's own top-level navigation.
+    pub nested: bool,
+}
+
+/// The class a [`LocalRequest`] reports for `addrs`: loopback (or unspecified, or one of this computer's own interface
+/// addresses: each reaches this computer, whatever its class) before any other non-public class; `None` when every
+/// address is public and none is this computer's own.
+#[must_use]
+pub fn local_class(addrs: &[SocketAddr]) -> Option<IpClass> {
+    if addrs.iter().any(|a| crate::own::is_own(a.ip())) {
+        return Some(IpClass::Loopback);
+    }
+    let classes: Vec<IpClass> = addrs.iter().map(|a| classify(a.ip())).collect();
+    if classes
+        .iter()
+        .any(|c| matches!(c, IpClass::Loopback | IpClass::Unspecified))
+    {
+        return Some(IpClass::Loopback);
+    }
+    classes.into_iter().find(|c| !c.is_public())
 }
 
 /// A scope that never reaches this computer (the shared listener: requests of unknown webviews).
@@ -69,7 +122,7 @@ pub fn bare_host(host: &str) -> &str {
         .unwrap_or(host)
 }
 
-/// Where to connect for `host:port`, or the refusal text.
+/// Where to connect for `host:port`, or the refusal text ([`decide_for`] without a known initiator).
 ///
 /// # Errors
 /// The reason, as text that names the host and the address class.
@@ -79,22 +132,51 @@ pub async fn decide(
     host: &str,
     port: u16,
 ) -> Result<Vec<SocketAddr>, String> {
+    decide_for(resolver, scope, host, port, None, false).await
+}
+
+/// Where to connect for `host:port` for a request from `initiator` (see [`LocalRequest::initiator`] and
+/// [`LocalRequest::nested`]), or the refusal text.
+///
+/// # Errors
+/// The reason, as text that names the host and the address class.
+pub async fn decide_for(
+    resolver: &dyn Resolve,
+    scope: &dyn Scope,
+    host: &str,
+    port: u16,
+    initiator: Option<&str>,
+    nested: bool,
+) -> Result<Vec<SocketAddr>, String> {
     let host = bare_host(host);
     let lower = host.trim_end_matches('.').to_ascii_lowercase();
     if scope.browser_addresses() {
-        if let Ok(ip) = lower.parse::<IpAddr>() {
-            return Ok(vec![SocketAddr::new(ip, port)]);
-        }
-        if lower == "localhost" || lower.ends_with(".localhost") {
-            return Ok(vec![
+        let addrs = if let Ok(ip) = lower.parse::<IpAddr>() {
+            vec![SocketAddr::new(ip, port)]
+        } else if lower == "localhost" || lower.ends_with(".localhost") {
+            vec![
                 SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
                 SocketAddr::from((Ipv6Addr::LOCALHOST, port)),
-            ]);
+            ]
+        } else {
+            tokio::time::timeout(RESOLVE_LIMIT, resolver.resolve(&lower, port))
+                .await
+                .map_err(|_| format!("{lower} did not resolve within 5 s"))?
+                .map_err(|error| format!("{lower} could not be resolved ({error})"))?
+        };
+        // Every answer is checked: one non-public answer makes the whole target local (no rebinding around the ask).
+        if let Some(class) = local_class(&addrs) {
+            let request = LocalRequest {
+                class,
+                port,
+                host: &lower,
+                own_address: addrs.iter().any(|a| crate::own::is_own(a.ip())),
+                initiator,
+                nested,
+            };
+            scope.local_access(&request).await?;
         }
-        return tokio::time::timeout(RESOLVE_LIMIT, resolver.resolve(&lower, port))
-            .await
-            .map_err(|_| format!("{lower} did not resolve within 5 s"))?
-            .map_err(|error| format!("{lower} could not be resolved ({error})"));
+        return Ok(addrs);
     }
     let accepted_loopback = match lower.as_str() {
         "127.0.0.1" => Some(vec![SocketAddr::from((Ipv4Addr::LOCALHOST, port))]),

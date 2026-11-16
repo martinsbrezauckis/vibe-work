@@ -24,14 +24,14 @@
 }
 .fref:focus-visible {
   outline: none;
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-mark);
 }
 .fref code {
   color: inherit;
 }
 .step-file {
   margin: 0 0 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   font-family: var(--font-mono);
 }
@@ -71,7 +71,7 @@
 .file-path,
 .file-meta {
   font-family: var(--font-mono);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -88,17 +88,17 @@
   background-color: var(--raised);
   color: var(--text);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   padding: 3px 22px 3px 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .file-note {
   margin: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   border: 1px solid var(--line-2);
   background: var(--raised);
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   flex: none;
 }
@@ -116,7 +116,7 @@
 .file-text pre {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--text);
   white-space: pre;
@@ -136,7 +136,7 @@
   user-select: none;
 }
 .file-md {
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   line-height: 1.55;
   color: var(--text);
   overflow-wrap: anywhere;
@@ -179,7 +179,7 @@
 /* While Vibe reads the side panel (panel_read): a quiet line above the code. */
 .file-edit-reading {
   margin: 4px 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .file-edit-conflict,
@@ -206,14 +206,14 @@
   align-items: center;
   padding: 6px 10px;
   color: var(--text-2);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .file-merge-labels {
   display: grid;
   grid-template-columns: 1fr 1fr;
   padding: 6px 10px;
   color: var(--text-2);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .file-merge-view {
   flex: 1;

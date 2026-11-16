@@ -1,5 +1,6 @@
 /** Protects ask cards from window-activation clicks. Uses capture listeners; installed by shell wiring and removed on unmount. */
 import type { DesktopClient } from "../../protocol/client/types";
+import { endCardKeys } from "../ask/cardKeys";
 
 // A click that activates the window arrives within moments of the window's focus; a press later than this after
 // the window came back (a native dialog closed, a switch with the keyboard) is an ordinary click.
@@ -38,6 +39,10 @@ export function isAccessibilityPress(p: {
   );
 }
 
+/**
+ * Installs window listeners that cancel the press that activates the window when it lands on an ask card, until its
+ * click ends. Uses the desktop focus channel when given. Returns the function that removes the listeners.
+ */
 export function guardActivationClick(subscribeFocus?: DesktopClient["subscribeFocus"]): () => void {
   let activating = false;
   let focusedAt: number | null = null;
@@ -105,6 +110,8 @@ export function guardActivationClick(subscribeFocus?: DesktopClient["subscribeFo
       native = true;
       if (focused) focusedAt = performance.now();
       else {
+        // The desktop window went behind another app: the card focus it restores later is not a fresh one.
+        endCardKeys();
         activating = true;
         focusedAt = null;
       }

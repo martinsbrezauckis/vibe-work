@@ -1,8 +1,9 @@
 //! Win32 message delivery to the visible `WebView2` child HWND selected from the controller's own host window.
 //! Depends on: `WebView2` controller and Win32 window APIs. Called by: `native_click` on Tauri's UI thread.
 
+use crate::sync::LockRecover;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use super::ClickReply;
 use webview2_com::ExecuteScriptCompletedHandler;
@@ -10,7 +11,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{ClientToScreen, ScreenToClient};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, GetClientRect, GetForegroundWindow, IsChild, IsWindowVisible,
+    GA_ROOT, GetAncestor, GetClientRect, GetForegroundWindow, IsChild, IsIconic, IsWindowVisible,
     PostMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WindowFromPoint,
 };
 use windows::core::HSTRING;
@@ -18,7 +19,8 @@ use windows::core::HSTRING;
 /// Posts a left-button click only to the browser child under a point in this controller's host `HWND`.
 ///
 /// # Errors
-/// Refuses inactive windows, occluded points, missing browser children and invalid native geometry.
+/// [`super::NOT_IN_FRONT`] for a hidden, minimized or background window; refuses occluded points, missing browser
+/// children and invalid native geometry.
 pub fn click(
     controller: &ICoreWebView2Controller,
     point: (f64, f64),
@@ -57,18 +59,14 @@ pub fn click_checked(
     // SAFETY: Tauri handed us the live controller on WebView2's UI thread. Its completion also runs there.
     let core = unsafe { controller.CoreWebView2() };
     let Ok(core) = core else {
-        if let Some(reply) = reply.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        if let Some(reply) = reply.lock_or_recover().take() {
             let _ = reply.send(Err("Not run: WebView2 is unavailable".to_owned()));
         }
         return;
     };
     let callback_reply = reply.clone();
     let handler = ExecuteScriptCompletedHandler::create(Box::new(move |status, answer| {
-        let Some(reply) = callback_reply
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        else {
+        let Some(reply) = callback_reply.lock_or_recover().take() else {
             return Ok(());
         };
         if reply.is_closed() {
@@ -96,7 +94,7 @@ pub fn click_checked(
     // SAFETY: ExecuteScript is called on the controller's UI thread; handler owns all callback state.
     let started = unsafe { core.ExecuteScript(&HSTRING::from(script), &handler) };
     if let Err(error) = started
-        && let Some(reply) = reply.lock().unwrap_or_else(PoisonError::into_inner).take()
+        && let Some(reply) = reply.lock_or_recover().take()
     {
         let _ = reply.send(Err(format!(
             "Not run: final page validation could not start: {error}"
@@ -115,13 +113,15 @@ pub(super) fn target(
         controller
             .ParentWindow(&raw mut host)
             .map_err(|e| format!("WebView2 host window: {e}"))?;
-        if host.is_invalid() || !IsWindowVisible(host).as_bool() {
-            return Err("native preview host is not visible".to_owned());
-        }
         let root = GetAncestor(host, GA_ROOT);
-        if root.is_invalid() || root != GetForegroundWindow() {
-            return Err("native preview window is not foreground".to_owned());
-        }
+        // Hidden to the tray or the pane not shown: the host is not visible; minimized: the root is iconic.
+        super::require_front(
+            !host.is_invalid()
+                && IsWindowVisible(host).as_bool()
+                && !root.is_invalid()
+                && !IsIconic(root).as_bool(),
+            !root.is_invalid() && root == GetForegroundWindow(),
+        )?;
         let mut rect = RECT::default();
         GetClientRect(host, &raw mut rect).map_err(|e| format!("WebView2 host bounds: {e}"))?;
         let width = f64::from(rect.right - rect.left);

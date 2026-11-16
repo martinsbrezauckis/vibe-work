@@ -5,7 +5,8 @@
 //! - [`wire`]: the one-request-per-connection NDJSON format between the `vw-agent-tools` binary (MCP server or
 //!   hook) and the Vibe Work core, plus the environment names and limits both sides share.
 //! - [`credential`]: the core's table of per-session random credentials (constant-time lookup).
-//! - [`killparse`]: literal starts of `kill` / `pkill` / `killall` / `taskkill` / `Stop-Process` / `spps`.
+//! - [`killparse`]: literal starts of `kill` / `pkill` / `killall` / `taskkill` / `Stop-Process` / `spps`, and
+//!   `osascript` quitting an app.
 //! - [`mcp`]: the stdio MCP server loop (answers `initialize` / `tools/list` itself, forwards `tools/call`).
 //! - [`gitparse`]: literal pushes/forge writes and credential commands refused; branch rewrites outside
 //!   the session's copy branch asked, ordinary local git left to Vibe's card.

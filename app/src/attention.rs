@@ -9,9 +9,20 @@ pub fn desktop_attention(app: AppHandle, count: u32) -> tauri::Result<()> {
     {
         app.run_on_main_thread(move || vw_platform::tray::indicator::set_attention(count > 0))?;
     }
+    // The count is drawn into the Dock icon itself: macOS hides `NSDockTile` labels while the app's notifications
+    // are not allowed, which is the state after the first notification banner goes unanswered.
     #[cfg(target_os = "macos")]
-    if let Some(window) = crate::main_window(&app) {
-        window.set_badge_count((count > 0).then_some(i64::from(count)))?;
+    {
+        let icon = tauri::include_image!("icons/128x128@2x.png");
+        let (width, height) = (icon.width(), icon.height());
+        let marked = vw_host::attention::dock_icon(icon.rgba(), width, height, count);
+        app.run_on_main_thread(move || {
+            if let Err(error) =
+                vw_platform::dock_icon::show(marked.as_deref().map(|rgba| (rgba, width, height)))
+            {
+                tracing::warn!(%error, "Dock icon count not shown");
+            }
+        })?;
     }
     #[cfg(windows)]
     if let Some(window) = crate::main_window(&app) {

@@ -76,35 +76,15 @@ pub fn project_key(project: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"vibe-work-pages\0");
     hasher.update(project.to_string_lossy().as_bytes());
-    hex(&hasher.finalize()[..16])
-}
-
-/// Lowercase hex of `bytes`.
-#[must_use]
-pub fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-            let _ = write!(out, "{b:02x}");
-            out
-        })
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
+    hex::encode(&hasher.finalize()[..16])
 }
 
 fn random_id() -> String {
     let mut bytes = [0u8; 8];
     if getrandom::fill(&mut bytes).is_err() {
-        return format!("c{}", now_ms());
+        return format!("c{}", crate::now_ms());
     }
-    format!("c{}", hex(&bytes))
+    format!("c{}", hex::encode(bytes))
 }
 
 /// The comments of every project, in `dir`.
@@ -139,7 +119,7 @@ impl CommentStore {
         if let Ok(file) = serde_json::from_str::<File>(&text) {
             return Ok(file);
         }
-        let aside = vw_platform::set_aside(&path, now_ms()).ok_or_else(|| {
+        let aside = vw_platform::set_aside(&path, crate::now_ms()).ok_or_else(|| {
             CommentError::Io("the unreadable comments file could not be moved aside".to_owned())
         })?;
         tracing::warn!(file = ?aside, "page comments file did not parse: moved aside");
@@ -218,7 +198,7 @@ impl CommentStore {
                 .map(|q| q.trim().chars().take(MAX_QUOTE).collect::<String>())
                 .filter(|q| !q.is_empty()),
             text: text.to_owned(),
-            created_ms: now_ms(),
+            created_ms: crate::now_ms(),
             sent_ms: None,
         };
         file.version = 1;
@@ -249,7 +229,7 @@ impl CommentStore {
     pub fn mark_sent(&self, project: &Path, ids: &[String]) -> Result<Vec<Comment>, CommentError> {
         let _guard = self.lock.lock();
         let mut file = self.load(project)?;
-        let now = now_ms();
+        let now = crate::now_ms();
         let mut marked = Vec::new();
         for comment in &mut file.comments {
             if ids.contains(&comment.id) {

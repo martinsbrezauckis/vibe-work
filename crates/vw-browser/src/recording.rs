@@ -200,8 +200,10 @@ impl Browser {
         };
         let captured = tokio::time::timeout(Duration::from_secs(3), async {
             let bound = self.bind_read(page, by).await?;
+            self.admit_capture(page).await?;
             let shot = self.service.screenshot(page).await.map_err(|e| crate::driver::preview_text(&e))?;
             bound.check_read_mount()?;
+            self.admit_capture(page).await?;
             Ok::<_, String>(shot)
         }).await.unwrap_or_else(|_| Err("The screenshot did not finish within three seconds; make the tab visible before the next action.".into()));
         let mut all = self

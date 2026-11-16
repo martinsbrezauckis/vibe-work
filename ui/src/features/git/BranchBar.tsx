@@ -14,12 +14,14 @@ import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Icon } from "../../components/Icon";
+import { Selector } from "../../components/Selector";
 import { useStore } from "../../state/createStore";
 import { useApp } from "../shell/AppContext";
 import type { Git } from "../../state/git";
 import { baseStat, barShown, branchOf, commitBlocked, prBlocked, pushBlocked } from "./model";
 import { useSessionWorking } from "./useSessionWorking";
 import { PrCard } from "./PrCard";
+import { PrList } from "./PrList";
 
 /** The bar for `sessionId`. */
 export function BranchBar({
@@ -46,6 +48,7 @@ export function BranchBar({
   const pushWhy = pushBlocked(status);
   const prWhy = prBlocked(status);
   const copy = status.location === "copy" && status.repo === ".";
+  const github = state?.remotes.some((r) => r.forge?.kind === "gitHub") ?? false;
   const bringWhy = copy && base?.ahead === 0 ? `${base.name} already has these changes.` : null;
   const reasons = [
     loadError === null ? null : "Git status unavailable.",
@@ -58,27 +61,19 @@ export function BranchBar({
     <div className="git-bar" data-git="bar">
       <div className="git-line">
         {status.repos.length > 1 ? (
-          <label className="git-repo">
-            <span className="sr-only">Repository</span>
-            <select
-              data-testid="git.branch-bar-select-repo"
-              aria-label="Repository"
-              disabled={busy}
-              value={selected ?? status.repo ?? ""}
-              onChange={(event) => void git.selectRepo(sessionId, event.target.value)}
-            >
-              {status.repos.map((repo) => (
-                <option
-                  data-testid="git.branch-bar-option-surface-1"
-                  data-item-id={repo.root}
-                  key={repo.root}
-                  value={repo.root}
-                >
-                  {repo.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Selector<string>
+            testId="git.branch-bar-select-repo"
+            label="Repository"
+            compact
+            disabled={busy}
+            value={selected ?? status.repo ?? ""}
+            options={status.repos.map((repo) => ({
+              value: repo.root,
+              label: repo.name,
+              tooltip: repo.root,
+            }))}
+            onChange={(root) => void git.selectRepo(sessionId, root)}
+          />
         ) : status.repo !== "." && status.repos[0] !== undefined ? (
           <span className="git-repo-name" title={status.repos[0].root}>
             {status.repos[0].name}
@@ -204,6 +199,7 @@ export function BranchBar({
         </Button>
       )}
       {loadError === null && <PrCard git={git} sessionId={sessionId} />}
+      {loadError === null && github && <PrList git={git} sessionId={sessionId} />}
     </div>
   );
 }

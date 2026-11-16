@@ -3,6 +3,7 @@ import { useCoreState } from "../shell/hooks";
 import { useState } from "react";
 import { BrowserComposerSettings } from "./BrowserComposerSettings";
 import { BrowserShieldsSettings } from "./BrowserShieldsSettings";
+import { BrowserLocalNetworkSettings } from "./BrowserLocalNetworkSettings";
 import { BrowserPoolSettings } from "./BrowserPoolSettings";
 import { BrowserDelegationSettings } from "./BrowserDelegationSettings";
 import { YourChromeSettings } from "./chrome/YourChromeSettings";
@@ -15,7 +16,8 @@ export function BrowserSettings() {
   const safari = useCoreState((s) => s.chromeControl?.safari !== undefined);
   const [poolError, setPoolError] = useState<string | null>(null);
   const [shieldsError, setShieldsError] = useState<string | null>(null);
-  const error = poolError ?? shieldsError;
+  const [localNetworkError, setLocalNetworkError] = useState<string | null>(null);
+  const error = poolError ?? shieldsError ?? localNetworkError;
   return (
     <>
       {error !== null && (
@@ -28,6 +30,7 @@ export function BrowserSettings() {
         <BrowserComposerSettings browser="Builtin" />
         <BrowserPoolSettings onError={setPoolError} />
         <BrowserShieldsSettings onError={setShieldsError} />
+        <BrowserLocalNetworkSettings onError={setLocalNetworkError} />
       </section>
       <YourChromeSettings />
       {edge ? <YourChromeSettings browser="Edge" /> : null}

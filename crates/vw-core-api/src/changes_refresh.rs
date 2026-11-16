@@ -12,12 +12,13 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     path::Path,
-    sync::{Arc, PoisonError, Weak},
+    sync::{Arc, Weak},
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use vw_changes::{Diff, TurnLabel, TurnSource};
+use vw_platform::sync::LockRecover;
 
 /// Blocking: refreshes `tracker` and builds the session's view (git or effects mode). Updates the tracker's
 /// fingerprint, observed labels and last diff.
@@ -320,7 +321,7 @@ pub(crate) async fn refresh_and_emit(shared: &Arc<Shared>, session_id: &str) {
             hooks.before_refresh(&id);
         }
         let tracker = hub_owner.changes.ensure(&id, &folder, None);
-        let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut guard = tracker.lock_or_recover();
         let before = guard.fingerprint.clone();
         let view = build_view(&hub_owner.changes, &id, &mut guard, &session_facts);
         (before != guard.fingerprint, view)

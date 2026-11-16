@@ -4,9 +4,10 @@ import { useLayoutEffect, useRef, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 
 import { reserve } from "../../components/nativeLayer";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import type { HandoffReview } from "./browser";
 
+/** Confirmation dialog that shows the tab's site and address before control of it goes to the agent. */
 export function TabHandoffDialog({
   review,
   busy,
@@ -21,7 +22,6 @@ export function TabHandoffDialog({
   onConfirm: () => void;
 }): ReactElement {
   const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(true, dialog, busy ? () => undefined : onClose);
   useLayoutEffect(() => {
     const element = dialog.current;
     if (!element) return;
@@ -45,58 +45,50 @@ export function TabHandoffDialog({
     };
   }, []);
   return createPortal(
-    <>
-      <div
-        data-testid="preview.tab-handoff-dialog-scrim"
-        className="scrim"
-        onClick={busy ? undefined : onClose}
-      />
-      <div
-        data-testid="preview.tab-handoff-dialog-modal"
-        className="modal browser-handoff-dialog"
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="browser-handoff-title"
-        data-native-overlay="browser-tab-handoff"
-        tabIndex={-1}
-      >
-        <header>
-          <h2 id="browser-handoff-title">Give this tab to the agent?</h2>
-        </header>
-        <section>
-          <p>The agent can read and act on this page after you give it control.</p>
-          <p>
-            <strong>{review.site || "This page"}</strong>
-            <br />
-            <span className="browser-handoff-url">{review.url || "Blank tab"}</span>
-          </p>
-          <p>This does not give the agent access to your vault.</p>
-          {error && <p role="alert">{error}</p>}
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="preview.tab-handoff-dialog-tb-btn"
-            type="button"
+    <Modal
+      onClose={busy ? () => undefined : onClose}
+      scrimTestId="preview.tab-handoff-dialog-scrim"
+      dialogRef={dialog}
+      data-testid="preview.tab-handoff-dialog-modal"
+      className="modal browser-handoff-dialog"
+      aria-labelledby="browser-handoff-title"
+      data-native-overlay="browser-tab-handoff"
+    >
+      <header>
+        <h2 id="browser-handoff-title">Give this tab to the agent?</h2>
+      </header>
+      <section>
+        <p>The agent can read and act on this page after you give it control.</p>
+        <p>
+          <strong>{review.site || "This page"}</strong>
+          <br />
+          <span className="browser-handoff-url">{review.url || "Blank tab"}</span>
+        </p>
+        <p>This does not give the agent access to your vault.</p>
+        {error && <p role="alert">{error}</p>}
+      </section>
+      <footer className="modal-actions">
+        <Button
+          data-testid="preview.tab-handoff-dialog-tb-btn"
+          type="button"
 
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            data-testid="preview.tab-handoff-dialog-btn-primary"
-            type="button"
-            appearance="dialog"
-            data-dialog-initial-focus
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            {busy ? "Giving control…" : "Give control"}
-          </Button>
-        </footer>
-      </div>
-    </>,
+          disabled={busy}
+          onClick={onClose}
+        >
+          Cancel
+        </Button>
+        <Button
+          data-testid="preview.tab-handoff-dialog-btn-primary"
+          type="button"
+          appearance="dialog"
+          data-dialog-initial-focus
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {busy ? "Giving control…" : "Give control"}
+        </Button>
+      </footer>
+    </Modal>,
     document.body,
   );
 }

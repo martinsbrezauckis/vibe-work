@@ -31,7 +31,7 @@ pub(crate) async fn native_click(
         vw_platform::native_click::normalized(point, viewport).map_err(EngineError::Platform)?;
     crate::platform::with_native(
         webview,
-        "clicking the native preview",
+        CLICKING,
         Duration::from_secs(5),
         move |native, reply| {
             // Stop or a timeout dropped the awaiting action before this queued UI callback ran.
@@ -85,16 +85,110 @@ pub(crate) async fn native_click(
         },
     )
     .await
-    .map_err(|error| match error {
+    .map_err(focus_required)
+}
+
+/// The UI-thread step's name; [`crate::platform::with_native`] puts it in front of the adapter's reason.
+const CLICKING: &str = "clicking the native preview";
+
+/// The OS adapters' one not-in-front outcome ([`vw_platform::native_click::NOT_IN_FRONT`], the same on every OS for
+/// click, wheel and keyboard input) becomes [`EngineError::FocusRequired`], the agent's plain "bring it forward"
+/// answer. Every other platform error stays as it is.
+fn focus_required(error: EngineError) -> EngineError {
+    match error {
         EngineError::Platform(ref text)
-            if matches!(
-                text.as_str(),
-                "clicking the native preview: native preview application is not active"
-                    | "clicking the native preview: native preview window is not key"
-            ) =>
+            if text
+                .strip_prefix(CLICKING)
+                .and_then(|reason| reason.strip_prefix(": "))
+                == Some(vw_platform::native_click::NOT_IN_FRONT) =>
         {
             EngineError::FocusRequired
         }
         other => other,
-    })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // PREDICT (before the fix): fails for Windows and Linux. Only the macOS refusals ("application is not active" /
+    // "window is not key") were mapped to FocusRequired; the Windows ("host is not visible" / "window is not
+    // foreground") and Linux ("is not visible" / "window is not active", and the keyboard's "needs the visible
+    // active browser pane") refusals reached the agent as raw internal errors.
+    use super::{CLICKING, EngineError, focus_required};
+    use vw_platform::native_click::require_front;
+
+    fn adapter(reason: &str) -> EngineError {
+        focus_required(EngineError::Platform(format!("{CLICKING}: {reason}")))
+    }
+
+    #[test]
+    fn every_os_reports_a_window_not_in_front_as_focus_required() {
+        // (adapter, condition, shown, front) as each OS adapter reads its live window.
+        for (os, condition, shown, front) in [
+            (
+                "macOS click+wheel+keyboard",
+                "app not active / window not key",
+                true,
+                false,
+            ),
+            (
+                "macOS click+wheel+keyboard",
+                "window or view hidden",
+                false,
+                true,
+            ),
+            (
+                "Windows click+sequence+keyboard",
+                "root not foreground",
+                true,
+                false,
+            ),
+            (
+                "Windows click+sequence+keyboard",
+                "host hidden to the tray / minimized",
+                false,
+                false,
+            ),
+            (
+                "Linux click+wheel+keyboard",
+                "toplevel not active",
+                true,
+                false,
+            ),
+            (
+                "Linux click+wheel+keyboard",
+                "widget unmapped / window not viewable",
+                false,
+                true,
+            ),
+        ] {
+            let reason = require_front(shown, front).expect_err(condition);
+            assert!(
+                matches!(adapter(&reason), EngineError::FocusRequired),
+                "{os}: {condition}: {reason}"
+            );
+        }
+        assert!(require_front(true, true).is_ok());
+    }
+
+    #[test]
+    fn other_platform_refusals_keep_their_own_text() {
+        for reason in [
+            "native preview point is occluded",
+            "native preview point is not over its browser child",
+            "native preview has invalid click geometry",
+            "Not run: the page target changed before native input",
+        ] {
+            assert!(
+                matches!(adapter(reason), EngineError::Platform(ref text) if text.ends_with(reason)),
+                "{reason}"
+            );
+        }
+        // The outcome only counts as the adapter's own answer to this step, never inside other text.
+        let wrapped = format!(
+            "Native input may have been sent: {}",
+            vw_platform::native_click::NOT_IN_FRONT
+        );
+        assert!(matches!(adapter(&wrapped), EngineError::Platform(_)));
+    }
 }

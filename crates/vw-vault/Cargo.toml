@@ -31,6 +31,8 @@ zeroize = { workspace = true }
 # Remembered device (ShellX's scheme): the OS credential store through keyring-core.
 # Versions checked on crates.io (keyring-core 1.0.0; store crates need Rust 1.88).
 keyring-core = { workspace = true }
+# The OS store's own error text is logged; the person reads a plain reason (remember.rs `store_failure`).
+tracing = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Pure-Rust zbus (no libdbus), its own async-io runtime: safe to call from a blocking thread of a
@@ -45,7 +47,3 @@ blake3 = { workspace = true, features = ["pure"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "=1.0.2", default-features = false, features = ["keychain"] }
-
-[features]
-# Optional agent capture directly into the vault. Off in default builds.
-agent-vault = []

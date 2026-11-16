@@ -123,6 +123,10 @@ function Body({
   return <BinaryView content={content} />;
 }
 
+/**
+ * The File tab of `sessionId`: the shown file's header with its actions, notices, find bar and the body or editor for
+ * its kind. Without a shown file it says how to open one; `onFold` adds a Fold editor button.
+ */
 export function SessionFile({
   files,
   sessionId,

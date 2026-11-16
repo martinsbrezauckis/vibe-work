@@ -97,6 +97,8 @@ export function createBrowser(
   let counter = 0;
   const tabsRead = new Map<string, number>();
   const ended = new Set<string>();
+  // Sessions whose error line is the "picture left out" notice: a background tabs read must not wipe it.
+  const notices = new Set<string>();
 
   const run = async (request: BrowserRequest): Promise<BrowserResult> => {
     const result = await core.run({ type: "browser", request });
@@ -104,6 +106,7 @@ export function createBrowser(
     return result.result;
   };
   const setError = (sessionId: string, error: string | null) => {
+    notices.delete(sessionId);
     store.set((s) => ({ ...s, error: put(s.error, sessionId, error) }));
   };
   const setNotes = (
@@ -117,10 +120,10 @@ export function createBrowser(
     store.set((s) => ({ ...s, states: put(s.states, state.sessionId, state) }));
     if (state.inFlight && before?.inFlight !== true) onAgentStart(state.sessionId);
   };
-  const setTabs = (sessionId: string, tabs: readonly PageTab[]) => {
+  const setTabs = (sessionId: string, tabs: readonly PageTab[], keepNotice = false) => {
     tabsRead.set(sessionId, (tabsRead.get(sessionId) ?? 0) + 1);
     store.set((s) => ({ ...s, tabs: put(s.tabs, sessionId, tabs) }));
-    setError(sessionId, null);
+    if (!(keepNotice && notices.has(sessionId))) setError(sessionId, null);
   };
 
   const controller = {
@@ -132,7 +135,7 @@ export function createBrowser(
       try {
         const result = await run({ op: "tabs", sessionId });
         if (result.type === "tabs" && tabsRead.get(sessionId) === read)
-          setTabs(sessionId, result.tabs);
+          setTabs(sessionId, result.tabs, true);
       } catch (thrown) {
         if (tabsRead.get(sessionId) === read)
           setError(sessionId, toCallError(thrown).error.message);
@@ -333,7 +336,9 @@ export function createBrowser(
           by: origin,
         };
         setNotes(sessionId, (notes) => [...notes, item]);
-        setError(sessionId, null);
+        // A picture left out for a protected value is told with the capture's own refusal; the note stays.
+        setError(sessionId, result.annotation.cropLeftOut ?? null);
+        if (result.annotation.cropLeftOut !== undefined) notices.add(sessionId);
         return item;
       } catch (thrown) {
         setError(sessionId, toCallError(thrown).error.message);

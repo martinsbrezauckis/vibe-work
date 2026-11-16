@@ -40,7 +40,7 @@ pub(super) fn repair(
             if !receipt.files.contains(&path) {
                 return Err("Browser helper registration is not owned by this setup".into());
             }
-            ensure_manifest(config, &path, &expected, true)?;
+            ensure_manifest(config, &path, &expected)?;
             if let Some(root) = target.registry {
                 let key = format!(r"{root}\{HOST_NAME}");
                 if !receipt.registry_keys.contains(&key) {
@@ -78,17 +78,16 @@ pub(super) fn check_helper(config: &ChromeControlConfig, state: &Path) -> Result
     Ok(())
 }
 
+/// Writes the host manifest. An existing one is replaced only when it names this installation's host and helper
+/// path: the same path is the same installation, with or without a receipt (a receipt is gone once the app's data
+/// was removed). One naming another path, or unreadable, is refused and left as it is.
 pub(super) fn ensure_manifest(
     config: &ChromeControlConfig,
     path: &Path,
     expected: &[u8],
-    owned: bool,
 ) -> Result<(), String> {
     let before = files::read(config, path).map_err(|e| super::problem::io_message(config, &e))?;
     if let Some(bytes) = &before {
-        if !owned {
-            return Err("Browser helper is set up by another Vibe Work".into());
-        }
         if bytes == expected {
             return Ok(());
         }

@@ -4,6 +4,7 @@ import type { CoreController } from "./coreStore";
 import type { Accessibility } from "./accessibility";
 import { createStore } from "./createStore";
 
+/** The permission prompt answered by voice: its core ticket, answer phrase, spoken text and whether it has played. */
 export interface VoicePromptState {
   callbackId: string;
   ticket: string;
@@ -11,6 +12,11 @@ export interface VoicePromptState {
   text: string;
   ready: boolean;
 }
+/**
+ * Creates the voice answer for permission prompts in voice chat: adds the answer phrase to the spoken prompt, then
+ * sends the recorded answer to the core. Works only with voice answers on, prompts read, English or no language set
+ * and nothing blocking.
+ */
 export function createVoicePrompt(deps: {
   core: CoreController;
   accessibility?: Accessibility | undefined;

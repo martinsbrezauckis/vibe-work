@@ -18,7 +18,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   min-width: 0;
 }
@@ -30,23 +30,13 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.git-repo select {
-  max-width: 18ch;
-  min-height: 28px;
-  padding: 2px 5px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--bg);
-  font: inherit;
-}
 .git-repo-name {
   color: var(--text);
   font-weight: var(--weight-semibold);
 }
 .git-reasons {
   margin: 0;
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .git-base,
@@ -63,7 +53,7 @@
 }
 .git-notice {
   margin: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
@@ -71,7 +61,7 @@
   display: grid;
   gap: 4px;
   margin: 0 0 10px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .git-field input,
@@ -87,7 +77,7 @@
 }
 .git-field textarea {
   font-family: var(--font-mono);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .git-inline {
   grid-template-columns: auto minmax(0, 1fr);
@@ -105,7 +95,7 @@
 .git-files li {
   padding: 4px 8px;
   border-top: 1px solid var(--line);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .git-files li:first-child {
   border-top: 0;
@@ -121,7 +111,7 @@
 }
 .git-st {
   color: var(--text-3);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
 }
 .git-check {
   display: grid;
@@ -129,7 +119,7 @@
   gap: 8px;
   align-items: start;
   margin: 0 0 8px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .git-modal footer {
@@ -141,7 +131,7 @@
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   min-width: 0;
 }
@@ -153,20 +143,23 @@
 }
 .pr-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
-.pr-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* A pull request's title wraps inside the panel (the shared link button stays on one line elsewhere): one
+   unbroken title would make the branch box, and with it the whole Changes panel, wider than the panel. */
+.pr-head .pr-title,
+.pr-rows .ext-link {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
   min-width: 0;
 }
 .pr-state {
   border-radius: var(--radius-sm);
   padding: 1px 6px;
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   background: var(--active);
   color: var(--text);
 }
@@ -203,7 +196,7 @@
 }
 .pr-when {
   color: var(--text-3);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
 }
 .pr-chip {
   background: transparent;
@@ -216,7 +209,7 @@
 }
 .git-rule {
   margin: 0 0 10px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .git-rule textarea {

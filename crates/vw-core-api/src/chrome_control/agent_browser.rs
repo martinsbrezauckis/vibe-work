@@ -1,9 +1,10 @@
 //! Browser identity for agent calls and add-on facts. Uses owned pairing/profile state, never page data.
 //! The gateway preserves explicit profile ids and a chat's binding; discovery prefers the only paired browser.
+pub(crate) use super::browser_text::Fixed;
 use super::{AddonState, AddonView, PairingState};
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Browser {
@@ -32,11 +33,7 @@ impl Browser {
             Self::Edge => &owner.edge_enroll,
             Self::Safari | Self::Firefox => return false,
         };
-        self.was_paired(shared)
-            && !enroll
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .waiting_reported()
+        self.was_paired(shared) && !enroll.lock_or_recover().waiting_reported()
     }
     pub(crate) fn from_profile(profile: &str) -> Self {
         if cfg!(feature = "your-safari") && (profile == "safari" || profile.starts_with("safari:"))
@@ -121,6 +118,8 @@ impl Browser {
             .replace("{browser}", self.short_name())
             .replace("{yourBrowser}", self.name())
     }
+    /// `text` with vocabulary setup texts worded for this browser; other text is unchanged
+    /// ([`super::browser_text::render`]).
     pub(crate) fn text(self, text: &str) -> String {
         super::browser_text::render(self, text)
     }
@@ -130,12 +129,7 @@ impl Browser {
             Self::Chrome => &owner.pairing,
             Self::Edge => &owner.edge_pairing,
             Self::Firefox => {
-                return owner
-                    .firefox_pairing
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .0
-                    == PairingState::WindowOpen;
+                return owner.firefox_pairing.lock_or_recover().0 == PairingState::WindowOpen;
             }
             Self::Safari => {
                 return cfg!(feature = "your-safari")
@@ -146,7 +140,7 @@ impl Browser {
                         .any(|(id, _)| self.owns_profile(id));
             }
         };
-        pairing.lock().unwrap_or_else(PoisonError::into_inner).0 == PairingState::Paired
+        pairing.lock_or_recover().0 == PairingState::Paired
     }
     pub(crate) fn enabled(self, shared: &Shared) -> bool {
         if self == Self::Safari {
@@ -198,8 +192,7 @@ pub(crate) fn selected(shared: &Shared, session: &str, tool: &str, args: &Value)
     if let Some(profile) = shared
         .chrome_control
         .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .get(session)
     {
         return Browser::from_profile(profile);
@@ -284,11 +277,7 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
         return view;
     }
     let (waiting, connecting) = {
-        let enroll = chrome
-            .owner
-            .edge_enroll
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let enroll = chrome.owner.edge_enroll.lock_or_recover();
         (
             enroll.waiting_reported(),
             enroll.connecting(tokio::time::Instant::now()),
@@ -311,12 +300,11 @@ pub(super) fn edge_addon(shared: &Shared, setup: &super::setup::ChromeSetupView)
             .owner
             .credential_missing
             .load(std::sync::atomic::Ordering::SeqCst),
-        helper_up: !chrome
+        keyring_unavailable: chrome
             .owner
-            .tools
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty(),
+            .keyring_unavailable
+            .load(std::sync::atomic::Ordering::SeqCst),
+        helper_up: !chrome.owner.tools.lock_or_recover().is_empty(),
         helper_conflict: chrome
             .owner
             .helper_conflict

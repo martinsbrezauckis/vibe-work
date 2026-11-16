@@ -3,6 +3,10 @@ import { Button } from "../../components/Controls";
 import { useId, type ReactElement } from "react";
 import { actionStep, nextStep, type BrowserAction, type BrowserTarget } from "./model";
 
+/**
+ * A repository or copy row's next-step button and its More menu of other actions, each disabled with its reason when
+ * not allowed. A copy outside the project offers only its next step, or a note when it is the selected chat's copy.
+ */
 export function NodeActions({
   target,
   onAction,

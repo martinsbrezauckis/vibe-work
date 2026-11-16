@@ -4,7 +4,7 @@
 //! The proxy accepts a request only with the current token, only on an exact allowlist of Mistral
 //! paths, replaces `Authorization` with the real key from core memory, and streams the answer back
 //! unchanged (status, headers, body), so Mistral's own 401/429/5xx reach Vibe as they are.
-//! Built-in context compaction omits historical image payloads from that model request. Image
+//! Built-in context compaction replaces inline historical image payloads with a text note in that model request. Image
 //! requests and compaction calls have response deadlines, while Vibe's stored history keeps its
 //! original images.
 //!

@@ -155,17 +155,25 @@ pub async fn host_subscribe(
     Ok(())
 }
 
-/// Opens the native folder picker (Rust owns it: the webview supplies no path), registers the
-/// chosen folder with the gate as user-picked, and returns it. `None` when the user cancelled.
+/// Opens the native folder picker (Rust owns it: the webview supplies no path, only which of the fixed purposes
+/// titles it; none means a project folder), registers the chosen folder with the gate as user-picked, and returns
+/// it. `None` when the user cancelled.
 ///
 /// # Errors
-/// `invalidParams` when the chosen path is not usable as a folder.
+/// `invalidParams` when `purpose` is not one of the fixed purposes or the chosen path is not usable as a folder.
 #[tauri::command]
 pub async fn pick_folder(
     app: AppHandle,
     host: State<'_, HostHandle>,
+    purpose: Option<String>,
 ) -> Result<Option<String>, CoreError> {
-    let Some(path) = dialogs::pick_folder(&app).await else {
+    let purpose = match purpose.as_deref() {
+        None => dialogs::FolderPurpose::default(),
+        Some(name) => dialogs::FolderPurpose::named(name).ok_or_else(|| {
+            CoreError::new(ErrorCode::InvalidParams, "unknown folder picker purpose")
+        })?,
+    };
+    let Some(path) = dialogs::pick_folder(&app, purpose).await else {
         return Ok(None);
     };
     host.get().await.register_picked_folder(&path).map(Some)
@@ -431,7 +439,7 @@ pub async fn update_subscribe(
     Ok(true)
 }
 
-/// Checks for a newer version now ("Check now", "Try again"). Returns when the check, and the download it
+/// Checks for a newer version now ("Check for updates", "Try again"). Returns when the check, and the download it
 /// starts in the automatic mode, has finished; progress arrives on the `update_subscribe` stream.
 ///
 /// # Errors

@@ -24,6 +24,7 @@ use crate::registry::{ProcessClass, ProcessGroup};
 use crate::stop::{Authority, StopError, StopOutcome, StopRefusal, stop};
 use crate::types::{ProcessRef, Snapshot};
 use crate::view::ProcessView;
+use vw_platform::sync::LockRecover;
 
 /// Refreshes `entry`'s ports from `snapshot`: every port its process or a descendant listens on. When the process
 /// itself listens on none, the name is the executable of the descendant that listens (the lowest pid of them), so a
@@ -54,10 +55,7 @@ fn listening(entry: &mut LedgerEntry, snapshot: &Snapshot) {
 
 impl ProcMon {
     fn lock_left(&self) -> std::sync::MutexGuard<'_, Vec<LedgerEntry>> {
-        self.inner
-            .deleted_session
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.deleted_session.lock_or_recover()
     }
 
     /// Adds an entry an earlier run's ledger names (startup sweep: its session no longer exists).
@@ -92,11 +90,7 @@ impl ProcMon {
     /// come from the ledger, else from the end report's views.
     pub fn session_deleted(&self, session_id: &str, still_running: &[ProcessView]) {
         let moved: Vec<Adopted> = {
-            let mut adopted = self
-                .inner
-                .adopted
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut adopted = self.inner.adopted.lock_or_recover();
             let (gone, keep): (Vec<Adopted>, Vec<Adopted>) =
                 adopted.drain(..).partition(|a| a.session_id == session_id);
             *adopted = keep;

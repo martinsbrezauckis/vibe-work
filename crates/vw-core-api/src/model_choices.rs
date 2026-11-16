@@ -4,7 +4,8 @@
 //! restores alert without closing the chat. No user config or Vibe session files are edited here.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -98,7 +99,7 @@ impl Choices {
         let Some(models) = runtime.pointer("/config/models").and_then(Value::as_array) else {
             return;
         };
-        let mut names = self.names.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut names = self.names.lock_or_recover();
         for model in models {
             if let (Some(alias), Some(name)) = (
                 model["alias"].as_str().filter(|a| !a.is_empty()),
@@ -122,8 +123,7 @@ impl Choices {
         }
         let known = self
             .names
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(&choice.alias)
             .cloned()
             .or_else(|| self.records.named(&choice.alias));
@@ -136,8 +136,7 @@ impl Choices {
     pub(crate) fn forget(&self, id: &str) {
         self.records.forget(id);
         self.handed_off
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .retain(|(old, new)| old != id && new != id);
     }
 

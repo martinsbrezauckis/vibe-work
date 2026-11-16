@@ -17,15 +17,10 @@ import { flushSync } from "react-dom";
 import { openMenu } from "../../state/openMenu";
 import { parseKeys } from "../../state/shortcuts";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import type { App } from "./AppContext";
 import { elementVisible } from "./elementVisibility";
 import { queryNeutral } from "./secretSafety";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** Use the shortcut registry's physical key names for keyboard actions as well as character input. */
 function physicalCode(key: string): string {
@@ -85,13 +80,13 @@ export function registerInputRoutes(app: App): () => void {
   document.addEventListener("click", onClick, true);
   const off = [
     app.uiControl.register("trace", (body) => {
-      const { since = 0 } = asObject(body);
+      const { since = 0 } = requiredBodyObject(body);
       if (typeof since !== "number" || !Number.isSafeInteger(since) || since < 0)
         throw new UiControlError("invalidParams", "since must be a non-negative safe integer");
       return app.uiControl.trace.read(since);
     }),
     app.uiControl.register("click", (body) => {
-      const { selector, index } = asObject(body);
+      const { selector, index } = requiredBodyObject(body);
       const el = target(selector, index);
       app.uiControl.clickTrigger(triggerId(el));
       // Commit click effects before uiControl drains their commands and releases the request's capability.
@@ -129,7 +124,7 @@ export function registerInputRoutes(app: App): () => void {
       return { clicked: el.getAttribute("aria-label") ?? el.tagName.toLowerCase() };
     }),
     app.uiControl.register("key", (body) => {
-      const { key, code, selector, index, ctrl, shift, alt, meta } = asObject(body);
+      const { key, code, selector, index, ctrl, shift, alt, meta } = requiredBodyObject(body);
       if (typeof key !== "string" || key === "")
         throw new UiControlError("invalidParams", "key must be a key name such as Escape or k");
       if (code !== undefined && (typeof code !== "string" || code === ""))
@@ -157,7 +152,7 @@ export function registerInputRoutes(app: App): () => void {
     app.uiControl.register(
       "menu",
       (body) => {
-        const { action = "state", selector, index, item } = asObject(body ?? {});
+        const { action = "state", selector, index, item } = requiredBodyObject(body ?? {});
         const shown = () => {
           const menu = openMenu();
           return menu === null

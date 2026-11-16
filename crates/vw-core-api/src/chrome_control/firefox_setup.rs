@@ -3,6 +3,7 @@ use super::{agent_browser::Browser, commands::invalid, setup};
 use crate::install_offers::{OfferKey, ToolsInstallOffer};
 use crate::{CommandResult, Core, CoreError};
 use serde_json::json;
+use vw_platform::sync::LockRecover;
 
 const KIND: &str = "chromeControl";
 const NAME: &str = "Mozilla Firefox";
@@ -48,12 +49,20 @@ impl Core {
         if keys
             .chrome_owner()
             .await
-            .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_READ_FAILED))?
+            .map_err(|error| {
+                invalid(&super::setup::owner_read_text(
+                    super::agent_browser::Browser::Firefox,
+                    &error,
+                ))
+            })?
             .is_none()
         {
-            keys.create_chrome_owner()
-                .await
-                .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED))?;
+            keys.create_chrome_owner().await.map_err(|error| {
+                invalid(&super::setup::owner_store_text(
+                    super::agent_browser::Browser::Firefox,
+                    &error,
+                ))
+            })?;
         }
         setup::install_for(
             &chrome.config,
@@ -83,6 +92,13 @@ impl Core {
             return Err(invalid(&super::firefox_sharing::page_sharing_unavailable()));
         }
         let config = &self.shared.chrome_control.config;
+        // A set-up Firefox gets its own host registration back first (a manifest the person or a cleanup removed,
+        // or one that changed): the add-on added next must find the helper. Another setup's file stays refused.
+        if let Some(state) = self.shared.chrome_control.dir()
+            && setup::registered(config, Some(state), NAME)
+        {
+            setup::repair_registrations(config, state, Some(NAME)).map_err(|e| invalid(&e))?;
+        }
         // A current add-on already in Firefox (on or off) is managed in Add-ons; otherwise the bundled signed file
         // makes Firefox show its own install prompt.
         let sharing = super::firefox_sharing::view(&self.shared);
@@ -96,8 +112,9 @@ impl Core {
             let executable = super::firefox_commands::executable().ok_or_else(|| {
                 invalid("Firefox is missing. Install Mozilla Firefox, then try Connect again.")
             })?;
-            vw_platform::process_command::hidden(&executable)
-                .args(["--new-tab", url])
+            let (program, args) = connect_launch(&executable, url, cfg!(target_os = "macos"));
+            vw_platform::process_command::hidden(&program)
+                .args(args)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -132,7 +149,9 @@ impl Core {
                 .credential_missing
                 .load(std::sync::atomic::Ordering::SeqCst)
         {
-            return Err(invalid(&reason));
+            return Err(invalid(
+                &super::agent_browser::Browser::Firefox.text(&reason),
+            ));
         }
         if chrome.owner.is_running() {
             let closed = chrome
@@ -163,22 +182,16 @@ impl Core {
             .owner
             .connected_profiles
             .remove_browser(Browser::Firefox);
-        super::profiles::remove_browser(chrome, Browser::Firefox);
+        let unsaved = super::profiles::remove_browser_saved(chrome, Browser::Firefox).is_err();
         chrome
             .chat_profiles
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .retain(|_, profile| !Browser::Firefox.owns_profile(profile));
         chrome
             .work
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .remove_browser(Browser::Firefox);
-        *chrome
-            .owner
-            .firefox_share_pairing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        *chrome.owner.firefox_share_pairing.lock_or_recover() =
             (super::PairingState::Unknown, None);
         if setup::registered(&chrome.config, Some(state), NAME) {
             setup::remove_browser(&chrome.config, state, NAME, true).map_err(|e| invalid(&e))?;
@@ -192,18 +205,79 @@ impl Core {
                 ));
             }
         }
-        *chrome
-            .owner
-            .firefox_pairing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            (super::PairingState::WindowClosed, None);
+        *chrome.owner.firefox_pairing.lock_or_recover() = (super::PairingState::WindowClosed, None);
         super::switches::deliver(&self.shared).await?;
         super::owner::publish(&self.shared);
         Ok(CommandResult::ChromeControl {
             view: super::commands::view(&self.shared),
             offer: None,
-            hint: None,
+            hint: unsaved.then(|| Browser::Firefox.words(super::profiles::REMOVAL_NOT_SAVED)),
         })
+    }
+}
+
+/// How Connect hands Firefox its page. On macOS the URL goes through Launch Services (`open -a Firefox.app`),
+/// which gives it to the person's running Firefox or starts Firefox normally with its own default profile;
+/// starting the `firefox` binary directly beside a running Firefox cannot load that locked profile and shows
+/// Firefox's "Profile Missing" window. Elsewhere the binary's `--new-tab` reaches the running Firefox itself.
+fn connect_launch(
+    executable: &std::path::Path,
+    url: &str,
+    macos: bool,
+) -> (std::path::PathBuf, Vec<std::ffi::OsString>) {
+    let bundle = executable
+        .ancestors()
+        .find(|path| path.extension().is_some_and(|ext| ext == "app"));
+    match bundle.filter(|_| macos) {
+        Some(app) => (
+            "/usr/bin/open".into(),
+            vec!["-a".into(), app.into(), url.into()],
+        ),
+        None => (executable.into(), vec!["--new-tab".into(), url.into()]),
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    // PREDICT (before the fix): Connect on macOS ran `…/Firefox.app/Contents/MacOS/firefox --new-tab <url>`
+    // directly, the launch Firefox answers with "Profile Missing" when its default profile is held by the running
+    // Firefox. After: macOS opens the URL with `/usr/bin/open -a …/Firefox.app <url>`; other systems keep --new-tab.
+    use super::connect_launch;
+    use std::path::Path;
+    #[test]
+    fn macos_connect_opens_the_page_through_launch_services() {
+        let url =
+            "file:///Applications/Vibe%20Work.app/Contents/Resources/firefox-addon/vibe-work.xpi";
+        for app in [
+            "/Applications/Firefox.app",
+            "/Users/a/Applications/Firefox.app",
+        ] {
+            let exe = Path::new(app).join("Contents/MacOS/firefox");
+            let (program, args) = connect_launch(&exe, url, true);
+            assert_eq!(program, Path::new("/usr/bin/open"));
+            assert_eq!(args, ["-a", app, url].map(std::ffi::OsString::from));
+            assert!(
+                !args
+                    .iter()
+                    .any(|a| a == "--new-tab" || a == "-profile" || a == "-P")
+            );
+        }
+    }
+    #[test]
+    fn other_systems_hand_the_page_to_the_running_firefox() {
+        for exe in [
+            "/usr/bin/firefox",
+            r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        ] {
+            let (program, args) = connect_launch(Path::new(exe), "about:addons", false);
+            assert_eq!(program, Path::new(exe));
+            assert_eq!(
+                args,
+                ["--new-tab", "about:addons"].map(std::ffi::OsString::from)
+            );
+        }
+        // A Firefox outside an app bundle on macOS (none ships that way) keeps the direct launch.
+        let (program, _) = connect_launch(Path::new("/opt/firefox/firefox"), "about:addons", true);
+        assert_eq!(program, Path::new("/opt/firefox/firefox"));
     }
 }

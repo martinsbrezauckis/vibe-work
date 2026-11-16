@@ -15,7 +15,8 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 
@@ -47,7 +48,7 @@ impl PlanProfile {
 
     /// Adds folders; true when one was new.
     fn add(&self, folders: impl IntoIterator<Item = String>) -> bool {
-        let mut projects = self.projects.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut projects = self.projects.lock_or_recover();
         let mut added = false;
         for folder in folders.into_iter().filter(|f| !f.trim().is_empty()) {
             if let Ok(resolved) = std::fs::canonicalize(&folder) {
@@ -81,13 +82,7 @@ fn plan_folders(shared: &Shared, project: &str) -> Vec<String> {
 /// The profile text for the current set (handbook folders from each project's settings).
 fn text(shared: &Shared) -> String {
     let profile = &shared.plan_profile;
-    let projects: Vec<String> = profile
-        .projects
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-        .cloned()
-        .collect();
+    let projects: Vec<String> = profile.projects.lock_or_recover().iter().cloned().collect();
     let targets: Vec<vw_pages::PlanTarget> = projects
         .into_iter()
         .flat_map(|project| {
@@ -106,10 +101,7 @@ fn text(shared: &Shared) -> String {
 fn write(shared: &Shared) {
     let profile = &shared.plan_profile;
     let body = text(shared);
-    let mut written = profile
-        .written
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut written = profile.written.lock_or_recover();
     if written.as_deref() == Some(body.as_str()) {
         return;
     }
@@ -183,11 +175,7 @@ pub(crate) fn before_open(shared: &Shared, method: &str, params: &Value) {
 
 /// Every project folder known in this run (the workspace hub).
 pub(crate) fn projects(shared: &Shared) -> Vec<String> {
-    let set = shared
-        .plan_profile
-        .projects
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let set = shared.plan_profile.projects.lock_or_recover();
     // A resolved duplicate of a symlinked folder is shown once (by the folder Vibe reports).
     let mut seen = BTreeSet::new();
     set.iter()

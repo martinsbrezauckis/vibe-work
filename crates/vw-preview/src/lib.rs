@@ -44,10 +44,17 @@ mod hooks;
 mod ids;
 mod layout;
 mod load_addresses;
+mod local_access;
+pub use local_access::{LocalVerdict, MAX_SITES, SiteAnswer, blocked_text, site_of, site_of_text};
+
+/// Whether the chat server a process scan found on a port still runs (`PreviewService::set_chat_servers`), asked
+/// each time a Local page's request for that port is admitted.
+pub type ServerAlive = std::sync::Arc<dyn Fn(u16) -> bool + Send + Sync>;
 mod names;
 mod native_click;
 mod navigation;
 mod page_init;
+pub mod person_block;
 mod person_pointer;
 mod placement_gate;
 mod policy;
@@ -55,6 +62,7 @@ mod popups;
 mod preview_error;
 mod service;
 mod service_evaluate;
+mod service_person_block;
 pub mod shields;
 mod shot;
 mod state;

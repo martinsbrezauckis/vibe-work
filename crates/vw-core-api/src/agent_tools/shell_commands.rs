@@ -2,7 +2,8 @@
 //! Only the hook credential records them; pump/snapshot projection attaches display-only metadata.
 //! Bounded by count and command size; a missing command never becomes a reconstructed approval.
 use std::collections::VecDeque;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 
@@ -24,7 +25,7 @@ impl Commands {
         if command.len() > 32_768 || session.len() > 256 || call.len() > 256 {
             return Err("shell command identity is too long".into());
         }
-        let mut items = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut items = self.0.lock_or_recover();
         // A call id is immutable. Reusing one with different text cannot change an open card.
         if let Some((_, _, kept)) = items.iter().find(|(s, c, _)| s == session && c == call) {
             return if kept == command {
@@ -50,8 +51,7 @@ impl Commands {
                 .unwrap_or_default();
             let command = self
                 .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .iter()
                 .find(|(s, c, _)| s == session && crate::one_ask::callback_matches_call(id, c))
                 .map(|(_, _, text)| text.clone());

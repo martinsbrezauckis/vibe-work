@@ -36,9 +36,10 @@ mod native {
     use super::{Layout, Placement};
     use std::{
         collections::HashMap,
-        sync::{LazyLock, Mutex, PoisonError},
+        sync::{LazyLock, Mutex},
     };
     use tauri::{Webview, Wry};
+    use vw_platform::sync::LockRecover;
     use vw_preview::EngineError;
 
     static VIEWS: LazyLock<Mutex<HashMap<String, Layout>>> = LazyLock::new(Mutex::default);
@@ -48,8 +49,7 @@ mod native {
         panel: Placement,
     ) -> Result<Placement, EngineError> {
         let active = VIEWS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(view.label())
             .is_some_and(|state| state.entered);
         let size = if active {
@@ -66,8 +66,7 @@ mod native {
             (panel.bounds.width, panel.bounds.height)
         };
         Ok(VIEWS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .entry(view.label().to_owned())
             .or_default()
             .place(panel, size))
@@ -75,7 +74,7 @@ mod native {
 
     pub(crate) fn changed(view: &Webview<Wry>, entered: bool) {
         let panel = {
-            let mut views = VIEWS.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut views = VIEWS.lock_or_recover();
             let state = views.entry(view.label().to_owned()).or_default();
             if state.entered == entered {
                 return;
@@ -97,8 +96,7 @@ mod native {
 
     pub(crate) fn forget(view: &Webview<Wry>) {
         let active = VIEWS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .remove(view.label())
             .is_some_and(|state| state.entered);
         if active {

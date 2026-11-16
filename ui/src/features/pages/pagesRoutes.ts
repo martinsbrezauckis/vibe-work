@@ -22,17 +22,12 @@
 import { writeClipboard } from "../../state/clipboard";
 import type { PickTarget } from "../../protocol/core";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { handbookAction, isHandbookAction } from "./handbookRoutes";
 import { commentChip, sectionChip } from "./model";
 import { insertChip, pointPreview, pointSection, pointTerminal, sessionChipFolder } from "./point";
 import type { Pages } from "./store";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, name: string): string {
   if (typeof value !== "string" || value === "")
@@ -120,7 +115,7 @@ export function registerPagesRoute(app: App, pages: Pages): () => void {
 
 /** One `ui/project` request (see the file header). */
 async function route(app: App, pages: Pages, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const sessionId =
     typeof input["sessionId"] === "string" ? input["sessionId"] : app.shell.store.get().selected;
   if (sessionId === null) throw new UiControlError("invalidParams", "no chat is shown");

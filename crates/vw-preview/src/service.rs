@@ -80,6 +80,10 @@ pub struct PreviewConfig {
     /// Additional exact test origins that consume external browser slots.
     #[cfg(feature = "e2e-script")]
     pub test_pool_origins: Vec<Url>,
+    /// Exact loopback test origin whose pages count as pages from the web for Local Network Access (test feature
+    /// only): a local test server stands in for a public site.
+    #[cfg(feature = "e2e-script")]
+    pub test_public_origin: Option<Url>,
 }
 
 impl std::fmt::Debug for PreviewConfig {
@@ -99,6 +103,8 @@ impl std::fmt::Debug for PreviewConfig {
         debug.field("test_browser_origin", &self.test_browser_origin);
         #[cfg(feature = "e2e-script")]
         debug.field("test_pool_origins", &self.test_pool_origins);
+        #[cfg(feature = "e2e-script")]
+        debug.field("test_public_origin", &self.test_public_origin);
         debug.finish()
     }
 }
@@ -121,6 +127,8 @@ impl PreviewConfig {
             test_browser_origin: None,
             #[cfg(feature = "e2e-script")]
             test_pool_origins: Vec::new(),
+            #[cfg(feature = "e2e-script")]
+            test_public_origin: None,
         }
     }
 }
@@ -184,6 +192,40 @@ impl PreviewService {
         }
     }
 
+    /// Test builds: a page of the configured loopback origin counts as a page from the web for Local Network Access.
+    #[cfg(feature = "e2e-script")]
+    pub(crate) fn test_public_page(&self, url: Option<&Url>) -> bool {
+        self.config
+            .test_public_origin
+            .as_ref()
+            .zip(url)
+            .is_some_and(|(origin, url)| origin.origin() == url.origin())
+    }
+
+    #[cfg(not(feature = "e2e-script"))]
+    #[allow(clippy::unused_self)]
+    pub(crate) fn test_public_page(&self, _url: Option<&Url>) -> bool {
+        false
+    }
+
+    /// Test builds: a request for the configured stand-in public origin itself is a request for a public site.
+    #[cfg(feature = "e2e-script")]
+    pub(crate) fn test_public_target(&self, request: &vw_netguard::LocalRequest<'_>) -> bool {
+        self.config
+            .test_public_origin
+            .as_ref()
+            .is_some_and(|origin| {
+                origin.host_str() == Some(request.host)
+                    && origin.port_or_known_default() == Some(request.port)
+            })
+    }
+
+    #[cfg(not(feature = "e2e-script"))]
+    #[allow(clippy::unused_self)]
+    pub(crate) fn test_public_target(&self, _request: &vw_netguard::LocalRequest<'_>) -> bool {
+        false
+    }
+
     /// A service over `engine` (its hooks are attached here).
     #[must_use]
     pub fn new(engine: Arc<dyn PreviewEngine>, config: PreviewConfig) -> Self {
@@ -191,6 +233,9 @@ impl PreviewService {
             window_close: std::sync::Mutex::new(None),
             popup: std::sync::Mutex::new(None),
             shields: std::sync::Mutex::new(crate::shields::Saved::load(&config.storage_root)),
+            site_answers: std::sync::Mutex::new(crate::local_access::SiteAnswers::load(
+                &config.storage_root,
+            )),
             guard_refused: std::sync::Mutex::new(None),
             state: std::sync::Mutex::new(State::default()),
             policy: config.policy.clone(),

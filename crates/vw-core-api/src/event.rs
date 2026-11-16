@@ -118,6 +118,11 @@ pub enum CoreEvent {
         /// Current account and opt-in, never credentials.
         view: crate::GithubReadsView,
     },
+    /// A chat's paused agent tools changed (its "waiting for you" line follows this view).
+    PausedTools {
+        /// The chat's paused tools.
+        view: crate::PausedToolsView,
+    },
     /// Idle sleep request changed.
     KeepAwake {
         /// Current app-wide view.
@@ -317,6 +322,13 @@ pub enum CoreEvent {
     BrowserChanged {
         /// The session.
         session_id: Option<String>,
+    },
+    /// The person pressed a page of the session's built-in browser while the agent controls it: the input block
+    /// swallowed the press, so the window's own keyboard focus did not move. The window takes its focus off the
+    /// focused element, and an ask card's answer keys wait until the person focuses the card again.
+    BlockedPagePress {
+        /// The chat whose browser page was pressed.
+        session_id: String,
     },
     /// A session's Project Pages changed (the viewer loaded or refused a page, a comment was added or removed):
     /// re-read with `pages`. `None`: several changed, re-read what is shown.
@@ -645,6 +657,7 @@ impl CoreEvent {
             Self::AskOpened { ask } => ask.session.as_deref().is_none_or(|s| s == id),
             Self::AskClosed { record } => record.ask.session.as_deref().is_none_or(|s| s == id),
             Self::ProtectedChange { proposal } => proposal.session_id == id,
+            Self::PausedTools { view } => view.session_id == id,
             Self::Snapshot { snapshot } => snapshot.session_id == id,
             Self::Change { change } => change.concerns(id),
             Self::GuardRefused { session_id, .. }
@@ -658,6 +671,7 @@ impl CoreEvent {
             | Self::LineCommentsChanged { session_id }
             | Self::ChangesUpdated { session_id, .. }
             | Self::PreviewShowRequested { session_id }
+            | Self::BlockedPagePress { session_id }
             | Self::PageMenu { session_id, .. } => session_id == id,
             Self::Alert {
                 session_id: Some(s),

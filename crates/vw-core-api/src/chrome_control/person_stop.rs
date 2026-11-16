@@ -1,10 +1,12 @@
 //! Person Stop from trusted helper session state. Uses the existing app interrupt and warning notice routes.
 //! Work binds each stop to its owning turn; a delayed observer or interrupt cannot stop a later turn.
-//! Invariant: the chat notice says "by you" only when the helper gives no connection-loss reason for the stop.
+//! Invariant: the chat notice says "by you" only when the helper gives no connection-loss reason for the stop;
+//! the helper's own fence for an unconfirmed open is no stop of the agent's work and is not reported.
 use super::agent_browser::Browser;
 use crate::{Command, Core, Origin, core::Shared};
 use serde_json::{Value, json};
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Stopped {
@@ -25,6 +27,12 @@ pub(super) fn connection_ended(row: &Value) -> bool {
         row["suspensionReason"].as_str(),
         Some("ADAPTER_DISCONNECTED" | "SESSION_CHANGED" | "LEASE_EXPIRED")
     )
+}
+
+/// The helper's own fence for an open the browser never confirmed (`START_UNCONFIRMED`). The agent's open call
+/// already returned its failure; nobody pressed Stop and the agent's turn continues, so it is not reported.
+pub(super) fn helper_fence(row: &Value) -> bool {
+    row["suspensionReason"] == "START_UNCONFIRMED"
 }
 
 /// The chat's warning line for a stop the app did not ask for.
@@ -125,8 +133,7 @@ impl PendingCall {
             shared
                 .chrome_control
                 .work
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .ask_stop(id, chat);
         }
         Self {
@@ -147,8 +154,7 @@ impl PendingCall {
                 let generation = shared
                     .chrome_control
                     .profiles
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .lock_or_recover()
                     .generation(&id);
                 (id, generation)
             }),
@@ -166,8 +172,7 @@ impl PendingCall {
                 != shared
                     .chrome_control
                     .profiles
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .lock_or_recover()
                     .generation(id)
         });
         if let Some((id, _)) = revoked {
@@ -213,8 +218,7 @@ impl PendingCall {
             shared
                 .chrome_control
                 .work
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .stop_refused(id, chat);
         }
         let stopped = shared

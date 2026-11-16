@@ -141,6 +141,15 @@ impl Sessions {
         }
     }
 
+    /// True while the agent holds `session_id`'s browser: it acted there and has not released it since (a question
+    /// to the person or the turn's end releases it; the next agent action takes it again).
+    #[must_use]
+    pub fn controlled(&self, session_id: &str) -> bool {
+        self.lock().get(session_id).is_some_and(|s| {
+            !s.ended && s.activity == Activity::Active && s.last_agent_at.is_some()
+        })
+    }
+
     /// The user's Stop: cancels the agent's action in flight and refuses further agent actions.
     pub fn stop(&self, session_id: &str) {
         self.lock()

@@ -63,20 +63,25 @@ async fn click_card_uses_only_the_helpers_observed_ref_name() {
         "chrome_execute",
         false,
     );
-    for (reference, expected) in [
-        ("accept", "Accept all"),
-        ("reject", "Reject"),
-        ("missing", ""),
-    ] {
-        let mut entry = json!({"sessionId":"chat","detail":{"effect":{
-            "toolName":"mcp_vw.chrome_execute","input":{"sessionId":"helper","action":"page.click",
-                "args":{"ref":reference,"name":"Forged approval name"}}
-        }}});
-        super::approval::project(shared, &mut entry);
-        assert_eq!(
-            entry["vwClickTarget"]["name"].as_str().unwrap_or(""),
-            expected
-        );
+    // PREDICT (page.drag): a long press card and the send card it raises named no target, so neither said which
+    // button the press activates; page.drag now projects the same observed name as page.click.
+    for action in ["page.click", "page.drag"] {
+        for (reference, expected) in [
+            ("accept", "Accept all"),
+            ("reject", "Reject"),
+            ("missing", ""),
+        ] {
+            let mut entry = json!({"sessionId":"chat","detail":{"effect":{
+                "toolName":"mcp_vw.chrome_execute","input":{"sessionId":"helper","action":action,
+                    "args":{"ref":reference,"name":"Forged approval name"}}
+            }}});
+            super::approval::project(shared, &mut entry);
+            assert_eq!(
+                entry["vwClickTarget"]["name"].as_str().unwrap_or(""),
+                expected,
+                "{action}"
+            );
+        }
     }
     let mut other = json!({"sessionId":"other","detail":{"effect":{
         "toolName":"mcp_vw.chrome_execute","input":{"sessionId":"helper",

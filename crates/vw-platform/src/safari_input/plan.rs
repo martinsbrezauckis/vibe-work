@@ -1,4 +1,5 @@
 //! Portable native event plan: validates chords and effects before any macOS call. The backend only posts this plan.
+use crate::key_positions::{NO_KEY_POSITION, typed_character_key, us_key as shortcut};
 use serde_json::Value;
 pub(super) struct Plan {
     pub modifiers: Vec<(u16, u64)>,
@@ -50,17 +51,22 @@ pub(super) fn plan(action: &str, args: &Value) -> Result<Plan, String> {
             .as_str()
             .ok_or("A native key is missing. Supply one key and optional modifiers.")?;
         if name == "Insert" {
-            // macOS has no Insert virtual key: 114 is Help. Use its distinct AppKit function character.
+            // Apple keyboards have no Insert key, and WebKit reports a PC keyboard's Insert (virtual key 114) as
+            // key and code "Help". A virtual key without a position keeps the text's key "Insert" and gives the
+            // page code "Unidentified" instead of a wrong key position.
             text = vec![0xf727];
-            Some(0)
+            Some(NO_KEY_POSITION)
         } else if let Some(code) = named(name) {
             Some(code)
         } else if name.chars().count() == 1
             && (modifiers.is_empty()
                 || !name.is_ascii() && modifiers.iter().all(|(code, _)| *code == 56))
         {
+            // The text decides the character; the virtual key gives the page its `code`. A letter or digit uses its
+            // US key position (code "KeyQ", "Digit7", as the other browsers report it); any other character has no
+            // position (code "Unidentified"), never the "a" key's.
             text = name.encode_utf16().collect();
-            Some(0)
+            Some(typed_character_key(name))
         } else if name.chars().count() == 1 {
             layout = true;
             Some(shortcut(name).ok_or("The shortcut key is unsupported. Use a named key or a supported keyboard shortcut.")?)
@@ -162,72 +168,58 @@ fn named(name: &str) -> Option<u16> {
         _ => return None,
     })
 }
-fn shortcut(name: &str) -> Option<u16> {
-    Some(match name.to_ascii_lowercase().as_str() {
-        "a" => 0,
-        "s" => 1,
-        "d" => 2,
-        "f" => 3,
-        "h" => 4,
-        "g" => 5,
-        "z" => 6,
-        "x" => 7,
-        "c" => 8,
-        "v" => 9,
-        "b" => 11,
-        "q" => 12,
-        "w" => 13,
-        "e" => 14,
-        "r" => 15,
-        "y" => 16,
-        "t" => 17,
-        "1" | "!" => 18,
-        "2" | "@" => 19,
-        "3" | "#" => 20,
-        "4" | "$" => 21,
-        "6" | "^" => 22,
-        "5" | "%" => 23,
-        "=" | "+" => 24,
-        "9" | "(" => 25,
-        "7" | "&" => 26,
-        "-" | "_" => 27,
-        "8" | "*" => 28,
-        "0" | ")" => 29,
-        "]" | "}" => 30,
-        "o" => 31,
-        "u" => 32,
-        "[" | "{" => 33,
-        "i" => 34,
-        "p" => 35,
-        "l" => 37,
-        "j" => 38,
-        "'" | "\"" => 39,
-        "k" => 40,
-        ";" | ":" => 41,
-        "\\" | "|" => 42,
-        "," | "<" => 43,
-        "/" | "?" => 44,
-        "n" => 45,
-        "m" => 46,
-        "." | ">" => 47,
-        "`" | "~" => 50,
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    // PREDICT (before the fix): both tests below fail. Insert was posted as virtual key 0 (kVK_ANSI_A) with the
+    // Insert function character, so WebKit reported key "Insert" but code "KeyA" (and Control+Insert looked like
+    // Control+KeyA to a page that reads `code`); every single typed character was virtual key 0 too, so typing "q"
+    // reached the page as code "KeyA". WebKit takes `code` from the virtual key and `key` from the event's text,
+    // except for virtual key 114 (a PC keyboard's Insert), which it reports as key and code "Help" (Safari, macOS 27).
     #[test]
-    fn insert_never_posts_the_native_help_key() {
+    fn insert_keeps_its_key_without_a_wrong_position_and_never_the_help_key() {
         for modifiers in [json!([]), json!(["Shift"]), json!(["Control"])] {
             let p = plan("page.key", &json!({"key":"Insert","modifiers":modifiers})).unwrap();
-            assert_ne!(p.key, Some(114), "macOS code 114 is Help, not Insert");
+            assert_eq!(p.key, Some(NO_KEY_POSITION), "code \"Unidentified\"");
+            assert_ne!(
+                p.key,
+                Some(114),
+                "WebKit reports virtual key 114 as key and code \"Help\""
+            );
+            assert_ne!(
+                p.key,
+                Some(0),
+                "virtual key 0 is the \"a\" key (code \"KeyA\")"
+            );
             assert_eq!(p.text, vec![0xf727], "AppKit Insert function character");
             assert!(!p.layout);
             assert_eq!(p.modifiers.len(), modifiers.as_array().unwrap().len());
         }
+    }
+    #[test]
+    fn typed_characters_use_their_own_key_position_and_keep_their_text() {
+        for (key, code) in [
+            ("q", 12),
+            ("Q", 12),
+            ("a", 0),
+            ("z", 6),
+            ("7", 26),
+            ("0", 29),
+        ] {
+            let p = plan("page.key", &json!({ "key": key })).unwrap();
+            assert_eq!(p.key, Some(code), "{key}");
+            assert_eq!(p.text, key.encode_utf16().collect::<Vec<_>>(), "{key}");
+            assert!(!p.layout, "{key}: plain text never needs the US layout");
+        }
+        // No letter or digit position: the text alone carries them (code "Unidentified", never "KeyA").
+        for key in [",", "/", "!", "Ā", "🙂", "é"] {
+            let p = plan("page.key", &json!({ "key": key })).unwrap();
+            assert_eq!(p.key, Some(NO_KEY_POSITION), "{key}");
+            assert_eq!(p.text, key.encode_utf16().collect::<Vec<_>>(), "{key}");
+        }
+        let p = plan("page.key", &json!({"key":"Ā","modifiers":["Shift"]})).unwrap();
+        assert_eq!(p.key, Some(NO_KEY_POSITION));
     }
     #[test]
     fn chords_unicode_and_click_counts_have_exact_plans() {

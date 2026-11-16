@@ -6,6 +6,10 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { VListHandle } from "virtua";
 import type { Row } from "./model/build";
 
+/**
+ * Scrolls back to the remembered row when rows are added above it while not following the bottom. Returns the
+ * function that records the row at a scroll offset.
+ */
 export function useHistoryAnchor(
   list: RefObject<VListHandle | null>,
   rows: readonly Row[],

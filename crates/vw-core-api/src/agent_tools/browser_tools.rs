@@ -31,13 +31,15 @@ fn searches_stored_secret(args: &Value) -> bool {
         .any(contains)
 }
 
+/// One check of `target`: only the built-in browser runs here. A `chrome` target is refused with one of two
+/// sentences, depending on whether this build has the separate Chrome tools at all.
 fn target(chrome_available: bool, args: &Value) -> Result<(), String> {
-    if args["target"] == "chrome" && !chrome_available {
-        return Err("This version works in Vibe Work's own browser.".to_owned());
-    }
     match args.get("target").and_then(Value::as_str) {
         None | Some("builtin") => Ok(()),
-        Some("chrome") => Err("This tool operates only in Vibe Work's browser.".to_owned()),
+        Some("chrome") if chrome_available => {
+            Err("This tool operates only in Vibe Work's browser.".to_owned())
+        }
+        Some("chrome") => Err("This version works in Vibe Work's own browser.".to_owned()),
         Some(other) => Err(format!(
             "unknown target '{}': use 'builtin'",
             other.chars().take(20).collect::<String>()
@@ -101,19 +103,8 @@ pub(super) async fn prepare(
             .await
             .map(Some);
     }
-    if matches!(
-        args["action"].as_str(),
-        Some(
-            "click"
-                | "check"
-                | "uncheck"
-                | "page.click"
-                | "page.double_click"
-                | "page.right_click"
-                | "page.middle_click"
-                | "page.triple_click"
-        )
-    ) && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+    if crate::chrome_control::builtin::activates_send(args)
+        && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
     {
         return super::browser_sending::prepare(shared, owner, source, call, args)
             .await
@@ -188,11 +179,13 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
-    let allow_send = crate::chrome_control::check::mode(shared, session_id).as_deref()
-        != Some("ask")
-        || crate::chrome_control::builtin::ask_required(&args)
-            .is_some_and(|tier| tier > vw_ask::chrome::Tier::Ask);
-    call_with_sending(shared, session_id, tool, args, allow_send).await
+    let allow_send = crate::chrome_control::builtin::may_send(
+        crate::chrome_control::check::mode(shared, session_id).as_deref(),
+        &args,
+    );
+    let mut answer = call_with_sending(shared, session_id, tool, args, allow_send).await?;
+    crate::paused_tools_gate::note_resumed(shared, session_id, &mut answer);
+    Ok(answer)
 }
 
 pub(super) async fn call_with_sending(
@@ -208,6 +201,8 @@ pub(super) async fn call_with_sending(
         Some(Value::String(tab)) if !tab.trim().is_empty() => Some(tab.as_str()),
         Some(_) => return Err("tab must be a nonempty web tab id or 'new'".to_owned()),
     };
+    // A pause that started after this call's receipt: wait inside the tool's own deadline.
+    crate::paused_tools_gate::wait(shared, session_id, crate::paused_tools::GATEWAY_WAIT).await?;
     let driver = browser(shared).map_err(|e| e.message)?;
     if tool == names::BROWSER_ACT
         && matches!(
@@ -285,16 +280,12 @@ fn validate_call(
             "This batch needs its pre-tool hook decisions; retry the call through its hook.".into(),
         );
     }
-    #[cfg(feature = "agent-vault")]
     if tool == names::BROWSER_CAPTURE_SECRET {
+        super::vault_capture::check_source(args)?;
         return Err(
             "This vault save needs its pre-tool hook decision; retry the tool through its hook."
                 .into(),
         );
-    }
-    #[cfg(not(feature = "agent-vault"))]
-    if tool == names::BROWSER_CAPTURE_SECRET {
-        return Err("Not run: saving a key to the vault is the user's action. Ask the user to select the key in the browser panel, then choose Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection.".to_owned());
     }
     if tool == names::BROWSER_READ && searches_stored_secret(args) {
         return Err(
@@ -347,6 +338,7 @@ async fn act_on_page(
         let mut receipt = driver
             .fill_form(page, &args, Actor::Agent, &nav, allow_send)
             .await?;
+        crate::chrome_control::builtin::explain_form_send(&mut receipt);
         attach_tab(shared, page, &mut receipt);
         return Ok(receipt);
     }
@@ -529,6 +521,26 @@ mod tests {
         assert_eq!(
             target(true, &json!({"target": "chrome"})),
             Err("This tool operates only in Vibe Work's browser.".to_owned())
+        );
+    }
+
+    // PREDICT: the single-pass target check must keep every answer of the former two-step check (an early
+    // `args["target"] == "chrome"` test, then a match): both Chrome sentences by availability, the unknown-target
+    // refusal, and a pass for an absent or built-in target. Refactor only, so no red exists on the base; dropping
+    // the availability guard makes this test fail (mutation check).
+    #[test]
+    fn target_is_checked_once_with_both_chrome_refusals_kept() {
+        for available in [true, false] {
+            assert_eq!(target(available, &json!({})), Ok(()));
+            assert_eq!(target(available, &json!({"target": "builtin"})), Ok(()));
+            assert_eq!(
+                target(available, &json!({"target": "safari"})),
+                Err("unknown target 'safari': use 'builtin'".to_owned())
+            );
+        }
+        assert_eq!(
+            target(false, &json!({"target": "chrome"})),
+            Err("This version works in Vibe Work's own browser.".to_owned())
         );
     }
 }

@@ -2,8 +2,10 @@
  * The words of the Allowed without asking page and the Safety summary line: times
  * ("added 14:02", "last 2 hours ago"), counts, the kind of a session answer, and the per-kind status and
  * confirmation texts. Pure functions of their inputs (`now` is passed in, so tests are exact).
- * Depends on: nothing. Called by: allowed/entries, allowed/view, allowed/store.
+ * Depends on: state/pathText (folderName, re-exported). Called by: allowed/entries, allowed/view, allowed/store.
  */
+
+export { folderName } from "../../../state/pathText";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -99,12 +101,6 @@ export function sessionKind(grant: GrantShape): string {
   if (scopes.includes("file_pattern")) return "File edit";
   if (scopes.includes("url_pattern")) return "Web address";
   return grant.tool.includes(".") ? "MCP tool" : "Tool";
-}
-
-/** The last segment of a folder path ("city-app" for "/home/anna/proj/city-app"). */
-export function folderName(folder: string): string {
-  const parts = folder.split(/[\\/]+/).filter((p) => p !== "");
-  return parts[parts.length - 1] ?? folder;
 }
 
 /** The status line after one entry of a kind is revoked. */

@@ -144,6 +144,7 @@ pub async fn full_page(
     session_id: &str,
     prefer: Option<Method>,
 ) -> Result<FullShot, String> {
+    browser.admit_capture(session_id).await?;
     let page = CapturePage::new(browser, session_id).await?;
     let restore = Restore::start(page.clone());
     let first = page.step("begin", 0.0).await?;
@@ -191,7 +192,10 @@ pub async fn full_page(
     }
     .await;
     let cleanup = restore.finish().await;
-    result.and_then(|full| cleanup.map(|()| full))
+    let full = result.and_then(|full| cleanup.map(|()| full))?;
+    // A value the person typed while the slices were taken refuses the capture too.
+    browser.admit_capture(session_id).await?;
+    Ok(full)
 }
 
 /// Cuts to the pixel cap and encodes the final PNG.

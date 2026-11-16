@@ -25,7 +25,7 @@
   margin: 0 0 8px;
 }
 .bulk .live2 {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   display: inline-flex;
   align-items: center;
@@ -65,7 +65,7 @@
   background: transparent;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   text-align: left;
 }
@@ -83,7 +83,7 @@
 .files .fst {
   grid-column: 1 / 3;
   font-family: var(--font-ui);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .filebar {
@@ -95,7 +95,7 @@
 }
 .filebar .fname {
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   margin-right: auto;
   overflow: hidden;
@@ -111,7 +111,7 @@
   flex-wrap: wrap;
 }
 .dtool .fmeta {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 
@@ -123,7 +123,7 @@
 }
 .review-note {
   padding: 12px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 .hunk + .hunk {
@@ -137,7 +137,7 @@
   background: var(--raised);
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .hunk-h .sp {
@@ -151,7 +151,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   font-family: var(--font-mono);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   line-height: 1.65;
 }
 .split > div {
@@ -186,7 +186,7 @@
   background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px);
 }
 .bnote {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   margin-top: 10px;
 }
@@ -200,7 +200,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--raised);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .history-offer span {
@@ -215,12 +215,12 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .files li > button:not(.row-more) {
-    transition: background var(--t-hover-fast) var(--ease-native);
+    transition: background var(--t-hover) var(--ease-std);
   }
 }
 .shared-note {
   flex-basis: 100%;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
   margin: 4px 0;
 }

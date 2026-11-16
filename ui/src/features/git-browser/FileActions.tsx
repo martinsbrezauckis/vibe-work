@@ -4,6 +4,7 @@ import { useId, type ReactElement } from "react";
 import type { BrowserTarget } from "./model";
 import { filePointReason } from "./point";
 
+/** The "Point Vibe at this" button of a changed file; disabled, with its reason shown, when the file cannot be pointed at. */
 export function FileActions({
   target,
   path,

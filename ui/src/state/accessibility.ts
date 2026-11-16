@@ -1,7 +1,9 @@
 /** Remembered accessibility choices. Used by Settings, shell wiring, prompt audio and reply announcements. */
 import { createStore } from "./createStore";
 
+/** Text size choices in percent of the default size. */
 export const TEXT_SIZES = [100, 110, 125, 150, 175, 200] as const;
+/** The remembered accessibility choices. */
 export interface AccessibilitySettings {
   promptSound: "auto" | "on" | "off";
   readPrompts: "voiceChat" | "always" | "never";
@@ -11,6 +13,7 @@ export interface AccessibilitySettings {
   contrast: "system" | "more";
   motion: "system" | "reduce";
 }
+/** Choices used before anything is saved and for any field with an unknown value. */
 export const ACCESSIBILITY_DEFAULTS: AccessibilitySettings = {
   promptSound: "auto",
   readPrompts: "voiceChat",
@@ -40,6 +43,10 @@ export function parseAccessibility(raw: unknown): AccessibilitySettings {
   };
 }
 
+/**
+ * Creates the accessibility store. With `persist` it loads and saves the choices in localStorage; each update is
+ * validated field by field.
+ */
 export function createAccessibility(persist: boolean) {
   let initial = ACCESSIBILITY_DEFAULTS;
   if (persist) {
@@ -64,4 +71,5 @@ export function createAccessibility(persist: boolean) {
     },
   };
 }
+/** The accessibility store with its `update` action. */
 export type Accessibility = ReturnType<typeof createAccessibility>;

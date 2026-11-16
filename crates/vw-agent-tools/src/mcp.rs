@@ -168,6 +168,7 @@ fn handle(
             }
             if let Some(args) = params.get("arguments")
                 && let Err(reason) = crate::browser_input::validate(name, args)
+                    .and_then(|()| unlisted_chrome_field(name, args))
             {
                 return Some(error(&id, -32602, &reason));
             }
@@ -179,6 +180,31 @@ fn handle(
         }
         _ => error(&id, -32601, "method not found"),
     })
+}
+
+/// Browser session, execute and status calls carry only the fields their published (closed) schema lists, so an
+/// unlisted option never reaches the core or the browser helper.
+fn unlisted_chrome_field(name: &str, args: &Value) -> Result<(), String> {
+    if !tools::is_chrome(name) {
+        return Ok(());
+    }
+    let catalog = crate::specs::with_receipts(json!(crate::chrome_tool_list()));
+    let Some(schema) = catalog
+        .as_array()
+        .and_then(|list| list.iter().find(|tool| tool["name"] == name))
+    else {
+        return Ok(());
+    };
+    let listed = &schema["inputSchema"]["properties"];
+    match args
+        .as_object()
+        .and_then(|args| args.keys().find(|key| listed.get(key.as_str()).is_none()))
+    {
+        Some(key) => Err(format!(
+            "{name} does not take `{key}`; use only the fields its schema lists."
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Runs the server until `input` ends. Returns when stdin closes (or stdout breaks).

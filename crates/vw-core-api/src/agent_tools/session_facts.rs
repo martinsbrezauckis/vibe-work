@@ -88,12 +88,15 @@ pub(super) async fn call(
         let label = mode
             .as_deref()
             .map(|mode| vw_vocabulary::label("accessModes", mode));
+        let status = core.status();
+        // Two products, two fields: `vibeVersion` is the Vibe runtime, `vibeWorkVersion` this app as About shows it.
         return Ok(json!({
             "accessMode":mode,
             "accessModeName":label,
             "model":view.state["session"]["model"],
             "thinkingLevel":view.state["session"]["reasoningEffort"],
-            "vibeVersion":core.status().vibe_version,
+            "vibeVersion":status.vibe_version,
+            "vibeWorkVersion":status.app_version,
             "chromeExtensionStore":crate::chrome_control::commands::extension_store(shared),
             "addons":addons(shared),
             "network":crate::network_facts::read(shared).await,
@@ -151,6 +154,35 @@ mod tests {
             assert_eq!(status.get("thinkingLevel"), Some(&thinking), "{status}");
         }
         core.shutdown().await;
+    }
+
+    /// PREDICT: before `vibeWorkVersion` existed, `session_status` named only the Vibe runtime's version, so the
+    /// agent could not tell which Vibe Work it runs; this fails on the missing key. The value must be the one
+    /// About shows (`status().app_version`: the app's package version, or the crate version without one).
+    #[tokio::test]
+    async fn session_status_reports_the_running_vibe_work_version_as_about_shows_it() {
+        for (name, configured, expected) in [
+            ("vw-version-app", Some("9.8.7-test"), "9.8.7-test"),
+            ("vw-version-crate", None, env!("CARGO_PKG_VERSION")),
+        ] {
+            let core = crate::offline_core::start_with(name, |config, _| {
+                config.app_version = configured.map(str::to_owned);
+            })
+            .await;
+            let _ = core.shared.store.load(json!({"session":{"id":"s","cwd":"/project","status":{"type":"idle"}},"entries":[],"turns":[]}), vw_session::LoadKind::New).unwrap();
+            let status = call(&core.shared, "s", tools::SESSION_STATUS, &json!({}))
+                .await
+                .unwrap();
+            assert_eq!(status["vibeWorkVersion"], json!(expected), "{status}");
+            assert_eq!(
+                status["vibeWorkVersion"],
+                json!(core.status().app_version),
+                "{status}"
+            );
+            // The Vibe runtime's version stays its own field (no Vibe runs in this core).
+            assert!(status["vibeVersion"].is_null(), "{status}");
+            core.shutdown().await;
+        }
     }
 
     #[tokio::test]

@@ -5,16 +5,16 @@
  * "Left running" (the agent's dev servers whose session was deleted, with Stop). Why the status bar and not a
  * Settings page: a server holding a port is live state the user should notice, not a preference; the button costs
  * nothing while both lists are empty.
- * Depends on: AppContext, hooks/useModalFocus, state/createStore, state/leftRunning, state/sessionProcesses,
+ * Depends on: AppContext, components/Modal, state/createStore, state/leftRunning, state/sessionProcesses,
  * SessionProcessesSection. Called by: StatusBar.
  * Invariants: the dialog is modal (`aria-modal`), so the native child views hide while it shows
  * (`NativeViewport`); Close has the initial focus; Escape closes it. Stop never asks again: the click is the
  * decision (the window's own trusted surface).
  */
-import { type ReactElement, useRef } from "react";
+import type { ReactElement } from "react";
 
 import { Button as ActionButton } from "../../components/Controls";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { processLabel } from "../../state/leftRunning";
 import { createStore, useStore } from "../../state/createStore";
 import type { SessionProcessesState } from "../../state/sessionProcesses";
@@ -77,76 +77,68 @@ function LeftRunningDialog({
 }): ReactElement | null {
   const state = useStore(left.store, (s) => s);
   const { sessionProcesses } = useApp();
-  const dialog = useRef<HTMLDivElement>(null);
   const close = () => {
     left.close();
   };
-  useModalFocus(state.open, dialog, close);
   if (!state.open) return null;
   return (
-    <>
-      <div data-testid="shell.left-running-scrim" className="scrim" onClick={close} />
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="left-running-title"
-        data-testid="shell.left-running-dialog"
-        ref={dialog}
-        tabIndex={-1}
-      >
-        <header>
-          <h2 id="left-running-title">Processes</h2>
-        </header>
-        {sessionProcesses !== null && <SessionProcessesSection procs={sessionProcesses} />}
-        <section className="proc-section">
-          <h3>Left running</h3>
-          <p className="left-running-intro">
-            The agent started these and they kept running after their chat was deleted. Stop ends a
-            process and the processes it started.
-          </p>
-          {state.items.length === 0 ? (
-            <p data-testid="left-running-empty">Nothing is left running.</p>
-          ) : (
-            <ul className="left-running-list">
-              {state.items.map((item) => (
-                <li data-item-id={item.id} key={item.id} data-left-running={item.id}>
-                  <span className="left-running-what">
-                    <span>{processLabel(item)}</span>
-                    <span className="d">
-                      {item.sessionTitle === null
-                        ? "from a deleted chat"
-                        : `from “${item.sessionTitle}” (deleted)`}
-                      {` · pid ${String(item.pid)}`}
-                    </span>
+    <Modal
+      onClose={close}
+      scrimTestId="shell.left-running-scrim"
+      aria-labelledby="left-running-title"
+      data-testid="shell.left-running-dialog"
+    >
+      <header>
+        <h2 id="left-running-title">Processes</h2>
+      </header>
+      {sessionProcesses !== null && <SessionProcessesSection procs={sessionProcesses} />}
+      <section className="proc-section">
+        <h3>Left running</h3>
+        <p className="left-running-intro">
+          The agent started these and they kept running after their chat was deleted. Stop ends a
+          process and the processes it started.
+        </p>
+        {state.items.length === 0 ? (
+          <p data-testid="left-running-empty">Nothing is left running.</p>
+        ) : (
+          <ul className="left-running-list">
+            {state.items.map((item) => (
+              <li data-item-id={item.id} key={item.id} data-left-running={item.id}>
+                <span className="left-running-what">
+                  <span>{processLabel(item)}</span>
+                  <span className="d">
+                    {item.sessionTitle === null
+                      ? "from a deleted chat"
+                      : `from “${item.sessionTitle}” (deleted)`}
+                    {` · pid ${String(item.pid)}`}
                   </span>
-                  <ActionButton
-                    data-testid="shell.left-running-stop"
-                    variant="danger"
-                    shape="outlined"
-                    disabled={state.stopping.includes(item.id)}
-                    aria-label={`Stop ${processLabel(item)}`}
-                    onClick={() => {
-                      void left.stop(item.id);
-                    }}
-                  >
-                    {state.stopping.includes(item.id) ? "Stopping…" : "Stop"}
-                  </ActionButton>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <footer className="modal-actions">
-          <ActionButton
-            data-testid="shell.left-running-close"
-            data-dialog-initial-focus="true"
-            onClick={close}
-          >
-            Close
-          </ActionButton>
-        </footer>
-      </div>
-    </>
+                </span>
+                <ActionButton
+                  data-testid="shell.left-running-stop"
+                  variant="danger"
+                  shape="outlined"
+                  disabled={state.stopping.includes(item.id)}
+                  aria-label={`Stop ${processLabel(item)}`}
+                  onClick={() => {
+                    void left.stop(item.id);
+                  }}
+                >
+                  {state.stopping.includes(item.id) ? "Stopping…" : "Stop"}
+                </ActionButton>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <footer className="modal-actions">
+        <ActionButton
+          data-testid="shell.left-running-close"
+          data-dialog-initial-focus="true"
+          onClick={close}
+        >
+          Close
+        </ActionButton>
+      </footer>
+    </Modal>
   );
 }

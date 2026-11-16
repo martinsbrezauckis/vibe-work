@@ -15,8 +15,6 @@ workspace = true
 tauri-build = { version = "2.7.1", features = [] }
 
 [features]
-# Optional agent capture directly into the vault. Off in default builds.
-agent-vault = ["vw-core-api/agent-vault"]
 # Upstream HTTP, HTTPS and SOCKS transports, included in release builds.
 proxy-transports = ["vw-core-api/proxy-transports"]
 # Bounded video review using installed system decoders and the packaged isolated helper.

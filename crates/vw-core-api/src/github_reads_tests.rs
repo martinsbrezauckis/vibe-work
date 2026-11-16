@@ -85,3 +85,27 @@ async fn a_dropped_gh_call_stops_every_process_gh_started() {
         left.0, left.1
     );
 }
+
+/// PREDICT: before the GitHub-reads detector shared the PR card's gh lookup it searched `PATH` only, so a desktop
+/// app started with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin` from Finder or Dock) never found a gh installed
+/// in a standard folder such as `~/.local/bin` or Homebrew's `bin`, and GitHub reads showed "gh is not installed".
+#[test]
+fn the_reads_detector_finds_gh_in_a_standard_folder_outside_a_short_path() {
+    let home = tempfile::tempdir().expect("home");
+    let bin = home.path().join(".local").join("bin");
+    std::fs::create_dir_all(&bin).expect("bin");
+    std::fs::write(bin.join("gh"), b"#!/bin/sh\n").expect("gh");
+    let empty = tempfile::tempdir().expect("empty");
+    let home_dir = home.path().as_os_str().to_owned();
+    let short_path = empty.path().as_os_str().to_owned();
+    let found = super::discover_with(|key| match key {
+        "PATH" => Some(short_path.clone()),
+        "HOME" => Some(home_dir.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        found,
+        Some(bin.join("gh").canonicalize().expect("canonical")),
+        "gh in ~/.local/bin is found although PATH lacks it"
+    );
+}

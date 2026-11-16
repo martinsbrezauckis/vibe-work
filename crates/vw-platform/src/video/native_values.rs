@@ -61,6 +61,57 @@ pub(super) fn media_foundation(code: i32) -> Error {
     )
 }
 
+/// Media Foundation step of a Windows source open with its own reading of a failure.
+#[cfg(any(test, windows))]
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Opening {
+    /// Reading the source's presentation duration (`MF_PD_DURATION`).
+    Duration,
+    /// Decoding the first frame, after the RGB32 decoder chain was accepted.
+    FirstFrame,
+}
+
+/// Reason for a failed Media Foundation call while a source is opened. Two codes there name a format this
+/// computer cannot read: a source without a duration (`MF_E_ATTRIBUTENOTFOUND` for `MF_PD_DURATION`, a live `WebM`
+/// recording) is an unsupported container, and a generic failure (`E_FAIL`) on the first frame after the decoder
+/// accepted the stream (H.264 High 10) is an unsupported codec. Every other code, and every failure after the
+/// first frame, keeps the general reading of [`media_foundation`].
+#[cfg(any(test, windows))]
+pub(super) fn media_foundation_open(step: Opening, code: i32) -> Error {
+    match (step, code.cast_unsigned()) {
+        (Opening::Duration, 0xC00D_36E6) => Error::new(
+            Code::UnsupportedContainer,
+            format!("Media Foundation reports no source duration ({code:#x})"),
+        ),
+        (Opening::FirstFrame, 0x8000_4005) => Error::new(
+            Code::UnsupportedCodec { codec: None },
+            format!("Media Foundation cannot decode the first frame of this format ({code:#x})"),
+        ),
+        _ => media_foundation(code),
+    }
+}
+
+/// Reason `AVFoundation` shows no video track: `tracks` counts the asset's tracks of every media type and `iso`
+/// says the file starts with an ISO `ftyp` box.
+#[cfg(any(test, target_os = "macos"))]
+pub(super) fn avfoundation_without_video(tracks: usize, iso: bool) -> Error {
+    match (tracks, iso) {
+        // An ISO file that passed the structural preflight but shows no track at all was never opened
+        // by AVFoundation (an extensionless snapshot did this): a worker failure, not the file's format.
+        (0, true) => Error::new(
+            Code::MediaOpen,
+            "AVFoundation could not open the video snapshot",
+        ),
+        // No track of any type in a file that is not ISO media: AVFoundation cannot read this container (`WebM`).
+        (0, false) => Error::new(
+            Code::UnsupportedContainer,
+            "AVFoundation cannot read this container",
+        ),
+        // The file was read and has tracks, none of them video (an audio-only MP4).
+        _ => Error::new(Code::NoVideoTrack, "AVFoundation has no video track"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +129,59 @@ mod tests {
             media_foundation(0x8000_4005_u32.cast_signed()).code,
             Code::DecodeFailed
         );
+    }
+    #[test]
+    fn media_foundation_open_names_formats_this_computer_cannot_read() {
+        // PREDICT (red before the fix): every open failure reads through the general mapping, so a live WebM
+        // without a duration (MF_E_ATTRIBUTENOTFOUND for MF_PD_DURATION) and an H.264 High 10 first frame
+        // (E_FAIL) are DecodeFailed instead of the named unsupported container / codec.
+        let live = media_foundation_open(Opening::Duration, 0xC00D_36E6_u32.cast_signed());
+        assert_eq!(live.code, Code::UnsupportedContainer);
+        assert!(live.detail.contains("0xc00d36e6"));
+        let high10 = media_foundation_open(Opening::FirstFrame, 0x8000_4005_u32.cast_signed());
+        assert_eq!(high10.code, Code::UnsupportedCodec { codec: None });
+        assert!(high10.detail.contains("0x80004005"));
+        // Everything else keeps the general reading: a missing decoder stays unsupported, the worker memory
+        // limit stays a limit, and any other failure, at open or while decoding later frames, is DecodeFailed.
+        for step in [Opening::Duration, Opening::FirstFrame] {
+            assert_eq!(
+                media_foundation_open(step, 0xC00D_5212_u32.cast_signed()).code,
+                Code::UnsupportedCodec { codec: None }
+            );
+            assert_eq!(
+                media_foundation_open(step, 0x8007_000E_u32.cast_signed()).code,
+                Code::Memory
+            );
+            assert_eq!(
+                media_foundation_open(step, 0xC00D_36B2_u32.cast_signed()).code,
+                Code::DecodeFailed
+            );
+        }
+        assert_eq!(
+            media_foundation_open(Opening::Duration, 0x8000_4005_u32.cast_signed()).code,
+            Code::DecodeFailed
+        );
+        assert_eq!(
+            media_foundation_open(Opening::FirstFrame, 0xC00D_36E6_u32.cast_signed()).code,
+            Code::DecodeFailed
+        );
+    }
+    #[test]
+    fn avfoundation_without_video_separates_unreadable_containers_from_files_without_video() {
+        // PREDICT (red before the fix): a file AVFoundation cannot read at all (no track of any type, not ISO
+        // media, e.g. every WebM) reads NoVideoTrack instead of the named unsupported container.
+        assert_eq!(
+            avfoundation_without_video(0, false).code,
+            Code::UnsupportedContainer
+        );
+        // A readable file with tracks but none of them video (an audio-only MP4) has no video track.
+        assert_eq!(avfoundation_without_video(1, true).code, Code::NoVideoTrack);
+        assert_eq!(
+            avfoundation_without_video(2, false).code,
+            Code::NoVideoTrack
+        );
+        // ISO media that passed the preflight but was never opened stays a media-open failure.
+        assert_eq!(avfoundation_without_video(0, true).code, Code::MediaOpen);
     }
     #[test]
     fn rational_time_rejects_invalid_flags_epochs_and_overflow() {

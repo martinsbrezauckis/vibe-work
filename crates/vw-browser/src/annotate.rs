@@ -11,8 +11,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use vw_preview::{PixelRect, PreviewService, crop, decode, encode};
+use vw_preview::{MountId, PixelRect, PreviewService, crop, decode, encode};
 
+use crate::Browser;
 use crate::model::{is_ref, parse_answer};
 use crate::scripts;
 
@@ -75,6 +76,12 @@ pub struct Annotation {
     /// A PNG of that area (base64), when the screenshot worked.
     #[serde(default)]
     pub crop_png_base64: Option<String>,
+    /// Why the picture was left out, when the page showed a protected value below Full access (the capture
+    /// refusal's wording); the note and position are kept. Absent (not null) otherwise, matching the optional
+    /// TypeScript field the UI checks with `!== undefined`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub crop_left_out: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +172,7 @@ async fn wait_for_pick(
 /// A plain-text reason (nothing open, cancelled, no answer within a minute; for a target: nothing there, or an
 /// invalid selector).
 pub async fn annotate(
+    browser: &Browser,
     service: &PreviewService,
     page: &str,
     session_id: &str,
@@ -199,8 +207,27 @@ pub async fn annotate(
         source: answer.source.map(|s| clip(&s, 200)),
         rect: answer.rect,
         crop_png_base64: None,
+        crop_left_out: None,
     };
-    annotation.crop_png_base64 = crop_of(service, session_id, answer.rect, answer.viewport).await;
+    // The picture follows the same admission as every capture: below Full access a page showing a password, PIN or
+    // card value gives no picture, and the person is told.
+    match browser.admit_capture(session_id).await {
+        Ok(()) => {
+            let before = service.page_mount(session_id);
+            let (crop, shown) = crop_of(service, session_id, answer.rect, answer.viewport).await;
+            annotation.crop_png_base64 = crop;
+            // A value typed while the pixels were taken leaves the picture out too.
+            if let Err(refusal) = browser.admit_capture(session_id).await {
+                annotation.crop_png_base64 = None;
+                annotation.crop_left_out = Some(refusal);
+            } else if before.is_none() || before != shown || service.page_mount(session_id) != shown
+            {
+                // A replacement document never receives the old document's pixels.
+                annotation.crop_png_base64 = None;
+            }
+        }
+        Err(refusal) => annotation.crop_left_out = Some(refusal),
+    }
     Ok(annotation)
 }
 
@@ -221,9 +248,15 @@ async fn crop_of(
     session_id: &str,
     rect: ViewRect,
     viewport: ViewRect,
-) -> Option<String> {
-    let shot = service.screenshot(session_id).await.ok()?;
-    let image = decode(&shot.png).ok()?;
+) -> (Option<String>, Option<MountId>) {
+    match service.screenshot_of_mount(session_id).await {
+        Ok((shot, mount)) => (crop_png(&shot.png, rect, viewport), Some(mount)),
+        Err(_) => (None, None),
+    }
+}
+
+fn crop_png(png: &[u8], rect: ViewRect, viewport: ViewRect) -> Option<String> {
+    let image = decode(png).ok()?;
     if viewport.width <= 0 || rect.width <= 0 || rect.height <= 0 {
         return None;
     }

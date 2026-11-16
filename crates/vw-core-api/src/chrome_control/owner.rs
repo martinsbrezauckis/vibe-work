@@ -35,6 +35,23 @@ struct Call {
     /// A plain owner request (`name` is the method, e.g. `owner.enroll.mint`) rather than a `tools/call`; its
     /// JSON-RPC error answer is an outcome, not a broken connection (`Pipe::begin_tolerant`).
     rpc: bool,
+    /// Sent by [`Owner::control`], which never waits for the answer: it is delivered although nobody holds its reply.
+    detached: bool,
+}
+
+impl Call {
+    /// Whether the owner still sends this call to the helper. A call whose caller stopped waiting (its reply is
+    /// closed) is dropped, except fire-and-forget control calls (frame, idle, stop, delete, cancel), which carry
+    /// the app's intent and must arrive.
+    fn admitted(&self) -> bool {
+        self.detached
+            || !self.reply.is_closed()
+            || (self.name == "chrome_session"
+                && matches!(
+                    self.args["action"].as_str(),
+                    Some("stop" | "delete" | "cancel")
+                ))
+    }
 }
 
 /// An owner answer and who wrote it. The helper's answers can carry page-derived text (titles, URLs, page text and
@@ -101,12 +118,16 @@ pub(super) struct Owner {
     pub(super) edge_pairing: Mutex<(PairingState, Option<String>)>,
     observed_setup: Mutex<Option<SetupSnapshot>>,
     pub(super) credential_missing: std::sync::atomic::AtomicBool,
+    /// The owner identity could not be read because this computer has no usable system keyring. Cleared when a
+    /// later start reads it; it is not a missing credential, so Remove does not apply.
+    pub(super) keyring_unavailable: std::sync::atomic::AtomicBool,
     /// The last helper launch was refused because another helper holds this state folder's lock
     /// (`OWNER_CONFLICT`). The owner keeps retrying; a helper connection or `stop` clears it.
     pub(super) helper_conflict: std::sync::atomic::AtomicBool,
     pub(super) connected_profiles: super::addon::ConnectedProfiles,
     pub(super) profile_ids: super::profile_ids::ProfileIds,
     pub(super) wake: super::reconnect::Wake,
+    pub(super) not_ready: super::reconnect::NotReady,
     pub(super) starts: super::browser_start::Attempts,
     pub(super) connection_waiting: super::connection_notice::Waiting,
     /// The automatic-pairing attempt and what the current helper connection reported for it (`enroll`).
@@ -131,6 +152,7 @@ impl Owner {
                 args,
                 reply,
                 rpc: false,
+                detached: true,
             };
             if let Err(tokio::sync::mpsc::error::TrySendError::Full(call)) = send.try_send(call) {
                 tokio::spawn(async move {
@@ -158,6 +180,10 @@ impl Owner {
                     _ = stopped.changed() => None,
                 };
                 let Some(call) = call else { break };
+                // The real owner loop's admission rule, so tests see exactly what reaches the helper.
+                if !call.admitted() {
+                    continue;
+                }
                 let value = answer(&call.name, &call.args);
                 log.lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -295,6 +321,7 @@ impl Owner {
                 args,
                 reply,
                 rpc,
+                detached: false,
             })
             .await
             .ok()?;
@@ -387,10 +414,17 @@ async fn start_inner(shared: &Arc<Shared>, removing: bool) -> Result<(), String>
         .keys
         .as_ref()
         .ok_or(vw_vocabulary::texts::CHROME_NEEDS_KEYRING)?;
-    let secret = keys
-        .chrome_owner()
-        .await
-        .map_err(|_| vw_vocabulary::texts::CHROME_OWNER_READ_FAILED)?;
+    // Without a system keyring (the app's fallback store) the identity cannot be read at all: that is named with its
+    // next step rather than reported as a missing credential.
+    let secret = keys.chrome_owner().await;
+    chrome.owner.keyring_unavailable.store(
+        secret.as_ref().is_err_and(setup::keyring_unavailable),
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    if secret.is_err() {
+        publish(shared);
+    }
+    let secret = secret.map_err(|error| setup::owner_read_failed(&error))?;
     chrome
         .owner
         .credential_missing
@@ -468,8 +502,12 @@ async fn supervise(
                     .clear();
             }
             serve_connection(&shared, &mut pipe, &mut requests, &mut stop).await;
-
-            pipe.abort().await;
+            if *stop.borrow() {
+                // Stop or quit: the helper closes its Firefox window before it ends.
+                pipe.finish().await;
+            } else {
+                pipe.abort().await;
+            }
         }
         if let Some(core) = shared.upgrade() {
             core.chrome_control.owner.clear_connection();
@@ -551,7 +589,7 @@ async fn serve_connection(
             }
             call = requests.recv() => {
                 let Some(call) = call else { ended = "requests closed"; break };
-                if call.reply.is_closed() && !(call.name == "chrome_session" && matches!(call.args["action"].as_str(), Some("stop" | "delete" | "cancel"))) { continue; }
+                if !call.admitted() { continue; }
                 if pending.len() >= 32 && call.name != "chrome_session" {
                     let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
                     continue;
@@ -615,3 +653,21 @@ mod pairing_tests;
 #[cfg(test)]
 #[path = "owner_disconnect_tests.rs"]
 mod disconnect_tests;
+
+/// The keyring sentence (a vocabulary template: `{yourBrowser}` is worded by the caller) while the owner identity
+/// cannot be read for lack of a system keyring. Tries once to start the helper again first, so a keyring the person
+/// has set up since is used at once and the flag cannot outlive its cause.
+pub(super) async fn keyring_blocked(shared: &Arc<Shared>) -> Option<&'static str> {
+    let owner = &shared.chrome_control.owner;
+    if !owner
+        .keyring_unavailable
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return None;
+    }
+    let _ = start_inner(shared, false).await;
+    owner
+        .keyring_unavailable
+        .load(std::sync::atomic::Ordering::SeqCst)
+        .then_some(vw_vocabulary::texts::CHROME_OWNER_STORE_UNAVAILABLE)
+}

@@ -15,6 +15,7 @@ fn decision_is_bound_to_owner_source_call_tool_and_input() {
         execution: None,
         stop: 0,
         announced: None,
+        issued: std::time::Instant::now(),
     });
     let args = json!({"command":"echo once","_vwReceipt":"decision"});
     assert!(
@@ -102,6 +103,7 @@ fn the_same_number_in_either_spelling_matches_and_a_different_number_does_not() 
         execution: None,
         stop: 0,
         announced: None,
+        issued: std::time::Instant::now(),
     });
     let called = |text: &str| -> Value { serde_json::from_str(text).unwrap() };
     let same = called(
@@ -136,4 +138,52 @@ fn the_same_number_in_either_spelling_matches_and_a_different_number_does_not() 
             "{other}"
         );
     }
+}
+
+/// PREDICT (red before the change): the receipt queue was one list of 1000 for every chat, so 1000 receipts of one
+/// chat that no Vibe call reports (minted by a holder of the hook credential, or calls Vibe skipped after the hook)
+/// made every chat's Vibe Work tools answer "Too many tool calls are in progress", until that chat was stopped. Now
+/// the limit counts each chat's own receipts, and an unreported receipt expires after `UNREPORTED_LIFETIME`.
+#[tokio::test]
+async fn one_chats_unreported_receipts_neither_block_other_chats_nor_stay() {
+    let f = crate::feature_test_core::Fixture::new().await;
+    let shared = &f.core.shared;
+    let receipt = |owner: &str, n: usize| Receipt {
+        key: format!("{owner}-{n}"),
+        owner: owner.into(),
+        source: owner.into(),
+        call: format!("call-{n}"),
+        tool: "search".into(),
+        args: json!({}),
+        prepared_args: Value::Null,
+        execution: None,
+        stop: 0,
+        announced: None,
+        issued: std::time::Instant::now(),
+    };
+    for n in 0..1000 {
+        save(shared, receipt("busy", n)).unwrap();
+    }
+    assert_eq!(
+        save(shared, receipt("busy", 1000)).err().as_deref(),
+        Some("Too many tool calls are in progress.")
+    );
+    save(shared, receipt("other", 0)).expect("another chat's tools keep working");
+    // An unreported receipt expires: once the busy chat's receipts are older than the lifetime, it can call again.
+    let long_ago = std::time::Instant::now()
+        .checked_sub(UNREPORTED_LIFETIME + Duration::from_secs(1))
+        .unwrap();
+    for receipt in super::super::calls(shared)
+        .unwrap()
+        .transports
+        .lock()
+        .unwrap()
+        .iter_mut()
+    {
+        if receipt.owner == "busy" {
+            receipt.issued = long_ago;
+        }
+    }
+    save(shared, receipt("busy", 1001)).expect("expired receipts leave the queue");
+    f.finish().await;
 }

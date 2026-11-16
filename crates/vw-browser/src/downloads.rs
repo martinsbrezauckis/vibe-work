@@ -8,6 +8,14 @@ use crate::{
 };
 use serde_json::{Value, json};
 
+/// Default `files.wait_download` wait when `timeoutMs` is absent: the same as Your Chrome's extension, and what the
+/// app's action catalog tells the agent (a test pins the catalog to these values).
+pub const WAIT_DEFAULT_MS: u64 = 20_000;
+/// Shortest accepted `timeoutMs` (the extension's minimum).
+pub const WAIT_MIN_MS: u64 = 1;
+/// Longest accepted `timeoutMs`.
+pub const WAIT_MAX_MS: u64 = 20_000;
+
 /// One validated file download request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
@@ -46,11 +54,11 @@ impl Request {
             Some("files.wait_download") => Self::Wait {
                 id: args.get("downloadId").map(|_| id()).transpose()?,
                 timeout: match args.get("timeoutMs") {
-                    None => 15_000,
+                    None => WAIT_DEFAULT_MS,
                     Some(v) => v
                         .as_u64()
-                        .filter(|n| *n <= 20_000)
-                        .ok_or("Download wait timeoutMs must be between 0 and 20000.")?,
+                        .filter(|n| (WAIT_MIN_MS..=WAIT_MAX_MS).contains(n))
+                        .ok_or("Download wait timeoutMs must be between 1 and 20000.")?,
                 },
             },
             Some("files.save_download") => Self::Save(id()?),
@@ -131,5 +139,41 @@ impl Browser {
     }
     fn download_record(&self, page: &str, id: &str) -> Result<Value, ActError> {
         self.service.chat_downloads(page).into_iter().find(|r|r["id"]==id).ok_or_else(||refused("DOWNLOAD_AMBIGUOUS: this chat has no download with that id. List this chat's downloads before trying again."))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Request, WAIT_DEFAULT_MS};
+    use serde_json::json;
+
+    // PREDICT (before the change): an absent timeoutMs waited 15000 ms and timeoutMs 0 was accepted, while the
+    // extension and the agent's catalog say default 20000 and 1..20000.
+    #[test]
+    fn the_download_wait_matches_the_extension() {
+        let wait = |args| match Request::parse(&args) {
+            Ok(Request::Wait { timeout, .. }) => Ok(timeout),
+            Ok(other) => panic!("{other:?}"),
+            Err(error) => Err(error),
+        };
+        assert_eq!(
+            wait(json!({"action":"files.wait_download"})),
+            Ok(WAIT_DEFAULT_MS)
+        );
+        assert_eq!(WAIT_DEFAULT_MS, 20_000);
+        assert_eq!(
+            wait(json!({"action":"files.wait_download","timeoutMs":1})),
+            Ok(1)
+        );
+        assert_eq!(
+            wait(json!({"action":"files.wait_download","timeoutMs":20_000})),
+            Ok(20_000)
+        );
+        for refused in [json!(0), json!(20_001), json!(-1), json!("5")] {
+            assert!(
+                wait(json!({"action":"files.wait_download","timeoutMs":refused})).is_err(),
+                "{refused}"
+            );
+        }
     }
 }

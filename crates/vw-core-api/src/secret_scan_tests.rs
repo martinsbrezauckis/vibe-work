@@ -330,31 +330,59 @@ fn title_parts_of_a_value_are_withheld_and_short_overlaps_kept() {
     assert_eq!(withhold_parts("sk-li", &[value]), "sk-li");
 }
 
+/// A title keeps an ordinary word that only begins a vault value, as the chat's messages do; every other part of the
+/// value (from inside it, long, most of a short value, or cut by the title's end) is still withheld.
+///
+/// PREDICT: fails before the fix: every run of six characters shared with a value was withheld, so the word
+/// "deploy" (the start of the invented value below) became "[secret withheld]" in "deploy the site".
 #[test]
-fn saved_auto_redact_from_an_earlier_version_loads_keeps_scanning_and_is_dropped_on_save() {
-    let dir = scratch("older-settings");
-    let path = dir.join("settings.json");
-    std::fs::write(
-        &path,
-        br#"{"theme":"dark","secretScan":{"enabled":true,"autoRedact":true}}"#,
-    )
-    .unwrap();
+fn a_title_keeps_a_word_that_only_begins_a_value_and_withholds_every_other_part() {
+    use crate::secret_scan_cache::withhold_parts;
+    let value = concat!("deploy", "Qz7Lm2Xc8Vb1Np6Rt3Yw0K");
+    for kept in ["deploy the site", "Please deploy now", "deploy Qz7 check"] {
+        assert_eq!(withhold_parts(kept, &[value]), kept);
+    }
+    for (title, withheld) in [
+        // Cut by the title's end, also before an ellipsis or punctuation.
+        (concat!("Run deploy", "Qz7L"), "Run [secret withheld]"),
+        (concat!("Run deploy", "Qz7L…"), "Run [secret withheld]…"),
+        ("Run deploy…", "Run [secret withheld]…"),
+        ("deploy", "[secret withheld]"),
+        // Inside a word.
+        ("redeploy the site", "re[secret withheld] the site"),
+        // From inside the value, at any place.
+        (concat!("Lm2Xc8", "Vb1 key"), "[secret withheld] key"),
+        (concat!("x Lm2X", "c8V y"), "x [secret withheld] y"),
+        // A long part anywhere.
+        (
+            concat!("Use deploy", "Qz7Lm2 now"),
+            "Use [secret withheld] now",
+        ),
+        // The whole value.
+        (
+            concat!("a deploy", "Qz7Lm2Xc8Vb1Np6Rt3Yw0K b"),
+            "a [secret withheld] b",
+        ),
+    ] {
+        assert_eq!(withhold_parts(title, &[value]), withheld, "{title}");
+    }
+    // Most of a short value is withheld wherever it is.
     assert_eq!(
-        crate::app_settings::scan_settings(&path),
-        crate::SecretScanSettings { enabled: true }
+        withhold_parts("x Qz7Lm2X y", &["Qz7Lm2X#9"]),
+        "x [secret withheld] y"
     );
-    crate::write_app_settings(
-        &path,
-        serde_json::json!({"keepAwake":false})
-            .as_object()
-            .unwrap()
-            .clone(),
-    )
-    .unwrap();
-    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+}
+
+/// PREDICT: fails before the fix: the kept word "zebrafish" was still cut, because a run that starts inside it and
+/// is shared with the value's inner part ("ebrafish", 8 characters) was withheld, giving "z[secret withheld] notes".
+#[test]
+fn a_kept_title_word_is_not_cut_by_a_fragment_inside_it() {
+    use crate::secret_scan_cache::withhold_parts;
+    let value = concat!("zebrafish", "3c9e71a4b2d0");
+    let kept = "zebrafish notes: reply with the single word OK and nothing else.";
+    assert_eq!(withhold_parts(kept, &[value]), kept);
     assert_eq!(
-        saved,
-        serde_json::json!({"theme":"dark","keepAwake":false,"secretScan":{"enabled":true}})
+        withhold_parts(concat!("zebrafish", "3c9e71a4 check"), &[value]),
+        "[secret withheld] check"
     );
-    std::fs::remove_dir_all(dir).unwrap();
 }

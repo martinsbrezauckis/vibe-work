@@ -1,6 +1,6 @@
 //! Trusted browser outcomes identify the person and give the agent an actionable next step.
 //! Exercises fixed app diagnostics without an extension, native view, or page text.
-use super::{agent_browser::Browser, browser_text, content, person_stop};
+use super::{agent_browser::Browser, browser_text::Fixed, content, person_stop};
 use serde_json::json;
 
 #[test]
@@ -43,21 +43,19 @@ fn paused_control_and_extension_updates_ask_the_person_to_act() {
 
 #[test]
 fn selection_instructions_keep_the_person_as_the_actor_in_each_browser() {
-    let source = "Not run: selection is sent by the user from Chrome. Ask the user to use Ask Vibe Work in Chrome's context menu.";
-    for browser in [Browser::Chrome, Browser::Edge, Browser::Safari] {
-        let reason = browser_text::render(browser, source);
+    for browser in [
+        Browser::Chrome,
+        Browser::Edge,
+        Browser::Safari,
+        Browser::Firefox,
+    ] {
+        let reason = Fixed::SelectionFromUser.text(browser);
         assert!(
             reason.contains(&browser.words("from {browser}.")),
             "{reason}"
         );
         assert!(reason.contains("Ask the user to use"), "{reason}");
     }
-    // Firefox page sharing is hidden in this version: no dead-end Ask Vibe Work menu, the owned window instead.
-    let firefox = browser_text::render(Browser::Firefox, source);
-    assert_eq!(
-        firefox,
-        "Not run: selection is sent by the user, and sharing pages from Firefox is not available in this version of Vibe Work. Use chrome_status for the owned Firefox window's supported actions."
-    );
 }
 
 #[test]

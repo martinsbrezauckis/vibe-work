@@ -14,6 +14,8 @@ pub(crate) const QUIT: &str = "quit";
 pub(crate) struct TrayState {
     preferences: Mutex<TrayPreferences>,
     icon: AtomicBool,
+    /// The tray host as the startup probe and the Linux host watch last saw it; Settings reads it without a bus probe.
+    host: vw_platform::tray::HostCache,
     notifications: AtomicBool,
     pending_notice: AtomicBool,
     closing: Mutex<Option<tauri::ipc::Channel<()>>>,
@@ -84,6 +86,7 @@ pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(TrayState {
         preferences: Mutex::new(TrayPreferences::load(&path)),
         icon: AtomicBool::new(false),
+        host: vw_platform::tray::HostCache::default(),
         notifications: AtomicBool::new(false),
         pending_notice: AtomicBool::new(false),
         closing: Mutex::new(None),
@@ -97,12 +100,21 @@ pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("tray could not be created; closing the window will quit");
         return Ok(());
     }
-    app.state::<TrayState>().icon.store(true, Ordering::Release);
+    let state = app.state::<TrayState>();
+    state.host.update(true);
+    state.icon.store(true, Ordering::Release);
     #[cfg(target_os = "linux")]
     {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             vw_platform::tray::watch_host(move |host| {
+                if app.state::<TrayState>().host.update(host)
+                    && let Some(events) = app
+                        .try_state::<vw_host::HostHandle>()
+                        .and_then(|handle| handle.try_get())
+                {
+                    events.tray_host(host);
+                }
                 if let Some(window) = crate::main_window(&app)
                     && vw_host::tray::must_reveal(window.is_visible().unwrap_or(true), host)
                 {
@@ -202,7 +214,13 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
 
 pub(crate) async fn view(app: &AppHandle, enabled: Option<bool>) -> Result<TrayView, String> {
     let state = app.state::<TrayState>();
-    let host = vw_platform::tray::host_available().await;
+    // Linux: the host watch's answer (it re-probes every second and on the watcher's signals), not a bus probe per
+    // call. Other platforms answer at once.
+    let host = if cfg!(target_os = "linux") {
+        state.host.get()
+    } else {
+        vw_platform::tray::host_available().await
+    };
     let mut preferences = state
         .preferences
         .lock()

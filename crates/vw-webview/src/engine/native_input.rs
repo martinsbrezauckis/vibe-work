@@ -33,18 +33,13 @@ impl TauriEngine {
         guard: NativeClickGuard,
     ) -> Result<(), EngineError> {
         let _visibility = self.visibility.lock().await;
-        if !self
-            .shown
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&id.label)
-            .is_some_and(|shown| shown.visible)
-        {
-            return Err(EngineError::Platform(
-                "Not run: this browser is not in the app's active window; show it there before a native click"
-                    .to_owned(),
-            ));
-        }
+        require_shown(
+            self.shown
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&id.label)
+                .is_some_and(|shown| shown.visible),
+        )?;
         let webview = self.webview(&id)?;
         let known = self
             .persons
@@ -219,5 +214,32 @@ impl TauriEngine {
             Ok(Err(_)) => Ok("\"\"".to_owned()),
             Err(_) => Err(EngineError::Timeout("evaluating a page script".to_owned())),
         }
+    }
+}
+
+/// A native input needs the pane to be shown. A pane that is not shown (window hidden to the tray, minimized, never
+/// placed) is the same "not in front" outcome the OS adapters give, so the agent gets the one refusal on every OS.
+fn require_shown(shown: bool) -> Result<(), EngineError> {
+    if shown {
+        Ok(())
+    } else {
+        Err(EngineError::FocusRequired)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // PREDICT (before the fix): a pane whose window is hidden in the tray is not "shown", so `require_shown` returned
+    // EngineError::Platform with its own text instead of FocusRequired, the error every OS adapter's not-in-front
+    // outcome maps to. The agent's hover and type then got a second wording on Linux, Windows and macOS alike.
+    use super::{EngineError, require_shown};
+
+    #[test]
+    fn a_pane_that_is_not_shown_gives_the_one_not_in_front_refusal() {
+        assert!(matches!(
+            require_shown(false),
+            Err(EngineError::FocusRequired)
+        ));
+        assert!(require_shown(true).is_ok());
     }
 }

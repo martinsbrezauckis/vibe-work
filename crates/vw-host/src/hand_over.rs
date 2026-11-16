@@ -20,7 +20,8 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -330,7 +331,7 @@ impl HandOverInbox {
         if hand_over.is_empty() {
             return;
         }
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.pending.len() >= MAX_PENDING {
             tracing::warn!("a hand-over was dropped: too many are waiting for the window");
             return;
@@ -345,19 +346,13 @@ impl HandOverInbox {
     /// hand-overs are already waiting (a launch with `--attach` before the window was ready). The subscriber
     /// returns false when it is gone.
     pub fn subscribe(&self, notify: impl Fn() -> bool + Send + 'static) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         let live = state.pending.is_empty() || notify();
         state.notify = live.then(|| Box::new(notify) as Notify);
     }
 
     /// Takes every waiting hand-over, oldest first.
     pub fn take(&self) -> Vec<HandOver> {
-        std::mem::take(
-            &mut self
-                .state
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .pending,
-        )
+        std::mem::take(&mut self.state.lock_or_recover().pending)
     }
 }

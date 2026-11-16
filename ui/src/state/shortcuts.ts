@@ -5,7 +5,9 @@
  * and feature routes (`createShortcuts().register`), tests.
  * Invariants:
  * - Letters, digits and punctuation match by physical key (`event.code`), so Ctrl+K works on any
- *   keyboard layout, including Cyrillic and Greek layouts.
+ *   keyboard layout, including Cyrillic and Greek layouts. Only a key event without a code (input
+ *   injected as a virtual key, as automation and some remote desktop tools send it) falls back to the
+ *   letter or digit in `event.key`.
  * - Modifiers match exactly: Ctrl+Shift+P never fires the Ctrl+P binding, and AltGr (Ctrl+Alt on
  *   Windows) never fires a Ctrl binding.
  * - Two bindings with the same combo are refused at registration, so a clash is found
@@ -35,6 +37,11 @@ export interface ShortcutDef {
   stopPropagation?: boolean;
   /** In a terminal, only keep the window from acting on the key: the terminal still gets it and `run` is skipped. */
   terminalGetsKey?: boolean;
+  /**
+   * True when the focused control handles this key itself (for example Ctrl+R in the composer opens prompt search):
+   * the window only keeps the webview from acting on the key, the control still gets it and `run` is skipped.
+   */
+  controlGetsKey?: (event: KeyboardEvent, target: EventTarget | null) => boolean;
 }
 
 interface Combo {
@@ -101,11 +108,20 @@ export function formatKeys(keys: string, mac = detectMac()): string {
     .join(" ");
 }
 
+/** The event's physical key; without one (an empty or "Unidentified" code), the code of its letter or digit. */
+function keyCode(event: KeyboardEvent): string {
+  if (event.code !== "" && event.code !== "Unidentified") return event.code;
+  const key = event.key.toLowerCase();
+  if (/^[a-z]$/.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  return event.code;
+}
+
 function matches(combo: Combo, event: KeyboardEvent, mac: boolean): boolean {
   const modDown = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   const noMod = !event.ctrlKey && !event.metaKey;
   return (
-    event.code === combo.code &&
+    keyCode(event) === combo.code &&
     (combo.mod ? modDown : noMod) &&
     event.shiftKey === combo.shift &&
     event.altKey === combo.alt
@@ -162,6 +178,7 @@ export function createShortcuts(mac = detectMac()) {
         if (terminal && def.allowInTerminal !== true) continue;
         if (typing && !(def.allowInInput ?? combo.mod)) continue;
         if (terminal && def.terminalGetsKey === true) return true;
+        if (def.controlGetsKey?.(event, target) === true) return true;
         if (def.stopPropagation === true) event.stopPropagation();
         def.run();
         return true;

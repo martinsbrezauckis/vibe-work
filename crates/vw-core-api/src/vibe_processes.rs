@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
 use vw_procmon::{OwnProcess, OwnProcessRegistry, ProcessClass, ProcessGroup, ProcessRef};
 
@@ -37,6 +37,8 @@ type Records = Arc<Mutex<HashMap<(String, String), Tracked>>>;
 
 /// Owned by Core, including its authenticated listener and monitor registrations.
 pub(crate) struct VibeProcesses {
+    /// The local listener's port (a port of Vibe Work itself).
+    port: u16,
     records: Records,
     registry: OwnProcessRegistry,
     task: JoinHandle<()>,
@@ -64,7 +66,7 @@ impl VibeProcesses {
         for byte in random {
             let _ = write!(token, "{byte:02x}");
         }
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        let (listener, own) = vw_netguard::listeners::bind_own_tokio()
             .await
             .map_err(|e| fail(e.to_string()))?;
         let port = listener
@@ -80,6 +82,8 @@ impl VibeProcesses {
         let held = records.clone();
         let registrations = registry.clone();
         let task = tokio::spawn(async move {
+            // The port stays one of Vibe Work's own (refused for every browser page) until the listener closes.
+            let _own = own;
             let mut clients = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
@@ -102,10 +106,16 @@ impl VibeProcesses {
             }
         });
         Ok(Self {
+            port,
             records,
             registry,
             task,
         })
+    }
+
+    /// The port the process receipts arrive on (a port of Vibe Work itself: never reachable from a browser page).
+    pub(crate) fn port(&self) -> u16 {
+        self.port
     }
 
     pub(crate) fn shutdown(&self) {

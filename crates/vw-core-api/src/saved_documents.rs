@@ -4,7 +4,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use sha2::{Digest as _, Sha256};
 
@@ -25,7 +26,7 @@ pub(crate) fn digest(bytes: &[u8]) -> Digest {
 }
 
 fn locked<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
-    value.lock().unwrap_or_else(PoisonError::into_inner)
+    value.lock_or_recover()
 }
 
 #[derive(Clone)]

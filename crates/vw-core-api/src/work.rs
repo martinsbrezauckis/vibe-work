@@ -20,8 +20,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -114,12 +115,12 @@ impl WorkState {
     }
 
     fn read<T>(&self, f: impl FnOnce(&Saved) -> T) -> T {
-        f(&self.saved.lock().unwrap_or_else(PoisonError::into_inner))
+        f(&self.saved.lock_or_recover())
     }
 
     /// Changes the saved state and writes it (user-only, atomic replace).
     fn change(&self, f: impl FnOnce(&mut Saved)) -> Result<(), CoreError> {
-        let mut saved = self.saved.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut saved = self.saved.lock_or_recover();
         let mut next = saved.clone();
         f(&mut next);
         if let Some(file) = &self.file {

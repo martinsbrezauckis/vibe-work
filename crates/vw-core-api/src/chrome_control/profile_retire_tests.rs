@@ -123,15 +123,15 @@ mod safari {
         assert_eq!(names.len(), 2, "{names:?}");
         assert_ne!(names[0], names[1], "{names:?}");
         for name in &names {
-            assert!(name.starts_with("Safari — paired "), "{names:?}");
-            assert!(!name.contains('('), "{names:?}");
+            assert!(name.starts_with("Safari (paired "), "{names:?}");
+            assert!(!name.contains([',', '—']), "{names:?}");
         }
         // A name saved by an earlier version from the registration is ignored as well.
         record(&core, ONE, |record| {
             record.metadata_name = Some("Safari".into());
         });
         let label = super::super::profiles::label(&core.shared.chrome_control, ONE);
-        assert!(label.starts_with("Safari — paired "), "{label}");
+        assert!(label.starts_with("Safari (paired "), "{label}");
         core.shutdown().await;
     }
 }
@@ -263,6 +263,60 @@ mod firefox {
         );
         assert_eq!(rows(&core, "firefox"), [(NEW.into(), "Firefox".into())]);
         assert_eq!(card(&core, "firefox"), None);
+        core.shutdown().await;
+    }
+
+    /// PREDICT: fails on the base. A second real Firefox profile A, paired first, is marked `replaced_by` B when B is
+    /// paired while A is closed: only a guess that A and B are one profile (Safari and Firefox name no profile). Remove
+    /// of B then unpaired A in the helper too (`[B, A]`), so A, which nobody removed, had to be approved again when it
+    /// opened. Only identities proven in B's folder (Chrome and Edge) may be unpaired with B.
+    #[tokio::test]
+    async fn removing_a_newer_firefox_identity_keeps_an_older_guessed_one_paired() {
+        let (core, mut prompts) = paired_core("retire-firefox-guess").await;
+        let unpaired = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = unpaired.clone();
+        core.shared
+            .chrome_control
+            .owner
+            .answering(move |name, params| match name {
+                "chrome_status" => json!({"structuredContent":{"firefoxWindow":"Window closed"}}),
+                "owner.profileUnpair" => {
+                    seen.lock()
+                        .unwrap()
+                        .push(params["profileId"].as_str().unwrap_or_default().to_string());
+                    json!({"unpaired":true})
+                }
+                "owner.browserAvailability" => json!({"applied":true}),
+                _ => json!({"approved":true}),
+            });
+        status(&core, &[(OLD, true, "Mozilla Firefox")]);
+        status(&core, &[(OLD, false, "Mozilla Firefox")]);
+        pair(&core, &mut prompts, NEW).await;
+        status(
+            &core,
+            &[
+                (OLD, false, "Mozilla Firefox"),
+                (NEW, true, "Mozilla Firefox"),
+            ],
+        );
+        core.chrome_control(
+            crate::Origin::Ui,
+            super::super::ChromeControlRequest::RemoveProfile {
+                profile_id: NEW.into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(*unpaired.lock().unwrap(), [NEW.to_string()]);
+        // A was never removed: when it opens it connects with its kept pairing and is shown again.
+        status(
+            &core,
+            &[
+                (OLD, true, "Mozilla Firefox"),
+                (NEW, false, "Mozilla Firefox"),
+            ],
+        );
+        assert_eq!(rows(&core, "firefox"), [(OLD.into(), "Firefox".into())]);
         core.shutdown().await;
     }
 

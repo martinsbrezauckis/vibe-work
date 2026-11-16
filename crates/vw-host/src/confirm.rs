@@ -310,6 +310,10 @@ fn once_label(request: &ConfirmationRequest) -> &'static str {
 pub const DONT_ALLOW: &str = "Don't allow";
 /// The approving button of a two-button confirmation.
 pub const CONTINUE: &str = "Continue";
+/// The buttons of the built-in browser's Local Network Access question (Block declines and is the default).
+pub const LOCAL_NETWORK_ALLOW: &str = "Allow";
+/// See [`LOCAL_NETWORK_ALLOW`].
+pub const LOCAL_NETWORK_BLOCK: &str = "Block";
 
 /// The labels of the dialog's buttons for `request`, first to last. The LAST one always declines: the app makes it
 /// the default (Return) on every OS, so a stray Enter (from the composer, say) never approves, and Escape or a closed
@@ -330,6 +334,12 @@ pub fn dialog_buttons(request: &ConfirmationRequest) -> Vec<String> {
     }
     if request.method == vw_core_api::NEW_CHAT_RESTORE_DIALOG_METHOD {
         return vec!["Keep".to_owned(), "Pick again".to_owned()];
+    }
+    if request.method == vw_core_api::LOCAL_NETWORK_DIALOG_METHOD {
+        return vec![
+            LOCAL_NETWORK_ALLOW.to_owned(),
+            LOCAL_NETWORK_BLOCK.to_owned(),
+        ];
     }
 
     if let Some(always) = &request.always
@@ -400,6 +410,13 @@ pub fn dialog_heading(text: &str) -> (String, String) {
 pub fn dialog_answer(request: &ConfirmationRequest, pressed: Option<&str>) -> Confirmation {
     if request.method == vw_core_api::BROWSER_PAIRING_DIALOG_METHOD {
         return if pressed == Some(vw_vocabulary::texts::CONNECTOR_CONNECT) {
+            Confirmation::Approved
+        } else {
+            Confirmation::Declined
+        };
+    }
+    if request.method == vw_core_api::LOCAL_NETWORK_DIALOG_METHOD {
+        return if pressed == Some(LOCAL_NETWORK_ALLOW) {
             Confirmation::Approved
         } else {
             Confirmation::Declined

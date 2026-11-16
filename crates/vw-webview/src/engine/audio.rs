@@ -3,18 +3,13 @@
 use super::TauriEngine;
 use crate::platform_audio;
 use tauri::Manager;
+use vw_platform::sync::LockRecover;
 use vw_preview::{AudioQuiet, EngineError};
 
 impl TauriEngine {
     pub(super) async fn quiet_audio_inner(&self) -> Result<AudioQuiet, EngineError> {
         let held = self.audio_lock.clone().lock_owned().await;
-        let labels: Vec<_> = self
-            .drains
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .keys()
-            .cloned()
-            .collect();
+        let labels: Vec<_> = self.drains.lock_or_recover().keys().cloned().collect();
         let app = self.app.clone();
         let window = self.window_label.clone();
         let (end, wait) = tokio::sync::oneshot::channel::<()>();

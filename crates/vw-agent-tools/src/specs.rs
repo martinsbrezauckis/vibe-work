@@ -54,7 +54,7 @@ pub fn tool_list(chrome_package: bool) -> Value {
         },
         {
             "name":tools::SESSION_STATUS,
-            "description":"Read this chat's model alias and thinking level (null when unknown), current access mode, running Vibe version (null when not running), Chrome extension store state from the last accepted release manifest (review means in Google's review, available means listed, null means unknown), and addons: each Vibe Work browser add-on with its state, the label the user sees and one line saying why and what the user does. Reads only; cannot change them. addon_suggest shows an add-on's setup control to the user.",
+            "description":"Read this chat's model alias and thinking level (null when unknown), current access mode, running Vibe version (vibeVersion, null when not running), this Vibe Work app's version as About shows it (vibeWorkVersion), Chrome extension store state from the last accepted release manifest (review means in Google's review, available means listed, null means unknown), and addons: each Vibe Work browser add-on with its state, the label the user sees and one line saying why and what the user does. Reads only; cannot change them. addon_suggest shows an add-on's setup control to the user.",
             "annotations":{"readOnlyHint":true},
             "inputSchema":empty_object(),
         },
@@ -229,7 +229,7 @@ fn secret_specs() -> Vec<Value> {
             },
         }),
     ];
-    specs.extend(crate::capture_spec::spec());
+    specs.push(crate::capture_spec::spec());
     specs
 }
 
@@ -415,34 +415,19 @@ fn builtin_browser_specs() -> Vec<Value> {
 }
 
 fn browser_capture_secret_spec() -> Value {
-    if cfg!(feature = "agent-vault") {
-        json!({
-            "name": tools::BROWSER_CAPTURE_SECRET,
-            "description": mode_names("Save a password or key directly to the vault without reading its value: point at its built-in browser_read ref and give it a name. {full} saves a new entry with {allowed} permission; {ask} and {edits} ask first and save with {askPermission} permission. Existing names need a duplicate decision: replace an app-owned entry, keep both or cancel. Returns only name, source and permission.")
-                .replace("{allowed}", vw_vocabulary::label("vaultPermissions", "allowed"))
-                .replace("{askPermission}", vw_vocabulary::label("vaultPermissions", "askEachTime")),
-            "inputSchema": {"type":"object","properties":{
-                "ref":{"type":"string","description":"The value's retained browser_read ref."},
-                "name":{"type":"string","description":"Vault entry name."},
-                "tab":{"type":"string","description":"The read's web tab id; omitted uses the current agent tab."}
-            },"required":["ref","name"],"additionalProperties":false}
-        })
-    } else {
-        json!({
-            "name": tools::BROWSER_CAPTURE_SECRET,
-            "description": "Saving a key to the vault is the user's action. This tool always refuses; the user selects the key in the browser panel, then chooses Save to vault in the toolbar, in Browser options when narrow, or by right-click on the selection. A saved key is used by name with secret_run.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ref": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
-                    "name": {"type": "string", "description": "Ignored legacy argument; saving is user-only."},
-                    "label": {"type": "string", "enum": ["mcp"], "description": "Ignored legacy argument; saving is user-only."}
-                },
-                "required": [],
-                "additionalProperties": false,
-            },
-        })
-    }
+    json!({
+        "name": tools::BROWSER_CAPTURE_SECRET,
+        "description": mode_names("Save a password or key directly to the vault without reading its value: point at its built-in browser_read ref and give it a name. {full} saves a new entry with {allowed} permission; {ask} and {edits} ask first and save with {askPermission} permission. Existing names need a duplicate decision: replace an app-owned entry, keep both or cancel. Returns only name, source and permission. Pages in the user's own browsers cannot be saved from yet: name that browser in target and the call refuses with the next step. The user can also save a selection with Save to vault (toolbar, Browser options when narrow, or right-click).")
+            .replace("{allowed}", vw_vocabulary::label("vaultPermissions", "allowed"))
+            .replace("{askPermission}", vw_vocabulary::label("vaultPermissions", "askEachTime")),
+        "inputSchema": {"type":"object","properties":{
+            "ref":{"type":"string","description":"The value's retained browser_read ref."},
+            "name":{"type":"string","description":"Vault entry name."},
+            "tab":{"type":"string","description":"The read's web tab id; omitted uses the current agent tab."},
+            "target":{"type":"string","enum":["builtin","chrome","edge","safari","firefox"],
+                "description":"Where the ref was read: builtin (default) is Vibe Work's own browser, the only one that can save now."}
+        },"required":["ref","name"],"additionalProperties":false}
+    })
 }
 
 fn browser_specs(_chrome_package: bool) -> Vec<Value> {

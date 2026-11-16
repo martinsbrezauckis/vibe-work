@@ -13,6 +13,7 @@ const NO_GIT = createStore<GitUi>({
   status: {},
   selected: {},
   cards: {},
+  lists: {},
   dialog: null,
   busy: {},
   notice: {},

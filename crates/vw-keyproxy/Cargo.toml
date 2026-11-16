@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 vw-vocabulary = { workspace = true }
+# Binds its loopback listeners as Vibe Work's own ports (refused for every browser page).
+vw-netguard = { workspace = true }
 # stored secret values register here so the Debug API never returns them.
 vw-secrets = { workspace = true }
 vw-mistral = { workspace = true }

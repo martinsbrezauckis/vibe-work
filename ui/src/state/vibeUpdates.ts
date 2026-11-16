@@ -32,8 +32,11 @@ function runningVibe(view: InstallView): string | null {
   return view.phase.state === "installed" ? view.phase.version : null;
 }
 
-/** The notice for `view`, or `null` when there is nothing to say. */
-export function vibeNoticeFor(view: InstallView): VibeNotice | null {
+/**
+ * The notice for `view`, or `null` when there is nothing to say. While a Vibe Work update is offered
+ * (`appUpdateOffered`), a newer untested Vibe is not mentioned: its support arrives with such an update.
+ */
+export function vibeNoticeFor(view: InstallView, appUpdateOffered = false): VibeNotice | null {
   const update = view.update;
   const phase = update.phase;
   const current = runningVibe(view);
@@ -75,7 +78,7 @@ export function vibeNoticeFor(view: InstallView): VibeNotice | null {
       detail:
         `Vibe Work has tested it${current === null ? "" : ` (you have ${current})`}. ` +
         "It installs next to your current Vibe and starts the next time you open Vibe Work." +
-        (update.upcoming === null
+        (update.upcoming === null || appUpdateOffered
           ? ""
           : ` Vibe ${update.upcoming} is also out; support for it arrives in an upcoming update.`),
       progress: null,
@@ -83,7 +86,7 @@ export function vibeNoticeFor(view: InstallView): VibeNotice | null {
       key: `vibe-available:${update.available}`,
     };
   }
-  if (update.upcoming !== null) {
+  if (update.upcoming !== null && !appUpdateOffered) {
     return {
       tone: "info",
       headline: `Vibe ${update.upcoming} is out; support arrives in an upcoming update.`,

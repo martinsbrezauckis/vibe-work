@@ -51,7 +51,7 @@
   border-radius: var(--radius-xs);
   color: var(--text-2);
   background: var(--hover);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
 }
 .browser-page-tab-mark img {
@@ -66,10 +66,10 @@
 }
 .browser-page-tab-agent {
   color: var(--text-2);
-  font-size: var(--text-10-5);
+  font-size: var(--text-xs);
 }
 .browser-page-tab-paused {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
 }
 .browser-page-new {
   flex: none;
@@ -83,7 +83,7 @@
 }
 .browser-page-new {
   width: 36px;
-  font-size: var(--text-22);
+  font-size: var(--text-xl);
 }
 .browser-page-new:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -99,7 +99,7 @@
   background: var(--raised);
   color: var(--text);
   cursor: pointer;
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
 }
 .browser-handoff-dialog {
   width: min(420px, 94vw);
@@ -133,7 +133,7 @@
   border-radius: var(--radius-md);
   background: var(--raised);
   box-shadow: var(--shadow);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 @media (max-width: 600px) {

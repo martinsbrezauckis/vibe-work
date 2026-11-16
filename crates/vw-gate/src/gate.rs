@@ -14,27 +14,28 @@
 //!   (`log_refusal`).
 
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::{debug, warn};
 
-use crate::callbacks::{CallbackBook, CallbackKind, OpenCallback};
+use crate::callbacks::CallbackBook;
 use crate::class::Class;
-use crate::confirm::{
-    Clock, Confirmation, ConfirmationRequest, ConfirmationToken, Confirmer, Requester, SystemClock,
-    TokenVault,
-};
-use crate::confirm_text::confirmation_summary;
-use crate::error::{CallbackFault, DenyReason, GateError};
+use crate::confirm::{Clock, ConfirmationToken, Confirmer, SystemClock, TokenVault};
+use crate::error::{DenyReason, GateError};
 use crate::picked::PickedFolders;
 use crate::privileged::{Ctx, check_p1};
 use crate::runtime_view::model_aliases;
 use crate::session_rules::adjust;
 use crate::table::row;
 use crate::transport::Transport;
+
+#[path = "gate_confirm.rs"]
+mod confirmations;
+#[path = "gate_callbacks.rs"]
+mod open_callbacks;
 
 /// Methods a trusted surface (the app's own main window) may confirm without the native dialog:
 /// commands the user types themselves (`!cmd` -> `session/shellCommand`), the composer access switch,
@@ -151,9 +152,7 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
     fn state(&self) -> MutexGuard<'_, State> {
         // A panic while holding the lock cannot leave the state half-updated in a way that
         // matters here (every update is a single insert or remove), so poisoning is ignored.
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// Sends `method` to Vibe if the gate allows it.
@@ -281,196 +280,6 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
             })
     }
 
-    /// Spend the original proxy-write consent and bind it to the core's credential-free forwarding call.
-    /// The core stores the sign-in in its vault; only the loopback address reaches Vibe. No second dialog is shown.
-    /// # Errors
-    /// Either shape is invalid, or the original single-use confirmation is absent, expired or mismatched.
-    pub fn confirm_proxy_forwarding(
-        &self,
-        original: &Value,
-        forwarded: &Value,
-        token: Option<&ConfirmationToken>,
-    ) -> Result<ConfirmationToken, GateError> {
-        let method = "config/proxy/write";
-        self.plan(method, forwarded)?;
-        self.authorise(method, original, token)?;
-        self.state().vault.mint(method, forwarded, self.clock.now())
-    }
-
-    /// Asks the user, in the native dialog, to approve one exact call, and returns the token that
-    /// lets [`Gate::call`] send it once.
-    ///
-    /// The params are validated first, so the user is never asked about a call that could not
-    /// pass.
-    ///
-    /// # Errors
-    /// The same refusals as [`Gate::call`] for the method and params;
-    /// [`GateError::ConfirmationNotApplicable`] when the call needs no confirmation;
-    /// [`GateError::ConfirmationDeclined`] when the user said no.
-    pub async fn request_confirmation(
-        &self,
-        method: &str,
-        params: &Value,
-    ) -> Result<ConfirmationToken, GateError> {
-        // Who asked is unknown here: the window's dialog is shown (`DebugApi` now means the request
-        // is answered without a dialog by the core's confirmer, so an unknown caller must never get it).
-        self.request_confirmation_as(method, params, Requester::Window)
-            .await
-    }
-
-    /// [`Gate::request_confirmation`] for a known requester, which the dialog shows first.
-    /// Who asks is a structured field, never read from the summary's wording.
-    ///
-    /// # Errors
-    /// As [`Gate::request_confirmation`].
-    pub async fn request_confirmation_as(
-        &self,
-        method: &str,
-        params: &Value,
-        requester: Requester,
-    ) -> Result<ConfirmationToken, GateError> {
-        let result = self
-            .request_confirmation_unlogged(method, params, requester)
-            .await;
-        if let Err(error) = &result {
-            log_refusal("request_confirmation", method, error);
-        }
-        result
-    }
-
-    async fn request_confirmation_unlogged(
-        &self,
-        method: &str,
-        params: &Value,
-        requester: Requester,
-    ) -> Result<ConfirmationToken, GateError> {
-        let plan = self.plan(method, params)?;
-        let Some(summary) = plan.confirm else {
-            return Err(GateError::ConfirmationNotApplicable {
-                method: method.to_owned(),
-            });
-        };
-        let request = ConfirmationRequest {
-            method: method.to_owned(),
-            summary: confirmation_summary(method, params, &summary),
-            params: params.clone(),
-            requester,
-            always: None,
-        };
-        match self.confirmer.confirm(&request).await {
-            Confirmation::Approved | Confirmation::ApprovedAlways => {
-                let now = self.clock.now();
-                self.state().vault.mint(method, params, now)
-            }
-            Confirmation::Declined => Err(GateError::ConfirmationDeclined {
-                method: method.to_owned(),
-            }),
-        }
-    }
-
-    /// Mints the confirmation token for one exact call WITHOUT showing the native dialog, for a
-    /// caller that vouches for the user's intent because the request came from a trusted surface
-    /// (the main window renders no untrusted active content, so a command the user typed
-    /// there needs no extra dialog, like in a terminal agent).
-    ///
-    /// Only the methods in [`TRUSTED_SURFACE_METHODS`] may be confirmed this way; everything that
-    /// installs code, adds endpoints or sends data off the machine keeps its native dialog. The
-    /// token is bound to the exact method and params and single use, like any other.
-    ///
-    /// The caller (the core) decides who counts as trusted; the gate only refuses methods that
-    /// no surface may self-confirm.
-    ///
-    /// # Errors
-    /// [`GateError::Denied`] when `method` is not in [`TRUSTED_SURFACE_METHODS`]; the same
-    /// refusals as [`Gate::call`] for the params; [`GateError::ConfirmationNotApplicable`] when
-    /// the call needs no confirmation (an interrupt).
-    pub fn request_trusted_confirmation(
-        &self,
-        method: &str,
-        params: &Value,
-    ) -> Result<ConfirmationToken, GateError> {
-        let result = self.trusted_confirmation_unlogged(method, params);
-        if let Err(error) = &result {
-            log_refusal("request_trusted_confirmation", method, error);
-        }
-        result
-    }
-
-    /// Reuses the person's earlier Full access choice for this exact session. The core must have
-    /// that choice in its own access record, never from caller params or Vibe's writable history.
-    /// This fixed resume shape cannot add config, tools, endpoints or a different profile; ordinary
-    /// session/resume requests still require the native dialog. The returned token is single use.
-    ///
-    /// # Errors
-    /// The same validation and token-allocation refusals as [`Gate::request_confirmation`].
-    pub fn confirm_restored_full_access(
-        &self,
-        session_id: &str,
-    ) -> Result<(Value, ConfirmationToken), GateError> {
-        let method = "session/resume";
-        let params = json!({"sessionId":session_id,"agentConfig":{"agent":"auto-approve"}});
-        self.plan(method, &params)?;
-        let token = self.state().vault.mint(method, &params, self.clock.now())?;
-        Ok((params, token))
-    }
-
-    /// Mints the confirmation token for one exact install WITHOUT the native dialog, for a window click that
-    /// confirmed an install offer the window showed first. Only [`OFFERED_INSTALL_METHODS`] qualify; the
-    /// core vouches that the offer was shown and taken (`vw-core-api` `install_offers`). Bound to the exact
-    /// method and params and single use, like any other token.
-    ///
-    /// # Errors
-    /// [`GateError::Denied`] for any other method; the same refusals as [`Gate::call`] for the params.
-    pub fn request_offered_confirmation(
-        &self,
-        method: &str,
-        params: &Value,
-    ) -> Result<ConfirmationToken, GateError> {
-        let result = if OFFERED_INSTALL_METHODS.contains(&method) {
-            self.plan(method, params).and_then(|plan| {
-                if plan.confirm.is_none() {
-                    return Err(GateError::ConfirmationNotApplicable {
-                        method: method.to_owned(),
-                    });
-                }
-                let now = self.clock.now();
-                self.state().vault.mint(method, params, now)
-            })
-        } else {
-            Err(denied(
-                method,
-                DenyReason::Policy("only a shown install offer may skip the dialog".to_owned()),
-            ))
-        };
-        if let Err(error) = &result {
-            log_refusal("request_offered_confirmation", method, error);
-        }
-        result
-    }
-
-    fn trusted_confirmation_unlogged(
-        &self,
-        method: &str,
-        params: &Value,
-    ) -> Result<ConfirmationToken, GateError> {
-        if !TRUSTED_SURFACE_METHODS.contains(&method) {
-            return Err(denied(
-                method,
-                DenyReason::Policy(
-                    "no surface may confirm this method without the dialog".to_owned(),
-                ),
-            ));
-        }
-        let plan = self.plan(method, params)?;
-        if plan.confirm.is_none() {
-            return Err(GateError::ConfirmationNotApplicable {
-                method: method.to_owned(),
-            });
-        }
-        let now = self.clock.now();
-        self.state().vault.mint(method, params, now)
-    }
-
     /// Classifies and validates a call without sending anything.
     fn plan(&self, method: &str, params: &Value) -> Result<Plan, GateError> {
         let Some(row) = row(method) else {
@@ -547,135 +356,6 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         if let Some(aliases) = model_aliases(snapshot) {
             self.state().aliases = aliases;
         }
-    }
-
-    /// Records a folder the user picked in a native dialog. Only such folders (and folders inside
-    /// them) can be trusted through the gate.
-    ///
-    /// # Errors
-    /// [`GateError::InvalidFolder`] when the path does not exist or is not a directory.
-    pub fn register_picked_folder(&self, path: &Path) -> Result<(), GateError> {
-        self.state().picked.register(path)
-    }
-
-    /// True when `path` is a folder the user picked in a native dialog in this run, or lies inside one
-    /// (both resolved, so `..` hops and symlinks out of a picked folder do not count). A relative or
-    /// unresolvable path is never picked. The `worktrees` command acts only on such folders
-    /// unless the user confirms in the native dialog.
-    #[must_use]
-    pub fn is_picked_folder(&self, path: &Path) -> bool {
-        self.state().picked.contains_path(path)
-    }
-
-    /// The folders the user picked in a native dialog in this run (canonical paths). The file
-    /// resolver compares a candidate with these LEXICALLY before any filesystem access (no oracle for paths
-    /// outside them), then checks the canonical path again.
-    #[must_use]
-    pub fn picked_roots(&self) -> Vec<std::path::PathBuf> {
-        self.state().picked.roots()
-    }
-
-    /// The picked folders whose spelling as picked (the folder dialog's, the Debug API's) differs from their canonical
-    /// path, as `(spelling, canonical)`: macOS `/tmp/x` for `/private/tmp/x`, a folder reached through a symbolic link.
-    /// For the same lexical comparison as [`Self::picked_roots`] in the spelling the window keeps; never for trust.
-    #[must_use]
-    pub fn picked_spellings(&self) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
-        self.state().picked.spellings()
-    }
-
-    /// Registers the callback of an inbound `callback/call` (pass its `params`). The UI should be
-    /// shown every registered callback, including kinds the gate will not answer.
-    ///
-    /// # Errors
-    /// [`CallbackFault::InvalidRegistration`] when `params` is not a callback entry;
-    /// [`CallbackFault::TooManyOpen`] past the configured limit;
-    /// [`CallbackFault::DuplicateId`] for an id that was already answered.
-    pub fn register_callback(&self, params: &Value) -> Result<CallbackKind, CallbackFault> {
-        self.state().callbacks.register(params)
-    }
-
-    /// Checks an original answer before the core replaces an approval with a refusal. Does not claim it.
-    ///
-    /// # Errors
-    /// [`GateError::Callback`] when the session, callback kind or offered output shape does not match.
-    pub fn validate_callback_answer(
-        &self,
-        session_id: &str,
-        callback_id: &str,
-        output: &Value,
-    ) -> Result<(), GateError> {
-        self.state()
-            .callbacks
-            .validate(session_id, callback_id, output)
-            .map_err(|fault| {
-                let error = GateError::Callback(fault);
-                log_refusal("answer_callback", "callback/result", &error);
-                error
-            })
-    }
-
-    /// Answers an open callback with `output` (the `output` object of `callback/result`).
-    ///
-    /// The answer is sent only if it matches the callback's session and kind and has exactly the
-    /// output shape for that kind. The callback is claimed before the send is awaited,
-    /// so concurrent answers send once. A claimed callback is never answered again, even if the
-    /// send fails.
-    ///
-    /// # Errors
-    /// [`GateError::Callback`] with the reason when the answer is refused (nothing was sent);
-    /// [`GateError::Transport`] when the send fails.
-    pub async fn answer_callback(
-        &self,
-        session_id: &str,
-        callback_id: &str,
-        output: Value,
-    ) -> Result<Value, GateError> {
-        if let Err(fault) = self
-            .state()
-            .callbacks
-            .claim(session_id, callback_id, &output)
-        {
-            let error = GateError::Callback(fault);
-            log_refusal("answer_callback", "callback/result", &error);
-            return Err(error);
-        }
-        let params = json!({
-            "sessionId": session_id,
-            "result": {"callbackId": callback_id, "output": output},
-        });
-        let sent = self.transport.request("callback/result", params).await;
-        self.state().callbacks.sent(session_id);
-        match sent {
-            Ok(result) => Ok(result),
-            Err(error) => {
-                warn!(
-                    callback_id,
-                    "gate: callback answer was claimed but the send failed"
-                );
-                Err(error.into())
-            }
-        }
-    }
-
-    /// Forgets a callback the server closed (cancelled, expired, or its turn ended).
-    pub fn callback_closed(&self, callback_id: &str) {
-        self.state().callbacks.close(callback_id);
-    }
-
-    /// Forgets every callback of a session (the session ended or the server restarted).
-    pub fn session_closed(&self, session_id: &str) {
-        self.state().callbacks.close_session(session_id);
-    }
-
-    /// The callbacks waiting for an answer, for the UI to show.
-    #[must_use]
-    pub fn open_callbacks(&self) -> Vec<OpenCallback> {
-        self.state().callbacks.open()
-    }
-
-    /// True while an answer of this session is still being delivered.
-    pub fn answering(&self, session_id: &str) -> bool {
-        self.state().callbacks.sending(session_id)
     }
 }
 

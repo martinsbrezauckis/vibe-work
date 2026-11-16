@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 use vw_git::state;
 
@@ -68,8 +68,7 @@ impl Core {
             .shared
             .git
             .repos
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(session_id)
             .filter(|(folder, _)| {
                 crate::changes_facts::path_key(folder) == crate::changes_facts::path_key(cwd)
@@ -99,22 +98,17 @@ impl Core {
             session.running.is_some(),
             &mut found,
         );
-        self.shared
-            .git
-            .repos
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                session_id.to_owned(),
-                (
-                    cwd.clone(),
-                    found
-                        .keys()
-                        .filter(|root| root.as_str() != ".")
-                        .cloned()
-                        .collect(),
-                ),
-            );
+        self.shared.git.repos.lock_or_recover().insert(
+            session_id.to_owned(),
+            (
+                cwd.clone(),
+                found
+                    .keys()
+                    .filter(|root| root.as_str() != ".")
+                    .cloned()
+                    .collect(),
+            ),
+        );
         let places = found.into_iter().map(repo_view).collect();
         Ok(DiscoveredRepos {
             places,

@@ -21,8 +21,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
@@ -101,8 +102,7 @@ impl CheckHooks {
         url.as_str() == "about:blank"
             || self
                 .ports
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .iter()
                 .any(|port| crate::viewer::allowed(url, *port))
     }
@@ -198,8 +198,7 @@ impl VisualChecker {
         let file = page.under(root);
         let print = fingerprint(root, &file)?;
         self.cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(&file)
             .filter(|(p, _)| *p == print)
             .map(|(_, r)| r.clone())
@@ -234,8 +233,7 @@ impl VisualChecker {
         };
         if report.error.is_none() {
             self.cache
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .insert(file, (print, report.clone()));
         }
         Ok(report)
@@ -243,10 +241,7 @@ impl VisualChecker {
 
     async fn run(&self, server: &PagesServer, page: &PagePath) -> Result<VisualReport, PagesError> {
         let mut mount = self.mount.lock().await;
-        self.ports
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(server.port());
+        self.ports.lock_or_recover().insert(server.port());
         let host = Url::parse(&format!("{}{}/", server.base_url(), server.check_prefix()))
             .map_err(|e| PagesError::Other(e.to_string()))?;
         let before = *self.loads.borrow();
@@ -302,10 +297,7 @@ impl VisualChecker {
 
     async fn mount_new(&self, url: Url) -> Result<MountId, PagesError> {
         let label = {
-            let mut generation = self
-                .generation
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut generation = self.generation.lock_or_recover();
             *generation += 1;
             format!("{CHECK_LABEL_PREFIX}{generation}")
         };
@@ -357,7 +349,7 @@ async fn bounded<T>(
 fn failed(page: &PagePath, reason: &str) -> VisualReport {
     VisualReport {
         page: page.to_string(),
-        checked_ms: now_ms(),
+        checked_ms: crate::now_ms(),
         issues: Vec::new(),
         notes: Vec::new(),
         error: Some(clip(reason, 300)),
@@ -425,7 +417,7 @@ fn parse(page: &PagePath, result: &str) -> Parsed {
                 .collect();
             Parsed::Done(VisualReport {
                 page: page.to_string(),
-                checked_ms: now_ms(),
+                checked_ms: crate::now_ms(),
                 issues,
                 notes,
                 error: None,
@@ -461,15 +453,7 @@ fn json_string(text: &str) -> String {
 fn accessor() -> String {
     let mut bytes = [0u8; 8];
     if getrandom::fill(&mut bytes).is_err() {
-        return format!("__vw_check_{}", now_ms());
+        return format!("__vw_check_{}", crate::now_ms());
     }
-    format!("__vw_check_{}", crate::comments::hex(&bytes))
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
+    format!("__vw_check_{}", hex::encode(bytes))
 }

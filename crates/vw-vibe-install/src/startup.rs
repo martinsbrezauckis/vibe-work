@@ -12,22 +12,24 @@ impl VibeInstaller {
         let Some(choice) = layout.choice() else {
             return;
         };
-        let version = crate::existing::probe(
+        let result = crate::existing::probe_checked(
+            crate::existing::SAVED_PROBE_LIMIT,
             &choice.path,
+            &[],
             &layout.root.join("probe/saved"),
             &self.inner.config.parent_env,
         )
         .await;
+        if let Err(failure) = &result {
+            tracing::warn!(server = %choice.path.display(), ?failure, "the remembered Vibe gave no version");
+        }
+        let warning = crate::existing::saved_warning(
+            &result,
+            crate::existing::SAVED_PROBE_LIMIT,
+            &self.inner.pinned,
+        );
+        let version = result.ok();
         let supported = version.as_deref() == Some(&self.inner.pinned);
-        let warning = Some(version.as_deref().map_or_else(
-            || {
-                format!(
-                    "This install did not answer; Vibe Work needs Vibe {}.",
-                    self.inner.pinned
-                )
-            },
-            |found| crate::existing::version_warning(found, &self.inner.pinned),
-        ));
         let mut state = self.inner.lock();
         if supported {
             state.phase = InstallPhase::Installed {

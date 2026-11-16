@@ -22,6 +22,10 @@ interface Props {
   text: string;
   onOpen?: () => void;
 }
+/**
+ * A "Send feedback…" button that opens the Bug form prefilled with `title` and `text` (cut to the core's limits) and
+ * calls `onOpen` once it opened. Renders nothing without a core connection.
+ */
 export function FeedbackAction(props: Props) {
   if (!props.core) return null;
   return <ReadyAction {...props} core={props.core} />;

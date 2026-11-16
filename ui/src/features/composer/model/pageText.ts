@@ -1,6 +1,10 @@
 /** Model-facing page and OS-selection text. Used by immediate and queued composer sends; context remains data. */
 import type { ContextItem } from "./message";
 
+/**
+ * The text a context item sends to the model (`modelText`, else `text`). Browser, page and selection text loses
+ * control and invisible formatting characters, and selection text gets a leading "untrusted content" line.
+ */
 export function pageContextText(item: ContextItem): string {
   const text = item.modelText ?? item.text;
   if (!["browser", "page", "selection"].includes(item.source)) return text;

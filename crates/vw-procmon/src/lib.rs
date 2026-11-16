@@ -47,7 +47,7 @@ pub use leases::{
 pub use ledger::{LEDGER_VERSION, Ledger, LedgerEntry, LedgerFile};
 pub use lifecycle::{SweepItem, SweepReport};
 pub use monitor::{ProcMon, ProcMonConfig};
-pub use os::{fill_cmdline, identity, is_alive, snapshot};
+pub use os::{fill_cmdline, identity, is_alive, port_held_by, snapshot};
 pub use procnet::{ProcNetListener, parse_proc_net_tcp};
 pub use registry::{OwnProcess, OwnProcessRegistry, ProcessClass, ProcessGroup, RegistrationId};
 pub use stop::{Authority, StopConfig, StopError, StopOutcome, StopRefusal, stop};

@@ -4,6 +4,7 @@
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 use cap_std::fs::Dir;
 use serde_json::{Value, json};
@@ -131,10 +132,7 @@ pub(super) async fn read_bytes(
         return answer(&name, &text, args, true);
     }
     let mut receiver = {
-        let mut jobs = chat
-            .jobs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut jobs = chat.jobs.lock_or_recover();
         if let Some(job) = jobs.get(&digest) {
             job.clone()
         } else {
@@ -150,11 +148,7 @@ pub(super) async fn read_bytes(
                 let success = result.is_ok();
                 sender.send_replace(Some(result));
                 if success {
-                    reader
-                        .jobs
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .remove(&digest);
+                    reader.jobs.lock_or_recover().remove(&digest);
                 }
             });
             receiver
@@ -183,10 +177,7 @@ pub(super) async fn read_bytes(
     match finished {
         Ok(Ok((text, cached))) => answer(&name, &text, args, cached),
         Ok(Err(error)) => {
-            chat.jobs
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(&digest);
+            chat.jobs.lock_or_recover().remove(&digest);
             Err(error)
         }
         Err(_) => Ok(

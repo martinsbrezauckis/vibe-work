@@ -28,7 +28,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use tracing::warn;
@@ -91,7 +92,7 @@ impl Access {
     /// the channel transport has its own lock for the individual resume/close calls.
     pub(crate) async fn lock_restore(&self, session_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = {
-            let mut restores = self.restores.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut restores = self.restores.lock_or_recover();
             restores.retain(|_, lock| lock.strong_count() > 0);
             if let Some(lock) = restores.get(session_id).and_then(Weak::upgrade) {
                 lock
@@ -123,7 +124,7 @@ impl Access {
     }
 
     fn set(&self, session_id: &str, agent: &str) {
-        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut agents = self.agents.lock_or_recover();
         // `runtime/updated` repeats the profile on every update: write only a change.
         if agents.get(session_id).map(String::as_str) != Some(agent) {
             agents.insert(session_id.to_owned(), agent.to_owned());
@@ -176,7 +177,7 @@ impl Access {
     /// Session `old` was handed off to `new`: `new` runs with `old`'s profile (Vibe derives the new
     /// session from the old one's settings) until Vibe reports otherwise.
     pub(crate) fn hand_off(&self, old: &str, new: &str) {
-        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut agents = self.agents.lock_or_recover();
         if let Some(agent) = agents.get(old).cloned()
             && !agents.contains_key(new)
         {
@@ -187,7 +188,7 @@ impl Access {
 
     /// Forgets a deleted session.
     pub(crate) fn forget(&self, session_id: &str) {
-        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut agents = self.agents.lock_or_recover();
         if agents.remove(session_id).is_some() {
             self.write(&agents);
         }
@@ -206,11 +207,7 @@ impl Access {
 
     /// The profile `session_id` ran with, if known.
     pub(crate) fn remembered(&self, session_id: &str) -> Option<String> {
-        self.agents
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(session_id)
-            .cloned()
+        self.agents.lock_or_recover().get(session_id).cloned()
     }
 }
 

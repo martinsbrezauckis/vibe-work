@@ -72,10 +72,17 @@ fn line(kind: LineKind, old_no: Option<usize>, new_no: Option<usize>, raw: &[u8]
 
 /// The hunks that turn `old` into `new`, with [`CONTEXT`] lines around each change.
 pub(crate) fn hunks(old: &[&[u8]], new: &[&[u8]]) -> Vec<LineHunk> {
+    hunks_compared(old, new, new)
+}
+
+/// [`hunks`] where `new` is matched against `old` through `compared` (the same lines in another form, e.g.
+/// without the CR git drops on the way into the repository); `new` is what the hunks show and splice.
+pub(crate) fn hunks_compared(old: &[&[u8]], new: &[&[u8]], compared: &[&[u8]]) -> Vec<LineHunk> {
+    debug_assert_eq!(new.len(), compared.len());
     let ops = similar::capture_diff_slices_deadline(
         Algorithm::Myers,
         old,
-        new,
+        compared,
         Some(Instant::now() + DEADLINE),
     );
     similar::group_diff_ops(ops, CONTEXT)

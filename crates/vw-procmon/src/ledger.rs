@@ -18,7 +18,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -120,12 +121,7 @@ impl Ledger {
     /// The current entries.
     #[must_use]
     pub fn entries(&self) -> Vec<LedgerEntry> {
-        self.entries
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .cloned()
-            .collect()
+        self.entries.lock_or_recover().values().cloned().collect()
     }
 
     /// Replaces the whole entry set and writes the file when it changed.
@@ -137,7 +133,7 @@ impl Ledger {
             .into_iter()
             .map(|e| ((e.process.pid, e.process.start.0), e))
             .collect();
-        *self.entries.lock().unwrap_or_else(PoisonError::into_inner) = map;
+        *self.entries.lock_or_recover() = map;
         self.write()
     }
 
@@ -151,7 +147,7 @@ impl Ledger {
             path: self.path.display().to_string(),
             reason: e.to_string(),
         })?;
-        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut written = self.written.lock_or_recover();
         if written.as_deref() == Some(text.as_str()) {
             return Ok(());
         }
@@ -174,7 +170,7 @@ impl Ledger {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(io(&self.path, e)),
         }
-        *self.written.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.written.lock_or_recover() = None;
         Ok(())
     }
 

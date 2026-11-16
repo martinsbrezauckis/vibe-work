@@ -114,6 +114,7 @@ impl Core {
                     status: self.pr_status(&session_id, &place, refresh).await?,
                 })
             }
+            request @ GitRequest::PrList { .. } => Box::pin(self.pr_list_request(request)).await,
             GitRequest::PrepareMessage {
                 session_id,
                 repo,

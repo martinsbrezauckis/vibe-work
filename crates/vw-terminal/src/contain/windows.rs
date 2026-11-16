@@ -11,8 +11,9 @@
 //! Proven on Windows 11 (`vw_terminal_windows.rs`): a `ping` the shell started is in the job
 //! and gone by pid after close.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use portable_pty::Child;
 use win32job::{ExtendedLimitInfo, Job};
@@ -53,8 +54,7 @@ impl Containment {
     /// Process ids in the job right now.
     pub(crate) fn job_members(&self) -> Vec<u32> {
         self.job
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .as_ref()
             .and_then(|job| job.query_process_id_list().ok())
             .map(|ids| {
@@ -91,12 +91,7 @@ impl Containment {
 
     /// Closes the job handle: kill-on-close ends every process in it.
     pub(crate) fn kill_now(&self) {
-        drop(
-            self.job
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .take(),
-        );
+        drop(self.job.lock_or_recover().take());
     }
 }
 

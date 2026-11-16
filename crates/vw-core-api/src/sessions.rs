@@ -189,6 +189,7 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
             crate::video_projection::apply(shared, &mut snapshot.state);
             crate::edit_preview::project(shared, &mut snapshot.state);
             crate::chrome_control::approval::project(shared, &mut snapshot.state);
+            crate::paused_tools_gate::mark_held_calls(shared, &mut snapshot.state);
             shared.protected_changes.overlay(id, &mut snapshot.state);
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
             snapshot.access_mode =
@@ -217,6 +218,7 @@ pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, resu
     crate::video_projection::apply(shared, result);
     crate::edit_preview::project(shared, result);
     crate::chrome_control::approval::project(shared, result);
+    crate::paused_tools_gate::mark_held_calls(shared, result);
     let Some(state) = result.get_mut("state").filter(|s| s.is_object()) else {
         return;
     };

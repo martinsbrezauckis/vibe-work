@@ -11,10 +11,10 @@ use ts_rs::{Config, TS};
 
 mod declarations;
 use declarations::{
-    changes_decls, connectors_decls, core_decls, documents_decls, events_decls, files_decls,
-    git_browser_decls, git_request_decls, instructions_decls, keys_decls, market_decls, push_decls,
-    secrets_decls, sessions_decls, speech_decls, status_decls, terminal_decls, trim_decl_lines,
-    vibe_decls, work_decls, worktrees_decls,
+    callbacks_decls, changes_decls, connectors_decls, core_decls, documents_decls, events_decls,
+    files_decls, git_browser_decls, git_request_decls, instructions_decls, keys_decls,
+    market_decls, push_decls, secrets_decls, sessions_decls, speech_decls, status_decls,
+    terminal_decls, trim_decl_lines, vibe_decls, work_decls, worktrees_decls,
 };
 
 mod feedback;
@@ -214,6 +214,7 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (proposal_decls(&cfg), "proposals"),
         (terminal_decls(&cfg), "terminal"),
         (keys_decls(&cfg), "keys"),
+        (callbacks_decls(&cfg), "callbacks"),
         (instructions_decls(&cfg), "instructions"),
         (documents_decls(&cfg), "documents"),
         (speech_decls(&cfg), "speech"),
@@ -260,6 +261,15 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
             ],
             "keep_awake",
         ),
+        (
+            vec![
+                crate::PausedTool::decl(&cfg),
+                crate::PausedToolsView::decl(&cfg),
+                crate::PausedToolsRequest::decl(&cfg),
+            ],
+            "paused_tools",
+        ),
+        (crate::knowledge_view::declarations(&cfg), "knowledge"),
         (new_chat::decls(&cfg), "new_chat"),
         (feedback::decls(&cfg), "feedback"),
         (

@@ -16,12 +16,12 @@
 }
 .chead h2 {
   margin: 0 0 4px;
-  font-size: var(--text-22);
+  font-size: var(--text-xl);
   letter-spacing: -0.01em;
 }
 .cmuted {
   color: var(--text-3);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .cbar {
   display: flex;
@@ -38,11 +38,11 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   padding: 6px 10px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .cnote {
   margin: 8px 0;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .cgroup {
@@ -50,7 +50,7 @@
 }
 .cgroup h3 {
   margin: 0 0 8px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--text-2);
   text-transform: none;
@@ -79,7 +79,7 @@
   text-align: left;
   padding: 12px 12px 6px;
   cursor: pointer;
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .ctile-main:hover:where(:not(:disabled)) {
   background: var(--hover);
@@ -95,7 +95,7 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-9);
+  border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--text-2);
   border: 1px solid var(--line);
@@ -107,11 +107,11 @@
 }
 .ctile-name {
   font-weight: var(--weight-semibold);
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .ctile-line {
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 .ctile-foot {
@@ -126,7 +126,7 @@
 /* The publisher gives way (one line, ellipsis) so the action stays on the card's line. */
 .ctile-via {
   color: var(--text-3);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
@@ -155,7 +155,7 @@
 }
 .creason {
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .csignin {
   display: flex;
@@ -173,7 +173,7 @@
   border-left: 3px solid var(--orange);
   border-radius: var(--radius-md);
   background: var(--panel);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .csignin-row.done {
   border-left-color: var(--green);
@@ -215,12 +215,12 @@
 }
 .srow-name {
   font-weight: var(--weight-semibold);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .srow-addr {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -231,19 +231,19 @@
   top: 12px;
   align-self: start;
   border: 1px solid var(--line);
-  border-radius: var(--radius-14);
+  border-radius: var(--radius-lg);
   background: var(--raised);
   padding: 16px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   min-width: 0;
 }
 .cdetail h2 {
   margin: 0;
-  font-size: var(--text-16);
+  font-size: var(--text-lg);
 }
 .cdetail h3 {
   margin: 14px 0 6px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .cdetail-head {
@@ -277,7 +277,7 @@
   flex-direction: column;
   gap: 4px;
   margin: 0 0 6px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .add-server input {
@@ -286,7 +286,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   padding: 7px 10px;
-  font: var(--text-13) var(--font-mono);
+  font: var(--text-base) var(--font-mono);
 }
 .add-server input[aria-invalid="true"] {
   border-color: var(--red);
@@ -294,7 +294,7 @@
 .csteps {
   margin: 0 0 10px;
   padding-left: 18px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 @media (max-width: 900px) {

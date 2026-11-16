@@ -15,14 +15,9 @@
 import type { LibraryFile } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { scopeOf } from "./LibraryDetail";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -39,7 +34,7 @@ function files(input: Record<string, unknown>): LibraryFile[] {
   if (!Array.isArray(list) || list.length === 0)
     throw new UiControlError("invalidParams", "files must be a non-empty list of {name, data}");
   return list.map((f: unknown) => {
-    const o = asObject(f);
+    const o = bodyObject(f);
     return { name: text(o, "name"), data: typeof o["data"] === "string" ? o["data"] : "" };
   });
 }
@@ -82,7 +77,7 @@ function read(app: App): unknown {
 }
 
 async function handle(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const a = app.libraries?.debugApi;
   if (a === undefined) throw new UiControlError("serverUnavailable", "Libraries need the core");
   try {

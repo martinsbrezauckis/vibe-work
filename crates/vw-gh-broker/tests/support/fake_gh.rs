@@ -19,6 +19,10 @@ fn main() -> io::Result<()> {
     println!("token={token}/{token}");
     eprintln!("stderr-token={token}");
     io::stdout().write_all(b"binary=\xff\x00\n")?;
+    // A `sleep-ms` file in the cwd makes this run take that long (a slow or stalled network call).
+    if let Some(ms) = std::fs::read_to_string("sleep-ms").ok().and_then(|v| v.trim().parse().ok()) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
     let code = std::fs::read_to_string("exit-code").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
     process::exit(code);
 }

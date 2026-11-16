@@ -6,7 +6,8 @@
  * stays available over key/vault and Vibe setup; a server's vault needs belong in its own detail.
  * When Vibe is not running the reason is shown in plain words. The worktree feature adds the header's copy chip, the startup
  * list of copies from deleted sessions (their end-of-session dialog is the window's, mounted by Shell).
- * Both chat views show KeyNotice whenever the Mistral key cannot be used, even after setup is skipped.
+ * Both chat views show KeyNotice whenever the Mistral key cannot be used, even after setup is skipped. The start
+ * screen also carries the one-time questions (right-click menus, another agent's setup).
  * Depends on: AppContext, hooks, components/Icon, state/shellState, the transcript, composer, worktree, projects
  * and connectors features.
  * Called by: Shell.
@@ -45,6 +46,7 @@ import { useSessionGit } from "../git/useSessionGit";
 import { ProjectsPage } from "../projects/ProjectsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { useApp } from "./AppContext";
+import { ImportHint } from "./ImportHint";
 import { KeyNotice } from "./KeyNotice";
 import { SendToOffer } from "./SendToOffer";
 import { formatKeys } from "../../state/shortcuts";
@@ -261,6 +263,7 @@ export function Content() {
                     </p>
                     <KeyNotice />
                     <SendToOffer />
+                    <ImportHint />
                     <OrphanList />
                     <ServerNote />
                   </div>

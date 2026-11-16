@@ -21,8 +21,10 @@
     for (let up = el; up; up = up.parentElement || up.getRootNode()?.host) if (up === scopeRoot) return true;
     return false;
   });
-  const protectedEditor = everything.elements.some(el => el.isContentEditable && privateField(el));
-  const select = REQ.selector || REQ.extract || scopeRoot || protectedEditor ? safeSelectors(everything.elements) : null;
+  // A protected select, textarea or editor puts its content into the page's own text: the redacted copy reads it then,
+  // and also when the walk stopped early (an unwalked field could be one).
+  const protectedText = everything.truncated || everything.elements.some(el => (el.isContentEditable || el.localName === "select" || el.localName === "textarea") && privateField(el));
+  const select = REQ.selector || REQ.extract || scopeRoot || protectedText ? safeSelectors(everything.elements) : null;
   if (select?.truncated) everything.truncated = true;
   // The original address stays on the host for admission checks; only displayUrl goes into agent answers.
   const out = { url: String(location.href).slice(0, 2000), displayUrl: hideKeys(String(location.href)).slice(0, 2000), title: clip(hideKeys(document.title), 300), readyState: document.readyState };

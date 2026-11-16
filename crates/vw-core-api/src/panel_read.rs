@@ -14,9 +14,10 @@
 //! - Editors with paths pass the person's file-read rules before any text or selection is copied to the answer.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
@@ -54,23 +55,19 @@ impl Pending {
         let id = format!("panel-{}", self.next.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = oneshot::channel();
         self.waiting
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .insert(id.clone(), (session.to_owned(), sender));
         (id, receiver)
     }
 
     fn forget(&self, id: &str) {
-        self.waiting
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id);
+        self.waiting.lock_or_recover().remove(id);
     }
 
     /// Hands the window's answer to the waiting tool, only when it names the request's own session. False: no such
     /// request waits (answered already, expired) or it belongs to another session.
     pub(crate) fn answer(&self, session: &str, id: &str, view: PanelView) -> bool {
-        let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut waiting = self.waiting.lock_or_recover();
         if waiting.get(id).is_none_or(|(owner, _)| owner != session) {
             return false;
         }

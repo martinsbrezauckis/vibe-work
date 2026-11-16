@@ -400,7 +400,7 @@ async fn approval_discovery_does_not_stall_unrelated_core_commands() {
         biased;
         core.discover_plugins(None, None),
         async {
-            let command = core.execute(crate::Origin::Ui, crate::Command::PromptHistory { text: None }).await;
+            let command = core.execute(crate::Origin::Ui, crate::Command::PromptHistory { text: None, session_id: None }).await;
             let released_before_watchdog = release.send(()).is_ok();
             (command, released_before_watchdog)
         }

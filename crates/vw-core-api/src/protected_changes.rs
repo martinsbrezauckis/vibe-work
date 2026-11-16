@@ -14,9 +14,10 @@ use crate::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, watch};
+use vw_platform::sync::LockRecover;
 use vw_proposals::{Decision, Proposal, Record, Status};
 struct Pending {
     proposal: Proposal,
@@ -69,7 +70,7 @@ impl Hub {
         }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
     pub(crate) fn shutdown(&self) {
         self.lock().pending.clear();

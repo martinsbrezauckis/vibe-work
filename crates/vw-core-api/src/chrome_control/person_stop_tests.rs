@@ -7,9 +7,19 @@ use std::{
 };
 use tokio::time::Instant;
 
-async fn fixture(name: &str, profile: &str) -> crate::Core {
+pub(super) async fn fixture(name: &str, profile: &str) -> crate::Core {
+    fixture_with(name, profile, |_, _| {}).await
+}
+
+/// [`fixture`] with a further config change (for example the agent tools, for the pre-tool receipt route).
+pub(super) async fn fixture_with(
+    name: &str,
+    profile: &str,
+    edit: impl FnOnce(&mut crate::CoreConfig, &std::path::Path),
+) -> crate::Core {
     let core = crate::offline_core::start_with(name, |config, dir| {
         config.chrome_control.package = Some(dir.join("package"));
+        edit(config, dir);
     })
     .await;
     for chat in ["a", "b"] {
@@ -47,14 +57,14 @@ async fn fixture(name: &str, profile: &str) -> crate::Core {
     core
 }
 
-fn turn(core: &crate::Core, chat: &str, id: &str, running: bool) {
+pub(super) fn turn(core: &crate::Core, chat: &str, id: &str, running: bool) {
     let _ = core.shared.store.load(json!({
         "session":{"id":chat,"status":{"type":if running {"running"} else {"idle"},"activeTurnId":running.then_some(id)}},
         "history":[],"turns":[{"id":id,"status":if running {"in_progress"} else {"completed"}}]
     }), vw_session::LoadKind::New).unwrap();
 }
 
-fn status(core: &crate::Core, state: &str, started: Instant) {
+pub(super) fn status(core: &crate::Core, state: &str, started: Instant) {
     owner::update_work(
         &Arc::downgrade(&core.shared),
         &json!({"structuredContent":{"sessions":[
@@ -218,7 +228,7 @@ async fn reusing_an_ended_id_as_active_is_not_replayed_or_claimed_not_run() {
 }
 
 /// The app uses its real gate, channel transport and pump; the peer answers only Vibe's interrupt method.
-fn runtime(core: &crate::Core) -> Arc<Mutex<Vec<Value>>> {
+pub(super) fn runtime(core: &crate::Core) -> Arc<Mutex<Vec<Value>>> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let calls = Arc::new(Mutex::new(Vec::new()));
     for (index, chat) in ["a", "b"].into_iter().enumerate() {

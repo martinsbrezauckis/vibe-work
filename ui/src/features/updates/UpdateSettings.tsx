@@ -95,7 +95,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             disabled={busy}
             onClick={run(updates.check)}
           >
-            Check now
+            Check for updates
           </Button>
           {phase.type === "failed" && phase.stage !== "check" && (
             <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />

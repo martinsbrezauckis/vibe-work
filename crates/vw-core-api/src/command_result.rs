@@ -138,6 +138,11 @@ pub enum CommandResult {
         /// The instructions request's answer.
         result: InstructionsResult,
     },
+    /// `importSetup`: `result` is the import request's answer.
+    #[allow(missing_docs, reason = "the variant's own doc names its one field")]
+    ImportSetup {
+        result: crate::import_view::ImportResult,
+    },
     /// `projectInstructions`.
     ProjectInstructions {
         /// The project instruction request's answer.
@@ -282,6 +287,16 @@ pub enum CommandResult {
         defaults_known: bool,
         /// How many rules the request removed (0 for `list`).
         removed: u32,
+    },
+    /// `knowledge`: every place after the request.
+    Knowledge {
+        /// The knowledge base.
+        view: crate::KnowledgeView,
+    },
+    /// A chat's paused tools after the request.
+    PausedTools {
+        /// The chat's paused tools.
+        view: crate::PausedToolsView,
     },
     /// Automatic idle-sleep preference and status.
     KeepAwake {

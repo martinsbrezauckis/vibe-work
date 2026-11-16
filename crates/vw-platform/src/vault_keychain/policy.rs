@@ -19,7 +19,8 @@ pub(super) fn classify(bound: bool, migrated: bool) -> Result<Binding, String> {
 }
 
 // Cache failures, never secrets. Startup may ask multiple times through independent store instances;
-// a refused prompt must not be presented again until restart or explicit removal of that credential.
+// a refused prompt must not be presented again by a read until restart, explicit removal of that credential, or a
+// Save the person makes (`save`).
 pub(super) struct Attempts(std::collections::BTreeMap<(String, String), String>);
 impl Attempts {
     pub(super) const fn new() -> Self {
@@ -38,6 +39,27 @@ impl Attempts {
         let result = call();
         if let Err(error) = &result {
             self.0.insert(key, error.clone());
+        }
+        result
+    }
+    /// A Save the person asked for: always asks the Keychain again (they may have unlocked it, or will answer the
+    /// prompt this time). Its outcome replaces the cached one: a refusal is what reads repeat, a success lets reads
+    /// ask again.
+    pub(super) fn save<T>(
+        &mut self,
+        service: &str,
+        account: &str,
+        call: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let key = (service.to_owned(), account.to_owned());
+        let result = call();
+        match &result {
+            Ok(_) => {
+                self.0.remove(&key);
+            }
+            Err(error) => {
+                self.0.insert(key, error.clone());
+            }
         }
         result
     }

@@ -81,19 +81,6 @@ export function DeveloperSettings(): ReactElement {
           </span>
         </span>
         <div className="set-actions">
-          {canSwitch && debugOn && (
-            <IconButton
-              data-testid="settings.developer-copy-token"
-              data-user-only="true"
-              icon="copy"
-              label="Copy token"
-              title={vaultState === "unlocked" ? "Copy token" : "Unlock the vault to copy"}
-              disabled={busy || vaultState !== "unlocked"}
-              onClick={() => {
-                void core.trackAction(tokenAction(false));
-              }}
-            />
-          )}
           <Switch
             data-testid="settings.developer-settings-switch"
             aria-label="Debug API"
@@ -112,6 +99,19 @@ export function DeveloperSettings(): ReactElement {
             </span>
           </span>
           <div className="set-actions">
+            {debugOn && (
+              <IconButton
+                data-testid="settings.developer-copy-token"
+                data-user-only="true"
+                icon="copy"
+                label="Copy token"
+                title={vaultState === "unlocked" ? "Copy token" : "Unlock the vault to copy"}
+                disabled={busy || vaultState !== "unlocked"}
+                onClick={() => {
+                  void core.trackAction(tokenAction(false));
+                }}
+              />
+            )}
             <Button
               data-testid="settings.developer-settings-tb-btn"
               type="button"

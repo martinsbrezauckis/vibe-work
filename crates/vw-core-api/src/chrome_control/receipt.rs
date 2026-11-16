@@ -2,7 +2,7 @@
 //! Gateway and output-cache boundaries call this before final budgeting; page fields never supply identity.
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 pub(super) fn profile(shared: &Shared, tool: &str, args: &Value) -> Option<String> {
     if matches!(tool, "chrome_session" | "chrome_task") && args["action"] == "open" {
@@ -17,8 +17,7 @@ fn bound_profile(shared: &Shared, id: &str) -> Option<String> {
     let profile = shared
         .chrome_control
         .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .profile_of(id)
         .map(str::to_owned);
     profile.or_else(|| super::profile_bindings::session_profile(&shared.chrome_control, id))
@@ -44,8 +43,7 @@ pub(super) fn stamp(shared: &Shared, tool: &str, args: &Value, result: &mut Valu
     let name = shared
         .chrome_control
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .agent_name(&profile);
     body.insert("profileId".into(), Value::String(profile));
     body.insert("profileName".into(), Value::String(name));

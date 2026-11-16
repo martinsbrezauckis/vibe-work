@@ -49,6 +49,7 @@ export interface MarketState {
   note: string | null;
 }
 
+/** The Tools page state before its first read, on the connectors tab. */
 export const MARKET_INITIAL: MarketState = {
   tab: "connectors",
   view: null,

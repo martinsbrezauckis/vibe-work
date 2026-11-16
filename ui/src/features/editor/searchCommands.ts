@@ -11,4 +11,5 @@ export const SEARCH_COMMANDS = [
   "replaceAll",
   "close",
 ] as const;
+/** One of {@link SEARCH_COMMANDS}. */
 export type SearchCommand = (typeof SEARCH_COMMANDS)[number];

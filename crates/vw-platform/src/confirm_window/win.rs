@@ -9,8 +9,9 @@
 //! ignores a `BM_CLICK` sent from another thread while it is the focused default button (the declining first button
 //! when the dialog opens), so an accessibility press of that button would otherwise do nothing.
 
+use crate::sync::LockRecover;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, S_OK, WPARAM};
 use windows::Win32::UI::Controls::{
@@ -48,7 +49,7 @@ struct Shared {
 impl Shared {
     /// Tells the dialog to end as cancelled (what Escape does). Any thread; a window that is gone is skipped.
     fn cancel_window(&self) {
-        let window = self.window.lock().unwrap_or_else(PoisonError::into_inner);
+        let window = self.window.lock_or_recover();
         if let Some(raw) = *window {
             // SAFETY: the handle is the live task dialog: it is cleared under this lock at TDN_DESTROYED, so it can
             // not be a later window that reused the value. Posting a message is allowed from any thread.
@@ -76,7 +77,7 @@ unsafe extern "system" fn notified(
     // SAFETY: `data` is the `Shared` that `run` keeps alive (an `Arc` clone) for the whole `TaskDialogIndirect` call.
     let shared = unsafe { &*(data as *const Shared) };
     if msg == TDN_CREATED {
-        *shared.window.lock().unwrap_or_else(PoisonError::into_inner) = Some(hwnd.0 as isize);
+        *shared.window.lock_or_recover() = Some(hwnd.0 as isize);
         route_programmatic_presses(hwnd, &shared.labels);
         if shared.closed.load(Ordering::Acquire) {
             shared.cancel_window();
@@ -89,7 +90,7 @@ unsafe extern "system" fn notified(
             }
         }
     } else if msg == TDN_DESTROYED {
-        *shared.window.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *shared.window.lock_or_recover() = None;
     }
     S_OK
 }
@@ -267,7 +268,7 @@ impl Raise {
     /// the window is not (or no longer) there.
     #[must_use]
     pub fn raise(&self) -> bool {
-        let window = self.0.window.lock().unwrap_or_else(PoisonError::into_inner);
+        let window = self.0.window.lock_or_recover();
         let Some(raw) = *window else {
             return false;
         };

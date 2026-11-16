@@ -60,7 +60,11 @@ pub(super) fn refusal(shared: &Shared, browser: Browser, live: bool) -> Option<V
     if !shared.chrome_control.config.available() {
         return None;
     }
-    let view = browser.addon(shared);
+    refusal_for(shared, browser, live, &addon(shared, browser))
+}
+
+/// [`refusal`] for a card state the caller already read.
+fn refusal_for(shared: &Shared, browser: Browser, live: bool, view: &AddonView) -> Option<Value> {
     let blocks = match view.state {
         AddonState::Connected => false,
         AddonState::SwitchedOff | AddonState::UpdateNeeded => true,
@@ -72,7 +76,7 @@ pub(super) fn refusal(shared: &Shared, browser: Browser, live: bool) -> Option<V
     if view.state == AddonState::Connecting && browser.reconnectable(shared) {
         return Some(super::reconnect::retry(browser));
     }
-    let mut answer = super::owner::own(&reason(&view, browser), "OWNER_REQUIRED").into_value();
+    let mut answer = super::owner::own(&reason(view, browser), "OWNER_REQUIRED").into_value();
     answer["structuredContent"]["addon"] = json!({
         "state": view.label, "stateCode": view.state, "instruction": view.instruction,
         "extensionVersion":view.extension_version,
@@ -85,12 +89,22 @@ pub(super) fn refusal(shared: &Shared, browser: Browser, live: bool) -> Option<V
 /// gets the card's words afterwards (`gateway::call_one`). Seen in the Chrome e2e: right after Use my Chrome was
 /// turned off and on, the card said Connecting and refused the chat's calls; with the helper deciding, they ran.
 pub(super) fn gate(shared: &Shared, browser: Browser, live: bool) -> Option<Value> {
-    if shared.chrome_control.config.available()
-        && browser.addon(shared).state == AddonState::Connecting
-    {
+    if !shared.chrome_control.config.available() {
         return None;
     }
-    refusal(shared, browser, live)
+    let view = addon(shared, browser);
+    if view.state == AddonState::Connecting {
+        return None;
+    }
+    refusal_for(shared, browser, live, &view)
+}
+
+/// The browser's card state. Each read rebuilds the Browser settings view (setup receipt, native-host registration
+/// check, helper check), so a check reads it once; tests count the reads.
+fn addon(shared: &Shared, browser: Browser) -> AddonView {
+    #[cfg(test)]
+    tests::VIEWS.with(|reads| reads.set(reads.get() + 1));
+    browser.addon(shared)
 }
 
 /// The connection's current diagnosis after a read, without overwriting an uncertain action receipt.
@@ -115,10 +129,18 @@ pub(super) fn after_call(
     let error = &answer.value()["structuredContent"]["error"];
     let reconnecting = browser.reconnectable(shared)
         && browser.addon(shared).state == super::AddonState::Connecting;
+    let not_ready = request && error["code"] == "SESSION_NOT_READY";
+    if request && !not_ready {
+        shared.chrome_control.owner.not_ready.opened(browser);
+    }
     if answer.value()["structuredContent"]["status"] != "unknown"
         && ((reconnecting && error["code"] == "PROFILE_NOT_CONNECTED")
-            || (request && browser.reconnectable(shared) && error["code"] == "SESSION_NOT_READY"))
+            || (not_ready && browser.reconnectable(shared)))
     {
+        // A connected browser that refuses starts again is not reconnecting: say so, and ask the person.
+        if not_ready && !reconnecting && shared.chrome_control.owner.not_ready.repeated(browser) {
+            return Some(super::reconnect::unconfirmed(browser));
+        }
         return Some(super::reconnect::pending(browser));
     }
     if !error.is_null()
@@ -140,6 +162,48 @@ pub(super) fn after_call(
 mod tests {
     use super::*;
     use crate::chrome_control::{gateway, owner, test_support};
+
+    thread_local! {
+        /// Card-state reads by this module on this test's thread (a current-thread runtime keeps the call here).
+        pub(super) static VIEWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    // PREDICT (before the gate change): one page.read reads the card state three times: once in the gateway's
+    // local check and twice in the pre-send gate (the Connecting test, then `refusal` again). Each read rebuilds the
+    // Browser settings view (receipt, registration check, helper check); the gate needs one, so a read costs two.
+    #[tokio::test]
+    async fn a_page_read_reads_the_card_state_once_per_check() {
+        let core = crate::chrome_control::output_tests::core("availability-view-reads").await;
+        test_support::answering(&core.shared, |tool, args| {
+            if tool == "chrome_status" {
+                crate::chrome_control::output_tests::status(args)
+            } else {
+                crate::chrome_control::output_tests::mcp(
+                    json!({"status":"completed","data":{"textPreview":"quay"}}),
+                )
+            }
+        });
+        VIEWS.with(|reads| reads.set(0));
+        let reply = gateway::call(
+            &core.shared,
+            "s",
+            "chrome_execute",
+            json!({"sessionId":"t","action":"page.read","args":{}}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            reply["vwMcpResult"]["structuredContent"]["error"].is_null(),
+            "{reply}"
+        );
+        assert_eq!(
+            VIEWS.with(std::cell::Cell::get),
+            2,
+            "the local check and the gate"
+        );
+        core.shutdown().await;
+    }
+
     /// Each test names its own core: one folder per name and process, so parallel tests never share files.
     async fn core_with_min_version(name: &str) -> crate::Core {
         crate::offline_core::start_with(name, |config, dir| {

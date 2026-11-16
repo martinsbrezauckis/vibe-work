@@ -462,6 +462,14 @@ impl Host {
         let _ = self.events.publisher().send(HostEvent::OpenUpdates);
     }
 
+    /// Tells the UI the tray host came or went ([`HostEvent::TrayHost`]); sent only when the answer changes.
+    pub fn tray_host(&self, available: bool) {
+        let _ = self
+            .events
+            .publisher()
+            .send(HostEvent::TrayHost { available });
+    }
+
     /// Delivers a native browser context-menu click as metadata only: Save to vault (the core still consumes the
     /// choice and requires native confirmation before storing anything) or, with `point`, Point Vibe at this.
     pub fn browser_context_menu(&self, session_id: String, point: bool) {

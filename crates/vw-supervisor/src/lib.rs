@@ -43,7 +43,10 @@ pub use env::{
     SecretError, SecretProvider, build_env, is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
-pub use launch::{CHILD_STOP_ADAPTER, adapter_python};
+pub use launch::{
+    CHILD_STOP_ADAPTER, GUARD_REFUSAL, adapter_python, guarded_vibe_versions, start_failure,
+    start_failure_message, start_failure_stderr,
+};
 pub use model_requests::{ModelRequestHold, ModelRequests};
 pub use python::server_python;
 pub use supervisor::{OpenedChannel, Supervisor};

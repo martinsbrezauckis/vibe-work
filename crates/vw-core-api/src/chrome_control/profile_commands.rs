@@ -3,7 +3,8 @@
 use super::{ChromeControlRequest, agent_browser::Browser, commands::invalid, profiles};
 use crate::{CommandResult, Core, CoreError, core::Shared};
 use serde_json::json;
-use std::sync::{PoisonError, atomic::Ordering};
+use std::sync::atomic::Ordering;
+use vw_platform::sync::LockRecover;
 
 /// The person-owned profile settings `profile_setting` handles.
 pub(super) fn is_setting(request: &ChromeControlRequest) -> bool {
@@ -84,25 +85,8 @@ impl Core {
             }
         }
         if matches!(request, ChromeControlRequest::RemoveProfile { .. }) {
-            // An older identity of this profile (an extension installed again) is hidden but still approved in the
-            // helper: unpair it with the profile the person removes.
-            let mut unpaired = true;
-            for profile in std::iter::once(id.clone()).chain(profiles::retired_by(chrome, &id)) {
-                let removed = chrome
-                    .owner
-                    .rpc("owner.profileUnpair", json!({"profileId":profile}))
-                    .await;
-                unpaired &= removed.is_some_and(|result| result["unpaired"] == true);
-            }
-            if !unpaired {
-                chrome.owner.approvals.removal_failed(&id);
-                return Err(invalid(
-                    "The profile is off, but its pairing could not be removed. Reconnect the helper and try Remove again.",
-                ));
-            }
-        }
-        if matches!(request, ChromeControlRequest::RemoveProfile { .. }) {
-            finish_removal(&self.shared, &id).await?;
+            let older = unpair_removed(chrome, &id).await?;
+            finish_removal(&self.shared, &id, &older).await?;
         }
         if matches!(request, ChromeControlRequest::ConnectProfile { .. }) {
             let answer = chrome.owner.call("chrome_status", json!({})).await;
@@ -131,8 +115,8 @@ pub(super) fn fence_profile(shared: &Shared, profile: &str) {
     chrome.owner.approvals.cancel_profile(profile);
     crate::ask::tool_calls::cancel_browser_profile(shared, profile);
     let active = {
-        let mut tasks = chrome.tasks.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut work = chrome.work.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut tasks = chrome.tasks.lock_or_recover();
+        let mut work = chrome.work.lock_or_recover();
         let active: Vec<_> = tasks
             .iter()
             .filter(|(id, _)| {
@@ -164,11 +148,7 @@ fn save_setting(
 ) -> Result<bool, CoreError> {
     let chrome = &shared.chrome_control;
     let browser = Browser::from_profile(id);
-    let mut next = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
+    let mut next = chrome.profiles.lock_or_recover().clone();
     let record = next
         .records
         .get_mut(id)
@@ -208,24 +188,46 @@ fn save_setting(
         *next.generations.entry(id.to_owned()).or_default() += 1;
     }
     next.save(chrome.dir()).map_err(|reason| invalid(&reason))?;
-    *chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = next;
+    *chrome.profiles.lock_or_recover() = next;
     Ok(fence)
 }
 
+/// Unpairs a removed profile in the helper. An older identity proven to be the same profile (an extension installed
+/// again) is hidden but still approved there: it is unpaired with it. Returns those older identities.
+async fn unpair_removed(chrome: &super::ChromeControl, id: &str) -> Result<Vec<String>, CoreError> {
+    let older = profiles::retired_by(chrome, id);
+    let mut unpaired = true;
+    for profile in std::iter::once(id.to_owned()).chain(older.iter().cloned()) {
+        let removed = chrome
+            .owner
+            .rpc("owner.profileUnpair", json!({"profileId":profile}))
+            .await;
+        unpaired &= removed.is_some_and(|result| result["unpaired"] == true);
+    }
+    if !unpaired {
+        chrome.owner.approvals.removal_failed(id);
+        return Err(invalid(
+            "The profile is off, but its pairing could not be removed. Reconnect the helper and try Remove again.",
+        ));
+    }
+    Ok(older)
+}
+
 /// Once the trust pin is revoked, permit a fresh native ceremony without re-enabling action authority.
-async fn finish_removal(shared: &Shared, id: &str) -> Result<(), CoreError> {
+/// `older` are the identities unpaired with `id` (`profiles::retired_by`); their records end removed and off as well.
+async fn finish_removal(shared: &Shared, id: &str, older: &[String]) -> Result<(), CoreError> {
     let chrome = &shared.chrome_control;
     {
-        let mut saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut saved = chrome.profiles.lock_or_recover();
         let mut next = saved.clone();
         if let Some(record) = next.records.get_mut(id) {
             record.removed = true;
+        }
+        for other in older {
+            if let Some(record) = next.records.get_mut(other) {
+                record.removed = true;
+                record.enabled = false;
+            }
         }
         next.save(chrome.dir()).map_err(|reason| invalid(&reason))?;
         *saved = next;

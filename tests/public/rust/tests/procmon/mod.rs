@@ -458,6 +458,7 @@ pub fn proc_row(pid: u32, ppid: u32, start: u64, cwd: &str) -> ProcessInfo {
         pid,
         ppid: Some(ppid),
         pgid: Some(pid),
+        sid: None,
         start: Some(StartToken(start)),
         same_user: Some(true),
         name: format!("proc{pid}"),

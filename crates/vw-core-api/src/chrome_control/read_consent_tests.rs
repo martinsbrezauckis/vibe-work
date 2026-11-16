@@ -139,7 +139,12 @@ async fn browser_writes_wait_for_once_session_or_no_before_any_helper_effect() {
                     .1;
                 let caps = call["_approvedCapabilities"].as_array().unwrap();
                 assert!(caps.contains(&json!("page.edit")));
-                assert!(caps.contains(&json!("page.commit")));
+                // Sending authority comes only with a card that names the send (read_consent::names_send).
+                assert_eq!(
+                    caps.contains(&json!("page.commit")),
+                    action == "page.commit",
+                    "{action} {decision}"
+                );
                 assert!(!caps.contains(&json!("raw.execute")));
                 drop(calls);
                 if decision == "approve_for_session" {

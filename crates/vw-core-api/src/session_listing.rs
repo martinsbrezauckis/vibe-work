@@ -7,9 +7,10 @@ use crate::{CommandResult, Core, CoreError, ErrorCode, Origin, SessionRowView};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{
-    Mutex, PoisonError,
+    Mutex,
     atomic::{AtomicU64, Ordering},
 };
+use vw_platform::sync::LockRecover;
 
 /// Empty child listings for inactive, unchanged parent rows, scoped to a server generation.
 /// Parents with children are always refreshed, including when all their children are archived.
@@ -22,7 +23,7 @@ pub(crate) struct ChildListings {
 impl ChildListings {
     fn note(&self, generation: u64, request: u64, parent: Value, empty: bool) {
         let id = parent["id"].as_str().unwrap_or_default().to_owned();
-        let mut cache = self.empty.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = self.empty.lock_or_recover();
         // An older concurrent traversal cannot replace a newer discovery.
         if self.request.load(Ordering::Relaxed) != request
             || cache.get(&id).is_some_and(|(at, _)| *at > generation)
@@ -137,12 +138,7 @@ impl Core {
         // Copy only cached empty discoveries. Never hold this mutex across external calls; overlapping
         // listings may discover independently, while each request reuses its own complete ownership facts.
         let empty = {
-            let mut cache = self
-                .shared
-                .child_listings
-                .empty
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut cache = self.shared.child_listings.empty.lock_or_recover();
             cache.retain(|_, (at, _)| *at >= generation);
             cache.clone()
         };

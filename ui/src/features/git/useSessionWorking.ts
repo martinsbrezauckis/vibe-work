@@ -4,6 +4,7 @@ import { sessionWorking } from "../../state/sessionWorking";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 
+/** True while the chat `sessionId` is sending, compacting or has a turn running; re-renders when that changes. */
 export function useSessionWorking(sessionId: string): boolean {
   const { composer } = useApp();
   const sending = useStore(

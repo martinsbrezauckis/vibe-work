@@ -52,6 +52,8 @@ pub enum AddonState {
     HelperNotRunning,
     /// The device credential was deleted outside the app; remove the old registration before connecting.
     OwnerCredentialMissing,
+    /// This computer has no usable system keyring, so the device credential cannot be read and the helper cannot start.
+    OwnerKeyringUnavailable,
     /// The recorded native registration could not be repaired.
     HelperSetupRequired,
     /// macOS refused filesystem access during this browser's setup.
@@ -139,6 +141,8 @@ pub(crate) struct Facts {
     /// The helper was refused because another helper holds its connection (`Owner::helper_conflict`).
     pub helper_conflict: bool,
     pub credential_missing: bool,
+    /// The device credential cannot be read for lack of a system keyring (`Owner::keyring_unavailable`).
+    pub keyring_unavailable: bool,
     pub paired_once: bool,
     /// The person removed every pairing of this browser in Browser settings. The extension may still be on, so this
     /// is not a lost connection: only a new pairing (Connect) brings the browser back.
@@ -291,6 +295,9 @@ pub(crate) fn state(facts: &Facts, probe: impl FnOnce() -> Probe) -> AddonState 
     if facts.waiting {
         return S::NotPaired;
     }
+    if !facts.helper_up && facts.keyring_unavailable {
+        return S::OwnerKeyringUnavailable;
+    }
     if !facts.helper_up && facts.helper_conflict {
         return S::OtherHelperRunning;
     }
@@ -413,6 +420,11 @@ pub(crate) fn view_for(
             Some(A::Remove),
             "Vibe Work's browser credential is missing. Ask the user to click Remove… in Settings > Browser, then Connect {browser}.",
         ),
+        S::OwnerKeyringUnavailable => (
+            "Not running",
+            Some(A::Connect),
+            vw_vocabulary::texts::CHROME_OWNER_STORE_UNAVAILABLE,
+        ),
         S::OtherHelperRunning => (
             "Another Vibe Work helper is running",
             None,
@@ -463,6 +475,7 @@ pub(crate) fn view_for(
     let step: Option<String> = match state {
         S::AccessBlocked => Some("Check Files & Folders".into()),
         S::OwnerCredentialMissing => Some(browser.words("Remove, then Connect {browser}")),
+        S::OwnerKeyringUnavailable => Some(browser.words(vw_vocabulary::texts::CHROME_OWNER_STORE_UNAVAILABLE)),
         S::ChromeMissing | S::ChromeSandboxed | S::OtherBrowser => {
             Some(browser.words("Install {fullBrowser}"))
         }

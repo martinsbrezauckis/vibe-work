@@ -14,6 +14,8 @@
 //! Invariants:
 //! - Only Vibe Work's own `VIBE_HOME/config.toml` is touched (never `~/.vibe`, same rule as `title_model`).
 //! - Only entries whose address has the forwarder's shape are re-ported; every other entry is left byte-identical.
+//! - An empty inline list (`mcp_servers = []`, as Vibe saves it) becomes the `[[mcp_servers]]` list at the first
+//!   add; a non-empty inline list is refused as `Unsupported`.
 //! - The edit is checked before it is written (the new text parses and has the expected entry), and the file is
 //!   re-read right before the rename: a change in between (Vibe wrote it) is retried once, then refused.
 
@@ -100,7 +102,13 @@ fn edit_file(
 }
 
 fn servers(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables, ConfigEditError> {
-    if !doc.contains_key("mcp_servers") {
+    // Vibe's own writer saves an empty list inline (`mcp_servers = []`): it holds no entry, so it becomes the
+    // table list. A non-empty inline list stays refused (rewriting it would change the person's entries).
+    let empty_inline = doc
+        .get("mcp_servers")
+        .and_then(Item::as_array)
+        .is_some_and(toml_edit::Array::is_empty);
+    if empty_inline || !doc.contains_key("mcp_servers") {
         doc.insert("mcp_servers", Item::ArrayOfTables(ArrayOfTables::new()));
     }
     doc.get_mut("mcp_servers")
@@ -173,3 +181,64 @@ pub(crate) fn rewrite_ports(home: &Path, base: &str) -> Result<usize, ConfigEdit
     })?;
     Ok(changed.load(std::sync::atomic::Ordering::Relaxed))
 }
+
+/// Adds an MCP server brought from another agent's setup (no key: a program with its arguments and environment,
+/// or an address with plain headers).
+///
+/// # Errors
+/// [`ConfigEditError`] (`NameTaken` when a server of that name exists).
+pub(crate) fn add_imported(
+    home: &Path,
+    name: &str,
+    server: &vw_import::mcp::Server,
+) -> Result<(), ConfigEditError> {
+    edit_file(home, |doc| {
+        let list = servers(doc)?;
+        if list
+            .iter()
+            .any(|t| t.get("name").and_then(Item::as_str) == Some(name))
+        {
+            return Err(ConfigEditError::NameTaken);
+        }
+        let pairs = |items: &[(String, String)]| {
+            let mut table = toml_edit::InlineTable::new();
+            for (k, v) in items {
+                table.insert(k, v.as_str().into());
+            }
+            toml_edit::Value::InlineTable(table)
+        };
+        let mut entry = Table::new();
+        entry.insert("name", value(name));
+        match server {
+            vw_import::mcp::Server::Stdio { command, args, env } => {
+                entry.insert("transport", value("stdio"));
+                entry.insert("command", value(command.as_str()));
+                let mut list = toml_edit::Array::new();
+                for arg in args {
+                    list.push(arg.as_str());
+                }
+                entry.insert("args", Item::Value(toml_edit::Value::Array(list)));
+                if !env.is_empty() {
+                    entry.insert("env", Item::Value(pairs(env)));
+                }
+            }
+            vw_import::mcp::Server::Http { url, headers } => {
+                entry.insert("transport", value("streamable-http"));
+                entry.insert("url", value(url.as_str()));
+                if !headers.is_empty() {
+                    let mut auth = Table::new();
+                    auth.insert("type", value("static"));
+                    auth.insert("headers", Item::Value(pairs(headers)));
+                    entry.insert("auth", Item::Table(auth));
+                }
+            }
+        }
+        list.push(entry);
+        Ok(true)
+    })
+    .map(|_| ())
+}
+
+#[cfg(test)]
+#[path = "mcp_keys_config_tests.rs"]
+mod tests;

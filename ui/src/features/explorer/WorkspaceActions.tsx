@@ -17,6 +17,10 @@ import type { Explorer } from "./store";
 import { useStore } from "../../state/createStore";
 import { workspaceModelOf } from "./workspaceModel";
 
+/**
+ * Folder actions without a session: with `init` false, Review all changes, Commit… and Revert all changes… with their
+ * review and confirmation; with `init` true, the Turn on version history dialog.
+ */
 export function WorkspaceActions({
   app,
   explorer,

@@ -9,6 +9,10 @@
  * `MAX_IMAGES`; the result's `mimeType` is the sniffed one.
  */
 import type { ImageItem } from "./message";
+import { toBase64 } from "../../../state/pathText";
+
+/** Base64 of `bytes`, re-exported for the image and document attach paths. */
+export { toBase64 };
 
 /** Largest image accepted, in bytes (the gate uses the same number). */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -28,16 +32,6 @@ export function sniffImage(bytes: Uint8Array): ImageType | null {
   if (starts([0x47, 0x49, 0x46, 0x38])) return "image/gif";
   if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)) return "image/webp";
   return null;
-}
-
-/** Base64 of `bytes` (chunked: `String.fromCharCode(...big)` overflows the stack). */
-export function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }
 
 /** Why an image was not attached, in words for a toast. */

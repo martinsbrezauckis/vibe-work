@@ -190,7 +190,7 @@ export function createSendActions(deps: {
         content.text.trim() !== "" &&
         deps.isTemporary?.(sessionId) !== true
       )
-        void syncPromptHistory(core, composer, content.text);
+        void syncPromptHistory(core, composer, { text: content.text, sessionId });
       return outcome;
     });
     chains.set(

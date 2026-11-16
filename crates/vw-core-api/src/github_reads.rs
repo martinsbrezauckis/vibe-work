@@ -6,90 +6,23 @@
 //! never holds up a chat start, the git check's `enabled()` or Settings for longer than that.
 use crate::{GithubReadsStatus as Status, GithubReadsView as View};
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::process::Child;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 use zeroize::Zeroizing;
+
+#[path = "github_reads_broker.rs"]
+mod broker;
+#[path = "github_reads_gh.rs"]
+mod gh_calls;
+use gh_calls::discover;
 
 /// The longest one `gh auth` call may take; then it is stopped and reported ([`GH_LATE`]).
 const GH_LIMIT: Duration = Duration::from_secs(10);
 /// The Settings reason when gh did not answer within [`GH_LIMIT`].
 const GH_LATE: &str = "gh did not answer within 10 seconds";
-
-/// gh's process while a call waits for it: dropping the call (its command was cancelled, the runtime shut down)
-/// before gh answered stops gh's whole group or job, as the timeout does. On Unix `KillOnDrop` alone kills only
-/// gh's own pid.
-struct GhCall(Box<dyn process_wrap::tokio::ChildWrapper>, bool);
-
-impl Drop for GhCall {
-    fn drop(&mut self) {
-        if !self.1 {
-            let _ = self.0.start_kill();
-        }
-    }
-}
-
-/// Runs `gh <args>` without input. A call still running after [`GH_LIMIT`] is killed and reported as `TimedOut`.
-///
-/// gh runs as the leader of its own process group (Unix) or in a kill-on-close Job Object (Windows), as the
-/// supervisor runs the server, so the timeout, and a call dropped before gh answered, stop every process gh
-/// started that stays in that group or job (a credential helper, a pager), not only gh itself. On Unix a process
-/// that leaves the group on purpose (`setsid`, a daemon) is out of reach of a group kill: only a cgroup or a
-/// subreaper could follow it, and gh's own keyring access starts none (go-keyring: a D-Bus call on Linux, the
-/// `security` tool as a plain child on macOS). gh is the user's own program: this is cleanup, not a containment
-/// boundary.
-async fn gh(program: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    use process_wrap::tokio::KillOnDrop;
-    use tokio::io::AsyncReadExt;
-    let mut command = vw_platform::process_command::hidden_wrap(program, |cmd| {
-        cmd.args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-    });
-    #[cfg(unix)]
-    command.wrap(process_wrap::tokio::ProcessGroup::leader());
-    #[cfg(windows)]
-    command.wrap(process_wrap::tokio::JobObject);
-    command.wrap(KillOnDrop);
-    let mut child = GhCall(command.spawn()?, false);
-    let mut stdout = child.0.stdout().take();
-    let mut stderr = child.0.stderr().take();
-    let read = async {
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let read_out = async {
-            match stdout.as_mut() {
-                Some(pipe) => pipe.read_to_end(&mut out).await.map(|_| ()),
-                None => Ok(()),
-            }
-        };
-        let read_err = async {
-            match stderr.as_mut() {
-                Some(pipe) => pipe.read_to_end(&mut err).await.map(|_| ()),
-                None => Ok(()),
-            }
-        };
-        // gh itself (the leader): its exit and the end of both pipes complete the call.
-        let (status, (), ()) = tokio::try_join!(child.0.inner_mut().wait(), read_out, read_err)?;
-        Ok(std::process::Output {
-            status,
-            stdout: out,
-            stderr: err,
-        })
-    };
-    let answered = tokio::time::timeout(GH_LIMIT, read).await;
-    let Ok(output) = answered else {
-        // Stop the whole tree (group or job), then reap it briefly so no zombie is left behind.
-        let _ = child.0.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(2), child.0.wait()).await;
-        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, GH_LATE));
-    };
-    // gh answered (its exit and the end of both pipes): a process it left running on purpose stays, as before.
-    child.1 = output.is_ok();
-    output
-}
 
 /// What gh answered, asked before the state lock is taken.
 struct Probe {
@@ -122,15 +55,6 @@ pub(crate) struct Reader {
     shim_prepared: std::sync::OnceLock<()>,
     /// A marker refresh is running ([`refresh_if_marked`]); a second agent command does not start another.
     marked_refresh: std::sync::atomic::AtomicBool,
-}
-
-fn discover() -> Option<PathBuf> {
-    std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .map(|p| p.join(if cfg!(windows) { "gh.exe" } else { "gh" }))
-        .find(|p| p.is_absolute() && p.is_file())
-        .and_then(|p| p.canonicalize().ok())
 }
 
 impl Reader {
@@ -177,7 +101,7 @@ impl Reader {
         self.directory.join("endpoint")
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     fn save(&self, enabled: bool) -> std::io::Result<()> {
@@ -191,16 +115,6 @@ impl Reader {
             )?;
         }
         Ok(())
-    }
-
-    fn stop(&self, state: &mut State) {
-        let _ = std::fs::remove_file(self.endpoint_file());
-        if let Some(mut running) = state.running.take() {
-            drop(running.child.stdin.take());
-            let identity = vw_procmon::identity(running.child.id());
-            state.retired.push((running.child, identity));
-        }
-        state.view.enabled = false;
     }
 
     /// Add only non-secret routing information after the ordinary credential filter.
@@ -241,167 +155,6 @@ impl Reader {
             env.push(("VW_GH_LOCAL_EXECUTABLE".into(), gh.as_os_str().to_owned()));
         }
         Ok(())
-    }
-
-    /// `Err(GH_LATE)` when gh did not answer within [`GH_LIMIT`].
-    async fn login(&self) -> Result<(Status, Option<String>), &'static str> {
-        let Some(program) = self.real_gh.as_ref().filter(|p| p.is_file()) else {
-            return Ok((Status::Missing, None));
-        };
-        let output = match gh(
-            program,
-            &[
-                "auth",
-                "status",
-                "--hostname",
-                "github.com",
-                "--json",
-                "hosts",
-            ],
-        )
-        .await
-        {
-            Ok(output) => output,
-            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return Err(GH_LATE),
-            Err(_) => return Ok((Status::SignedOut, None)),
-        };
-        if let Some(status) = structured_login(&output.stdout) {
-            return Ok(status);
-        }
-        // Older gh versions reject --json. Preserve their existing text path without a version probe.
-        let output = if output.status.success() {
-            output
-        } else {
-            match gh(program, &["auth", "status", "--hostname", "github.com"]).await {
-                Ok(output) => output,
-                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return Err(GH_LATE),
-                Err(_) => return Ok((Status::SignedOut, None)),
-            }
-        };
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        if !text.contains("github.com") && output.status.success() {
-            return Ok((Status::Enterprise, None));
-        }
-        if !output.status.success() {
-            return Ok((Status::SignedOut, None));
-        }
-        let login = text
-            .lines()
-            .find(|line| {
-                line.contains("github.com") && (line.contains("account ") || line.contains(" as "))
-            })
-            .and_then(|line| {
-                line.split_once("account ")
-                    .or_else(|| line.split_once(" as "))
-            })
-            .and_then(|(_, rest)| rest.split_whitespace().next())
-            .map(str::to_owned);
-        if login.is_none() {
-            return Ok((Status::SignedOut, None));
-        }
-        Ok((Status::SignedIn, login))
-    }
-
-    async fn token(&self) -> std::io::Result<Zeroizing<String>> {
-        let program = self
-            .real_gh
-            .as_ref()
-            .ok_or_else(|| std::io::Error::other("gh is not installed"))?;
-        let output = gh(program, &["auth", "token", "--hostname", "github.com"]).await?;
-        let bytes = Zeroizing::new(output.stdout);
-        if !output.status.success() {
-            return Err(std::io::Error::other("gh is not signed in"));
-        }
-        let token = Zeroizing::new(String::from_utf8_lossy(&bytes).trim().to_owned());
-        if token.is_empty() || token.contains(['\n', '\r', '\0']) {
-            return Err(std::io::Error::other("gh returned no usable token"));
-        }
-        Ok(token)
-    }
-
-    fn start(&self, token: Zeroizing<String>) -> std::io::Result<Running> {
-        let binary = self
-            .binary
-            .as_ref()
-            .ok_or_else(|| std::io::Error::other("the GitHub reader executable is missing"))?;
-        if self.shim_prepared.get().is_none() {
-            return Err(std::io::Error::other(
-                "the GitHub reader shim is unavailable",
-            ));
-        }
-        let gh = self
-            .real_gh
-            .as_ref()
-            .ok_or_else(|| std::io::Error::other("gh is not installed"))?;
-        let mut command = vw_platform::process_command::hidden(binary);
-        command
-            .arg("gh-broker")
-            .arg(gh)
-            .env_clear()
-            .envs(std::env::vars_os().filter(|(k, _)| {
-                matches!(
-                    k.to_str(),
-                    Some(
-                        "PATH"
-                            | "HOME"
-                            | "USERPROFILE"
-                            | "SYSTEMROOT"
-                            | "WINDIR"
-                            | "TEMP"
-                            | "TMP"
-                            | "TMPDIR"
-                            | "LANG"
-                            | "LC_ALL"
-                            | "HTTP_PROXY"
-                            | "HTTPS_PROXY"
-                            | "NO_PROXY"
-                            | "ALL_PROXY"
-                            | "http_proxy"
-                            | "https_proxy"
-                            | "no_proxy"
-                            | "all_proxy"
-                            | "SSL_CERT_FILE"
-                            | "SSL_CERT_DIR"
-                    )
-                )
-            }))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = command.spawn()?;
-        let result = (|| {
-            let input = child
-                .stdin
-                .as_mut()
-                .ok_or_else(|| std::io::Error::other("broker input unavailable"))?;
-            writeln!(input, "{}", token.as_str())?;
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| std::io::Error::other("broker output unavailable"))?;
-            let mut endpoint = String::new();
-            BufReader::new(stdout).read_line(&mut endpoint)?;
-            if endpoint.trim().is_empty() {
-                return Err(std::io::Error::other("broker did not start"));
-            }
-            vw_platform::replace_private(&self.endpoint_file(), endpoint.trim().as_bytes())
-                .map_err(std::io::Error::other)
-        })();
-        if let Err(error) = result {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-        Ok(Running { child, token })
     }
 
     /// Asks gh (outside the state lock, each call within [`GH_LIMIT`]), then applies its answer under the lock.
@@ -493,51 +246,6 @@ impl Reader {
         }
         let _ = std::fs::remove_file(self.endpoint_file().with_extension("refresh"));
         state.view.clone()
-    }
-
-    fn maintain(&self, state: &mut State, token: std::io::Result<Zeroizing<String>>) {
-        let token = match token {
-            Ok(token) => token,
-            Err(error) => {
-                let was_on = state.running.is_some();
-                self.stop(state);
-                let late = error.kind() == std::io::ErrorKind::TimedOut;
-                state.view.status = if was_on && !late {
-                    Status::LoggedOut
-                } else {
-                    Status::Error
-                };
-                if late {
-                    state.view.reason = Some(GH_LATE.to_owned());
-                } else if !was_on {
-                    state.view.reason = Some("gh did not provide a usable token".to_owned());
-                }
-                return;
-            }
-        };
-        let alive = state
-            .running
-            .as_mut()
-            .is_some_and(|r| r.child.try_wait().ok() == Some(None));
-        if !alive
-            || self.endpoint_file().with_extension("refresh").exists()
-            || state
-                .running
-                .as_ref()
-                .is_none_or(|r| r.token.as_str() != token.as_str())
-        {
-            self.stop(state);
-            if let Ok(running) = self.start(token) {
-                state.running = Some(running);
-            } else {
-                state.view.status = Status::Error;
-                state.view.reason = Some("the reader process could not be started".to_owned());
-            }
-        }
-        state.view.enabled = state.running.is_some();
-        if state.view.enabled {
-            state.view.status = Status::On;
-        }
     }
 
     pub(crate) fn enabled(&self) -> bool {
@@ -675,40 +383,4 @@ pub(crate) async fn refresh_if_marked(shared: &Arc<crate::core::Shared>) {
         }
     });
     let _ = tokio::time::timeout(MARKED_WAIT, task).await;
-}
-
-#[cfg(all(test, target_os = "linux"))]
-#[path = "github_reads_tests.rs"]
-mod tests;
-
-// Schema: cli/cli pkg/cmd/auth/status/status.go (hosts -> accounts, with state, active and login).
-// JSON status can exit zero even when authentication failed, so exit code alone never signs an account in.
-fn structured_login(bytes: &[u8]) -> Option<(Status, Option<String>)> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let hosts = value.get("hosts")?.as_object()?;
-    let Some(accounts) = hosts.get("github.com") else {
-        return Some((
-            if hosts.is_empty() {
-                Status::SignedOut
-            } else {
-                Status::Enterprise
-            },
-            None,
-        ));
-    };
-    let login = accounts
-        .as_array()?
-        .iter()
-        .find(|entry| entry["active"] == true && entry["state"] == "success")
-        .and_then(|entry| entry["login"].as_str())
-        .filter(|login| !login.is_empty())
-        .map(str::to_owned);
-    Some((
-        if login.is_some() {
-            Status::SignedIn
-        } else {
-            Status::SignedOut
-        },
-        login,
-    ))
 }

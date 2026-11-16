@@ -39,6 +39,7 @@ const ALL_COMMANDS = [
   "data-retention",
 ] as const;
 
+/** The names of the `/` commands the app handles itself; anything else typed after `/` is sent as text. */
 export const CLIENT_COMMANDS = ALL_COMMANDS;
 
 /** One GUI command name. */

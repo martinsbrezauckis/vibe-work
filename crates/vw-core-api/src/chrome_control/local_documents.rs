@@ -3,10 +3,8 @@
 use super::agent_browser::Browser;
 use crate::core::Shared;
 use serde_json::{Value, json};
-use std::{
-    collections::VecDeque,
-    sync::{Arc, PoisonError},
-};
+use std::{collections::VecDeque, sync::Arc};
+use vw_platform::sync::LockRecover;
 #[derive(Default)]
 pub(super) struct Documents(VecDeque<Entry>);
 struct Entry {
@@ -63,10 +61,7 @@ pub(super) async fn prepare(
         .map_err(|_| "The preview address is invalid. Open the file again.")?;
     url.set_fragment(source.fragment());
     let url = url.to_string();
-    let mut documents = chrome
-        .local_documents
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut documents = chrome.local_documents.lock_or_recover();
     if generation != chrome.browser_generation(Browser::Firefox)
         || stop != crate::stops::generation(shared, chat)
     {

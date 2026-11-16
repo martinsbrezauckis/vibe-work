@@ -34,6 +34,27 @@ impl PreviewService {
             .collect()
     }
 
+    /// The chats' servers now: every port where a listener attributed to a chat session accepts connections (the
+    /// core's latest process scan). A Local page (the App preview included) reaches them as the chats' servers, also
+    /// a chat's whose preview is not open (`State::chat_ports`); a free leased port or a stopped server's port is not
+    /// among them. `scan` orders the reports (the core's scans in the order they started): an older scan's report
+    /// arriving after a newer one's is dropped. `alive` tells, each time a request is admitted, whether the server
+    /// the scan found on a port still runs: a port whose server exited is not reached, even before the next scan
+    /// (another program may listen there by then).
+    pub fn set_chat_servers(&self, scan: u64, mut ports: Vec<u16>, alive: crate::ServerAlive) {
+        ports.sort_unstable();
+        ports.dedup();
+        let mut state = self.inner.lock();
+        if state
+            .chat_servers
+            .as_ref()
+            .is_some_and(|(seen, _, _)| *seen > scan)
+        {
+            return;
+        }
+        state.chat_servers = Some((scan, ports, alive));
+    }
+
     /// Keeps only the ports of `session_id`'s preview that are still its own (`current`: listeners attributed to the
     /// session and its leased ports, as the core sees them now); a stopped server or an ended lease leaves the
     /// set, and the URL rules of every mounted Local preview follow at once. Never adds a port
@@ -56,6 +77,12 @@ impl PreviewService {
             self.inner.changed(session_id);
         }
         shrunk
+    }
+
+    /// [`Self::refresh_rules`] for the core's port re-check: the App preview's rules name the chats' server ports, so
+    /// a server port another chat leased since the mount reaches the list within one re-check.
+    pub async fn refresh_local_rules(&self) {
+        self.refresh_rules().await;
     }
 
     /// Gives every mounted Local preview the URL rules for the current ports when they changed (an open
@@ -152,11 +179,58 @@ impl PreviewService {
     }
 }
 
+impl PreviewService {
+    /// Reinstalls the rules of every mounted page from the web after the Local Network Access answers changed (their
+    /// content rules list the allowed sites: macOS); a page whose engine cannot apply them is closed, so a withdrawn
+    /// Allow never stays in force. Engines without URL rules answer at once.
+    pub async fn apply_site_answers(&self) {
+        self.apply_rule_inputs().await;
+    }
+
+    /// Reinstalls the rules of every mounted page after an input of the content rules changed (the allowed sites,
+    /// Vibe Work's own ports: `vw_netguard::rules::revision`). Every page holds Vibe Work's own ports, so every
+    /// mount with rules gets its list again (its rule page unchanged); a page whose engine cannot apply them is
+    /// closed, so a new own port or a withdrawn Allow never stays reachable. Engines without URL rules answer at once.
+    pub async fn apply_rule_inputs(&self) {
+        let _one_at_a_time = self.inner.rules_lock.lock().await;
+        let mounted: Vec<(MountId, RulePage)> = {
+            let state = self.inner.lock();
+            state
+                .entries
+                .iter()
+                .filter_map(|(session, e)| {
+                    let mount = e.ready_mount()?;
+                    // By the rules a page holds (a local-network page without a host has web rules too).
+                    let page = mount.rules.as_ref().or(mount.rules_offered.as_ref())?;
+                    Some((
+                        MountId {
+                            session_id: session.clone(),
+                            label: mount.label.clone(),
+                        },
+                        page.clone(),
+                    ))
+                })
+                .collect()
+        };
+        for (id, page) in mounted {
+            let result = self
+                .bounded("rules", self.engine.update_rules(&id, page))
+                .await;
+            if let Err(error) = result {
+                tracing::warn!(%error, session = %id.session_id, "page closed until its address rules apply");
+                let _ = self.unmount(&id.session_id).await;
+                self.inner.changed(&id.session_id);
+            }
+        }
+    }
+}
+
 /// True when `new` would take away a right the confirmed rules `old` give (a port). Nothing confirmed (`None`): the
 /// mount runs without URL rules already (reported by the missing layer), so closing it would protect nothing.
 fn narrows(old: Option<&RulePage>, new: &RulePage) -> bool {
     match (old, new) {
-        (Some(RulePage::Local { ports: before }), RulePage::Local { ports: after }) => {
+        (Some(RulePage::Local { ports: before }), RulePage::Local { ports: after })
+        | (Some(RulePage::App { ports: before }), RulePage::App { ports: after }) => {
             before.iter().any(|p| !after.contains(p))
         }
         (Some(old), new) => old != new,

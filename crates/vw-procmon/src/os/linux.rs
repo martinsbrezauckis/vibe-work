@@ -24,6 +24,7 @@ struct Stat {
     state: char,
     ppid: u32,
     pgid: u32,
+    sid: u32,
     start: u64,
 }
 
@@ -39,6 +40,7 @@ fn read_stat(dir: &Path) -> Option<Stat> {
         state: rest.first()?.chars().next()?,
         ppid: rest.get(1)?.parse().ok()?,
         pgid: rest.get(2)?.parse().ok()?,
+        sid: rest.get(3)?.parse().ok()?,
         start: rest.get(19)?.parse().ok()?,
     })
 }
@@ -70,6 +72,33 @@ pub(crate) fn identity(pid: u32) -> Option<ProcessRef> {
             pid,
             start: StartToken(s.start),
         })
+}
+
+/// See `os::port_held_by`: the port's listening socket inodes from `/proc/net/tcp{,6}`, each found among the
+/// descriptors of `processes` (only theirs are read).
+pub(crate) fn port_held_by(port: u16, processes: &[ProcessRef]) -> bool {
+    let mut listening = HashSet::new();
+    for file in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(text) = fs::read_to_string(file) {
+            listening.extend(
+                parse_proc_net_tcp(&text)
+                    .into_iter()
+                    .filter(|s| s.port == port)
+                    .map(|s| s.inode),
+            );
+        }
+    }
+    if listening.is_empty() || processes.is_empty() {
+        return false;
+    }
+    let mut held = HashSet::new();
+    for process in processes {
+        if let Ok(fds) = fs::read_dir(format!("/proc/{}/fd", process.pid)) {
+            held.extend(fds.flatten().filter_map(|fd| socket_inode(&fd.path())));
+        }
+    }
+    // Identity checked after the descriptors were read: a pid reused meanwhile has another start token.
+    listening.is_subset(&held) && processes.iter().all(|p| is_alive(*p))
 }
 
 fn socket_inode(link: &Path) -> Option<u64> {
@@ -134,6 +163,7 @@ pub(crate) fn snapshot() -> Result<Snapshot, ScanError> {
                 pid,
                 ppid: Some(stat.ppid),
                 pgid: Some(stat.pgid),
+                sid: Some(stat.sid),
                 start: Some(StartToken(stat.start)),
                 same_user,
                 name: stat.name,

@@ -5,6 +5,16 @@ import type { Browser } from "./browser";
 import type { Previews } from "./store";
 import { previewVisibility } from "./visibility";
 
+/** Ctrl+R itself (not Cmd+R) in a field marked `data-keeps-ctrl-r`: the composer's prompt search. */
+function fieldKeepsCtrlR(event: KeyboardEvent, target: EventTarget | null): boolean {
+  return (
+    event.ctrlKey &&
+    !event.metaKey &&
+    target instanceof Element &&
+    target.closest("[data-keeps-ctrl-r]") !== null
+  );
+}
+
 /** Reserves window reload keys, reloading only the open chat's visible page. */
 export function registerReloadKeys(
   app: App,
@@ -49,6 +59,7 @@ export function registerReloadKeys(
       terminalGetsKey: true,
       allowWhileComposing: true,
       stopPropagation: true,
+      ...(keys === "Mod+R" ? { controlGetsKey: fieldKeepsCtrlR } : {}),
       run: index < 2 ? reload : () => {},
     }),
   );

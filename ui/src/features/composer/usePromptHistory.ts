@@ -12,6 +12,10 @@ import {
 import { PromptHistory, syncPromptHistory } from "../../state/promptHistory";
 import { useApp } from "../shell/AppContext";
 
+/**
+ * Prompt history for the composer of `sessionId`: the shared history entries, a refresh from the core, and a key
+ * handler that replaces the draft with an earlier prompt (returns true when it did) with the caret at its end.
+ */
 export function usePromptHistory(
   sessionId: string,
   draft: string,
@@ -43,9 +47,18 @@ export function usePromptHistory(
     }
   }, [draft, box]);
   return {
+    /** The shared history, oldest first (prompt search lists it newest first). */
+    entries,
     refresh,
     edit: () => {
       navigation.edit();
+    },
+    /** Puts a prompt picked in the search into the draft, caret at its end; never sends. */
+    load: (text: string) => {
+      navigation.edit();
+      caret.current = text.length;
+      composer.setDraft(sessionId, text);
+      box.current?.focus();
     },
     key: (event: KeyboardEvent<HTMLTextAreaElement>) => {
       const input = event.currentTarget;

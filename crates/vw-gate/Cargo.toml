@@ -29,6 +29,8 @@ serde = { workspace = true, features = ["derive"] }
 # the workspace (same note as vw-session).
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror = { workspace = true }
+# The image check's base64 decoding (`content.rs`; already in Cargo.lock).
+base64 = { workspace = true }
 # WHATWG URL parsing for the MCP server address rule (`mcp_url.rs`; already in Cargo.lock via vw-platform).
 url = { workspace = true }
 tracing = { workspace = true }

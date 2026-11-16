@@ -98,14 +98,15 @@ pub(crate) fn agent_page_allowed(service: &PreviewService, owner: &str, key: &st
 }
 
 /// Places a targeted tab in the real Browser area only when that area is currently visible.
-/// A hidden panel or modal cannot be brought forward through a stale rectangle.
+/// A hidden panel or modal cannot be brought forward through a stale rectangle. Called for the agent's browser
+/// calls: the selection counts as the agent's, not as the person's choice.
 pub(crate) async fn front_page(
     service: &PreviewService,
     owner: &str,
     key: &str,
 ) -> Result<(), CoreError> {
     service
-        .front_tab_if_visible(owner, key)
+        .front_agent_tab_if_visible(owner, key)
         .await
         .map_err(|e| core_error(&e))?;
     Ok(())

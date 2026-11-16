@@ -6,8 +6,9 @@
 //! Depends on: [`crate::update_flow`] (state), [`crate::update_store`], [`crate::update_verify`].
 //! Called by: [`crate::update_flow`] (after a check), `app` (`commands.rs`), tests.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use crate::update_flow::{
     InstallMode, Offer, Phase, Progress, Stage, UpdateError, UpdateManager, UpdateNotice,
@@ -77,7 +78,7 @@ impl UpdateManager {
             let notes = offer.notes.clone();
             let version = version.clone();
             Arc::new(move |received: u64, total: Option<u64>| {
-                let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut last = last.lock_or_recover();
                 let done = total.is_some_and(|t| received >= t);
                 if !done && last.elapsed() < Duration::from_millis(200) {
                     return;

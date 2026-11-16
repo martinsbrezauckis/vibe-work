@@ -9,18 +9,13 @@
  * answers the route's state afterwards.
  */
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { Git } from "../../state/git";
 import type { App } from "../shell/AppContext";
 import { barShown } from "./model";
 
 const ACTIONS =
   "state, reload, selectRepo, openCommit, setMessage, toggleFile, runHooks, commit, push, openPr, setPr, createPr, refreshCard, sendChecks, sendReview, openBring, bringIn, askVibe or close";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, name: string): string {
   if (typeof value !== "string")
@@ -82,7 +77,7 @@ function state(git: Git, sessionId: string) {
 /** Registers `ui/git`; returns the function that removes it. */
 export function registerGitRoute(app: App, git: Git): () => void {
   return app.uiControl.register("git", async (body) => {
-    const params = asObject(body);
+    const params = bodyObject(body);
     const sessionId =
       params["sessionId"] === undefined
         ? app.shell.store.get().selected

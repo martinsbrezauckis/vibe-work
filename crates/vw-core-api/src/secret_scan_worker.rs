@@ -12,11 +12,12 @@ use crate::{
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::{PoisonError, Weak, atomic::Ordering},
+    sync::{Weak, atomic::Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use vw_keys::VaultScanSecret;
 use vw_logscan::ScanReport;
+use vw_platform::sync::LockRecover;
 
 #[path = "secret_scan_policy.rs"]
 mod policy;
@@ -68,8 +69,7 @@ pub(crate) fn run(
     initial
         .secret_scan
         .view
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .findings
         .clone_from(&worker.cache.findings);
     secret_scan::publish(&initial);
@@ -133,12 +133,7 @@ fn inputs(shared: &Shared) -> Result<Vec<VaultScanSecret>, CoreError> {
         }
     })?;
     let (secrets, skipped) = filter_inputs(secrets);
-    shared
-        .secret_scan
-        .view
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .skipped_secrets = skipped;
+    shared.secret_scan.view.lock_or_recover().skipped_secrets = skipped;
     Ok(secrets)
 }
 
@@ -306,16 +301,8 @@ impl Worker {
     }
 
     fn checked(shared: &Shared, failed: u32, errors: Vec<PathBuf>) {
-        *shared
-            .secret_scan
-            .errors
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = errors;
-        let mut view = shared
-            .secret_scan
-            .view
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        *shared.secret_scan.errors.lock_or_recover() = errors;
+        let mut view = shared.secret_scan.view.lock_or_recover();
         view.checked_ms = Some(
             i64::try_from(
                 SystemTime::now()
@@ -425,11 +412,7 @@ impl Worker {
                 self.cache.findings.push(finding);
             }
         }
-        let mut view = shared
-            .secret_scan
-            .view
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut view = shared.secret_scan.view.lock_or_recover();
         view.chats = count(chats.len());
         view.places = chats.values().map(|chat| chat.places).sum();
         view.findings.clone_from(&self.cache.findings);

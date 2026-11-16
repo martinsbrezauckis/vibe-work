@@ -255,6 +255,10 @@ fn disconnected_mixed_and_partial_profiles_never_imply_support() {
     assert!(!super::capabilities::supports(&partial, "clipboard.read"));
 }
 
+/// The agent-facing schema states the page.read defaults the gateway really sends, and every other schema field
+/// equals the helper's. The helper's own page.read defaults are larger; the app always sends its own, so the
+/// comparison applies the app's values to the helper side. check-all sets `VW_CHROME_CATALOG` to the released helper.
+/// PREDICT: without the app's values on the helper side, page.read differs on the limit and maxBytes defaults.
 #[test]
 fn app_action_schemas_match_the_helper_catalog() {
     let catalog: serde_json::Value =
@@ -262,6 +266,20 @@ fn app_action_schemas_match_the_helper_catalog() {
     assert_eq!(
         catalog["actions"].as_array().unwrap().len(),
         ACTIONS.len() + 5
+    );
+    let read = catalog["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "page.read")
+        .unwrap();
+    assert_eq!(
+        read["inputSchema"]["properties"]["limit"]["default"],
+        json!(super::output::READ_DEFAULT_LIMIT)
+    );
+    assert_eq!(
+        read["inputSchema"]["properties"]["maxBytes"]["default"],
+        json!(super::output::READ_DEFAULT_MAX_BYTES)
     );
     if let Ok(path) = std::env::var("VW_CHROME_CATALOG") {
         let helper: serde_json::Value =
@@ -282,6 +300,11 @@ fn app_action_schemas_match_the_helper_catalog() {
             let mut schema = source["inputSchema"].clone();
             if row["id"] == "page.find" {
                 schema["properties"]["limit"]["default"] = json!(5);
+            }
+            if row["id"] == "page.read" {
+                schema["properties"]["limit"]["default"] = json!(super::output::READ_DEFAULT_LIMIT);
+                schema["properties"]["maxBytes"]["default"] =
+                    json!(super::output::READ_DEFAULT_MAX_BYTES);
             }
             let mut expected = row["inputSchema"].clone();
             // Schema overrides must not invent arguments when the pinned helper still has the old contract.
@@ -342,4 +365,26 @@ fn rich_clipboard_read_and_write_are_full_in_the_shared_policy() {
             "{action}"
         );
     }
+}
+
+// The built-in browser's download wait and the agent's catalog (pinned to the helper's source catalog above) agree.
+#[test]
+fn the_built_in_download_wait_matches_the_catalog() {
+    let catalog: serde_json::Value =
+        serde_json::from_str(include_str!("action_catalog.json")).unwrap();
+    let row = catalog["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "files.wait_download")
+        .unwrap();
+    let timeout = &row["inputSchema"]["properties"]["timeoutMs"];
+    assert_eq!(timeout["minimum"], vw_browser::downloads::WAIT_MIN_MS);
+    assert_eq!(timeout["maximum"], vw_browser::downloads::WAIT_MAX_MS);
+    let default = format!("default {}", vw_browser::downloads::WAIT_DEFAULT_MS);
+    assert!(
+        row["description"].as_str().unwrap().contains(&default),
+        "{}",
+        row["description"]
+    );
 }

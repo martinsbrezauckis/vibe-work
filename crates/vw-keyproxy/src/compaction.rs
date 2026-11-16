@@ -3,6 +3,12 @@
 //! Vibe also uses `secondary_call` for vision. Compaction requests (streamed since Vibe 3.0.3) end in a
 //! text-only user summary request after the historical images; vision requests carry the image in their
 //! last user message. The built-in prompt also identifies image-free compaction for its deadline.
+//! A request counts as compaction when `metadata.call_type` is `secondary_call`, its last message is user text,
+//! and it either carries the built-in compaction or cut-off prompt or an earlier message has an inline
+//! (`data:image/`) image; so a secondary call with an earlier inline image and a final user text is treated as
+//! compaction too. In a compaction request every inline image of a user message is replaced by the fixed text
+//! "[Image omitted from compaction input; its original message still contains it.]" ("original message" = Vibe's
+//! stored history, which the proxy never changes); linked (`http(s)`) images and every other request are sent as is.
 
 use serde_json::{Value, json};
 

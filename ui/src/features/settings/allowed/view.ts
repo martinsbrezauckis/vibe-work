@@ -30,7 +30,9 @@ export interface AllowedUi {
   shown: Readonly<Record<string, number>>;
 }
 
+/** Rows a list shows before its first "Show more"; also the entry count up to which groups start open. */
 export const FIRST_ROWS = 10;
+/** Rows each "Show more" adds to a list. */
 export const MORE_ROWS = 20;
 
 /** The empty choices. */
@@ -106,6 +108,7 @@ const VAULT_PARTS: readonly { part: VaultPart; title: string }[] = [
 
 const DEFAULTS_UNKNOWN =
   "Vibe Work could not read Vibe's own default list, so this list may also show rules that Vibe has by default.";
+/** Line shown in the Vault group while the vault is locked. */
 export const VAULT_LOCKED_PAGE = "The vault is locked, so its items are not shown or counted.";
 
 /** Find is on. */

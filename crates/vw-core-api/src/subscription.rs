@@ -127,6 +127,7 @@ impl CoreSubscription {
                 crate::video_projection::apply(&shared, &mut snapshot.state);
                 crate::edit_preview::project(&shared, &mut snapshot.state);
                 crate::chrome_control::approval::project(&shared, &mut snapshot.state);
+                crate::paused_tools_gate::mark_held_calls(&shared, &mut snapshot.state);
                 shared
                     .protected_changes
                     .overlay(&snapshot.session_id, &mut snapshot.state);

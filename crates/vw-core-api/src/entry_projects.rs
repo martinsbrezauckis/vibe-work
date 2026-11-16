@@ -5,7 +5,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 
@@ -23,9 +24,7 @@ pub(crate) struct EntryProjects {
 
 impl EntryProjects {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Captured>> {
-        self.identities
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.identities.lock_or_recover()
     }
 
     pub(crate) fn get(&self, id: &str) -> Captured {
@@ -41,10 +40,7 @@ impl EntryProjects {
 
     pub(crate) fn forget(&self, id: &str) {
         self.lock().remove(id);
-        self.copies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id);
+        self.copies.lock_or_recover().remove(id);
     }
 
     pub(crate) fn folders(&self) -> Vec<PathBuf> {
@@ -137,8 +133,7 @@ impl Opening {
             shared
                 .entry_projects
                 .copies
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .insert(id.to_owned(), self);
             return;
         }
@@ -152,12 +147,7 @@ impl Opening {
 
 /// Finalizes a Vibe-created copy once, while the authorized start is still waiting for its folder.
 pub(crate) async fn finish_copy(shared: &Shared, id: &str, path: Option<&Path>) {
-    let opening = shared
-        .entry_projects
-        .copies
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .remove(id);
+    let opening = shared.entry_projects.copies.lock_or_recover().remove(id);
     let Some(opening) = opening else { return };
     let path = path.map(Path::to_path_buf);
     let cwd = shared.names.cwd_of(&shared.store, id);

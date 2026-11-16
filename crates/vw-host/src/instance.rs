@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +47,14 @@ pub struct InstanceGuard {
     stop: Arc<AtomicBool>,
     wake: SocketAddr,
     listener: Option<std::thread::JoinHandle<()>>,
+}
+
+impl InstanceGuard {
+    /// The port of this instance's local listener (a port of Vibe Work itself: never reachable from a browser page).
+    #[must_use]
+    pub fn port(&self) -> u16 {
+        self.wake.port()
+    }
 }
 
 impl Drop for InstanceGuard {
@@ -114,7 +122,7 @@ pub fn start(
     }
     // A stale endpoint from a crashed owner must not answer a second launch while this one starts.
     let _ = std::fs::remove_file(&endpoint_path);
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+    let (listener, own) = vw_netguard::listeners::bind_own()?;
     let wake = listener.local_addr()?;
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
@@ -137,6 +145,8 @@ pub fn start(
     let thread = std::thread::Builder::new()
         .name("window-focus".to_owned())
         .spawn(move || {
+            // The port stays one of Vibe Work's own (refused for every browser page) until the listener closes.
+            let _own = own;
             while !stopping.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {

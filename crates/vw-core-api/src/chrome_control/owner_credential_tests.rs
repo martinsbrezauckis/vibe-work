@@ -3,11 +3,22 @@ use super::*;
 use std::sync::{Arc, atomic::Ordering};
 
 pub(super) async fn memory_keys(root: &std::path::Path) -> Arc<vw_keys::KeyService> {
+    keys_with(root, vw_vault::remember::MemoryDeviceStore::default()).await
+}
+
+pub(super) async fn keys_without_keyring(root: &std::path::Path) -> Arc<vw_keys::KeyService> {
+    keys_with(root, vw_vault::remember::MemoryDeviceStore::temporary()).await
+}
+
+async fn keys_with(
+    root: &std::path::Path,
+    store: vw_vault::remember::MemoryDeviceStore,
+) -> Arc<vw_keys::KeyService> {
     vw_keys::KeyService::start(vw_keys::KeyServiceConfig {
         managed_vault: None,
         vault: vw_vault::VaultConfig {
             location: vw_vault::location::VaultLocation::explicit(root.join("vault")),
-            device_store: Arc::new(vw_vault::remember::MemoryDeviceStore::default()),
+            device_store: Arc::new(store),
             kdf: vw_vault::KdfParams::default(),
             device_name: "test".into(),
         },
@@ -353,6 +364,52 @@ async fn reconnecting_removed_chrome_keeps_edges_owner_key_and_registration() {
             .await
             .unwrap()
             .is_some_and(|key| key.expose() == original.expose())
+    );
+    core.shutdown().await;
+    keys.shutdown().await;
+}
+
+/// PREDICT: on a computer without a system keyring the app's fallback store keeps nothing, so reading the owner
+/// identity found none and both cards said "Browser credential missing / Remove, then Connect", whose Remove and
+/// Connect only led back to the same text. Now the read names the keyring and its next step, and the card does not
+/// claim a missing credential.
+#[tokio::test]
+async fn no_system_keyring_is_named_not_reported_as_a_missing_credential() {
+    let root = std::env::var_os("VW_TEST_ROOT")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join(format!("browser-owner-no-keyring-{}", std::process::id()));
+    let keys = keys_with(&root, vw_vault::remember::MemoryDeviceStore::temporary()).await;
+    let core = crate::offline_core::start_with("browser-owner-no-keyring", |config, dir| {
+        config.keys = Some(keys.clone());
+        config.chrome_control.user_home = Some(dir.join("home"));
+        config.chrome_control.macos = Some(false);
+        std::fs::create_dir_all(dir.join("package/bin")).unwrap();
+        std::fs::write(
+            dir.join("package/bin").join(setup::helper_name()),
+            b"helper",
+        )
+        .unwrap();
+        config.chrome_control.package = Some(dir.join("package"));
+    })
+    .await;
+    test_support::answering(&core.shared, |_, _| json!({}));
+    let chrome = &core.shared.chrome_control;
+    chrome.owner.stop().await;
+    std::fs::write(
+        chrome.dir().unwrap().join("setup.json"),
+        br#"{"files":[],"browsers":["Google Chrome"],"selectedBrowsers":["Google Chrome"],"userData":[]}"#,
+    )
+    .unwrap();
+    let refused = owner::start(&core.shared).await.unwrap_err();
+    assert_eq!(
+        refused,
+        vw_vocabulary::texts::CHROME_OWNER_STORE_UNAVAILABLE,
+        "the reason names the system keyring and the next step"
+    );
+    assert!(!chrome.owner.credential_missing.load(Ordering::SeqCst));
+    assert_ne!(
+        core.chrome_view().setup.addon.unwrap().state,
+        AddonState::OwnerCredentialMissing
     );
     core.shutdown().await;
     keys.shutdown().await;

@@ -18,6 +18,30 @@ struct Input {
     name: String,
     #[serde(default)]
     tab: Option<String>,
+    /// Checked by [`check_source`] before anything else; only the built-in browser reaches the capture.
+    #[serde(rename = "target", default)]
+    _target: Option<String>,
+}
+/// Saving reads the value inside Vibe Work's own browser only. A ref from the user's own browsers is refused with
+/// the next step instead of a generic failure; no value is read for it.
+pub(super) fn check_source(args: &Value) -> Result<(), String> {
+    use crate::chrome_control::agent_browser::Browser;
+    let browser = match args.get("target").and_then(Value::as_str) {
+        None | Some("builtin") => return Ok(()),
+        Some("chrome") => Browser::Chrome,
+        Some("edge") => Browser::Edge,
+        Some("safari") => Browser::Safari,
+        Some("firefox") => Browser::Firefox,
+        Some(_) => {
+            return Err(
+                "The target is invalid; use builtin, chrome, edge, safari or firefox.".into(),
+            );
+        }
+    };
+    Err(format!(
+        "Not run: saving from {} is not available yet. Ask the user to open the page in Vibe Work's browser panel, or save it from a command's output.",
+        browser.name()
+    ))
 }
 pub(super) fn vault_error(shared: &Shared, error: &vw_keys::KeyError) -> String {
     if vw_keys::is_locked(error) {
@@ -75,6 +99,7 @@ pub(super) async fn prepare(
     owner: &str,
     args: &Value,
 ) -> Result<Execution, String> {
+    check_source(args)?;
     crate::agent_access::check_for(shared, vault_save::KIND, owner)?;
     let input: Input = serde_json::from_value(args.clone()).map_err(
         |_| "A vault capture needs ref and name, with optional tab; point at a browser_read ref.",

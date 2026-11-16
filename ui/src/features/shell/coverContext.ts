@@ -6,6 +6,7 @@
  */
 import { createContext, useContext } from "react";
 
+/** True while a page covers the work view; provided by Content. */
 export const CoveredByPage = createContext(false);
 
 /** True while a page covers the work view. */

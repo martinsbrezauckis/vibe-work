@@ -223,7 +223,7 @@ export function SessionList() {
                   >
                     <ActivityMark kind="input" />
                     <span className="t">{s.title}</span>
-                    <span className="p">{s.project}</span>
+                    {s.project !== s.title && <span className="p">{s.project}</span>}
                   </button>
                 ))}
               </div>

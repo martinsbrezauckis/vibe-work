@@ -48,7 +48,16 @@ pub(super) async fn for_run(
     // The launcher can add its own tool folders even when usr/bin/bash.exe, named in the
     // secret request, does not. Ask the same resolver/launcher as Vibe; do not guess folders.
     command
-        .args(["-I", "-B", "-c", include_str!("secret_shell_path.py")])
+        .args([
+            "-I",
+            "-B",
+            "-c",
+            concat!(
+                include_str!("../../../vw-supervisor/src/vibe_guard_versions.py"),
+                "\n",
+                include_str!("secret_shell_path.py")
+            ),
+        ])
         .current_dir(cwd)
         .env_clear()
         .envs(tools.config.process_env.clone())

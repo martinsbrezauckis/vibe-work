@@ -4,7 +4,7 @@ use super::agent_browser::Browser;
 use crate::core::Shared;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 /// Bounded names from the helper's last page observations, keyed by chat, session and opaque ref.
 #[derive(Default)]
@@ -88,11 +88,7 @@ pub(super) fn observe(shared: &Shared, chat: &str, request: &Value, result: &Val
     if body["status"] != "completed" || body["untrustedPageContent"]["sessionId"] != session {
         return;
     }
-    let mut refs = shared
-        .chrome_control
-        .click_refs
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut refs = shared.chrome_control.click_refs.lock_or_recover();
     collect_refs(&mut refs, chat, session, &body["untrustedPageContent"]);
 }
 
@@ -144,6 +140,7 @@ pub(crate) fn project(shared: &Shared, value: &mut Value) {
                         | "page.right_click"
                         | "page.middle_click"
                         | "page.commit"
+                        | "page.drag"
                 )
             )
             && let (Some(chat), Some(session), Some(reference)) = (
@@ -157,8 +154,7 @@ pub(crate) fn project(shared: &Shared, value: &mut Value) {
             let target = shared
                 .chrome_control
                 .click_refs
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .find(chat, session, reference)
                 .map(|(role, name)| (role.to_owned(), name.to_owned()));
             if let Some((role, name)) = target {

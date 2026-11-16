@@ -13,7 +13,8 @@
 //! - The change-forwarding task is owned by [`PreviewHub`] and aborted when the hub drops or the core shuts down.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
+use vw_platform::sync::LockRecover;
 
 use tokio::task::JoinHandle;
 use vw_preview::{
@@ -74,14 +75,23 @@ pub(crate) struct PreviewHub {
     task: Mutex<Option<JoinHandle<()>>>,
     /// Re-checks the previews' ports.
     ports_task: Mutex<Option<JoinHandle<()>>>,
+    /// Installs the mounted pages' content rules again when their inputs change.
+    rules_task: Mutex<Option<JoinHandle<()>>>,
+    /// Chat -> the id of the turn in which the agent last used its browser (`browser_input_block`).
+    pub(crate) agent_turns: Mutex<std::collections::HashMap<String, String>>,
     #[cfg(test)]
     maintenance_counts: maintenance_tests::Counts,
 }
 
 impl Drop for PreviewHub {
     fn drop(&mut self) {
-        for slot in [&self.task, &self.browser_task, &self.ports_task] {
-            if let Some(task) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        for slot in [
+            &self.task,
+            &self.browser_task,
+            &self.ports_task,
+            &self.rules_task,
+        ] {
+            if let Some(task) = slot.lock_or_recover().take() {
                 task.abort();
             }
         }
@@ -108,6 +118,8 @@ pub(crate) fn open(setup: Option<PreviewSetup>) -> Option<Arc<PreviewHub>> {
         pending_wipes,
         task: Mutex::new(None),
         ports_task: Mutex::new(None),
+        rules_task: Mutex::new(None),
+        agent_turns: Mutex::new(std::collections::HashMap::new()),
         #[cfg(test)]
         maintenance_counts: maintenance_tests::Counts::default(),
     }))
@@ -173,6 +185,7 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
         hub.service.set_network_guard(guard.clone());
         guard.set_context(Arc::new(crate::browser_guard::GuardContext::new(shared)));
         crate::browser_guard::register_internal_ports(shared, guard);
+        guard.publish_internal_ports();
         if let Some(keys) = &shared.config.keys {
             keys.register_browser_guard(guard.clone());
         } else {
@@ -204,7 +217,7 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
             shared.emit(CoreEvent::PreviewChanged { session_id });
         }
     });
-    *hub.task.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *hub.task.lock_or_recover() = Some(task);
     // The agent strip and action log follow `browserChanged`.
     let mut browser_changes = hub.browser.sessions().changes();
     let weak: Weak<Shared> = Arc::downgrade(shared);
@@ -230,12 +243,21 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
             shared.emit(CoreEvent::BrowserChanged { session_id: owner });
         }
     });
-    *hub.browser_task
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
-    *hub.ports_task
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(maintenance::start(shared));
+    *hub.browser_task.lock_or_recover() = Some(task);
+    // The built-in browser's input block follows the same browser changes and the person's pauses.
+    crate::browser_input_block::start(shared);
+    // A press the block swallowed tells the window (its own focus did not move); the listener ends with the core.
+    let weak = Arc::downgrade(shared);
+    vw_preview::person_block::on_refused(move |owner| {
+        weak.upgrade().is_some_and(|shared| {
+            shared.emit(CoreEvent::BlockedPagePress {
+                session_id: owner.to_owned(),
+            });
+            true
+        })
+    });
+    *hub.ports_task.lock_or_recover() = Some(maintenance::start(shared));
+    *hub.rules_task.lock_or_recover() = Some(crate::browser_guard::watch_rule_inputs(shared));
 }
 
 /// How often the previews' ports are re-checked.
@@ -279,8 +301,13 @@ pub(crate) async fn session_ended(shared: &Shared, session_id: &str, deleted: bo
 /// Closes every preview (quit) and stops the forwarder.
 pub(crate) async fn shutdown(shared: &Shared) {
     if let Some(hub) = &shared.preview {
-        for slot in [&hub.task, &hub.browser_task, &hub.ports_task] {
-            if let Some(task) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        for slot in [
+            &hub.task,
+            &hub.browser_task,
+            &hub.ports_task,
+            &hub.rules_task,
+        ] {
+            if let Some(task) = slot.lock_or_recover().take() {
                 task.abort();
             }
         }

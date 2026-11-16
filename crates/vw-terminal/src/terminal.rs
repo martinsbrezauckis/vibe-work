@@ -25,9 +25,10 @@ use std::io::{ErrorKind, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, channel, sync_channel};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use vw_platform::sync::LockRecover;
 
 use portable_pty::{ChildKiller, MasterPty};
 use tracing::{debug, warn};
@@ -50,7 +51,7 @@ const READER_DRAIN: Duration = Duration::from_secs(2);
 const RESTART_MARKER: &[u8] = b"\r\n\x1b[2m[restarted]\x1b[0m\r\n";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.lock_or_recover()
 }
 
 /// The exit of one shell, set once by its waiter.

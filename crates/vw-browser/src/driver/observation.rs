@@ -73,6 +73,7 @@ impl Browser {
         #[cfg(feature = "e2e-script")]
         self.before_image().await;
         let shot = if screenshot {
+            self.admit_capture(session_id).await?;
             Some(
                 self.service
                     .screenshot(session_id)
@@ -87,6 +88,7 @@ impl Browser {
         bound.check_read_mount()?;
         if screenshot {
             self.ref_mount(session_id).map_err(|error| error.text)?;
+            self.admit_capture(session_id).await?;
         }
         // Labels go on the agent's copy only, after the image is known to show the observed page.
         let shot = shot

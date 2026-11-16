@@ -14,8 +14,9 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.11 adds browser profiles named as in Chrome and Edge, one-time codes on web pages, protected fields in more
-languages and custom connectors with sign-in on Windows.
+Version 0.1.12 adds a knowledge base of your own folders, drives and Mistral libraries, vault saves by the agent,
+a clear frame with Pause while the agent controls your browser, prompt search, settings search, setup import from
+other coding agents and pull requests with their CI status.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -72,8 +73,10 @@ Questions and reports: `CONTRIBUTING.md`.
   or Your Edge (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in
   your own Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows,
   with Stop in the extension and on the page. In Firefox the agent works in a window Vibe Work opens with its own
-  empty profile each time: Settings > Browser > Your Firefox > Open window (on Linux, Mozilla's Firefox from the .deb
-  package or the download, not the Snap package). Local pages open like in a normal browser.
+  empty profile each time: Settings > Browser > Your Firefox > Open window (on Linux also Ubuntu's Snap Firefox).
+  Local pages open like in a normal browser. To share from your own
+  Firefox (on Linux Mozilla's Firefox, not yet Ubuntu's Snap Firefox), choose Connect next to Ask Vibe Work and add the Vibe Work add-on when Firefox asks; then right-click a
+  page, link, image or selected text and choose Ask Vibe Work. The agent never reads your own Firefox tabs.
   Manual:
   [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).
 - **Capture from a page.** A page's design system, structure, assets, text, full-page pictures and before/after

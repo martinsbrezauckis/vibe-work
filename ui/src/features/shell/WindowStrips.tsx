@@ -6,6 +6,7 @@ import { useLayout, useSessionSummaries, useShellState } from "./hooks";
 import { formatKeys } from "../../state/shortcuts";
 import { TEXT } from "../../vocabulary";
 
+/** Folded chat list: a button that shows the list again and one button per chat that is not archived. */
 export function SessionsStrip() {
   const app = useApp();
   const layout = useLayout();
@@ -56,6 +57,7 @@ export function SessionsStrip() {
     </aside>
   );
 }
+/** Folded chat: a Show chat button with the selected chat's title and activity state. */
 export function ChatStrip() {
   const app = useApp();
   const selected = useShellState((s) => s.selected);
@@ -74,6 +76,7 @@ export function ChatStrip() {
     </aside>
   );
 }
+/** Button that folds the chat into its strip; disabled while the side panel is closed. */
 export function FoldChatButton() {
   const app = useApp();
   const layout = useLayout();

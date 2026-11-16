@@ -2,7 +2,8 @@
 //! Uses the current turn/stop generation and never replays a browser action or an unknown outcome.
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 pub(super) async fn fresh(
     shared: &Arc<Shared>,
@@ -19,12 +20,11 @@ pub(super) async fn fresh(
             return Ok(answer);
         }
         let old = body["sessionId"].as_str().is_some_and(|id| {
-            shared
-                .chrome_control
-                .work
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .stopped_before(id, session, pending.turn.as_deref())
+            shared.chrome_control.work.lock_or_recover().stopped_before(
+                id,
+                session,
+                pending.turn.as_deref(),
+            )
         });
         let stopped = body["state"].as_str().is_some_and(|state| {
             state.eq_ignore_ascii_case("stopped") || state.eq_ignore_ascii_case("stopping")

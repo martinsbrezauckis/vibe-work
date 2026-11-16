@@ -5,6 +5,10 @@ import { useStore } from "../../state/createStore";
 import { TEXT_SIZES } from "../../state/accessibility";
 import { useApp } from "../shell/AppContext";
 
+/**
+ * Settings > Accessibility: permission prompt sound, reading and voice answers, screen reader reply announcements,
+ * text size, contrast and motion. Each change goes straight to the accessibility store.
+ */
 export function AccessibilitySettings() {
   const { accessibility } = useApp();
   const s = useStore(accessibility.store, (state) => state);

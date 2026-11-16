@@ -5,7 +5,8 @@
  * run with telemetry on, so telemetry off also hides rollout features such as smart
  * approve and extra models. The screen says that in plain words; this module computes the facts it
  * shows.
- * Depends on: coreStore, modelChoice (`sessionForPick`), protocol/core types. Called by:
+ * Depends on: coreStore, modelChoice (`sessionForPick`), vibeSettings (`readSettingsFields`), protocol/core types.
+ * Called by:
  * features/settings/PrivacySettings, settingsRoutes.
  * Invariants:
  * - Turning a switch OFF is sent as is. Turning it ON (data leaves the machine again) needs the native
@@ -17,6 +18,7 @@
 import type { JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
+import { readSettingsFields } from "./vibeSettings";
 
 /** Layers that shadow what this screen writes. */
 const SHADOWING = new Set(["environment", "admin", "overrides"]);
@@ -76,16 +78,13 @@ export function parsePrivacy(result: JsonValue): PrivacyView | null {
   };
 }
 
-/** Reads the switches through `sessionId`; rejects with a plain-words `Error`. */
-export async function readPrivacy(core: CoreController, sessionId: string): Promise<PrivacyView> {
+/** Reads the switches through `sessionId` (`null`: no chat at all); rejects with a plain-words `Error`. */
+export async function readPrivacy(
+  core: CoreController,
+  sessionId: string | null,
+): Promise<PrivacyView> {
   try {
-    const result = await core.run({
-      type: "call",
-      method: "config/fields/read",
-      params: { sessionId },
-    });
-    if (result.type !== "reply") throw new Error("unexpected answer");
-    const parsed = parsePrivacy(result.result);
+    const parsed = parsePrivacy(await readSettingsFields(core, sessionId));
     if (parsed === null) throw new Error("Vibe's config did not list the privacy switches.");
     return parsed;
   } catch (thrown) {

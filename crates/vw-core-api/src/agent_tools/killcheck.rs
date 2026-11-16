@@ -114,6 +114,7 @@ pub(crate) async fn guard(
         if matches!(asked, Asked::Hook { .. })
             || reason.starts_with("Not done:")
             || reason == vw_ask::DECLINED
+            || reason == vw_agent_tools::hook::PROCESS_DECLINED
         {
             reason
         } else {
@@ -207,7 +208,16 @@ async fn hold(
     if let Asked::Hook { call_id, .. } = asked {
         request.params["toolCallId"] = Value::String(call_id.into());
     }
-    crate::ask::guards::wait(shared, request, "this process-stop command").await
+    // The user's No names what was declined (the agent reads it), never another way to stop the process.
+    crate::ask::guards::wait(shared, request, "this process-stop command")
+        .await
+        .map_err(|reason| {
+            if reason == vw_ask::DECLINED {
+                vw_agent_tools::hook::PROCESS_DECLINED.to_owned()
+            } else {
+                reason
+            }
+        })
 }
 
 fn hold_summary(title: &str, command: &str, why: &[String]) -> String {
@@ -343,8 +353,56 @@ impl Judge<'_> {
                 );
                 self.object(text);
             }
-            None => self.object(format!("pid {pid} ({name}) belongs to another app")),
+            None => {
+                // Several chats share the evidence (one folder, no registered ancestor): all of them are
+                // named; "another app" is only for a process no chat and not Vibe Work itself started.
+                // This session first: its own agent is the likeliest starter of what it now wants to stop.
+                let candidates = match &owner {
+                    vw_procmon::Owner::OtherApp { candidates, .. } => {
+                        let mut ordered: Vec<&String> = candidates.iter().collect();
+                        ordered.sort_by_key(|c| c.as_str() != self.session);
+                        ordered
+                            .into_iter()
+                            .map(|c| {
+                                if c == self.session {
+                                    "this session".to_owned()
+                                } else {
+                                    session_name(self.shared, c)
+                                }
+                            })
+                            .collect()
+                    }
+                    vw_procmon::Owner::Session { .. } => Vec::new(),
+                };
+                let ours = self.snapshot.descends_from_self(pid);
+                self.object(not_attributed(pid, &name, &candidates, ours));
+            }
         }
+    }
+}
+
+/// At most this many candidate sessions are named; the rest are counted.
+const NAMED_CANDIDATES: usize = 3;
+
+/// The objection for a process no single session owns: the candidate sessions when there are any (the first
+/// `NAMED_CANDIDATES` named, the rest counted), else Vibe Work when the app started it (the agent's own browser
+/// window through the browser helper), else another app.
+fn not_attributed(pid: u32, name: &str, candidates: &[String], started_by_app: bool) -> String {
+    if candidates.is_empty() && started_by_app {
+        format!("pid {pid} ({name}) belongs to Vibe Work")
+    } else if candidates.is_empty() {
+        format!("pid {pid} ({name}) belongs to another app")
+    } else if candidates.len() > NAMED_CANDIDATES + 1 {
+        format!(
+            "pid {pid} ({name}) may belong to {} or one of {} other sessions",
+            candidates[..NAMED_CANDIDATES].join(" or "),
+            candidates.len() - NAMED_CANDIDATES
+        )
+    } else {
+        format!(
+            "pid {pid} ({name}) may belong to {}",
+            candidates.join(" or ")
+        )
     }
 }
 
@@ -368,7 +426,50 @@ fn matches(process: &ProcessInfo, pattern: &str, how: NameMatch) -> bool {
 
 #[cfg(test)]
 mod kg1_tests {
-    use super::hold_summary;
+    use super::{hold_summary, not_attributed};
+
+    /// PREDICT (written before the fix): a process two chats share (same folder, started detached) and the
+    /// agent's own Firefox window (started by the app's browser helper, no chat owns it) were both "belongs to
+    /// another app"; now the chats, or Vibe Work, are named, and an unrelated process stays another app's.
+    #[test]
+    fn a_shared_process_names_its_candidate_sessions() {
+        assert_eq!(
+            not_attributed(
+                435_229,
+                "sleep",
+                &[
+                    "this session".to_owned(),
+                    "another session ('util')".to_owned()
+                ],
+                false,
+            ),
+            "pid 435229 (sleep) may belong to this session or another session ('util')"
+        );
+        assert_eq!(
+            not_attributed(12, "firefox", &[], true),
+            "pid 12 (firefox) belongs to Vibe Work"
+        );
+        assert_eq!(
+            not_attributed(7, "node", &[], false),
+            "pid 7 (node) belongs to another app"
+        );
+    }
+
+    /// PREDICT: a process many chats of one folder could have started (detached, no session fact) named every
+    /// one of them, 17 names joined by "or". The first three are named and the rest are counted.
+    #[test]
+    fn a_long_candidate_list_names_three_and_counts_the_rest() {
+        let mut candidates = vec!["this session".to_owned()];
+        candidates.extend((1..17).map(|i| format!("another session ('chat {i}')")));
+        assert_eq!(
+            not_attributed(64_213, "sleep", &candidates, false),
+            "pid 64213 (sleep) may belong to this session or another session ('chat 1') or another session ('chat 2') or one of 14 other sessions"
+        );
+        assert_eq!(
+            not_attributed(64_213, "sleep", &candidates[..4], false),
+            "pid 64213 (sleep) may belong to this session or another session ('chat 1') or another session ('chat 2') or another session ('chat 3')"
+        );
+    }
 
     #[test]
     fn held_kill_command_is_complete() {

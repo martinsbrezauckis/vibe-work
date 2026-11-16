@@ -110,6 +110,7 @@ function describe(
       "page.triple_click",
       "page.right_click",
       "page.middle_click",
+      "page.drag",
     ].includes(action)
   )
     line = line.replace("an element", clickTarget(target));

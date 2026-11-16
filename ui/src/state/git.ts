@@ -20,6 +20,7 @@ import type {
   GitResult,
   GitStatusView,
   PrPlanView,
+  PrListView,
   PrStatusView,
   PreparedKind,
 } from "../protocol/core";
@@ -76,6 +77,8 @@ export interface GitUi {
   status: Readonly<Record<string, GitStatusView>>;
   selected: Readonly<Record<string, string>>;
   cards: Readonly<Record<string, PrStatusView>>;
+  /** The Git panel's pull request list per session (read only while the list is open). */
+  lists: Readonly<Record<string, PrListView>>;
   dialog: GitDialog | null;
   /** A request is running (per session). */
   busy: Readonly<Record<string, boolean>>;
@@ -92,6 +95,7 @@ const initial: GitUi = {
   status: {},
   selected: {},
   cards: {},
+  lists: {},
   dialog: null,
   busy: {},
   notice: {},
@@ -543,6 +547,17 @@ export function createGit(deps: {
       } catch (thrown) {
         if (refresh && isCurrent(sessionId, repo))
           note(sessionId, "error", toCallError(thrown).error.message);
+      }
+    },
+
+    /** Reads the chat's pull request list (`refresh`: ask the forge now). Called only while the list is open. */
+    async list(sessionId: string, refresh: boolean): Promise<void> {
+      try {
+        const result = await run({ op: "prList", sessionId, refresh });
+        if (result.kind === "prList")
+          store.set((s) => ({ ...s, lists: put(s.lists, sessionId, result.list) }));
+      } catch (thrown) {
+        if (refresh) note(sessionId, "error", toCallError(thrown).error.message);
       }
     },
 

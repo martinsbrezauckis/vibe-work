@@ -7,8 +7,9 @@ use std::{
     collections::BTreeSet,
     io::Read as _,
     path::{Path, PathBuf},
-    sync::{Mutex, PoisonError},
+    sync::Mutex,
 };
+use vw_platform::sync::LockRecover;
 
 const SESSION_BYTES: usize = 32 * 1024 * 1024;
 const TOTAL_BYTES: usize = 128 * 1024 * 1024;
@@ -163,7 +164,7 @@ impl History {
         if !safe(session) || bytes.len() > vw_preview::MAX_BYTES {
             return Err("Invalid video image or session.".into());
         }
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.deleted.contains(session) {
             return Err("This chat was deleted.".into());
         }
@@ -234,7 +235,7 @@ impl History {
         call: &str,
         metadata: Value,
     ) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.deleted.contains(session) {
             return Err("This chat was deleted.".into());
         }
@@ -273,7 +274,7 @@ impl History {
             .and_then(|s| s.split_once(':'))
             .ok_or("Invalid video frame.")?;
         let cell = cell.parse::<usize>().map_err(|_| "Invalid video frame.")?;
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state.lock_or_recover();
         if state.deleted.contains(session) {
             return Err("This chat was deleted.".into());
         }
@@ -286,7 +287,7 @@ impl History {
     }
     /// Remembers the receipt issued for a video call so its record can be found from Vibe's effect entry.
     pub(crate) fn bind_receipt(&self, source: &str, call: &str, receipt: &str) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.receipts.len() >= 256 {
             state.receipts.pop_front();
         }
@@ -301,7 +302,7 @@ impl History {
             let receipt = value["detail"]["input"][vw_agent_tools::wire::tools::RECEIPT_FIELD]
                 .as_str()
                 .map(receipt_digest);
-            let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let state = self.state.lock_or_recover();
             if let Some(record) = state.records.iter().rev().find(|r| {
                 r.source == source
                     && (r.call == call
@@ -317,7 +318,7 @@ impl History {
         }
     }
     pub(crate) fn forget(&self, session: &str) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         state.deleted.insert(session.into());
         let removed: Vec<_> = state
             .records

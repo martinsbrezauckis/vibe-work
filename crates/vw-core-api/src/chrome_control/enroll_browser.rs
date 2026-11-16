@@ -3,6 +3,7 @@
 use std::sync::{Mutex, atomic::AtomicBool};
 
 use crate::core::Shared;
+use vw_platform::sync::LockRecover;
 
 /// The browser whose own Connect may consume a waiting report or ticket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +46,23 @@ impl Browser {
             Self::Chrome => &shared.chrome_control.connect_requested,
             Self::Edge => &shared.chrome_control.edge_connect_requested,
         }
+    }
+
+    /// The helper protocol's browser word (`owner.pairingPage.open`).
+    pub(super) fn helper_id(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::Edge => "edge",
+        }
+    }
+
+    /// The helper reported this browser's extension as paired with another Vibe Work.
+    pub(super) fn other_owner(self, shared: &Shared) -> bool {
+        let pairing = match self {
+            Self::Chrome => &shared.chrome_control.owner.pairing,
+            Self::Edge => &shared.chrome_control.owner.edge_pairing,
+        };
+        pairing.lock_or_recover().0 == super::PairingState::OtherOwner
     }
 
     pub(super) fn other(self) -> Self {

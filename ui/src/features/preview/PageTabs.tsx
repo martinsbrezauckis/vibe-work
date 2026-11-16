@@ -36,6 +36,10 @@ function safeFavicon(tab: PageTab): string | null {
   return value?.startsWith("data:image/png;base64,") && value.length < 100_000 ? value : null;
 }
 
+/**
+ * Tab bar of the Browser panel for one session: the pinned App preview and the web tabs, with keyboard switching,
+ * Ctrl/Cmd+T to open, Ctrl/Cmd+W to close, and drag to reorder web tabs.
+ */
 export function PageTabs({
   browser,
   sessionId,

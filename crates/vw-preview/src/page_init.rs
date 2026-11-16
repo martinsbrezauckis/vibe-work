@@ -14,6 +14,8 @@ const SOURCE: &str = include_str!("js/page_init.js");
 const SHARE: &str = include_str!("js/page_share.js");
 const SELECTION: &str = include_str!("js/page_selection.js");
 const WIDGET_FORMATS: &str = include_str!("js/widget_formats.js");
+/// The closed shadow roots keeper (vw-browser's visual-capture admission asks it); first, before any page script.
+const CLOSED_ROOTS: &str = include_str!("js/closed_roots.js");
 
 /// The page environment's accessor name for a mount whose console accessor is `console_accessor`.
 #[must_use]
@@ -77,5 +79,5 @@ pub fn page_init_script_themed(name: &str, theme: &str) -> String {
         )
         .replace("__VW_THEME__", &format!("\"{theme}\""))
         .replace("__VW_MENU__", &menu_palette());
-    format!("{environment}\n{WIDGET_FORMATS}")
+    format!("{CLOSED_ROOTS}\n{environment}\n{WIDGET_FORMATS}")
 }

@@ -23,6 +23,7 @@ import { NOTIFY_LEVELS } from "../../state/osNotify";
 import { startFolderFor } from "../../state/projectStartFolder";
 import { summarize } from "../../state/sessionSummary";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import { waitingSessions } from "../ask/waiting";
 import type { App } from "../shell/AppContext";
 import {
@@ -32,13 +33,6 @@ import {
   buildList,
   folderName,
 } from "./listModel";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body)) {
-    return body as Record<string, unknown>;
-  }
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, name: string): string {
   if (typeof value === "string" && value !== "") return value;
@@ -183,7 +177,7 @@ export function registerSessionRoutes(app: App): () => void {
   };
   const removers = [
     app.uiControl.register("sessions", async (body) => {
-      const input = asObject(body);
+      const input = requiredBodyObject(body);
       const action = input["action"] ?? "read";
       if (action === "read") return listJson(app);
       const { core: c, sessions: act } = need();
@@ -246,7 +240,7 @@ export function registerSessionRoutes(app: App): () => void {
       return listJson(app);
     }),
     app.uiControl.register("notifications", (body) => {
-      const input = asObject(body);
+      const input = requiredBodyObject(body);
       const action = input["action"] ?? "read";
       if (action === "level") {
         const level = NOTIFY_LEVELS.find((l) => l === input["level"]);

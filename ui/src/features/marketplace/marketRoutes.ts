@@ -20,14 +20,9 @@
 import { toCallError } from "../../protocol/client/types";
 import { offersReport } from "../../state/installOffers";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { MARKET_FILTERS, type MarketFilter, marketGroups, statusOf } from "./model";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -83,7 +78,7 @@ function read(app: App): unknown {
 
 /** Runs one `ui/marketplace` request. */
 async function handleMarket(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const market = app.market;
   if (market === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const a = market.debugApi;

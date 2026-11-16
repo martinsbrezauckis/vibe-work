@@ -293,16 +293,22 @@ impl Pipe {
         let _ = self.child.wait().await;
     }
 
-    // Only the unix reply-identity test closes a pipe gracefully.
-    #[cfg(all(test, unix))]
-    pub(super) async fn close(mut self) {
+    /// Ends the helper when the app stops browser control or quits. The end of its input asks the helper to close
+    /// the Firefox window it owns and exit; only a helper still running after the bound is killed, so a quit never
+    /// leaves that window (and its open control connection) behind.
+    pub(super) async fn finish(mut self) {
         drop(self.input.take());
-        if tokio::time::timeout(Duration::from_secs(2), self.child.wait())
+        if tokio::time::timeout(Duration::from_secs(3), self.child.wait())
             .await
             .is_err()
         {
             let _ = self.child.kill().await;
             let _ = self.child.wait().await;
         }
+    }
+
+    #[cfg(all(test, unix))]
+    pub(super) async fn close(self) {
+        self.finish().await;
     }
 }

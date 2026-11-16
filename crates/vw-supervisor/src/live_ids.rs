@@ -10,7 +10,8 @@
 //! - `kill_now` never waits and never reaps: reaping stays with the owner task (or with the OS once this process
 //!   has exited), so tokio's and std's own handles never wait on an id that something else already reaped.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 struct Ids {
@@ -24,7 +25,7 @@ pub(crate) struct LiveIds(Arc<Mutex<Ids>>);
 
 impl LiveIds {
     fn locked(&self) -> MutexGuard<'_, Ids> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_or_recover()
     }
 
     pub(crate) fn set_leader(&self, pid: Option<u32>) {

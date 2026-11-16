@@ -6,6 +6,7 @@ import type { App } from "../shell/AppContext";
 import { openBuiltinTabs } from "./builtinTabs";
 import { openChromeTabs } from "./chromeTabs";
 
+/** A browser the composer's tab picker can list tabs from; "Vibe Work" is the built-in browser. */
 export type ComposerBrowser = "Chrome" | "Edge" | "Safari" | "Firefox" | "Vibe Work";
 
 /** Only connected browsers whose module is present can supply tab context. */

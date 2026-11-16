@@ -13,13 +13,8 @@
  */
 import { toCallError } from "../../protocol/client/types";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** Registers `ui/worktrees`; returns the function that removes it. */
 export function registerWorktreeRoutes(app: App): () => void {
@@ -54,7 +49,7 @@ export function registerWorktreeRoutes(app: App): () => void {
     return state();
   };
   return app.uiControl.register("worktrees", (body) => {
-    const { action, path } = asObject(body);
+    const { action, path } = bodyObject(body);
     switch (action ?? "state") {
       case "state":
         return (app.worktrees?.loadOrphans() ?? Promise.resolve()).then(state);

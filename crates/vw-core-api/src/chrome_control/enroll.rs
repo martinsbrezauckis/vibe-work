@@ -21,8 +21,9 @@
 //!
 //! Depends on: the owner pipe (`owner::Owner::rpc`), `browser::open`. Called by: `commands` (Connect), `owner`
 //! (waiting reports).
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::time::Instant;
@@ -34,6 +35,8 @@ use crate::core::Shared;
 pub(super) const MINT: &str = "owner.enroll.mint";
 /// Drops every ticket the helper holds.
 pub(super) const REVOKE: &str = "owner.enroll.revoke";
+/// Asks the extension that holds another Vibe Work to open its own pairing page (helper protocol).
+pub(super) const OPEN_PAIRING_PAGE: &str = "owner.pairingPage.open";
 /// How long one Connect may still mint (its one retry included).
 /// Chrome's first-run screens and Enable can take several minutes. Bound that pending authorization without
 /// extending the helper ticket's own lifetime or changing cancellation, browser binding or single use.
@@ -333,11 +336,7 @@ pub(super) fn page_url(extension_id: &str, ticket: Option<(&str, &str, &str)>) -
 fn open_plain(shared: &Shared, caller: &'static str, browser: Browser, page: PairPage) {
     tracing::info!(caller, ?browser, "Chrome enrollment open_plain");
     let chrome = &shared.chrome_control;
-    browser
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .cancel();
+    browser.enroll(shared).lock_or_recover().cancel();
     let mut url = page_url(&chrome.config.extension_id, None);
     if let PairPage::Expired = page {
         url.push_str("#vw-enroll-reason=expired");
@@ -347,15 +346,38 @@ fn open_plain(shared: &Shared, caller: &'static str, browser: Browser, page: Pai
     }
 }
 
+/// Open pairing page while the browser's extension holds another Vibe Work. The connected extension opens its own
+/// page in its own profile's window, in front (`owner.pairingPage.open`); no profile folder is guessed. Without such
+/// an extension (none connected, an older extension or helper) the page opens through the browser as before.
+async fn open_paired_elsewhere(shared: &Arc<Shared>, caller: &'static str, browser: Browser) {
+    let answer = shared
+        .chrome_control
+        .owner
+        .rpc(OPEN_PAIRING_PAGE, json!({"browser": browser.helper_id()}))
+        .await;
+    let asked = answer
+        .as_ref()
+        .and_then(|answer| answer["asked"].as_u64())
+        .unwrap_or(0);
+    tracing::info!(
+        caller,
+        ?browser,
+        asked,
+        "Chrome enrollment open_paired_elsewhere"
+    );
+    if asked == 0 {
+        open_plain(shared, caller, browser, PairPage::Plain);
+    } else {
+        browser.enroll(shared).lock_or_recover().cancel();
+    }
+}
+
 /// Asks one mint for `attempt` and opens what it allows. `Ok(false)`: the helper had no waiting connection (the
 /// caller arms the retry). The URL and the ticket are never logged: a failed open logs only its fixed reason.
 async fn mint_and_open(shared: &Arc<Shared>, attempt: &str, browser: Browser) -> bool {
     let chrome = &shared.chrome_control;
     let answer = chrome.owner.rpc(MINT, json!({"attempt": attempt})).await;
-    let mut enroll = browser
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut enroll = browser.enroll(shared).lock_or_recover();
     let now = Instant::now();
     let live = enroll.live(attempt, now);
     tracing::info!(live, ?browser, "Chrome enrollment mint_and_open");
@@ -420,17 +442,9 @@ pub(super) async fn begin(
         .other()
         .requested(shared)
         .store(false, std::sync::atomic::Ordering::SeqCst);
-    browser
-        .other()
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .cancel();
+    browser.other().enroll(shared).lock_or_recover().cancel();
     let (attempt, debug_api_acts) = {
-        let mut enroll = browser
-            .enroll(shared)
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut enroll = browser.enroll(shared).lock_or_recover();
         let debug_api_acts = crate::command_origin::debug_api_acts(shared, origin);
         let attempt = if debug_api_acts {
             enroll.cancel();
@@ -474,6 +488,9 @@ pub(super) async fn connect_edge(
     {
         return Err(vw_vocabulary::texts::CHROME_OWNER_MISSING.into());
     }
+    if let Some(sentence) = super::owner::keyring_blocked(shared).await {
+        return Err(super::agent_browser::Browser::Edge.words(sentence));
+    }
     if let Some(reason) = super::edge_policy::refusal(&chrome.config) {
         return Err(reason.to_owned());
     }
@@ -490,18 +507,9 @@ pub(super) async fn connect_edge(
     browser
         .requested(shared)
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let waiting = browser
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .waiting_reported();
-    let other_owner = chrome
-        .owner
-        .edge_pairing
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .0
-        == super::PairingState::OtherOwner;
+    let waiting = browser.enroll(shared).lock_or_recover().waiting_reported();
+    let other_owner =
+        chrome.owner.edge_pairing.lock_or_recover().0 == super::PairingState::OtherOwner;
     let opened = if waiting || other_owner {
         browser
             .requested(shared)
@@ -529,11 +537,7 @@ pub(super) async fn open_for_waiting(
     attempt: Option<&str>,
     browser: Browser,
 ) {
-    let can = browser
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .waiting_auto;
+    let can = browser.enroll(shared).lock_or_recover().waiting_auto;
     tracing::info!(
         can,
         attempt_present = attempt.is_some(),
@@ -541,14 +545,15 @@ pub(super) async fn open_for_waiting(
         "Chrome enrollment open_for_waiting"
     );
     let Some(attempt) = attempt.filter(|_| can) else {
-        open_plain(shared, "open_for_waiting", browser, PairPage::Plain);
+        if browser.other_owner(shared) {
+            open_paired_elsewhere(shared, "open_for_waiting", browser).await;
+        } else {
+            open_plain(shared, "open_for_waiting", browser, PairPage::Plain);
+        }
         return;
     };
     {
-        let mut enroll = browser
-            .enroll(shared)
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut enroll = browser.enroll(shared).lock_or_recover();
         if let Some(a) = enroll.attempt.as_mut().filter(|a| a.id == attempt) {
             // This mint is the first; the one retry stays for the next waiting report.
             a.mint_on_waiting = false;
@@ -560,10 +565,7 @@ pub(super) async fn open_for_waiting(
 }
 
 fn arm_retry(shared: &Shared, attempt: &str, browser: Browser) {
-    let mut enroll = browser
-        .enroll(shared)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut enroll = browser.enroll(shared).lock_or_recover();
     if let Some(a) = enroll.attempt.as_mut().filter(|a| a.id == attempt) {
         a.mint_on_waiting = true;
         browser
@@ -576,10 +578,7 @@ fn arm_retry(shared: &Shared, attempt: &str, browser: Browser) {
 /// the pipe reader: the mint runs on its own task). `waiting`: the report is `waiting` (a mismatch never mints).
 pub(super) fn on_waiting(shared: &Arc<Shared>, waiting: bool, browser: Browser) {
     let attempt = {
-        let mut enroll = browser
-            .enroll(shared)
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut enroll = browser.enroll(shared).lock_or_recover();
         let now = Instant::now();
         tracing::info!(
             waiting,
@@ -598,6 +597,15 @@ pub(super) fn on_waiting(shared: &Arc<Shared>, waiting: bool, browser: Browser) 
     };
     let attempt = match attempt {
         Ok(attempt) => attempt,
+        Err(_) if !waiting => {
+            // A mismatch report: that extension is connected and can open its own page (own task: this runs
+            // inside the pipe reader, which must stay free to read the helper's answer).
+            let shared = shared.clone();
+            tokio::spawn(
+                async move { open_paired_elsewhere(&shared, "on_waiting", browser).await },
+            );
+            return;
+        }
         Err(page) => {
             open_plain(shared, "on_waiting", browser, page);
             return;

@@ -17,6 +17,7 @@ import { TEXT, wording } from "../../vocabulary";
 import { visibleText } from "./visibleText";
 import { registerCardFocus } from "./cardFocus";
 import { usePermissionArrival } from "./permissionArrival";
+import { answerDigit, cardFocused, cardKeysArmed } from "./cardKeys";
 import { type AskButton, type AskChoice } from "./model";
 import { focusCard, jumpToCard, revealCardControl, useCardLayout } from "./useCardLayout";
 
@@ -130,6 +131,8 @@ export function AskCard(props: AskCardProps): ReactElement {
 function PermissionCard(props: AskCardProps): ReactElement {
   const { buttons, disabled, onChoose } = props;
   const arrival = usePermissionArrival(props.keys !== false);
+  // Keys answer after the arrival grace, and only while the person's focus is deliberately on a card (`cardKeys`).
+  const keysReady = () => arrival.keysReady() && cardKeysArmed();
   const fresh = useFirstSight(`card:${props.id}`);
   const frame = useRef<HTMLDivElement>(null);
   // The answer button a primary pointer is pressed on (cleared when the pointer leaves it or is cancelled): the
@@ -195,7 +198,7 @@ function PermissionCard(props: AskCardProps): ReactElement {
         !event.ctrlKey &&
         !event.metaKey
       )
-        props.onKeys(event, arrival.keysReady() && !event.repeat);
+        props.onKeys(event, keysReady() && !event.repeat);
       return;
     }
     // A held key repeats: only its first press answers (the next card may already have the focus).
@@ -210,8 +213,9 @@ function PermissionCard(props: AskCardProps): ReactElement {
       event.metaKey
     )
       return;
-    const button = buttons.find((b) => String(b.key) === event.key);
-    if (!arrival.keysReady() || event.repeat) {
+    const digit = answerDigit(event);
+    const button = buttons.find((b) => String(b.key) === digit);
+    if (!keysReady() || event.repeat) {
       if (button !== undefined || event.key === "Enter" || event.key === " ")
         event.preventDefault();
       return;
@@ -239,6 +243,7 @@ function PermissionCard(props: AskCardProps): ReactElement {
       data-card-id={props.id}
       onKeyDown={onKey}
       onFocusCapture={(event) => {
+        cardFocused(event.target);
         if (event.target instanceof HTMLElement) revealCardControl(event.target);
         props.onFocusInside?.(true);
       }}

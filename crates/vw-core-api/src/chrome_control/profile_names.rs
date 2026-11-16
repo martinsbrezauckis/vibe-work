@@ -8,9 +8,9 @@ use super::ChromeControl;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::PoisonError,
     time::SystemTime,
 };
+use vw_platform::sync::LockRecover;
 
 /// `Local State` holds every profile's settings summary; real files are well under this.
 const LOCAL_STATE_LIMIT: u64 = 16 * 1024 * 1024;
@@ -77,10 +77,7 @@ pub(super) fn folder_entry(folder: &Path) -> Option<Entry> {
 /// that this file was not read for. Returns whether a shown name or account changed.
 pub(super) fn refresh(chrome: &ChromeControl) -> bool {
     let folders: Vec<(String, PathBuf)> = {
-        let saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let saved = chrome.profiles.lock_or_recover();
         saved
             .records
             .iter()
@@ -95,10 +92,7 @@ pub(super) fn refresh(chrome: &ChromeControl) -> bool {
         .collect();
     let mut read_now = Vec::new();
     {
-        let saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let saved = chrome.profiles.lock_or_recover();
         for data in parents {
             let Some(stamp) = std::fs::symlink_metadata(data.join("Local State"))
                 .ok()
@@ -126,10 +120,7 @@ pub(super) fn refresh(chrome: &ChromeControl) -> bool {
         .into_iter()
         .filter_map(|data| Some((data.clone(), read(&data)?)))
         .collect();
-    let mut saved = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.profiles.lock_or_recover();
     let mut next = saved.clone();
     for (data, (stamp, _)) in &states {
         let covered = folders

@@ -4,7 +4,7 @@
 .lib-costs {
   margin: 8px 0 0;
   padding-left: 18px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 .lib-ask {
@@ -17,7 +17,7 @@
 .lib-ask h3,
 .lib-detail-head h3 {
   margin: 0 0 8px;
-  font-size: var(--text-14);
+  font-size: var(--text-md);
 }
 .lib-ask-row,
 .lib-new,
@@ -36,14 +36,14 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);
   padding: 7px 10px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .lib-answer {
   margin-top: 12px;
 }
 .lib-answer-text {
   white-space: pre-wrap;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   line-height: 1.55;
   margin: 0 0 10px;
 }
@@ -60,7 +60,7 @@
   padding: 0;
   color: var(--blue);
   font: inherit;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   cursor: pointer;
   text-align: left;
 }
@@ -110,14 +110,14 @@
 }
 .lib-item-name,
 .lib-doc-name {
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   overflow-wrap: anywhere;
 }
 .lib-scope {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .lib-scope select {
@@ -127,7 +127,7 @@
   border-radius: var(--radius-md);
   padding: 5px 24px 5px 8px;
   font: inherit;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 /* "Make library" is a real button next to the field (it read as plain text). */
 .lib-side .lib-new input {
@@ -182,7 +182,7 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: var(--text-12-5)/var(--leading-copy) var(--font-mono);
+  font: var(--text-base)/var(--leading-copy) var(--font-mono);
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-md);

@@ -15,9 +15,13 @@ fn readonly(command: &Command, wire: &Value) -> bool {
         Command::Files { request } => {
             !matches!(request, crate::files_view::FilesRequest::Write { .. })
         }
+        // The prompt history names its chat only to keep temporary chats out of the shared file; it changes no chat.
+        // A pause holds this app's own waiting browser calls; it sends nothing to Vibe and changes no chat either.
         Command::ReadSession { .. }
         | Command::RefreshSession { .. }
-        | Command::ViewSession { .. } => true,
+        | Command::ViewSession { .. }
+        | Command::PromptHistory { .. }
+        | Command::PausedTools { .. } => true,
         Command::Call { method, .. } => {
             method.ends_with("/read") || method.ends_with("/list") || method.ends_with("/subscribe")
         }

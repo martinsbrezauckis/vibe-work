@@ -21,7 +21,6 @@ import {
   readAccount,
   usageOf,
 } from "../../state/account";
-import { sessionForPick } from "../../state/modelChoice";
 import { useApp } from "../shell/AppContext";
 import { useKeyUi } from "../setup/useKeys";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
@@ -41,7 +40,11 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
   const keyBlocked = useKeyReadiness() !== null;
   const running = useCoreState((s) => s.server.phase === "running");
   const selected = useShellState((s) => s.selected);
-  const via = core === null ? null : sessionForPick(core, selected);
+  // The account is read through the open chat; without one the core reads it through its own short-lived helper
+  // chat. A chat that exists but is not open would only give Vibe's detached answer ("Not reported").
+  const via = useCoreState((s) =>
+    selected !== null && s.sessions[selected] !== undefined ? selected : null,
+  );
   const session = useCoreState((s) =>
     selected === null ? undefined : s.sessions[selected]?.session,
   );
@@ -68,7 +71,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
 
   useEffect(() => {
     if (part !== "account") return;
-    if (core === null || !running || via === null || keyBlocked) return;
+    if (core === null || !running || keyBlocked) return;
     let live = true;
     void readAccount(core, via).then((view) => {
       if (live) setAccount({ itemId: activeItem, value: view });
@@ -147,11 +150,11 @@ function AccountFacts({
         inSettings
         message="Your Mistral key lets Vibe Work read your account details from Mistral."
       />
-      {via === null && (
-        <p className="key-line">Needs a chat: Vibe reads the account through one.</p>
-      )}
-      {via !== null && account === null && !keyBlocked && (
-        <p className="key-line">Reading the account…</p>
+      {/* With no chat at all the core reads the account through its own short-lived helper chat. */}
+      {account === null && !keyBlocked && (
+        <p className="key-line">
+          {via === null ? "Reading the account without a chat…" : "Reading the account…"}
+        </p>
       )}
       {account !== null && !keyBlocked && (
         <dl className="set-facts" data-testid="account-facts">

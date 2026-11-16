@@ -5,13 +5,15 @@
  * mounted and come back unchanged when Settings closes (Back, Esc, or any rail item).
  * Depends on: AppContext, hooks, catalog, every settings section component, components/Highlight.
  * Called by: Content (while `settings.open`).
- * Invariants: a `target` (from a search hit) scrolls its `data-setting` row into view and lights it for 1.5 s, then
- * is cleared; a row that is not rendered yet (a section still reading its data) is retried for up to a second, then
- * the category heading lights instead. Esc goes Home (as the rail's Home does) unless focus is in a text field or a
- * menu; Ctrl F focuses
+ * Invariants: a `target` (from a search hit) scrolls its `data-setting` row into view, moves focus to its first
+ * control and lights it for 1.5 s, then is cleared; a row that is not rendered yet (a section still reading its data) is retried for up to a second, then
+ * the category heading lights instead. While searching, the result line (the count, or no match) is said once by
+ * the polite announcer after typing pauses. Esc goes Home (as the rail's Home does) unless focus is in a text field, a
+ * menu or an open inline form; Ctrl F focuses
  * the search inside Settings.
  */
 import { type ReactElement, useEffect, useRef } from "react";
+import { announce } from "../../state/announcer";
 import { openHit } from "./openHit";
 import { useSettingsDescriptions } from "./useSettingsDescriptions";
 
@@ -37,10 +39,12 @@ import { CliSharingSettings } from "./CliSharingSettings";
 import { KeepAwakeSettings } from "./KeepAwakeSettings";
 import { SendToSettings } from "./SendToSettings";
 import { CopiesSettings } from "./CopiesSettings";
+import { ImportSettings } from "./ImportSettings";
 import { GitSettings } from "./GitSettings";
 import { DeveloperSettings } from "./DeveloperSettings";
 import { ErrorDetailSetting } from "./ErrorDetailSetting";
 import { InstructionsSettings } from "./InstructionsSettings";
+import { KnowledgeSettings } from "./KnowledgeSettings";
 import { MistralLinks } from "./MistralLinkRows";
 import { NetworkSettings } from "./NetworkSettings";
 import { PrivacySettings } from "./PrivacySettings";
@@ -72,6 +76,7 @@ function sections(category: string): ReactElement {
           {/* The two Git cards stay together: author details, then session copies. */}
           <GitSettings />
           <CopiesSettings />
+          <ImportSettings />
         </>
       );
     case "accessibility":
@@ -130,6 +135,8 @@ function sections(category: string): ReactElement {
           <MistralLinks category="instructions" />
         </>
       );
+    case "knowledge":
+      return <KnowledgeSettings />;
     case "voice":
       return <VoiceSettings />;
     case "notifications":
@@ -156,6 +163,21 @@ function sections(category: string): ReactElement {
 /** How long a found setting stays lit. */
 const FLASH_MS = 1500;
 
+/** Controls a found setting can take focus on. */
+const FOCUSABLE =
+  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+/** Moves focus to the first control of a found setting (or the setting itself), so the next key acts there. */
+function focusInto(row: HTMLElement): void {
+  const control = row.querySelector<HTMLElement>(FOCUSABLE);
+  if (control !== null) {
+    control.focus({ preventScroll: true });
+    return;
+  }
+  if (!row.hasAttribute("tabindex")) row.tabIndex = -1;
+  row.focus({ preventScroll: true });
+}
+
 /** Lights up the `target` row once it is on the page (retried while sections load), then forgets the target. */
 function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
   const { shell } = useApp();
@@ -176,6 +198,7 @@ function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
       const lit = row ?? page?.querySelector<HTMLElement>(".set-head") ?? null;
       if (lit !== null) {
         if (typeof lit.scrollIntoView === "function") lit.scrollIntoView({ block: "center" });
+        focusInto(lit);
         lit.classList.add("set-flash");
         lit.setAttribute("data-flash", "true");
         const done = lit;
@@ -195,7 +218,8 @@ function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
   }, [target, category, root, shell]);
 }
 
-/** Esc does what Home does (outside text fields and menus); Ctrl F focuses the search inside Settings. */
+/** Esc does what Home does (outside text fields, menus and open inline forms, `data-settings-form`, whose typed
+ * text it would drop); Ctrl F focuses the search inside Settings. */
 function useSettingsKeys() {
   const app = useApp();
   useEffect(() => {
@@ -211,7 +235,9 @@ function useSettingsKeys() {
         el !== null &&
         el.id !== SETTINGS_SEARCH_ID &&
         (el.isContentEditable ||
-          el.closest("input, textarea, select, [role=menu], [role=dialog]") !== null);
+          el.closest(
+            "input, textarea, select, [role=menu], [role=dialog], [data-settings-form]",
+          ) !== null);
       if (typing) return;
       e.preventDefault();
       goHome(app);
@@ -221,6 +247,31 @@ function useSettingsKeys() {
       window.removeEventListener("keydown", onKey);
     };
   }, [app]);
+}
+
+/**
+ * How long typing must pause before the search result is said. VoiceOver re-reads the focused search field by
+ * itself about a second after typing stops and cuts off whatever it is saying then, even an assertive message; a
+ * line said after that re-read (and before VoiceOver's own hint) is heard in full. Other screen readers hear the
+ * same single line.
+ */
+const SAY_RESULT_MS = 1500;
+
+/**
+ * Says the search result line once the typing pauses (the visible lines are no live regions). The wait starts
+ * again on every keystroke (`query`), also while the line stays the same (no match), so it is never said during
+ * the typing or during the re-read.
+ */
+function useSayResult(said: string | null, query: string) {
+  useEffect(() => {
+    if (said === null) return;
+    const timer = setTimeout(() => {
+      announce(said);
+    }, SAY_RESULT_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [said, query]);
 }
 
 /** The page body. */
@@ -244,6 +295,9 @@ export function SettingsPage(): ReactElement {
     chrome?.firefox !== undefined,
     chrome?.safari !== undefined,
   ).filter((r) => offered.some((c) => c.id === r.category));
+  const count = `${results.length === 1 ? "1 setting matches" : `${String(results.length)} settings match`} “${view.query.trim()}”`;
+  const none = `No setting matches. Press ${formatKeys("Mod+k")} to search everything.`;
+  useSayResult(searching ? (results.length === 0 ? none : count) : null, view.query);
   return (
     <div className="settings-page ui-body" role="region" aria-label="Settings" ref={root}>
       <div className="set-body">
@@ -251,12 +305,7 @@ export function SettingsPage(): ReactElement {
           <>
             <header className="set-head">
               <h2>Results</h2>
-              <p className="set-path">
-                {results.length === 1
-                  ? "1 setting matches"
-                  : `${String(results.length)} settings match`}{" "}
-                “{view.query.trim()}”
-              </p>
+              <p className="set-path">{count}</p>
             </header>
             {offered
               .filter((c) => results.some((r) => r.category === c.id))
@@ -289,11 +338,7 @@ export function SettingsPage(): ReactElement {
                     ))}
                 </div>
               ))}
-            {results.length === 0 && (
-              <p className="key-line">
-                No setting matches. Press {formatKeys("Mod+k")} to search everything.
-              </p>
-            )}
+            {results.length === 0 && <p className="key-line">{none}</p>}
           </>
         ) : (
           <>

@@ -378,6 +378,12 @@ const PATHS = {
       <path d="M12 10v4" />
     </>
   ),
+  pause: (
+    <>
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+    </>
+  ),
   pin: (
     <>
       <path d="M12 17v5" />

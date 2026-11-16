@@ -3,6 +3,10 @@ import type { App } from "../shell/AppContext";
 import type { ChromePicker } from "../../state/composerStore";
 import { NEW_CHAT } from "../../state/newChatKey";
 
+/**
+ * Opens the tab picker on the built-in browser for `sessionId` and fills it with the chat's pages that have an
+ * address; on a failed read the picker shows an error instead.
+ */
 export async function openBuiltinTabs(app: App, sessionId: string): Promise<void> {
   const pending: ChromePicker = {
     sessionId,
@@ -38,6 +42,10 @@ export async function openBuiltinTabs(app: App, sessionId: string): Promise<void
       });
   }
 }
+/**
+ * Shares the built-in browser page `pageKey` through the person-share queue and closes the picker; on failure the
+ * picker stays open with an error. Does nothing while the picker is loading or belongs to another chat.
+ */
 export async function pickBuiltinTab(app: App, sessionId: string, pageKey: string): Promise<void> {
   const current = app.composer.store.get().chromePicker;
   if (current?.sessionId !== sessionId || current.loading) return;

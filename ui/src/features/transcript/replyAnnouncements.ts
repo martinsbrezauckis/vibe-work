@@ -5,6 +5,10 @@ import { obj, str } from "./model/entries";
 import { speakable } from "../voice/speechText";
 import type { App } from "../shell/AppContext";
 
+/**
+ * Announces each ended turn of the selected chat once to screen readers (failed, stopped, or finished with the reply
+ * as the Accessibility setting says). Returns the function that stops listening.
+ */
 export function startReplyAnnouncements(app: App): () => void {
   const core = app.core;
   if (core === null) return () => undefined;

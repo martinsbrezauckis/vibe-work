@@ -448,7 +448,19 @@ impl PreviewService {
         if destination == crate::policy::Destination::Public {
             return Ok((destination, None));
         }
+        let internal = self.inner.internal_ports();
         let state = self.inner.lock();
+        // The App preview's media fetch to a port on this computer passes the same live admission as the page's own
+        // requests: the chat server the core's scan attributed to the port must still hold it now, so a port kept
+        // in the open's list after its server left is never fetched from another program's listener.
+        let pinned_app =
+            state.tabs.contains_key(session_id) && !state.page_owners.contains_key(session_id);
+        if let crate::policy::Destination::Loopback { port } = destination
+            && pinned_app
+            && !state.chat_port_allowed(session_id, internal.as_deref(), port)
+        {
+            return Err(crate::policy::UrlRefusal::Unattributed(port).to_string());
+        }
         let entry = state
             .entries
             .get(session_id)

@@ -29,16 +29,12 @@ pub const BEGIN: &str = "<!-- >>> vibe-work note (managed by Vibe Work: rewritte
 pub const END: &str = "<!-- <<< vibe-work note <<< -->";
 /// The note itself (`working_note.md`): the map, a few hundred tokens.
 pub const TEXT: &str = include_str!("working_note.md");
-/// Optional direct-to-vault capability, shared with the staged built-in skills.
+/// The direct-to-vault capability line, shared with the staged built-in skills (always present).
 #[must_use]
 pub const fn vault_capture_line() -> Option<&'static str> {
-    if cfg!(feature = "agent-vault") {
-        Some(
-            "A secret can go straight from its source into the vault without entering the chat: use browser_capture_secret with a browser_read ref, or secret_capture_command with a program and arguments, and give the entry a name.",
-        )
-    } else {
-        None
-    }
+    Some(
+        "A secret can go straight from its source into the vault without entering the chat: use browser_capture_secret with a browser_read ref, or secret_capture_command with a program and arguments, and give the entry a name.",
+    )
 }
 fn vault_capture_note() -> String {
     vault_capture_line().map_or_else(String::new, |line| format!("\n\n{line}"))

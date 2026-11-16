@@ -86,6 +86,7 @@ await page.route("**/*", (route) => route.fulfill({
   contentType: "text/html",
 }));
 
+let strictEval = null;
 try {
   for await (const line of createInterface({ input: process.stdin })) {
     try {
@@ -98,6 +99,13 @@ try {
         await page.goto(request.url);
       } else if (request.op === "navigate") {
         await page.goto(request.url);
+      } else if (request.op === "strictEval") {
+        // CDP evaluation exempts `eval` from the page's policy by default; the app's WebKit evaluation does not.
+        strictEval = await page.context().newCDPSession(page);
+      } else if (request.op === "evaluate" && strictEval) {
+        const answer = await strictEval.send("Runtime.evaluate", { expression: request.script, returnByValue: true, awaitPromise: true, allowUnsafeEvalBlockedByCSP: false });
+        // As in WebKit's evaluation, a script that throws or does not compile answers nothing (an empty string).
+        value = answer.exceptionDetails ? "" : (answer.result.value ?? null);
       } else if (request.op === "evaluate") {
         value = await page.evaluate(request.script);
       } else if (request.op === "waitForFrame") {

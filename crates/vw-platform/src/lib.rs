@@ -20,6 +20,7 @@ pub use clipboard::content as clipboard_content;
 pub mod screen_reader;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub mod search_directory;
+pub mod sync;
 pub use background::lower_thread_priority;
 #[cfg(target_os = "macos")]
 pub mod app_copies;
@@ -36,6 +37,9 @@ pub mod confirm_window;
 #[cfg(all(feature = "webview", target_os = "macos"))]
 #[allow(unsafe_code)]
 pub mod content_rules;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod dock_icon;
 pub mod edge_policy;
 mod event_target;
 #[cfg(target_os = "linux")]
@@ -45,7 +49,15 @@ pub mod extension_registry;
 pub mod final_path;
 mod harden;
 mod in_front;
+#[allow(unsafe_code)]
+pub mod interface_addresses;
+pub use interface_addresses::interface_addresses;
 pub mod keep_awake;
+#[cfg(all(
+    any(target_os = "macos", test),
+    any(feature = "safari-input", feature = "webview")
+))]
+mod key_positions;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub mod kill_job;

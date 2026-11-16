@@ -1,5 +1,6 @@
 //! Value-free save cards for the authenticated vault capture broker.
-//! Reuses the app-owned callback overlay and ask lifecycle; only the person's window may decide.
+//! Reuses the app-owned callback overlay and ask lifecycle; only the person's window may decide (the card's ask is
+//! person-only: `ask::cards::answer_by` refuses every other answer before it reaches [`answer`]).
 use super::{Arc, Shared, Value, json};
 use crate::{CommandResult, CoreError, CoreEvent, ErrorCode, Origin};
 use vw_ask::{AnsweredBy, Choice, Outcome, Scope};
@@ -111,14 +112,6 @@ pub(super) fn answer(
             "This save choice is no longer offered; request the save again.",
         )
     };
-    if origin != Origin::Ui {
-        let mut error = CoreError::new(
-            ErrorCode::Denied,
-            "The vault save needs the user's answer. Ask the user to answer it in Vibe Work's window.",
-        );
-        error.server_code = Some(crate::vault_scope::VAULT_USER_ONLY.into());
-        return Err(error);
-    }
     let decision = output["decision"]["type"].as_str().ok_or_else(refused)?;
     let calls = super::calls(shared).ok_or_else(refused)?;
     let mut records = super::lock(calls);

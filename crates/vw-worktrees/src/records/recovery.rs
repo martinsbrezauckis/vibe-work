@@ -3,6 +3,7 @@
 //! and record readers/updates. Recovery never deletes a session, branch or worktree.
 
 use std::path::PathBuf;
+use vw_platform::sync::LockRecover;
 
 use super::{Record, Records, WorktreeError, lock_records};
 
@@ -17,11 +18,7 @@ impl Records {
     }
 
     pub(super) fn memory_recovery(&self, session_id: &str) -> Option<Record> {
-        self.recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(session_id)
-            .cloned()
+        self.recovery.lock_or_recover().get(session_id).cloned()
     }
 
     /// True when a failed creation's ownership is retained in recovery storage or this run's memory.
@@ -49,8 +46,7 @@ impl Records {
             WorktreeError::InvalidName("the session id cannot name a recovery record".into())
         })?;
         self.recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .insert(record.session_id.clone(), record.clone());
         let dir = self.recovery_dir();
         vw_platform::ensure_private_dir(&dir).map_err(|error| {
@@ -74,21 +70,12 @@ impl Records {
         )
         .map_err(|error| WorktreeError::io("replace recovery record", &path, error))?;
         // Durable records are read from disk so another handle's archive/keep/handoff remains visible.
-        self.recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&record.session_id);
+        self.recovery.lock_or_recover().remove(&record.session_id);
         Ok(())
     }
 
     pub(super) fn recovery_ids(&self) -> Vec<String> {
-        let mut ids: Vec<_> = self
-            .recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .keys()
-            .cloned()
-            .collect();
+        let mut ids: Vec<_> = self.recovery.lock_or_recover().keys().cloned().collect();
         if let Ok(entries) = std::fs::read_dir(self.recovery_dir()) {
             ids.extend(entries.flatten().filter_map(|entry| {
                 entry
@@ -109,10 +96,7 @@ impl Records {
         {
             return Err(WorktreeError::io("remove recovery record", &path, error));
         }
-        self.recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(id);
+        self.recovery.lock_or_recover().remove(id);
         Ok(())
     }
 
@@ -155,11 +139,7 @@ impl Records {
                 out.push(self.follow_rename(record)?);
             }
         }
-        let memory = self
-            .recovery
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let memory = self.recovery.lock_or_recover().clone();
         for (id, record) in memory {
             out.retain(|existing| existing.session_id != id);
             out.push(self.follow_rename(record)?);

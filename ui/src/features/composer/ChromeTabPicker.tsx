@@ -37,6 +37,10 @@ function profileBrowser(id: string): "Chrome" | "Edge" | "Safari" | "Firefox" {
   return "Chrome";
 }
 
+/**
+ * The open tab list of the picked browser for `sessionId`, with a browser switch when several are usable. Renders
+ * nothing unless this chat's picker is open; picking a row adds that tab to the chat.
+ */
 export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElement | null {
   const app = useApp();
   const view = useCoreState((s) => s.chromeControl);
@@ -182,6 +186,11 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
         ))}
         {picker.rows.map((tab) => {
           const other = bound !== null && !sameProfile(tab.profileId, bound);
+          const detail = `${tab.profileName} · ${other ? (otherBrowser ?? "Not this chat's profile") : tab.url}`;
+          const reason = other
+            ? (otherBrowser ??
+              `A chat keeps one ${browser} profile. Start a new chat to add a tab from ${tab.profileName}.`)
+            : null;
           return (
             <Button
               type="button"
@@ -189,14 +198,12 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
               data-testid="composer.chrome-tab-pick"
               data-item-id={`${tab.profileId}:${String(tab.tabId)}`}
               key={`${tab.profileId}:${String(tab.tabId)}`}
-              aria-label={tab.title || tab.url}
+              // The name carries the second line (profile and address, or why the tab cannot be added), so
+              // same-titled tabs of other profiles or sites sound different. It is in the name, not a description,
+              // because WebKitGTK does not expose aria-description to screen readers.
+              aria-label={`${tab.title || tab.url}, ${reason === null ? detail : `${tab.profileName} · ${reason}`}`}
               data-profile={other ? "other" : undefined}
-              title={
-                other
-                  ? (otherBrowser ??
-                    `A chat keeps one ${browser} profile. Start a new chat to add a tab from ${tab.profileName}.`)
-                  : undefined
-              }
+              title={reason ?? undefined}
               disabled={picker.loading || other}
               onClick={() =>
                 void pickChromeTab(
@@ -208,9 +215,7 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
               }
             >
               <span className="chrome-tab-title">{tab.title || tab.url}</span>
-              <span className="ui-help">
-                {tab.profileName} · {other ? (otherBrowser ?? "Not this chat's profile") : tab.url}
-              </span>
+              <span className="ui-help">{detail}</span>
             </Button>
           );
         })}

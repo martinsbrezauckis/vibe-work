@@ -3,13 +3,15 @@
 
 use crate::{Reply, Request, local, policy, wire};
 use bstr::ByteSlice;
-use interprocess::local_socket::{Listener, prelude::*};
+use interprocess::local_socket::{Listener, Stream, prelude::*};
 #[cfg(not(windows))]
 use std::process::Command;
 use std::{
-    io::{self, BufReader},
+    io::{self, BufReader, Read},
     path::Path,
-    process::{ExitStatus, Stdio},
+    process::{Child, ExitStatus, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
 };
 use tempfile::TempDir;
 use zeroize::Zeroizing;
@@ -22,7 +24,11 @@ pub struct Broker {
     listener: Listener,
     endpoint: String,
     directory: TempDir,
+    limit: Duration,
 }
+
+/// How long one gh run may take before the broker stops it.
+pub const TIME_LIMIT: Duration = Duration::from_secs(120);
 
 /// Where the broker keeps its private directory. A Unix socket path holds about 104 bytes (`sun_path`; 108 on Linux),
 /// so a long `TMPDIR` (a deep test or build folder) would make the endpoint unbindable: then `/tmp` is used. The
@@ -71,7 +77,15 @@ impl Broker {
             listener,
             endpoint,
             directory,
+            limit: TIME_LIMIT,
         })
+    }
+
+    /// Use another limit for one gh run (default [`TIME_LIMIT`]); a run past it is stopped and refused.
+    #[must_use]
+    pub fn with_time_limit(mut self, limit: Duration) -> Self {
+        self.limit = limit;
+        self
     }
 
     /// The non-secret endpoint name to put in the shim's environment.
@@ -80,24 +94,37 @@ impl Broker {
         &self.endpoint
     }
 
-    /// Serve requests until the listener fails. Each request uses the same refusal policy.
+    /// Serve requests until the listener fails. Each connection is answered on its own thread, so a slow gh run
+    /// never holds other callers; each request uses the same refusal policy.
     ///
     /// # Errors
-    /// Returns listener or transport errors; process failures are returned as gh replies.
+    /// Returns listener errors; process failures are returned as gh replies.
     pub fn serve(&self) -> io::Result<()> {
-        loop {
-            self.serve_one()?;
-        }
+        std::thread::scope(|scope| {
+            loop {
+                let stream = self.listener.accept()?;
+                // A caller that goes away before its reply only ends its own connection.
+                scope.spawn(move || {
+                    let _ = self.answer(stream, None);
+                });
+            }
+        })
     }
 
-    /// Serve until the owner closes its control pipe. Active commands finish first.
+    /// Serve until the owner closes its control pipe, each connection on its own thread.
+    /// Active commands finish first.
     /// # Errors
-    /// Listener or reply transport failure.
-    pub fn serve_until(&self, stopped: &std::sync::atomic::AtomicBool) -> io::Result<()> {
-        while !stopped.load(std::sync::atomic::Ordering::Acquire) {
-            self.answer(Some(stopped))?;
-        }
-        Ok(())
+    /// Listener failure.
+    pub fn serve_until(&self, stopped: &AtomicBool) -> io::Result<()> {
+        std::thread::scope(|scope| {
+            while !stopped.load(Ordering::Acquire) {
+                let stream = self.listener.accept()?;
+                scope.spawn(move || {
+                    let _ = self.answer(stream, Some(stopped));
+                });
+            }
+            Ok(())
+        })
     }
 
     /// Accept and answer one invocation, also useful to hosts that own the serving loop.
@@ -105,14 +132,14 @@ impl Broker {
     /// # Errors
     /// Returns listener or reply transport errors. Invalid requests are answered with a refusal.
     pub fn serve_one(&self) -> io::Result<()> {
-        self.answer(None)
+        let stream = self.listener.accept()?;
+        self.answer(stream, None)
     }
 
-    fn answer(&self, stopped: Option<&std::sync::atomic::AtomicBool>) -> io::Result<()> {
-        let stream = self.listener.accept()?;
+    fn answer(&self, stream: Stream, stopped: Option<&AtomicBool>) -> io::Result<()> {
         let mut stream = BufReader::new(stream);
         let mut reply = match wire::receive::<Request>(&mut stream) {
-            Ok(_) if stopped.is_some_and(|s| s.load(std::sync::atomic::Ordering::Acquire)) => {
+            Ok(_) if stopped.is_some_and(|s| s.load(Ordering::Acquire)) => {
                 Reply::refused(crate::entry::UNAVAILABLE)
             }
             Ok(request) => self.run(&request),
@@ -176,20 +203,68 @@ impl Broker {
             .env("GH_NO_EXTENSION_UPDATE_NOTIFIER", "1")
             .env("GH_PAGER", "")
             .env("PAGER", "")
-            .stdin(Stdio::null());
-        match child.output() {
-            Ok(output) => Reply {
-                exit_code: exit_code(output.status),
-                stdout: output.stdout,
-                stderr: output.stderr,
-            },
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        match child.spawn() {
+            Ok(child) => self.finish(child),
             Err(error) => Reply::refused(&error.to_string()),
+        }
+    }
+
+    /// Collects a started gh run, stopping it once it passes the time limit.
+    fn finish(&self, mut child: Child) -> Reply {
+        // Both pipes are drained while gh runs, so a large reply never blocks it. The readers are detached: a
+        // process gh started that still holds a pipe after gh is stopped cannot hold back the refusal.
+        let stdout = child
+            .stdout
+            .take()
+            .map(|pipe| std::thread::spawn(move || drain(pipe)));
+        let stderr = child
+            .stderr
+            .take()
+            .map(|pipe| std::thread::spawn(move || drain(pipe)));
+        let deadline = Instant::now() + self.limit;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+            }
+        };
+        match status {
+            Some(status) => Reply {
+                exit_code: exit_code(status),
+                stdout: collect(stdout),
+                stderr: collect(stderr),
+            },
+            None => Reply::refused(&format!(
+                "Stopped: the GitHub command did not finish within {} seconds. Ask for less (a narrower query, \
+                 --limit, a single page) and try again.",
+                self.limit.as_secs()
+            )),
         }
     }
 
     fn redact(&self, bytes: &[u8]) -> Vec<u8> {
         bytes.replace(self.token.as_bytes(), b"[REDACTED]")
     }
+}
+
+fn drain(mut pipe: impl Read) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let _ = pipe.read_to_end(&mut bytes);
+    bytes
+}
+
+fn collect(reader: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    reader.and_then(|r| r.join().ok()).unwrap_or_default()
 }
 
 fn exit_code(status: ExitStatus) -> i32 {

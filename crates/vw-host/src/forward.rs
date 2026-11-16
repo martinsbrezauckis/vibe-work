@@ -10,7 +10,8 @@
 //! - Order is the subscription's order; the sink is called from one task, so it sees events in
 //!   sequence.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
@@ -36,11 +37,7 @@ impl Forwarder {
                 }
             }
         });
-        let previous = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .replace(task);
+        let previous = self.task.lock_or_recover().replace(task);
         if let Some(previous) = previous {
             previous.abort();
         }
@@ -48,12 +45,7 @@ impl Forwarder {
 
     /// Stops the running forwarder, if any.
     pub fn stop(&self) {
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
     }

@@ -14,7 +14,8 @@
 //! - The lock is never held across an await (plain methods, no futures).
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use vw_session::SessionStore;
@@ -56,7 +57,7 @@ pub(crate) struct Names {
 
 impl Names {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
 
     /// Records the title and folders of every item of a listing page.

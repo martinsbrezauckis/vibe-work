@@ -5,13 +5,14 @@
 //! (`host_subscribe` command carries them over a Tauri channel).
 //! Invariants:
 //! - Wire forms `{"type": "openSession", "sessionId": "...", "notificationId"?: number}`,
-//!   `{"type": "openUpdates"}`, and
+//!   `{"type": "openUpdates"}`, `{"type": "trayHost", "available": bool}`, and
 //!   `{"type": "browserSaveContext", "sessionId": "..."}`; the UI mirrors them in
 //!   `ui/src/protocol/client/types.ts` and a private test pins the JSON.
 //! - Delivery is best effort and ordered; a subscriber that is gone ends its forwarding task.
 //! - One forwarder at a time (a reload of the UI replaces the previous one).
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
@@ -36,6 +37,12 @@ pub enum HostEvent {
     },
     /// The user activated an OS update notice: show Updates settings.
     OpenUpdates,
+    /// The tray host came (`available`) or went (Linux `StatusNotifier` host): the close-to-tray setting reads its
+    /// row again.
+    TrayHost {
+        /// Whether a tray host is registered now.
+        available: bool,
+    },
     /// A physical Save to vault click in this session's child browser webview.
     BrowserSaveContext {
         /// Session whose browser held the one-use choice; no page value crosses this event.
@@ -88,23 +95,13 @@ impl HostEvents {
                 }
             }
         });
-        if let Some(previous) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .replace(task)
-        {
+        if let Some(previous) = self.task.lock_or_recover().replace(task) {
             previous.abort();
         }
     }
 
     pub(crate) fn stop(&self) {
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
     }

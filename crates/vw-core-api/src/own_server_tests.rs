@@ -18,6 +18,7 @@ fn snapshot(rows: &[(u32, u32, &str, bool)]) -> Snapshot {
                         pid,
                         ppid: Some(ppid),
                         pgid: None,
+                        sid: None,
                         start: Some(StartToken(u64::from(pid))),
                         same_user: Some(true),
                         name: String::new(),

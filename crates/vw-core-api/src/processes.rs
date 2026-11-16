@@ -13,6 +13,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use tokio::task::JoinHandle;
@@ -355,10 +356,6 @@ impl Core {
     /// What the startup sweep found and did ("Stopped N processes left from last time"; UI later).
     #[must_use]
     pub fn startup_sweep(&self) -> Option<SweepReport> {
-        self.shared
-            .sweep
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.shared.sweep.lock_or_recover().clone()
     }
 }

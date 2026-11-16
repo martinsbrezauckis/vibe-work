@@ -190,6 +190,37 @@ fn native_host_preserves_foreign_values_children_markers_and_unreceipted_keys() 
     }
 }
 
+/// A key left behind after the app's data was removed has no receipt but names this installation's own manifest
+/// path: setup takes it back. An unreceipted key naming another path, or no path, stays refused (test above).
+///
+/// PREDICT (before the fix): `host` refuses every existing unreceipted key, so this fails with "belongs to another
+/// setup".
+#[test]
+fn native_host_takes_back_an_unreceipted_key_naming_this_manifest_path() {
+    for value in [r"C:\state\host.json", "c:/state/host.json"] {
+        let registry = Fake {
+            exists: true,
+            ..Default::default()
+        };
+        registry.contents.borrow_mut().value = Some(value.into());
+        registry.contents.borrow_mut().host_type = Some("REG_EXPAND_SZ");
+        host("HKCU\\fixture", r"C:\state\host.json", false, &registry).unwrap();
+        let c = registry.contents.borrow();
+        assert_eq!(c.value.as_deref(), Some(r"C:\state\host.json"), "{value}");
+        assert_eq!(c.host_type, None);
+    }
+    let registry = Fake {
+        exists: true,
+        ..Default::default()
+    };
+    registry.contents.borrow_mut().value = Some(r"C:\another\host.json".into());
+    assert!(host("HKCU\\fixture", r"C:\state\host.json", false, &registry).is_err());
+    assert_eq!(
+        registry.contents.borrow().value.as_deref(),
+        Some(r"C:\another\host.json")
+    );
+}
+
 #[test]
 fn a_key_appearing_during_creation_is_not_overwritten_or_claimed() {
     let registry = Fake {

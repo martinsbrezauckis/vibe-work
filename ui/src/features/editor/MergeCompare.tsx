@@ -7,6 +7,7 @@ import { MergeView } from "@codemirror/merge";
 import { languageFor } from "./languages";
 import { editorHighlight, editorTheme } from "./theme";
 
+/** Props of {@link MergeCompare}: the two texts, the file name that picks the language, and the close callback. */
 export interface MergeCompareProps {
   mine: string;
   disk: string;
@@ -14,6 +15,7 @@ export interface MergeCompareProps {
   onClose: () => void;
 }
 
+/** A read-only side-by-side comparison of `mine` and `disk`, with a Close comparison button. */
 export function MergeCompare({ mine, disk, filename, onClose }: MergeCompareProps) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {

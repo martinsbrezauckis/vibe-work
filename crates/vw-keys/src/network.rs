@@ -7,7 +7,7 @@
 //! Called by host startup and core Settings after native confirmation; no method returns the MAC key.
 
 use std::path::PathBuf;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 use vw_mistral::network::{self, LoadedSettings, NetworkSettings, PreparedSettings};
 use vw_vault::{Vault, VaultStatus};
@@ -234,8 +234,8 @@ impl KeyService {
         let guard = self.network_forwarder.clone();
         let vibe_guard = self.vibe_forwarder.clone();
         let checked = blocking(move || {
-            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
-            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+            let _transition = transition.lock_or_recover();
+            let mut state = state.lock_or_recover();
             if copy {
                 unlocked(&vault);
             }
@@ -269,31 +269,21 @@ impl KeyService {
     }
 
     pub(crate) fn stop_authenticated_network(&self) {
-        let network = self.network.lock().unwrap_or_else(PoisonError::into_inner);
+        let network = self.network.lock_or_recover();
         if network.requires_vault {
             forwarder::configure_locked(&self.network_forwarder, &network.core_locked);
             forwarder::configure_locked(&self.vibe_forwarder, &network.vibe_locked);
         }
-        for guard in self
-            .network_probes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-        {
+        for guard in self.network_probes.lock_or_recover().iter() {
             guard.set_enabled(false);
             guard.set_upstream(vw_netguard::Upstream::none());
         }
     }
 
     pub(crate) fn network_locked(&self) {
-        let mut network = self.network.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut network = self.network.lock_or_recover();
         if credentials::protected(&network.browser) {
-            for guard in self
-                .browser_guards
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .iter()
-            {
+            for guard in self.browser_guards.lock_or_recover().iter() {
                 forwarder::configure_locked(guard, &forwarder::locked(&network.browser));
             }
             network.browser = forwarder::locked(&network.browser);
@@ -308,12 +298,7 @@ impl KeyService {
     /// # Errors
     /// Migration awaits an unlocked or newly created vault.
     pub fn before_vibe_launch(&self) -> Result<(), String> {
-        if self
-            .network
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .migration_pending
-        {
+        if self.network.lock_or_recover().migration_pending {
             Err("Unlock or set up the vault to move the proxy sign-in, then restart Vibe.".into())
         } else {
             Ok(())
@@ -330,17 +315,13 @@ impl KeyService {
         changed: Vec<String>,
     ) -> Result<(), KeyError> {
         let (vault, copy) = (self.vault(), !self.lock_on_quit());
-        self.network
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .dotenv
-            .clone_from(&dotenv);
+        self.network.lock_or_recover().dotenv.clone_from(&dotenv);
         let guard = self.network_forwarder.clone();
         let vibe_guard = self.vibe_forwarder.clone();
         let state = self.network.clone();
         let transition = self.network_use.clone();
         blocking(move || {
-            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
+            let _transition = transition.lock_or_recover();
             let (key, _) = check_key(&vault, copy);
             let loaded = network::read_settings(&file, key.as_ref());
             if loaded.rejected {
@@ -354,7 +335,7 @@ impl KeyService {
             migration::write(&dotenv, &child, &vibe_guard)?;
             migration::cleanup(&file)?;
             let environment = NetworkSettings::from_environment();
-            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = state.lock_or_recover();
             state.file = Some(file);
             state.requires_vault =
                 credentials::protected(&child) || credentials::protected(&environment);
@@ -392,10 +373,7 @@ impl KeyService {
     }
 
     fn network_state(&self) -> State {
-        self.network
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .state
+        self.network.lock_or_recover().state
     }
 }
 

@@ -8,6 +8,7 @@ use crate::agent_tools::{AgentTools, FinishedHere, StartedHere};
 use crate::core::Shared;
 use serde_json::{Value, json};
 use vw_agent_tools::output;
+use vw_platform::sync::LockRecover;
 use vw_procmon::{Attribution, ProcessClass, ProcessRef, StopError};
 
 pub(super) fn pid_arg(args: &Value) -> Result<u32, String> {
@@ -80,12 +81,7 @@ pub(super) fn processes_list(
     let mut processes = Vec::new();
     let mut covered: Vec<ProcessRef> = Vec::new();
     for (process, earlier) in ours {
-        let earlier = earlier
-            || !tools
-                .started
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .contains_key(&process);
+        let earlier = earlier || !tools.started.lock_or_recover().contains_key(&process);
         let launch = tools.launches.of(process);
         if ended(&snapshot, process) {
             shared.procmon.registry().unregister_process(process);
@@ -179,10 +175,7 @@ pub(super) fn ended(snapshot: &vw_procmon::Snapshot, process: ProcessRef) -> boo
 
 /// Snapshot this run's natural exits before launch cleanup removes their logs.
 pub(super) fn snapshot_exited(tools: &AgentTools, session_id: &str) {
-    let mut started = tools
-        .started
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut started = tools.started.lock_or_recover();
     let mut exited: Vec<ProcessRef> = started
         .iter()
         .filter(|(_, s)| s.session_id == session_id && s.started.exited().is_some())
@@ -215,8 +208,7 @@ pub(super) fn snapshot_exited(tools: &AgentTools, session_id: &str) {
 pub(super) fn finished_here(tools: &AgentTools, session_id: &str) -> Vec<Value> {
     tools
         .finished
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_or_recover()
         .iter()
         .rev()
         .filter(|s| s.session_id == session_id)
@@ -240,10 +232,7 @@ pub(super) fn retain_finished(
     status: String,
 ) {
     let last_output = output::tail(&entry.log, 1024).unwrap_or_default();
-    let mut finished = tools
-        .finished
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut finished = tools.finished.lock_or_recover();
     remember_finished(
         &mut finished,
         FinishedHere {
@@ -259,10 +248,7 @@ pub(super) fn retain_finished(
 }
 
 pub(super) fn retain_launch(tools: &AgentTools, launch: &Launch, status: String) {
-    let mut finished = tools
-        .finished
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut finished = tools.finished.lock_or_recover();
     remember_finished(
         &mut finished,
         FinishedHere {
@@ -278,10 +264,7 @@ pub(super) fn retain_launch(tools: &AgentTools, launch: &Launch, status: String)
 
 /// Serialize output capture and log removal with this run's reaper snapshots.
 pub(super) fn finish_launch(tools: &AgentTools, process: ProcessRef, status: &str) {
-    let mut started = tools
-        .started
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut started = tools.started.lock_or_recover();
     if let Some(entry) = started.remove(&process) {
         retain_finished(tools, process, &entry, status.to_owned());
     } else if let Some(launch) = tools.launches.of(process) {

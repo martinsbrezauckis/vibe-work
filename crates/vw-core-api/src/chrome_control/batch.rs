@@ -124,7 +124,8 @@ pub(crate) async fn prepare(
     call: &str,
     args: Value,
 ) -> Result<crate::ask::tool_calls::receipts::Execution, String> {
-    super::gateway::validate_public_args(&args)?;
+    let browser = super::agent_browser::selected(shared, chat, "chrome_execute", &args);
+    super::gateway::validate_public_args(&args, browser)?;
     super::gateway::validate_session(shared, chat, "chrome_execute", &args)?;
     let mode = super::check::mode(shared, chat);
     let current = mode.as_deref().and_then(vw_ask::chrome::Tier::from_mode);
@@ -134,7 +135,7 @@ pub(crate) async fn prepare(
             .filter_map(|step| super::mapping::ask_required("chrome_execute", step))
             .max()
             .unwrap_or(vw_ask::chrome::Tier::Ask);
-        let consent = super::read_consent::Consent(tier);
+        let consent = super::read_consent::Consent(tier, false);
         for mut step in steps(&args)? {
             step["sessionId"] = args["sessionId"].clone();
             super::check::authorize_read(shared, chat, "chrome_execute", &step, Some(&consent))?;

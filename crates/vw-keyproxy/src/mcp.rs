@@ -7,21 +7,34 @@
 //! Request order (each step refuses before anything leaves the machine):
 //! 1. the path is exactly `/vw-mcp/<id>` (`id`: 1 to 64 of `a-z 0-9 -`), no query → else 404 / 400;
 //! 2. `Authorization: Bearer <token>` is the current proxy token → else 401 (`vibe_work_proxy_token`);
-//! 3. the resolver answers the binding: unknown → 404, no grant → 403 (`vibe_work_mcp_not_allowed`), vault locked
+//! 3. the resolver answers the binding (it may first wait while the person answers the core's first-use key dialog):
+//!    unknown → 404, no grant → 403 (`vibe_work_mcp_not_allowed`), vault locked
 //!    or secret gone → 503 at once (Vibe gives a server 10 s to start, `startup_timeout_sec`), no resolver → 503;
 //! 4. the request goes to the binding's upstream (never an address from the request) with hop-by-hop headers,
 //!    `Host`, `Authorization`, `Cookie`, `X-Api-Key` and the binding's header removed, the key header added
 //!    (marked sensitive), the body streamed;
 //! 5. a 3xx answer is refused with 502 (`vibe_work_mcp_redirect`) instead of being passed back for the client to
-//!    follow, so a request carrying the key only ever goes to the address the user confirmed; anything else is
-//!    streamed back (status, headers minus hop-by-hop, body).
+//!    follow, so a request carrying the key only ever goes to the address the user confirmed; a compressed answer
+//!    (any `Content-Encoding` but `identity`; the request goes without `Accept-Encoding`) is refused with 502
+//!    (`vibe_work_mcp_encoded`), because it cannot be checked for the key; an answer with a header name or value
+//!    that holds the inserted key in any form the scrub knows (`vw_secrets::holds`) is refused with 502
+//!    (`vibe_work_mcp_header_key`), because a client can copy a header into what the agent reads (an unexpected
+//!    `Content-Type` becomes a tool error). When the request was one JSON-RPC `tools/call` (its body read whole, up
+//!    to `CALL_PEEK` bytes, before forwarding), each of these three refusals is instead that call's answer: a tool
+//!    result with `isError: true` whose text is the refusal's sentence, because Vibe's MCP client gives the agent
+//!    such a result's text but turns any HTTP error into a fixed sentence. Anything else is streamed back (status, headers minus hop-by-hop and
+//!    `Content-Length`, body) through `vw_secrets::StreamScrub`: the key this forwarder inserted (at any length, the
+//!    registry's minimum aside) and every other registered stored value are withheld, also
+//!    when the server splits one across two parts of its answer. The person allowed the key to go to this server,
+//!    not to the agent that reads the server's answers.
 //!
 //! The client is the proxy's own (`server.rs`: `vw_mistral::proxy_client()`, built with
 //! `reqwest::redirect::Policy::none()` in `vw-mistral/src/client.rs`): a following client would never show the 3xx
 //! to step 5 and would carry the key header to the redirect target. A `Location` header is never passed back on any
 //! answer (MCP answers do not use it), so nothing can tell the client to repeat the request elsewhere.
 //!
-//! Depends on: axum, reqwest (the proxy's no-redirect client), futures-util, zeroize. Called by: `server`.
+//! Depends on: axum, reqwest (the proxy's no-redirect client), futures-util, zeroize, vw-secrets (the answer scrub).
+//! Called by: `server`.
 //! Invariants: never logs a header value, the key, the token or the upstream address (binding id and status only);
 //! the key exists only in the resolver's answer, the outgoing header and memory that is zeroized on drop.
 
@@ -32,8 +45,9 @@ use axum::http::header::{AUTHORIZATION, HeaderName, HeaderValue};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use futures_util::TryStreamExt;
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
+use serde_json::json;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
 
@@ -120,7 +134,8 @@ fn binding_id(path: &str) -> Option<&str> {
 }
 
 /// Headers never copied in either direction (hop-by-hop); toward the upstream also the ones that could carry Vibe's
-/// token or the user's cookies and the binding's own key header; toward the client also `Location` (module docs).
+/// token or the user's cookies, the binding's own key header and `Accept-Encoding` (the answer must be checkable);
+/// toward the client also `Location` and `Content-Length` (the scrubbed body can differ in length; module docs).
 fn dropped(name: &HeaderName, request: bool, key_header: &str) -> bool {
     matches!(
         name.as_str(),
@@ -133,11 +148,11 @@ fn dropped(name: &HeaderName, request: bool, key_header: &str) -> bool {
             | "trailer"
             | "transfer-encoding"
             | "upgrade"
-    ) || (!request && name.as_str() == "location")
+    ) || (!request && matches!(name.as_str(), "location" | "content-length"))
         || (request
             && (matches!(
                 name.as_str(),
-                "host" | "authorization" | "cookie" | "x-api-key"
+                "host" | "authorization" | "cookie" | "x-api-key" | "accept-encoding"
             ) || name.as_str().eq_ignore_ascii_case(key_header)))
 }
 
@@ -260,6 +275,13 @@ async fn forward(
         );
     };
     value.set_sensitive(true);
+    // Registered before anything is sent (the Debug API's answers withhold it too); this answer's own scrub withholds
+    // it at any length (module docs, step 5).
+    let key = target
+        .value
+        .strip_prefix("Bearer ")
+        .unwrap_or(&target.value);
+    vw_secrets::register(vw_secrets::SecretKind::VaultValue, key);
     let mut headers = reqwest::header::HeaderMap::new();
     for (header, v) in &parts.headers {
         if !dropped(header, true, &target.header) {
@@ -267,10 +289,11 @@ async fn forward(
         }
     }
     headers.insert(name, value);
+    let (call, body) = peek_call(body).await;
     let sent = client
         .request(parts.method.clone(), target.upstream.as_str())
         .headers(headers)
-        .body(reqwest::Body::wrap_stream(body.into_data_stream()))
+        .body(body)
         .send()
         .await;
     let Ok(response) = sent else {
@@ -285,10 +308,39 @@ async fn forward(
     debug!(binding = %short, status = status.as_u16(), "mcp forwarder: forwarded");
     if status.is_redirection() {
         warn!(binding = %short, status = status.as_u16(), "mcp forwarder: refused a redirect");
-        return error(
-            StatusCode::BAD_GATEWAY,
+        return refused_answer(
+            call.as_ref(),
             "vibe_work_mcp_redirect",
             "This MCP server answered with a redirect. Vibe Work sends your key only to the address you confirmed: add the server with its final address.",
+        );
+    }
+    let encoded = response
+        .headers()
+        .get_all(axum::http::header::CONTENT_ENCODING)
+        .iter()
+        .any(|v| !v.as_bytes().eq_ignore_ascii_case(b"identity"));
+    if encoded {
+        warn!(binding = %short, "mcp forwarder: refused a compressed answer");
+        return refused_answer(
+            call.as_ref(),
+            "vibe_work_mcp_encoded",
+            "This MCP server sent a compressed answer, which Vibe Work cannot check for your key. Turn compression off for this server.",
+        );
+    }
+    // Header names arrive lower-cased: they are searched for the key's forms and the lower-cased key's (its hex
+    // forms differ). A lower-cased base64 form cannot be told from other text (`vw-secrets`: transformed values).
+    let lower = Zeroizing::new(key.to_ascii_lowercase());
+    if response.headers().iter().any(|(name, v)| {
+        let name = name.as_str().as_bytes();
+        vw_secrets::holds(name, key)
+            || vw_secrets::holds(name, &lower)
+            || vw_secrets::holds(v.as_bytes(), key)
+    }) {
+        warn!(binding = %short, "mcp forwarder: refused an answer header holding the key");
+        return refused_answer(
+            call.as_ref(),
+            "vibe_work_mcp_header_key",
+            "This MCP server sent your key back in a header of its answer, so Vibe Work did not pass the answer on.",
         );
     }
     let mut out = Response::builder().status(status);
@@ -299,12 +351,94 @@ async fn forward(
             }
         }
     }
-    let stream = response.bytes_stream().map_err(std::io::Error::other);
-    out.body(Body::from_stream(stream)).unwrap_or_else(|_| {
-        error(
-            StatusCode::BAD_GATEWAY,
-            "vibe_work_upstream_unreachable",
-            "The MCP server's answer could not be passed on.",
-        )
+    out.body(Body::from_stream(scrubbed(response, key)))
+        .unwrap_or_else(|_| {
+            error(
+                StatusCode::BAD_GATEWAY,
+                "vibe_work_upstream_unreachable",
+                "The MCP server's answer could not be passed on.",
+            )
+        })
+}
+
+/// The longest request body read before forwarding to learn whether it is one tool call. MCP requests are small;
+/// a longer body is forwarded as it streams, and its refusals stay HTTP errors.
+const CALL_PEEK: usize = 1 << 20;
+
+/// The JSON-RPC id of `body` when it is one `tools/call` request.
+fn tool_call_id(body: &[u8]) -> Option<serde_json::Value> {
+    let request: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let id = request.get("id")?;
+    (request.get("method")?.as_str()? == "tools/call" && (id.is_number() || id.is_string()))
+        .then(|| id.clone())
+}
+
+/// Reads up to [`CALL_PEEK`] bytes of the request body: the tool call's id when the whole body was read, and the
+/// body to forward, unchanged (the parts read, then the rest as it streams).
+async fn peek_call(body: Body) -> (Option<serde_json::Value>, reqwest::Body) {
+    let mut rest = body.into_data_stream();
+    let mut read = Vec::new();
+    let mut head = Vec::new();
+    let mut whole = true;
+    while let Some(part) = rest.next().await {
+        let fits = match &part {
+            Ok(bytes) => {
+                head.extend_from_slice(bytes);
+                head.len() <= CALL_PEEK
+            }
+            Err(_) => false,
+        };
+        read.push(part);
+        if !fits {
+            whole = false;
+            break;
+        }
+    }
+    let call = if whole { tool_call_id(&head) } else { None };
+    let body = futures_util::stream::iter(read).chain(rest);
+    (call, reqwest::Body::wrap_stream(body))
+}
+
+/// A refusal of the server's answer (module docs, step 5): for a tool call, that call's tool result with `isError`
+/// and the refusal's sentence (the kind in `_meta`); otherwise the 502 error. Neither holds anything from the answer.
+fn refused_answer(call: Option<&serde_json::Value>, kind: &str, message: &str) -> Response {
+    let Some(id) = call else {
+        return error(StatusCode::BAD_GATEWAY, kind, message);
+    };
+    let body = json!({"jsonrpc": "2.0", "id": id, "result": {
+        "content": [{"type": "text", "text": message}],
+        "isError": true,
+        "_meta": {"vibe-work/refusal": kind},
+    }});
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, kind, message))
+}
+
+/// The upstream body with every registered stored value and the inserted `key` (at any length) withheld, a value
+/// split across two parts included (`vw_secrets::StreamScrub`); the kept tail is passed on when the body ends.
+fn scrubbed(
+    response: reqwest::Response,
+    key: &str,
+) -> impl futures_util::Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + use<> {
+    let state = (
+        response.bytes_stream(),
+        Some(vw_secrets::StreamScrub::with_value(
+            vw_secrets::SecretKind::VaultValue,
+            key,
+        )),
+    );
+    futures_util::stream::unfold(state, |(mut upstream, scrub)| async move {
+        let mut scrub = scrub?;
+        match upstream.next().await {
+            Some(Ok(part)) => {
+                let passed = scrub.push(&part);
+                Some((Ok(passed.into()), (upstream, Some(scrub))))
+            }
+            Some(Err(problem)) => Some((Err(std::io::Error::other(problem)), (upstream, None))),
+            None => Some((Ok(scrub.finish().into()), (upstream, None))),
+        }
     })
 }

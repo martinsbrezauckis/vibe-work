@@ -22,7 +22,7 @@
   padding: 6px 10px;
   border-left: 3px solid var(--line-2);
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 
 .local-plugin {
@@ -45,7 +45,7 @@
 }
 .local-plugin-path {
   margin: 8px 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 /* Plugin contents are a list; the composer also uses ctools for its horizontal toolbar. */
 .local-plugin > .ctools {
@@ -64,12 +64,12 @@
 }
 .install-offer h4 {
   margin: 0 0 6px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .install-offer .set-facts .check {
   padding: 6px 0;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   gap: 12px;
 }
 .install-offer .set-facts .check + .check {

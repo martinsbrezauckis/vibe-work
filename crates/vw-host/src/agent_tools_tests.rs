@@ -125,3 +125,30 @@ fn windows_line_preserves_nasty_paths_in_bash_and_powershell() {
         }
     }
 }
+
+/// A person's own hooks in the app's hooks.toml (any type, here Vibe's `notification`) stay when the app writes
+/// or removes its own block, so they keep running after a restart.
+#[test]
+fn with_block_keeps_a_person_notification_hook() {
+    let own =
+        "[[hooks]]\nname = \"ping\"\ntype = \"notification\"\ncommand = \"notify-send done\"\n";
+    let block = super::hook_block(
+        std::path::Path::new("/app/vw-hook"),
+        std::path::Path::new("/data/hook-endpoint"),
+    );
+    let first = super::with_block(own, Some(&block));
+    let restarted = super::with_block(&first, Some(&block));
+    assert_eq!(first, restarted, "rewriting the block changes nothing else");
+    for text in [&first, &restarted] {
+        assert!(text.starts_with(own.trim_end()), "{text}");
+        let parsed: toml::Table = text.parse().expect("valid TOML");
+        let hooks = parsed["hooks"].as_array().unwrap();
+        assert!(
+            hooks.iter().any(|h| h["name"].as_str() == Some("ping")
+                && h["type"].as_str() == Some("notification")),
+            "{text}"
+        );
+    }
+    let removed = super::with_block(&first, None);
+    assert_eq!(removed.trim_end(), own.trim_end());
+}

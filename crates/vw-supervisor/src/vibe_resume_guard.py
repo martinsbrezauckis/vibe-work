@@ -6,9 +6,7 @@ plugin pins for the core's verified refresh before it admits new work.
 
 
 def install_restored_turn_guard():
-    import importlib.metadata
-    if importlib.metadata.version("mistral-vibe") != "3.1.2":
-        return
+    require_guarded_vibe("restored-turn guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from mistralai_vibe_local_harness.vibe._session import UnifiedHarnessSessionBackend
 
     async def interrupt_restored(self, runtime, recovered, turn_id, once_idle):
@@ -27,9 +25,7 @@ def install_restored_turn_guard():
 
 
 def install_resumed_plugin_guard():
-    import importlib.metadata
-    if importlib.metadata.version("mistral-vibe") != "3.1.2":
-        return
+    require_guarded_vibe("resumed-plugin guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from vibe.app_server._unified_harness_backend_adapter import UnifiedHarnessBackendAdapter
 
     async def keep_saved_plugins(self):

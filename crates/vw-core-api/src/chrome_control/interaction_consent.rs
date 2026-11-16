@@ -35,7 +35,8 @@ pub(crate) async fn prepare(
     args: Value,
     consent: Option<Consent>,
 ) -> Result<tool_calls::receipts::Execution, String> {
-    super::gateway::validate_execute_args(&args)?;
+    let browser = super::agent_browser::selected(shared, owner, "chrome_execute", &args);
+    super::gateway::validate_execute_args(&args, browser)?;
     let mut answer = run(shared, owner, source, call, args.clone(), consent, None).await?;
     super::receipt::stamp(shared, "chrome_execute", &args, &mut answer["vwMcpResult"]);
     super::output::guard(&mut answer["vwMcpResult"]);
@@ -80,7 +81,11 @@ pub(super) async fn run(
                 None,
             ),
         };
-        if consent.is_some_and(|consent| consent.0 >= tier) {
+        // In Ask a write card's package carries `page.commit` only when that card named the send, so a send
+        // discovered under any other write card still asks with the send's own card.
+        if consent.is_some_and(|consent| {
+            consent.0 >= tier && (action != Some("page.commit") || consent.sends(&args))
+        }) {
             return Ok(answer);
         }
         let waiting = clock.map(super::batch_wait::Clock::pause);
@@ -90,7 +95,10 @@ pub(super) async fn run(
         if crate::stops::generation(shared, owner) != generation {
             return Err(crate::stops::APPROVAL_ENDED.into());
         }
-        consent = Some(Consent(tier));
+        consent = Some(Consent(
+            consent.map_or(tier, |consent| consent.0.max(tier)),
+            action == Some("page.commit") || consent.is_some_and(|consent| consent.1),
+        ));
         super::check::authorize_read(shared, owner, "chrome_execute", &args, consent.as_ref())?;
         super::gateway::validate_session(shared, owner, "chrome_execute", &args)?;
         // A script-driven click may already have run before its send was blocked. Never replay it.

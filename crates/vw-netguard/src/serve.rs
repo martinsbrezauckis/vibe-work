@@ -21,7 +21,7 @@ use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
 
-use crate::decide::decide;
+use crate::decide::decide_for;
 use crate::guard::{CANARY_SUFFIX, Inner, LOOPBACK_CANARY_PATH, ListenerScope, Who};
 use crate::head::{self, Target};
 
@@ -118,8 +118,9 @@ async fn connect(addrs: &[SocketAddr]) -> Result<TcpStream, String> {
 /// A canary request: marks its token and returns the answer text, else `None`.
 ///
 /// The public canary is any request for `<token>.vw-guard.invalid` (only this proxy can answer that name). The
-/// loopback canary is a request for THIS listener's own port that arrives in proxy form: it proves
-/// the engine sends loopback traffic through the guard. Sent directly (an engine that bypasses the proxy for loopback),
+/// loopback canary is a request for THIS listener's own port that arrives in proxy form, for a probe announced now
+/// ([`crate::NetGuard::announce_loopback`]): it proves the engine sends loopback traffic through the guard; an
+/// unannounced one is no canary and meets the own-port refusal. Sent directly (an engine that bypasses the proxy for loopback),
 /// it arrives in origin form and fails to parse (400): nothing is marked.
 fn canary(
     inner: &Inner,
@@ -139,6 +140,7 @@ fn canary(
         && bare == "127.0.0.1"
         && port == local.port()
         && let Some(token) = url.path().strip_prefix(LOOPBACK_CANARY_PATH)
+        && announced(inner, Some(token), port)
     {
         inner.saw(&format!("loopback:{token}"));
         return Some("Vibe Work network guard: loopback active.");
@@ -148,11 +150,20 @@ fn canary(
     if let (Target::Tunnel { .. }, Ok(local)) = (target, stream.local_addr())
         && bare == "127.0.0.1"
         && port == local.port()
+        && announced(inner, None, port)
     {
         inner.saw(&format!("loopback-port:{port}"));
         return Some("Vibe Work network guard: loopback active.");
     }
     None
+}
+
+/// True while a probe announced a loopback canary for the listener `port` (`token`: that one probe's), so a page that
+/// loads a canary-shaped address at the guard's own port is refused like any request for Vibe Work's own ports.
+fn announced(inner: &Inner, token: Option<&str>, port: u16) -> bool {
+    crate::guard::lock(&inner.announced)
+        .iter()
+        .any(|(t, p)| *p == port && token.is_none_or(|token| t == token))
 }
 
 /// Answers a canary. A CONNECT name canary (macOS `WebKit` tunnels plain http too) is a real tunnel: the page goes
@@ -268,7 +279,21 @@ async fn serve_one(
         bare: &bare,
         port,
     };
-    let addrs = match decide(inner.resolver.as_ref(), &scope, &host, port).await {
+    let (initiator, nested) = match &head.target {
+        Target::Forward { headers, .. } => (initiator(headers), nested(headers)),
+        Target::Tunnel { .. } => (None, TUNNEL_MAY_BE_FRAME),
+        Target::Direct { .. } => (None, false),
+    };
+    let addrs = match decide_for(
+        inner.resolver.as_ref(),
+        &scope,
+        &host,
+        port,
+        initiator.as_deref(),
+        nested,
+    )
+    .await
+    {
         Ok(addrs) => addrs,
         Err(reason) => {
             answer(&mut stream, "403 Forbidden", &decided.refuse(&reason)).await;
@@ -276,6 +301,53 @@ async fn serve_one(
         }
     };
     relay(&decided, stream, &head, &addrs, body).await;
+}
+
+/// The origin of the document that sent a plain request: its one `Origin` header (not `null`), else the origin of
+/// its one `Referer`. The engine writes both; a page can leave them out but cannot name another site there. Several
+/// values, or none: unknown.
+fn initiator(headers: &[(String, String)]) -> Option<String> {
+    let one = |name: &str| {
+        let mut values = headers
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.trim());
+        match (values.next(), values.next()) {
+            (Some(value), None) => Some(value),
+            _ => None,
+        }
+    };
+    let origin_of = |text: &str| {
+        url::Url::parse(text)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "http" | "https"))
+            .map(|u| u.origin().ascii_serialization())
+            .filter(|o| o != "null")
+    };
+    match one("origin") {
+        Some(origin) if origin != "null" => origin_of(origin),
+        _ => one("referer").and_then(origin_of),
+    }
+}
+
+/// True where the browser engine's navigation callback reports a frame's navigation as the page's own, without
+/// saying which (Linux `WebKitGTK`: one `decide-policy` callback for the page and every frame; Windows
+/// `NavigationStarting` and the macOS main-frame check report only the page). A tunnel shows no `Sec-Fetch-Dest`, so
+/// there it is never taken for the page's top-level navigation: it is decided like the page's other requests.
+const TUNNEL_MAY_BE_FRAME: bool = cfg!(target_os = "linux");
+
+/// True when the engine marks a plain request as a nested document (a frame's, an embed's): its one `Sec-Fetch-Dest`
+/// is present and not `document`. A page cannot write this header; an engine that sends none says nothing.
+fn nested(headers: &[(String, String)]) -> bool {
+    let mut values = headers
+        .iter()
+        .filter(|(n, _)| n.eq_ignore_ascii_case("sec-fetch-dest"))
+        .map(|(_, v)| v.trim());
+    match (values.next(), values.next()) {
+        (Some(dest), None) => !dest.eq_ignore_ascii_case("document"),
+        (Some(_), Some(_)) => true,
+        (None, _) => false,
+    }
 }
 
 /// A request the policy has judged: who asked, for which host and port.

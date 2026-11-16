@@ -36,6 +36,11 @@ use crate::{guard, scripts};
 /// Vibe Work's own words; page words are under `untrustedPageContent.outcomeText`.
 pub const HEADLINE_KEY: &str = "Outcome";
 
+/// The receipt's `networkGuard` text while the guard watches a page's requests (Local Network Access: a page from the
+/// web is asked about first; Vibe Work's own ports are never reachable).
+pub const NETWORK_GUARD_ACTIVE: &str = "browser request guard is active; a page from the web reaches this computer or \
+     the local network only after the user allowed its site";
+
 /// A boxed navigation future.
 pub type NavFuture<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
 
@@ -183,9 +188,11 @@ impl Browser {
         json!({
             "loading": view.as_ref().is_some_and(|v| v.loading),
             // Plain and positive ("...are refused when a page is opened" was read as "this page was
-            // refused"). A refusal always comes as an error or under `refusedNavigations`, never here.
+            // refused"). A refusal always comes as an error or under `refusedNavigations`, never here. What it says
+            // follows Local Network Access: a page from the web reaches this computer or the local network only after
+            // the person allowed its site.
             "networkGuard": if self.service.guarded(session_id) {
-                "browser request guard is active; local addresses are allowed"
+                NETWORK_GUARD_ACTIVE
             } else {
                 "local addresses use the browser engine's network behavior"
             },

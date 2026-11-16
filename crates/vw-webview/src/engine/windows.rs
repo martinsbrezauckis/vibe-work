@@ -3,10 +3,10 @@
 //! Depends on: Tauri windows and checked preview mounts.
 //! Called by: preview engine browser-window methods.
 use super::TauriEngine;
-use std::sync::PoisonError;
 use tauri::{
     LogicalPosition, LogicalSize, Manager, Webview, Window, WindowBuilder, WindowEvent, Wry,
 };
+use vw_platform::sync::LockRecover;
 use vw_preview::{EngineError, PageWindowAction, PageWindowInfo, Placement, Rect};
 
 fn failure(error: impl std::fmt::Display) -> EngineError {
@@ -44,11 +44,7 @@ impl TauriEngine {
     }
 
     pub(super) fn page_window_native(&self, page: &str) -> Option<Window<Wry>> {
-        self.page_windows
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(page)
-            .cloned()
+        self.page_windows.lock_or_recover().get(page).cloned()
     }
 
     pub(super) async fn page_window_inner(
@@ -106,10 +102,7 @@ impl TauriEngine {
                 }
             });
             let snapshot = info(&window)?;
-            self.page_windows
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(page, window);
+            self.page_windows.lock_or_recover().insert(page, window);
             return Ok(Some(snapshot));
         }
         let Some(window) = current else {
@@ -122,10 +115,7 @@ impl TauriEngine {
         match action {
             PageWindowAction::Close => {
                 window.destroy().map_err(failure)?;
-                self.page_windows
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(&page);
+                self.page_windows.lock_or_recover().remove(&page);
                 Ok(None)
             }
             PageWindowAction::Focus | PageWindowAction::FocusPanel => {

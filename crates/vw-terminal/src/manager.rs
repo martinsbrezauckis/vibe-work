@@ -14,7 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use tracing::{info, warn};
 
@@ -51,10 +52,7 @@ pub struct TerminalManager {
 }
 
 fn lock(inner: &Inner) -> MutexGuard<'_, Registry> {
-    inner
-        .registry
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    inner.registry.lock_or_recover()
 }
 
 /// Runs blocking terminal work off the async runtime.

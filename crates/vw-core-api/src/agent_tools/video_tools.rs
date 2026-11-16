@@ -164,17 +164,12 @@ async fn extract(
                 .await?;
         Ok::<_, Error>(reply.into_tool())
     };
-    let invalidated = async {
-        loop {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            if crate::stops::generation(shared, owner) != stop
-                || !tools.table.has_session(owner)
-                || shared.store.view(owner).is_none()
-            {
-                break;
-            }
-        }
-    };
+    // Ends the job when its chat is stopped or removed, or its tools go away (re-checked after the job too).
+    let invalidated = crate::stops::until_ended(shared, || {
+        crate::stops::generation(shared, owner) != stop
+            || !tools.table.has_session(owner)
+            || shared.store.view(owner).is_none()
+    });
     let reply = tokio::select! {biased; ()=invalidated=>return Err(Error::new(Code::Cancelled, "video job ended")), result=tokio::time::timeout(Duration::from_secs(40),extraction)=>result.map_err(|error| Error::at(Code::Timeout, "video job deadline", error))??};
     if crate::stops::generation(shared, owner) != stop || !tools.table.has_session(owner) {
         return Err(Error::new(Code::Cancelled, "video job ended"));

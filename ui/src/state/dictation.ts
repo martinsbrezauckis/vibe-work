@@ -27,6 +27,10 @@ import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
+import { toBase64 } from "./pathText";
+
+/** Base64 of `bytes`, re-exported for the voice chat audio chunks. */
+export { toBase64 };
 
 /** How long the microphone may take to open before the strip says it waits for the permission (an OS prompt). */
 const PERMISSION_LINE_AFTER_MS = 500;
@@ -84,15 +88,6 @@ export const DICTATION_IDLE: DictationState = {
 
 /** Where the text box should put its caret after an insertion (`seq` changes each time). */
 export type CaretPlacement = { sessionId: string; caret: number; seq: number } | null;
-
-/** Base64 of bytes (chunked: `String.fromCharCode` takes a limited number of arguments). */
-export function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
 
 /**
  * The draft after inserting `text` at `[start, end)` (the selection is replaced), with a space added where

@@ -7,6 +7,7 @@ use std::{
 };
 use tokio::{sync::watch, task::AbortHandle};
 use vw_gate::{Confirmation, ConfirmationRequest};
+use vw_platform::sync::LockRecover;
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 struct Pending {
     id: String,
@@ -39,7 +40,7 @@ impl Drop for Owner<'_> {
         if !self.cancel {
             return;
         }
-        let mut calls = self.calls.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut calls = self.calls.0.lock_or_recover();
         if let Some(call) = calls.get_mut(&self.key).filter(|call| call.id == self.id) {
             call.waiters = call.waiters.saturating_sub(1);
             if call.waiters == 0 {
@@ -55,11 +56,7 @@ fn pending(
 ) -> Result<(String, String, watch::Receiver<Option<Confirmation>>), String> {
     let mut key = format!("{}:{}", request.method, request.params);
     let (id, result) = {
-        let mut calls = shared
-            .guard_asks
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut calls = shared.guard_asks.0.lock_or_recover();
         // Concurrent calls must never reuse one native Allow, even when their text is identical.
         if calls.contains_key(&key) {
             key = format!(
@@ -138,11 +135,7 @@ async fn decision(
         .map_err(|_| "Permission prompt closed.".to_owned())?;
     let answer = (*result.borrow()).unwrap_or(Confirmation::Declined);
     {
-        let mut calls = shared
-            .guard_asks
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut calls = shared.guard_asks.0.lock_or_recover();
         // The first waiter to wake closes this sheet's entry; a newer sheet for the same exact command keeps its own.
         if calls.get(&owner.key).is_some_and(|p| p.id == id) {
             calls.remove(&owner.key);

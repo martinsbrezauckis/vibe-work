@@ -19,6 +19,7 @@ import type { InstallView } from "./vibe";
 import type { GithubReadsView } from "./github_reads";
 import type { Ask, AskRecord, SessionGrant, GrantOffer, ChromeControlView } from "./ask";
 import type { KeepAwakeView } from "./keep_awake";
+import type { PausedToolsView } from "./paused_tools";
 import type { FeedbackView } from "./feedback";
 import type { SecretScanView } from "./secret_scan";
 export type CoreEvent = { "type": "feedback",
@@ -109,7 +110,11 @@ sessionId: string, } | { "type": "githubReads",
 /**
  * Current account and opt-in, never credentials.
  */
-view: GithubReadsView, } | { "type": "keepAwake",
+view: GithubReadsView, } | { "type": "pausedTools",
+/**
+ * The chat's paused tools.
+ */
+view: PausedToolsView, } | { "type": "keepAwake",
 /**
  * Current app-wide view.
  */
@@ -303,7 +308,11 @@ sessionId: string, } | { "type": "browserChanged",
 /**
  * The session.
  */
-sessionId: string | null, } | { "type": "pagesChanged",
+sessionId: string | null, } | { "type": "blockedPagePress",
+/**
+ * The chat whose browser page was pressed.
+ */
+sessionId: string, } | { "type": "pagesChanged",
 /**
  * The session.
  */

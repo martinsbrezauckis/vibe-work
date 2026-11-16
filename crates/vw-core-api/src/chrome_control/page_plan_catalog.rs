@@ -86,7 +86,7 @@ pub(super) fn decorate(result: &mut Value, requested: Option<&str>) {
                 row["inputSchema"] = schema(name);
                 row["description"] = if name.starts_with("recording.video.") {
                     json!(
-                        "Continuous video requires an offscreen encoder absent from this extension version. This action returns unavailable with the existing recording.start/stop action-screenshot GIF alternative."
+                        "Continuous video of this chat's own tab where the browser's extension reports page.video.v1 (Chrome/Edge extension 0.1.12); elsewhere this returns unavailable with the recording.start/stop action-screenshot GIF alternative."
                     )
                 } else if super::page_capture::NAMES.contains(name) {
                     json!(

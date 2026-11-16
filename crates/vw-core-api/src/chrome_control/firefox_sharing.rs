@@ -1,13 +1,16 @@
 //! Firefox add-on sharing status, separate from the owned automation window. Consumed by Settings and agent facts.
 use super::{AddonState, AddonView, agent_browser::Browser};
 use crate::core::Shared;
+use vw_platform::sync::LockRecover;
 
-/// Firefox page sharing ("Ask Vibe Work" through the signed add-on) is hidden in 0.1.10. The pinned Chrome Control
-/// helper refuses every Firefox add-on connection, so Connect would end at the add-on's "Native host disconnected".
-/// It returns with the 0.1.11 person-share route. While false: Settings and agent facts carry no sharing view, Firefox
-/// setup registers the helper without opening the add-on prompt, and the add-on request is refused. The owned
-/// Firefox window (`WebDriver` `BiDi`, Open window) is separate and unaffected.
-pub(super) const PAGE_SHARING_AVAILABLE: bool = false;
+/// Firefox page sharing ("Ask Vibe Work" through the signed add-on). The helper relays the add-on and limits it to a
+/// person's shares (no agent session on the person's Firefox). When false: Settings and agent facts carry no sharing
+/// view, Firefox setup registers the helper without opening the add-on prompt, and the add-on request is refused.
+/// The owned Firefox window (`WebDriver` `BiDi`, Open window) is separate and unaffected.
+pub(super) const PAGE_SHARING_AVAILABLE: bool = true;
+
+/// What the agent is told about a connected sharing add-on: shares arrive from the person; it cannot reach the tabs.
+const CONNECTED: &str = "The user can share pages, links, images and selected text from their own Firefox with Ask Vibe Work in Firefox's right-click menu; shared items arrive in the chat. The agent cannot open, list or read the user's Firefox tabs. For browser actions use chrome_session with profileId firefox:agent (the owned Firefox window).";
 
 /// The plain refusal for the add-on request while page sharing is hidden; names the owned window's control instead.
 pub(super) fn page_sharing_unavailable() -> String {
@@ -21,14 +24,28 @@ pub(super) fn shown(shared: &Shared) -> Option<AddonView> {
     PAGE_SHARING_AVAILABLE.then(|| view(shared))
 }
 
-/// Only the add-on profile may supply sharing facts; the owned `BiDi` runtime is a different connection.
-fn addon_profile(id: &str) -> bool {
+/// The core's own half of the person-share rule (the helper refuses too): an agent tool call that names the
+/// person's Firefox profile is refused before any helper call. A bare status read stays allowed; it only reports.
+pub(super) fn refuse_agent_reach(tool: &str, args: &serde_json::Value) -> Result<(), String> {
+    let named = args["profileId"].as_str().is_some_and(addon_profile);
+    let bare_status =
+        tool == "chrome_status" && args.get("action").is_none() && args.get("actions").is_none();
+    if named && !bare_status {
+        return Err(AGENT_REFUSAL.into());
+    }
+    Ok(())
+}
+const AGENT_REFUSAL: &str = "Not run: the user's own Firefox only sends pages they choose with Ask Vibe Work; the agent cannot open, list or read its tabs. Use chrome_session with profileId firefox:agent (the owned Firefox window) for browser actions.";
+
+/// Only the add-on profile may supply sharing facts; the owned `BiDi` runtime is a different connection. The
+/// person's Firefox reached this way is read for the composer only, never bound to a chat as its browser.
+pub(super) fn addon_profile(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
     id.starts_with("firefox:") && id != "firefox:agent"
 }
 
 pub(super) fn observe(shared: &Shared, data: &serde_json::Value) -> bool {
     use super::PairingState;
-    use std::sync::PoisonError;
     if data["profileId"]
         .as_str()
         .is_some_and(|id| !addon_profile(id))
@@ -44,8 +61,7 @@ pub(super) fn observe(shared: &Shared, data: &serde_json::Value) -> bool {
         .chrome_control
         .owner
         .firefox_share_pairing
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+        .lock_or_recover();
     if data["profileId"].is_null()
         && profiles.is_some_and(|rows| {
             !rows
@@ -72,12 +88,7 @@ pub(super) fn observe(shared: &Shared, data: &serde_json::Value) -> bool {
 pub(super) fn view(shared: &Shared) -> AddonView {
     use super::PairingState;
     let chrome = &shared.chrome_control;
-    let pairing = chrome
-        .owner
-        .firefox_share_pairing
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .0;
+    let pairing = chrome.owner.firefox_share_pairing.lock_or_recover().0;
     let live: Vec<_> = chrome
         .owner
         .connected_profiles
@@ -116,6 +127,9 @@ pub(super) fn view(shared: &Shared) -> AddonView {
     };
     let mut view = super::addon::view_for(state, "", Browser::Firefox);
     view.extension_version = version;
+    if state == AddonState::Connected {
+        view.instruction = CONNECTED.into();
+    }
     if state == AddonState::NotPaired {
         view.instruction = "The Firefox add-on is waiting for approval. Ask the user to confirm the Firefox connection in Vibe Work.".into();
         view.action = None;
@@ -139,19 +153,9 @@ fn self_distributed_update(view: &mut AddonView) {
 impl super::owner::Owner {
     pub(super) fn clear_firefox(&self) {
         use super::PairingState;
-        use std::sync::PoisonError;
-        *self
-            .firefox_pairing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
-        *self
-            .firefox_share_pairing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = (PairingState::Unknown, None);
-        self.firefox_states
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        *self.firefox_pairing.lock_or_recover() = (PairingState::Unknown, None);
+        *self.firefox_share_pairing.lock_or_recover() = (PairingState::Unknown, None);
+        self.firefox_states.lock_or_recover().clear();
     }
 }
 

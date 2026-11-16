@@ -2,9 +2,10 @@
 // parent index (a tree of the kept elements), landmarks, headings, layout containers (flex / grid with their
 // direction, columns and gap) and fixed / sticky elements. The kind classification is ShellX Canvas's,
 // applied to the live DOM instead of a source map.
-// Password, card and vault-filled fields never leave the page (as in the observation).
+// Protected fields (the shared privateField rule: password, PIN, card, vault-filled) never leave the page, also not
+// through the text of an element that holds one (a wrapping label, a form).
 // REQ: { page, maxElements }. Synchronous; the answer is untrusted page data, every string clipped.
-/* global INTERACTIVE, REQ, clip, collect, globalRect, inFrame, labelOf, matches, secretKind, vaultFilled, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
+/* global INTERACTIVE, REQ, clip, collect, globalRect, inFrame, labelOf, matches, privateField, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const LANDMARK = new Set(["header", "nav", "main", "footer", "aside", "section", "article", "form"]);
@@ -47,6 +48,8 @@
     if (tag === "input" || tag === "textarea" || tag === "select") return labelOf(el);
     if (MEDIA.has(tag)) return clip(el.getAttribute("alt") || el.getAttribute("aria-label") || el.getAttribute("title") || "", 120);
     if (LANDMARK.has(tag) || tag === "div") return clip(el.getAttribute("aria-label") || "", 120);
+    // An element whose text holds a protected field's content (a select's options, an editor's text) has none.
+    if (Array.from(el.querySelectorAll("select,textarea,[contenteditable]")).some((field) => privateField(field))) return "";
     return clip(el.innerText || el.textContent, 120);
   };
   const { elements, truncated } = collect();
@@ -86,7 +89,7 @@
     if (el.id) item.id = clip(el.id, 60);
     const classes = classesOf(el);
     if (classes.length) item.classes = classes;
-    const secret = vaultFilled(el) ? "vault" : secretKind(el);
+    const secret = privateField(el)?.kind;
     if (secret) item.redacted = secret;
     const name = item.redacted && tag !== "input" && tag !== "textarea" ? "" : nameOf(el);
     if (name) item.text = name;

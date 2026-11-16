@@ -5,9 +5,9 @@
  */
 import { PathLine } from "../../components/PathLine";
 import { Button } from "../../components/Controls";
-import { type ReactElement, useRef } from "react";
+import type { ReactElement } from "react";
 
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { useStore } from "../../state/createStore";
 import { NO_WORKTREES, type Worktrees } from "../../state/worktrees";
 import { useApp } from "../shell/AppContext";
@@ -69,10 +69,6 @@ function Body({ worktrees }: { worktrees: Worktrees }): ReactElement | null {
 export function EndDialog(): ReactElement | null {
   const { worktrees } = useApp();
   const end = useStore(worktrees?.store ?? NO_WORKTREES, (s) => s.end);
-  const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(end !== null, dialog, () => {
-    worktrees?.dismiss();
-  });
   if (worktrees === null || end === null) return null;
   const inspection = end.inspection;
   const files = inspection?.fileCount ?? 0;
@@ -84,50 +80,46 @@ export function EndDialog(): ReactElement | null {
       : `${verb} and discard ${String(files)} unsaved item${files === 1 ? "" : "s"}`;
   const title = "Throw away this copy?";
   return (
-    <>
-      <div className="scrim" />
-      <div
-        data-testid="worktrees.end-dialog-modal"
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        ref={dialog}
-        tabIndex={-1}
-        data-worktree="end"
-      >
-        <header>
-          <h2>{title}</h2>
-        </header>
-        <section>
-          <Body worktrees={worktrees} />
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="worktrees.end-dialog-cancel"
-            type="button"
+    <Modal
+      onClose={() => {
+        worktrees.dismiss();
+      }}
+      scrimCloses={false}
+      data-testid="worktrees.end-dialog-modal"
+      aria-label={title}
+      data-worktree="end"
+    >
+      <header>
+        <h2>{title}</h2>
+      </header>
+      <section>
+        <Body worktrees={worktrees} />
+      </section>
+      <footer className="modal-actions">
+        <Button
+          data-testid="worktrees.end-dialog-cancel"
+          type="button"
 
-            data-dialog-initial-focus="true"
-            disabled={end.busy}
-            onClick={() => {
-              worktrees.dismiss();
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            data-testid="worktrees.end-dialog-remove"
-            type="button"
-            shape="outlined"
-            variant="danger"
-            data-action="remove"
-            disabled={!canRemove}
-            onClick={() => void worktrees.remove()}
-          >
-            {removeLabel}
-          </Button>
-        </footer>
-      </div>
-    </>
+          data-dialog-initial-focus="true"
+          disabled={end.busy}
+          onClick={() => {
+            worktrees.dismiss();
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          data-testid="worktrees.end-dialog-remove"
+          type="button"
+          shape="outlined"
+          variant="danger"
+          data-action="remove"
+          disabled={!canRemove}
+          onClick={() => void worktrees.remove()}
+        >
+          {removeLabel}
+        </Button>
+      </footer>
+    </Modal>
   );
 }

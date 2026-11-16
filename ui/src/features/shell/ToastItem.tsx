@@ -44,7 +44,7 @@ export function ToastItem({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [preview, setPreview] = useState(() => initialToastPreview(text));
-  const message = useRef<HTMLSpanElement>(null);
+  const message = useRef<HTMLParagraphElement>(null);
   const paused = hovered || focused || reading || (docked && !active);
   const gone = useRef(onGone);
   const exitTimer = useRef<number | null>(null);
@@ -119,7 +119,8 @@ export function ToastItem({
         aria-hidden="true"
       />
       <div className="toast-content">
-        <span ref={message} className="toast-text">
+        {/* A paragraph: the Linux web view leaves plain text beside the buttons out of the accessibility tree. */}
+        <p ref={message} className="toast-text">
           {toast.plugin ? (
             <PluginNoticeText text={docked ? text : preview} name={toast.plugin.name} />
           ) : docked ? (
@@ -127,7 +128,7 @@ export function ToastItem({
           ) : (
             preview
           )}
-        </span>
+        </p>
         {(toast.guardRefusal !== undefined || docked || preview !== text) && (
           <Button
             data-testid="shell.toast-item-button"

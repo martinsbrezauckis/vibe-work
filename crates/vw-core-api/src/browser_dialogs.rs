@@ -2,7 +2,8 @@
 //! The UI reports its modal; native callers hold a lifetime guard. Page dialogs are separate browser targets.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 pub(crate) struct Dialogs {
@@ -24,23 +25,17 @@ pub struct BrowserDialog {
 
 impl Drop for BrowserDialog {
     fn drop(&mut self) {
-        self.dialogs
-            .inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .native
-            .remove(&self.id);
+        self.dialogs.inner.lock_or_recover().native.remove(&self.id);
     }
 }
 
 impl Dialogs {
     pub(crate) fn set_ui(&self, name: Option<String>) {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner).ui =
-            name.map(|name| label(&name));
+        self.inner.lock_or_recover().ui = name.map(|name| label(&name));
     }
 
     fn hold(self: &Arc<Self>, name: &str) -> BrowserDialog {
-        let mut state = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.inner.lock_or_recover();
         state.next += 1;
         let id = state.next;
         state.native.insert(id, label(name));
@@ -51,7 +46,7 @@ impl Dialogs {
     }
 
     pub(crate) fn check(&self) -> Result<(), String> {
-        let state = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.inner.lock_or_recover();
         if let Some(name) = state
             .native
             .last_key_value()

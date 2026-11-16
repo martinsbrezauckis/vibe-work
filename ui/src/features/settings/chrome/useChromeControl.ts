@@ -17,6 +17,8 @@ interface ChromeStatus {
   text: string;
   alert: boolean;
   kind?: "removed" | "hint";
+  /** After "Removed.": the core's note that the removal could not be saved (shown as an alert). */
+  note?: string;
 }
 
 /** What the section reads and does. */
@@ -91,7 +93,14 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
                           : request
                 : request;
         const result = await core.run({ type: "chromeControl", request: selected });
-        if (request.op === "remove") setStatus({ kind: "removed", text: "Removed.", alert: false });
+        if (request.op === "remove") {
+          const note = result.type === "chromeControl" ? result.hint : undefined;
+          setStatus(
+            note
+              ? { kind: "removed", text: "Removed.", alert: true, note }
+              : { kind: "removed", text: "Removed.", alert: false },
+          );
+        }
         return result;
       } catch (thrown) {
         const error = toCallError(thrown).error;
@@ -214,12 +223,16 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
     status?.kind === "removed"
       ? {
           ...status,
-          text:
+          text: [
             view?.setup.extensionRestart === true
               ? "Removed. Restart Chrome to finish."
               : view?.setup.extensionLeft === true
                 ? TEXT.chromeRemoved
                 : "Removed.",
+            status.note,
+          ]
+            .filter(Boolean)
+            .join(" "),
         }
       : status;
   return { view, busy, status: liveStatus, readError, run, connect };

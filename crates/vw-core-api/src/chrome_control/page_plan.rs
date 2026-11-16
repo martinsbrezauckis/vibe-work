@@ -119,6 +119,35 @@ pub(super) async fn dispatch(
     Ok(result)
 }
 
+/// Whether the browser profile of this request's session reports page video (`page.video.v1` and the action).
+async fn records_video(shared: &Arc<Shared>, request: &Value) -> bool {
+    let status = shared
+        .chrome_control
+        .owner
+        .call("chrome_status", json!({}))
+        .await;
+    let body = &status.value()["structuredContent"];
+    let Some(profile) = body["sessions"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["sessionId"] == request["sessionId"]))
+        .and_then(|r| r["profileId"].as_str())
+    else {
+        return false;
+    };
+    body["profiles"].as_array().is_some_and(|rows| {
+        rows.iter().any(|r| {
+            r["profileId"] == profile
+                && r["connected"] == true
+                && r["extensionCapabilities"]
+                    .as_array()
+                    .is_some_and(|caps| caps.contains(&json!("page.video.v1")))
+                && r["features"]
+                    .as_array()
+                    .is_some_and(|names| names.contains(&request["action"]))
+        })
+    })
+}
+
 pub(super) fn mcp(body: &Value) -> owner::Answer {
     owner::Answer::Helper(
         json!({"isError":body["status"] != "completed","content":[{"type":"text","text":body.to_string()}],"structuredContent":body}),
@@ -136,7 +165,18 @@ pub(super) async fn send(
         .is_some_and(|name| name.starts_with("recording.video."))
     {
         checked(shared, chat, request, consent)?;
-        return Err("Continuous page video is unavailable: this extension has no offscreen WebCodecs encoder or recording sink. Use recording.start and recording.stop for a GIF of action screenshots; it contains no audio or continuous video.".into());
+        // Extensions that report page.video.v1 record the chat's own tab themselves; the helper admits the action.
+        if records_video(shared, request).await {
+            return super::escalation::send(
+                shared,
+                chat,
+                "chrome_execute",
+                request.clone(),
+                consent,
+            )
+            .await;
+        }
+        return Err("Continuous page video is unavailable in this browser connection: its extension has no video recorder (the Chrome/Edge extension records video from version 0.1.12). Use recording.start and recording.stop for a GIF of action screenshots, or ask the user to update the browser extension.".into());
     }
     if super::agent_browser::selected(shared, chat, "chrome_execute", request)
         == super::agent_browser::Browser::Safari

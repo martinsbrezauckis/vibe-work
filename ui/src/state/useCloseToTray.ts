@@ -1,8 +1,9 @@
-/** Native General switch. Reads and saves through the typed client; polls while Settings is open
- * so Linux host loss removes the row. Failed saves retain the confirmed value. */
+/** Native General switch. Reads and saves through the typed client; reads again when the host reports the tray
+ * host came or went (`trayHost`), so Linux host loss removes the row. Failed saves retain the confirmed value. */
 import { useEffect, useRef, useState } from "react";
 import type { DesktopClient } from "../protocol/client/types";
 import { toCallError } from "../protocol/client/types";
+import { onTrayHost } from "./trayHostEvents";
 
 /** The close preference and current host availability. */
 export function useCloseToTray(desktop: DesktopClient | undefined) {
@@ -25,10 +26,10 @@ export function useCloseToTray(desktop: DesktopClient | undefined) {
         });
     };
     read();
-    const timer = setInterval(read, 1000);
+    const off = onTrayHost(read);
     return () => {
       live = false;
-      clearInterval(timer);
+      off();
     };
   }, [desktop]);
   const change = async (enabled: boolean) => {

@@ -4,6 +4,10 @@
 import type { JsonValue } from "../../../protocol/core";
 import { type Obj, obj } from "./entries";
 
+/**
+ * Divider text of a model-change entry: "Model changed to <name>" when exactly one display name in the runtime's
+ * model list matches the entry's model, otherwise "Model changed".
+ */
 export function modelChangeText(entry: Obj, runtime: JsonValue | undefined): string {
   const id = obj(entry["details"])?.["model"];
   const models = obj(obj(runtime)?.["config"])?.["models"];

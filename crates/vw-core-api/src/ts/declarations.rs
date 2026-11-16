@@ -283,6 +283,15 @@ pub(super) fn instructions_decls(cfg: &Config) -> Vec<String> {
         InstructionsDoc::decl(cfg),
         InstructionsScope::decl(cfg),
         ProjectInstructionFile::decl(cfg),
+        crate::ImportRequest::decl(cfg),
+        crate::ImportResult::decl(cfg),
+        crate::ImportPick::decl(cfg),
+        crate::ImportDetected::decl(cfg),
+        crate::ImportSummary::decl(cfg),
+        vw_import::Found::decl(cfg),
+        vw_import::Agent::decl(cfg),
+        vw_import::Kind::decl(cfg),
+        vw_import::Status::decl(cfg),
         ProjectInstructionsRequest::decl(cfg),
         ProjectInstructionsResult::decl(cfg),
     ]
@@ -366,8 +375,12 @@ pub(super) fn core_decls(cfg: &Config) -> Vec<String> {
         // Shared by skills.ts and market.ts (one-click install offers).
         crate::ToolsInstallOffer::decl(cfg),
         AlertKind::decl(cfg),
-        CallbackInfo::decl(cfg),
     ]
+}
+
+/// Open callback rows, in their own module so `index.ts` stays within the 800-line size limit.
+pub(super) fn callbacks_decls(cfg: &Config) -> Vec<String> {
+    vec![CallbackInfo::decl(cfg)]
 }
 
 /// The session list's view types (snapshot, row, change), in their own module so `index.ts` stays within the

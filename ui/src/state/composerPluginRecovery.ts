@@ -5,6 +5,10 @@ import { toCallError } from "../protocol/client/types";
 import { arr, obj, str } from "../features/transcript/model/entries";
 import { runningTurnId } from "../features/composer/model/session";
 
+/**
+ * Refreshes the plugins of a held chat, first resuming it when it is idle with turns and nothing running. Notes whether
+ * the refresh happened or waits for the current reply; the draft stays. Does nothing while the chat is sending.
+ */
 export async function retryPluginRefresh(
   core: CoreController,
   composer: ComposerStore,

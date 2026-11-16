@@ -21,6 +21,8 @@ vault-e2e = ["vw-core-api/vault-e2e"]
 
 [dependencies]
 vw-vocabulary = { workspace = true }
+# Binds its loopback listeners as Vibe Work's own ports (refused for every browser page).
+vw-netguard = { workspace = true }
 vw-ask = { workspace = true }
 vw-core-api = { workspace = true }
 vw-platform = { workspace = true }

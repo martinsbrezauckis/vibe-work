@@ -4,6 +4,11 @@ import type { App } from "../shell/AppContext";
 import { UiControlError } from "../../state/uiControl";
 import { actionStep, type BrowserAction, type BrowserTarget } from "./model";
 
+/**
+ * Runs a git browser row action: opens the target's chat, starts a new chat or task in its folder, or selects the
+ * repository in the chat's Changes tab and starts its commit, push, pull request or bring-into-base step. Throws
+ * {@link UiControlError} when the action is not allowed or the target has no chat.
+ */
 export async function adapterAction(
   app: App,
   target: BrowserTarget,
@@ -51,6 +56,10 @@ export async function adapterAction(
   else await git.openBring(sessionId);
 }
 
+/**
+ * Opens a changed file of `target` in its chat's File tab. Throws {@link UiControlError} when the file is not in the
+ * target, the target has no chat, or the file is outside the chat's readable folder.
+ */
 export async function adapterFile(
   app: App,
   target: BrowserTarget,

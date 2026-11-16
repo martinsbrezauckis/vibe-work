@@ -4,7 +4,8 @@
 use crate::SecretScanSettings;
 use serde_json::{Map, Value};
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 static WRITE: Mutex<()> = Mutex::new(());
 
@@ -13,7 +14,7 @@ static WRITE: Mutex<()> = Mutex::new(());
 /// # Errors
 /// Settings cannot be read, parsed, or written. No Vibe configuration is touched.
 pub fn write_app_settings(path: &Path, update: Map<String, Value>) -> std::io::Result<()> {
-    let _write = WRITE.lock().unwrap_or_else(PoisonError::into_inner);
+    let _write = WRITE.lock_or_recover();
     let mut settings = match std::fs::read(path) {
         Ok(bytes) => {
             serde_json::from_slice::<Map<String, Value>>(&bytes).map_err(std::io::Error::other)?

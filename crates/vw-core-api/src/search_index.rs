@@ -22,8 +22,9 @@
 //! its previous text and is retried by the next pass; text per message is capped at [`MAX_TEXT`].
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::warn;
@@ -99,7 +100,7 @@ pub(crate) struct MessageIndex {
 
 impl MessageIndex {
     fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
 
     /// How far the index is.

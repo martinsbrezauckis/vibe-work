@@ -36,9 +36,7 @@ mod launches;
 pub(crate) mod panel;
 mod preview_tools;
 mod process_reply;
-#[cfg(feature = "agent-vault")]
 mod secret_capture;
-#[cfg(feature = "agent-vault")]
 mod secret_capture_exec;
 mod secret_dialog;
 pub(crate) mod secret_env;
@@ -68,8 +66,9 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::task::JoinHandle;
@@ -211,6 +210,8 @@ pub(crate) struct AgentTools {
     /// chat's mode from it (`chrome_launch`).
     shared: OnceLock<Weak<crate::core::Shared>>,
     listener: Mutex<Option<std::net::TcpListener>>,
+    /// Holds the endpoint port in Vibe Work's own ports (refused for every browser page) while the tools live.
+    _own: vw_netguard::listeners::OwnPort,
     pub(crate) task: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -224,7 +225,7 @@ impl AgentTools {
         vw_platform::ensure_private_dir(&config.data_dir).map_err(|e| e.to_string())?;
         vw_platform::ensure_private_dir(&config.data_dir.join("output"))
             .map_err(|e| e.to_string())?;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+        let (listener, own) = vw_netguard::listeners::bind_own().map_err(|e| e.to_string())?;
         let endpoint = listener.local_addr().map_err(|e| e.to_string())?;
         let table = Arc::new(CredentialTable::default());
         let hook = table.hook().map_err(|e| e.to_string())?;
@@ -252,15 +253,13 @@ impl AgentTools {
             copy_locks: copycheck::CopyLocks::default(),
             on_demand: crate::on_demand::OnDemand::default(),
             listener: Mutex::new(Some(listener)),
+            _own: own,
             task: Mutex::new(None),
         })
     }
 
     pub(crate) fn take_listener(&self) -> Option<std::net::TcpListener> {
-        self.listener
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
+        self.listener.lock_or_recover().take()
     }
 
     /// Restore claims from live launch records before any new lease is handed out (including a server
@@ -403,10 +402,7 @@ impl AgentTools {
             tracing::warn!(%error,"Could not delete saved video frames");
         }
         self.on_demand.forget(session_id);
-        tools::forget_finished(
-            &mut self.finished.lock().unwrap_or_else(PoisonError::into_inner),
-            session_id,
-        );
+        tools::forget_finished(&mut self.finished.lock_or_recover(), session_id);
     }
 
     /// Session `old` was handed off to `new` (`handoff.rs`): its credentials, its launch records and the
@@ -417,26 +413,20 @@ impl AgentTools {
         self.launches.hand_off(old, new);
         for started in self
             .started
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .values_mut()
             .filter(|s| s.session_id == old)
         {
             new.clone_into(&mut started.session_id);
         }
-        let mut finished = self.finished.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut finished = self.finished.lock_or_recover();
         tools::handoff_finished(&mut finished, old, new);
         tracing::debug!(moved, "agent tools: credentials follow the hand-off");
     }
 
     /// Stops the listener task.
     pub(crate) fn shutdown(&self) {
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
     }
@@ -521,7 +511,7 @@ pub(crate) fn start_server(shared: &Arc<crate::core::Shared>) {
     if let Some(tools) = &shared.agent_tools
         && let Some(task) = server::spawn_server(shared)
     {
-        *tools.task.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+        *tools.task.lock_or_recover() = Some(task);
     }
 }
 
@@ -634,8 +624,9 @@ mod server_args_tests {
     }
 }
 
-#[cfg(feature = "agent-vault")]
 mod vault_capture;
 
 #[cfg(test)]
 mod restart_tests;
+#[cfg(test)]
+mod vault_capture_tests;

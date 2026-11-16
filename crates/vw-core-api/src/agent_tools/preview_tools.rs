@@ -2,12 +2,15 @@
 //! `preview_screenshot`, `preview_console`. Every one acts on the credential's session only; refusals are plain
 //! text naming the owner ("port 28104 belongs to another session ('Shop')").
 //!
-//! Depends on: `previews` (the shared open path, the hub), `preview_ports`, vw-preview, vw-agent-tools (`wire`).
+//! Depends on: `previews` (the shared open path, the hub), `preview_ports`, vw-preview, vw-agent-tools (`wire`),
+//! `paused_tools_gate` (the person's browser Pause).
 //! Called by: `tools::call`.
 //! Invariants:
 //! - Answers stay small JSON except the screenshot, which carries its PNG under `wire::IMAGE_KEY` (at most 1 MiB
 //!   before base64, within `wire::MAX_ANSWER`).
 //! - Local-network pages use the same title, screenshot and console access rules as other pages.
+//! - `preview_screenshot` returns pixels only after the built-in browser's protected-value admission
+//!   (`vw_browser::Browser::admit_capture`), the one rule every agent-bound visual capture uses.
 //! - `preview_list.canOpen` holds only listening servers (leased free ports are `leasedFree`);
 //!   `preview_open` on a loopback port nothing listens on is refused with how to start the server (it used to
 //!   answer "loaded" over an error page).
@@ -247,10 +250,32 @@ async fn open(
     }
     // Opening asks the window to show this session's App preview. The window checks
     // that it is the selected session; the tool never changes sessions or brings the OS window forward.
-    let mut changes = hub.service.visibility_changes();
+    let changes = hub.service.visibility_changes();
+    // A web tab the agent's own browser call brought forward gives way here already, without the window's answer.
+    hub.service
+        .reselect_app_preview(session_id)
+        .await
+        .map_err(|e| text(&core_error(&e)))?;
     shared.emit(CoreEvent::PreviewShowRequested {
         session_id: session_id.to_owned(),
     });
+    wait_capturable(hub, session_id, changes).await;
+    view = hub.service.view(session_id).unwrap_or(view);
+    let unavailable = hub.service.screenshot_unavailable_reason(session_id);
+    let note = open_note(&view, unavailable);
+    Ok(json!({
+        "tab": app_tab(session_id),
+        "preview": preview_json(&hub.service, Some(&view), false, session_id, None),
+        "note": note,
+    }))
+}
+
+/// Waits (at most two seconds) for the window's report that App preview can be captured, after a selection change.
+async fn wait_capturable(
+    hub: &PreviewHub,
+    session_id: &str,
+    mut changes: tokio::sync::watch::Receiver<u64>,
+) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while hub
         .service
@@ -265,20 +290,27 @@ async fn open(
         {
             break;
         }
-        view = hub.service.view(session_id).unwrap_or(view);
     }
-    view = hub.service.view(session_id).unwrap_or(view);
-    let unavailable = hub.service.screenshot_unavailable_reason(session_id);
-    let note = open_note(&view, unavailable);
-    Ok(json!({
-        "tab": app_tab(session_id),
-        "preview": preview_json(&hub.service, Some(&view), false, session_id, None),
-        "note": note,
-    }))
 }
 
-/// Runs one preview tool for `session_id`.
+/// Runs one preview tool for `session_id`. Its page tools wait while the person paused the chat's browser, like
+/// browser tools: a pause that started after the call's receipt is waited for here, inside the tool's own deadline.
 pub(crate) async fn call(
+    shared: &Arc<Shared>,
+    session_id: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    if crate::paused_tools_gate::browser_call(tool, args) {
+        crate::paused_tools_gate::wait(shared, session_id, crate::paused_tools::GATEWAY_WAIT)
+            .await?;
+    }
+    let mut answer = run(shared, session_id, tool, args).await?;
+    crate::paused_tools_gate::note_resumed(shared, session_id, &mut answer);
+    Ok(answer)
+}
+
+async fn run(
     shared: &Arc<Shared>,
     session_id: &str,
     tool: &str,
@@ -296,6 +328,17 @@ pub(crate) async fn call(
             {
                 return Err(format!("Not run: {reason}"));
             }
+            // App preview's own screenshot: a web tab the agent's own browser call brought forward gives way to
+            // App preview first; a tab the person chose stays, and the refusal below asks them.
+            let changes = hub.service.visibility_changes();
+            if hub
+                .service
+                .reselect_app_preview(session_id)
+                .await
+                .map_err(|e| text(&core_error(&e)))?
+            {
+                wait_capturable(hub, session_id, changes).await;
+            }
             // A screenshot at a device width sets the preview to it first (the user's pane too).
             if let Some(width) = width_arg(args)? {
                 hub.service
@@ -303,11 +346,24 @@ pub(crate) async fn call(
                     .await
                     .map_err(|e| text(&core_error(&e)))?;
             }
+            // The built-in browser's protected-value admission, before and after the pixels. The screenshot's own
+            // refusals (nothing open, a hidden preview, a vault fill) answer first; a suspended preview has no page
+            // to check until the screenshot mounts it again.
+            if hub.service.page_mount(session_id).is_some()
+                && hub
+                    .service
+                    .screenshot_unavailable_reason(session_id)
+                    .is_none()
+                && !hub.service.shots_blocked(session_id)
+            {
+                hub.browser.admit_capture(session_id).await?;
+            }
             let (shot, mount) = hub
                 .service
                 .screenshot_of_mount(session_id)
                 .await
                 .map_err(|e| text(&core_error(&e)))?;
+            hub.browser.admit_capture(session_id).await?;
             // The image must still belong to the current mount.
             if hub.service.page_mount(session_id).as_ref() != Some(&mount) {
                 return Err(
@@ -352,3 +408,11 @@ pub(crate) async fn call(
 #[cfg(test)]
 #[path = "preview_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "preview_screenshot_protected_tests.rs"]
+mod screenshot_protected_tests;
+
+#[cfg(test)]
+#[path = "preview_selection_tests.rs"]
+mod selection_tests;

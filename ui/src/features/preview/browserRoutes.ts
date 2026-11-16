@@ -13,6 +13,7 @@
 import { writeClipboard } from "../../state/clipboard";
 import { panelOwner } from "../../state/shellState";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { awayFromHome } from "../shell/home";
 import type { Browser } from "./browser";
@@ -21,12 +22,6 @@ import { addressToUrl, isLocalPage } from "./browserModel";
 import type { Previews } from "./store";
 import { pickPreviewVisibilityReason, previewVisibility } from "./visibility";
 import { pointPreview } from "../pages/point";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, field: string): string {
   if (typeof value !== "string")
@@ -108,7 +103,7 @@ export function registerBrowserRoute(
     };
   };
   return app.uiControl.register("browser", async (body) => {
-    const args = asObject(body);
+    const args = bodyObject(body);
     const sessionId =
       typeof args["sessionId"] === "string" ? args["sessionId"] : panelOwner(app.shell.store.get());
     if (sessionId === null) throw new UiControlError("invalidParams", "no chat is selected");

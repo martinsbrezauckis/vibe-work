@@ -1,29 +1,22 @@
-//! Pins optional command capture discovery and its value-free input schema.
-//! Uses the public tool list; run by Cargo with and without the optional vault feature.
+//! Pins command capture discovery and its value-free input schema.
+//! Uses the public tool list.
 #[test]
-fn command_capture_is_advertised_only_when_enabled() {
+fn command_capture_is_advertised() {
     let list = vw_agent_tools::mcp::tool_list();
     let found = list
         .as_array()
         .unwrap()
         .iter()
         .find(|tool| tool["name"] == "secret_capture_command");
+    let tool = found.expect("command capture must be discoverable");
     assert_eq!(
-        found.is_some(),
-        cfg!(feature = "agent-vault"),
-        "command capture must be discoverable in the optional module"
+        tool["inputSchema"]["required"],
+        serde_json::json!(["name", "program"])
     );
-    if let Some(tool) = found {
-        assert_eq!(
-            tool["inputSchema"]["required"],
-            serde_json::json!(["name", "program"])
-        );
-        assert!(tool["inputSchema"]["properties"]["value"].is_null());
-        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
-    }
+    assert!(tool["inputSchema"]["properties"]["value"].is_null());
+    assert_eq!(tool["inputSchema"]["additionalProperties"], false);
 }
 
-#[cfg(feature = "agent-vault")]
 #[test]
 fn capture_parser_bounds_runtime_without_weakening_existing_secret_runs() {
     use serde_json::json;

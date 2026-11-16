@@ -11,7 +11,9 @@
 //! - Public = global unicast only ([`ip::classify`]); a host NAME is refused when any of its DNS answers is not
 //!   public, and the proxy connects only to the addresses it checked (no second resolution: DNS rebinding).
 //! - This computer only as `127.0.0.1` / `[::1]` / `localhost`, never Vibe Work's own ports, and only when the
-//!   session's [`PageContext`] allows the port (Private Network Access idea).
+//!   session's [`PageContext`] allows the port (Private Network Access idea). For a browser page, this computer's own
+//!   interface addresses ([`own`]) are this computer too: asked about like loopback, Vibe Work's own ports refused.
+//! - Vibe Work's own ports include every guard's listeners in the process ([`listeners`]), not only the asking guard's.
 pub mod chromium;
 mod credential;
 pub mod decide;
@@ -19,6 +21,8 @@ pub mod forward;
 mod guard;
 pub mod head;
 pub mod ip;
+pub mod listeners;
+pub mod own;
 pub mod resolve;
 pub mod rules;
 mod serve;
@@ -30,7 +34,7 @@ pub mod upstream;
 pub mod upstream;
 mod ws_origin;
 
-pub use decide::{NoLoopback, Scope, ScopeFuture};
+pub use decide::{LocalRequest, NoLoopback, Scope, ScopeFuture};
 pub use guard::{
     CANARY_SUFFIX, LOG_CAP, LOOPBACK_CANARY_PATH, MAX_CONNECTIONS, NetGuard, PageContext, Refusal,
     SEEN_CAP,

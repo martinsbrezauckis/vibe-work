@@ -192,3 +192,21 @@ fn adapter_source_never_travels_on_argv() {
         "the Python adapter must be delivered outside argv"
     );
 }
+
+#[test]
+fn a_guard_list_that_does_not_read_as_plain_versions_offers_nothing() {
+    let read = |line: &str| super::parse_guarded(&format!("x = 1\n{line}\n"));
+    assert_eq!(
+        read(r#"GUARDED_VIBE_VERSIONS = frozenset({"3.1.2", "3.1.3"})"#),
+        ["3.1.2", "3.1.3"]
+    );
+    for line in [
+        r#"GUARDED_VIBE_VERSIONS = frozenset({"3.1.2", "3.1.x"})"#,
+        r#"GUARDED_VIBE_VERSIONS = frozenset({"3.1.2", OTHER})"#,
+        r#"GUARDED_VIBE_VERSIONS = frozenset({"3.1.2"}) | EXTRA"#,
+        r#"GUARDED_VIBE_VERSIONS = {"3.1.2"}"#,
+        "GUARDED_VIBE_VERSIONS = frozenset({})",
+    ] {
+        assert!(read(line).is_empty(), "{line}");
+    }
+}

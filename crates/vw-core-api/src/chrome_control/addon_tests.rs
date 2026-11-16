@@ -699,6 +699,8 @@ fn a_removed_pairing_offers_connect_unless_chrome_says_otherwise() {
             chrome_running: true,
             ..removed.clone()
         },
+        // Chrome is closed: an earlier pairing (`paired_once`) never reads "Connected when Chrome is open" here.
+        removed.clone(),
     ] {
         for (probe, expected) in [
             (Probe::Unknown, S::NotConnected),

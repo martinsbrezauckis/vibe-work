@@ -1,6 +1,6 @@
 //! Media Foundation Source Reader adapter. Called only inside the native helper after sandbox setup.
 //! Normalizes the initial presentation offset, clips padded RGB rows and never uses decode timestamps.
-use super::{Frame, Metadata, geometry};
+use super::{Frame, Metadata, geometry, native_values::Opening};
 use std::path::Path;
 use vw_video_types::{Code, Error};
 #[allow(
@@ -82,6 +82,10 @@ impl Drop for Com {
 fn failure(e: windows::core::Error) -> Error {
     super::native_values::media_foundation(e.code().0)
 }
+/// Reads a failure of one `open` step whose Media Foundation codes name a format this computer cannot read.
+fn opening(step: Opening, e: &windows::core::Error) -> Error {
+    super::native_values::media_foundation_open(step, e.code().0)
+}
 impl Decoder {
     /// Opens the authorized private source with only its video stream selected.
     /// # Errors
@@ -138,9 +142,9 @@ impl Decoder {
                     MF_SOURCE_READER_MEDIASOURCE.0.cast_unsigned(),
                     &MF_PD_DURATION,
                 )
-                .map_err(failure)?;
+                .map_err(|e| opening(Opening::Duration, &e))?;
             let duration = u64::try_from(&duration)
-                .map_err(failure)?
+                .map_err(|e| opening(Opening::Duration, &e))?
                 .checked_mul(100)
                 .filter(|n| *n > 0 && *n <= 7_200_000_000_000)
                 .ok_or(Error::new(Code::Duration, "duration"))?;
@@ -168,7 +172,7 @@ impl Decoder {
                 _com: com,
             };
             d.offset = d
-                .sample()?
+                .read(|e| opening(Opening::FirstFrame, &e))?
                 .ok_or(Error::new(Code::DecodeFailed, "empty video"))?
                 .0;
             Ok(d)
@@ -275,6 +279,13 @@ impl Decoder {
         Ok(covering)
     }
     fn sample(&self) -> Result<Option<(i64, IMFSample)>, Error> {
+        self.read(failure)
+    }
+    /// Next decoded sample; `fail` reads a failed `ReadSample` call.
+    fn read(
+        &self,
+        fail: impl Fn(windows::core::Error) -> Error,
+    ) -> Result<Option<(i64, IMFSample)>, Error> {
         for _ in 0..1024 {
             let (mut flags, mut pts, mut sample) = (0, 0, None);
             // SAFETY: output pointers are valid stack storage and the reader is initialized.
@@ -288,7 +299,7 @@ impl Decoder {
                         Some(&raw mut pts),
                         Some(&raw mut sample),
                     )
-                    .map_err(failure)?;
+                    .map_err(&fail)?;
             }
             if flags & MF_SOURCE_READERF_ERROR.0.cast_unsigned() != 0 {
                 return Err(Error::new(Code::DecodeFailed, "native decoder failure"));

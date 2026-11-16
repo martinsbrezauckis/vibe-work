@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 pub(super) const FILE: &str = "model-choices.json";
 const LEGACY: [(&str, &str); 3] = [
@@ -149,15 +150,11 @@ impl Records {
     }
 
     pub fn get(&self, id: &str) -> Record {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .document
-            .get(id)
+        self.state.lock_or_recover().document.get(id)
     }
 
     pub fn named(&self, alias: &str) -> Option<String> {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state.lock_or_recover();
         for field in ["remembered", "fallback", "pending"] {
             for value in state.document.chats.values() {
                 if let Ok(choice) = serde_json::from_value::<Choice>(value[field].clone())
@@ -220,7 +217,7 @@ impl Records {
     }
 
     pub fn copy_in_memory(&self, old: &str, new: &str) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if let Some(record) = state.document.chats.get(old).cloned() {
             state.document.chats.insert(new.into(), record.clone());
             state.unsaved_copies.insert(new.into(), record);
@@ -232,7 +229,7 @@ impl Records {
         change: impl FnOnce(&mut Document) -> io::Result<bool>,
         write: impl FnOnce(&Path, &Document) -> io::Result<()>,
     ) -> Result<(), CoreError> {
-        let mut current = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut current = self.state.lock_or_recover();
         let commit = || -> io::Result<Document> {
             let _lock = self.dir.as_deref().map(lock).transpose()?;
             let (mut next, migrated) = match self.dir.as_deref() {

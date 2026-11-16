@@ -11,8 +11,6 @@ publish = false
 [lints]
 workspace = true
 [features]
-# Optional agent capture directly into the vault. Off in default builds.
-agent-vault = []
 ts = ["dep:ts-rs"]
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

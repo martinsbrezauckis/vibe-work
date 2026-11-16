@@ -13,8 +13,9 @@
 //! - The forwarding/reload task is owned by [`PagesHub`] and aborted on drop or shutdown.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tokio::task::JoinHandle;
 use vw_pages::{PagePath, PagesConfig, PagesError, PagesService};
@@ -144,14 +145,14 @@ pub(crate) fn start_hub_events(
             }
         }
     });
-    *hub.task.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *hub.task.lock_or_recover() = Some(task);
 }
 
 impl PagesHub {
     /// Stops the event and reload task and the background checks (quit).
     pub(crate) fn stop_task(&self) {
         for slot in [&self.task, &self.checks] {
-            if let Some(task) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            if let Some(task) = slot.lock_or_recover().take() {
                 task.abort();
             }
         }
@@ -162,10 +163,7 @@ impl PagesHub {
 pub(crate) async fn session_ended(shared: &Shared, session_id: &str) {
     if let Some(hub) = &shared.pages {
         hub.service.session_ended(session_id).await;
-        hub.plans
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(session_id);
+        hub.plans.lock_or_recover().remove(session_id);
     }
 }
 

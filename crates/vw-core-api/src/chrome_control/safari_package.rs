@@ -111,8 +111,17 @@ pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<Optio
         .safari_seen_at
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let reachable =
-        super::safari::notice_reachable(launching, last_report, std::time::Instant::now());
+    let now = std::time::Instant::now();
+    let reachable = super::safari::notice_reachable(launching, last_report, now);
+    // Safari stopped running the idle extension page: a local page load wakes it before the notice is sent.
+    let wake = super::safari::wake_first(launching, last_report, now)
+        .then(|| shared.chrome_control.dir().map(super::safari::wake_page))
+        .flatten()
+        .and_then(|written| {
+            written
+                .map_err(|reason| tracing::warn!(%reason, "Safari wake page could not be written"))
+                .ok()
+        });
     let forwarded = vw_platform::browser::bring_safari_forward(|allowed| {
         tracing::info!(allowed, "Safari brought forward after its launch");
     });
@@ -123,7 +132,13 @@ pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<Optio
     vw_platform::safari_extension::open_setup(
         extension,
         move || {
-            if launching {
+            if let Some(page) = wake {
+                if vw_platform::browser::open_in_safari(&page) {
+                    wait_for_extension(&shared, seen);
+                } else {
+                    tracing::warn!("Safari wake page could not be opened");
+                }
+            } else if launching {
                 wait_for_extension(&shared, seen);
             }
         },
@@ -133,7 +148,8 @@ pub(super) fn open(shared: &std::sync::Arc<crate::core::Shared>) -> Result<Optio
         },
     )
     .map_err(|_| "Safari Settings could not be opened.".to_owned())?;
-    // The notice is still sent (Safari may run the page by now), but the person gets the way that always works.
+    // The notice is still sent after the wake (the page may not report in time), and the person also gets the way that
+    // always works.
     Ok(pairing_hint(reachable))
 }
 

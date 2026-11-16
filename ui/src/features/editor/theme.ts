@@ -3,6 +3,7 @@ import { HighlightStyle } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
+/** Syntax highlighting that gives each token kind a `syn-token-*` class. */
 export const editorHighlight = HighlightStyle.define([
   { tag: tags.keyword, class: "syn-token-keyword" },
   { tag: [tags.string, tags.regexp], class: "syn-token-string" },
@@ -17,12 +18,13 @@ export const editorHighlight = HighlightStyle.define([
   { tag: tags.link, class: "syn-token-link" },
 ]);
 
+/** The editor's look: colours and fonts from the app's CSS variables, for both colour schemes. */
 export const editorTheme = EditorView.theme({
   "&": { height: "100%", minHeight: "0", backgroundColor: "var(--bg)", color: "var(--text)" },
   ".cm-scroller": {
     overflow: "auto",
     fontFamily: "var(--font-mono)",
-    fontSize: "12.5px",
+    fontSize: "var(--text-base)",
     lineHeight: "1.55",
   },
   ".cm-content": { caretColor: "var(--text)", minHeight: "100%" },

@@ -47,6 +47,7 @@ function More({
     />
   );
 }
+/** One commit row: subject, author, time and whether it is in the shared history, with a ⋯ menu when `menu` is set. */
 export function VersionRow({
   version,
   onOpen,
@@ -81,6 +82,10 @@ export function VersionRow({
     </div>
   );
 }
+/**
+ * The explorer's history view: an open commit's details, or the uncommitted changes followed by commits grouped by
+ * day, loaded 50 at a time. Offers to turn on version history when the folder has none.
+ */
 export function History({
   state,
   explorer,

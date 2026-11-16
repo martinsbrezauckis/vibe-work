@@ -68,43 +68,75 @@ def render(labels, series, values, kind, title, unit):
     top = max(max(flat), 0.0) or 1.0
     low = min(min(flat), 0.0)
     span = top - low or 1.0
-    w, h, left, right, up, down = 720, 360, 64, 16, 36, 70
+    n = len(labels)
+    if kind == "hbar":
+        # One row per label: names on the left, bars grow right from the zero line, values along the bottom.
+        w, left, right, up, down = 720, 128, 16, 36, 40
+        slot = 28 if len(values) == 1 else 16 * len(values) + 8
+        h = up + slot * max(n, 1) + down
+    else:
+        w, h, left, right, up, down = 720, 360, 64, 16, 36, 70
     pw, ph = w - left - right, h - up - down
     title = html.escape(title or f"{', '.join(series)} by label")
     out = [f'<figure class="hb-chart"><svg viewBox="0 0 {w} {h}" width="100%" role="img" aria-label="{title}" '
            f'xmlns="http://www.w3.org/2000/svg" style="max-width:{w}px;font:12px system-ui,sans-serif">',
            f"<title>{title}</title>"]
 
-    def y(v):
-        return up + ph - (v - low) / span * ph
+    def tip(i, v):
+        return f"<title>{html.escape(labels[i])}: {nice(v)}{html.escape(unit)}</title>"
 
-    for i in range(5):
-        tick = low + span * i / 4
-        out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(tick):.1f}" y2="{y(tick):.1f}" style="stroke:var(--line)"/>')
-        out.append(f'<text x="{left - 6}" y="{y(tick) + 4:.1f}" text-anchor="end" style="fill:var(--text-3)">{nice(tick)}</text>')
-    n = len(labels)
-    slot = pw / max(n, 1)
-    if kind == "line":
-        for s, col in enumerate(values):
-            pts = [f"{left + slot * (i + 0.5):.1f},{y(v):.1f}" for i, v in enumerate(col) if v is not None]
-            out.append(f'<polyline points="{" ".join(pts)}" fill="none" style="stroke:{COLOURS[s]};stroke-width:2"/>')
-    else:
-        bw = slot * 0.8 / len(values)
+    def label_text(label):
+        return html.escape(label if len(label) <= 14 else label[:13] + "…")
+
+    if kind == "hbar":
+        def x(v):
+            return left + (v - low) / span * pw
+
+        for i in range(5):
+            tick = low + span * i / 4
+            out.append(f'<line x1="{x(tick):.1f}" x2="{x(tick):.1f}" y1="{up}" y2="{h - down}" style="stroke:var(--line)"/>')
+            out.append(f'<text x="{x(tick):.1f}" y="{h - down + 16}" text-anchor="middle" style="fill:var(--text-3)">{nice(tick)}</text>')
+        bh = slot * 0.8 / len(values)
         for s, col in enumerate(values):
             for i, v in enumerate(col):
                 if v is None:
                     continue
-                x = left + slot * i + slot * 0.1 + bw * s
-                y0, y1 = sorted([y(v), y(0)])
-                out.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{max(y1 - y0, 0.5):.1f}" '
-                           f'style="fill:{COLOURS[s]}"><title>{html.escape(labels[i])}: {nice(v)}{html.escape(unit)}</title></rect>')
-    every = max(1, n // 12)
-    for i, label in enumerate(labels):
-        if i % every == 0:
-            x = left + slot * (i + 0.5)
-            text = html.escape(label if len(label) <= 14 else label[:13] + "…")
-            out.append(f'<text x="{x:.1f}" y="{h - down + 16}" text-anchor="end" transform="rotate(-35 {x:.1f} {h - down + 16})" '
-                       f'style="fill:var(--text-2)">{text}</text>')
+                y = up + slot * i + slot * 0.1 + bh * s
+                x0, x1 = sorted([x(v), x(0)])
+                out.append(f'<rect x="{x0:.1f}" y="{y:.1f}" width="{max(x1 - x0, 0.5):.1f}" height="{bh:.1f}" '
+                           f'style="fill:{COLOURS[s]}">{tip(i, v)}</rect>')
+        for i, label in enumerate(labels):
+            out.append(f'<text x="{left - 6}" y="{up + slot * (i + 0.5) + 4:.1f}" text-anchor="end" '
+                       f'style="fill:var(--text-2)">{label_text(label)}</text>')
+    else:
+        def y(v):
+            return up + ph - (v - low) / span * ph
+
+        for i in range(5):
+            tick = low + span * i / 4
+            out.append(f'<line x1="{left}" x2="{w - right}" y1="{y(tick):.1f}" y2="{y(tick):.1f}" style="stroke:var(--line)"/>')
+            out.append(f'<text x="{left - 6}" y="{y(tick) + 4:.1f}" text-anchor="end" style="fill:var(--text-3)">{nice(tick)}</text>')
+        slot = pw / max(n, 1)
+        if kind == "line":
+            for s, col in enumerate(values):
+                pts = [f"{left + slot * (i + 0.5):.1f},{y(v):.1f}" for i, v in enumerate(col) if v is not None]
+                out.append(f'<polyline points="{" ".join(pts)}" fill="none" style="stroke:{COLOURS[s]};stroke-width:2"/>')
+        else:
+            bw = slot * 0.8 / len(values)
+            for s, col in enumerate(values):
+                for i, v in enumerate(col):
+                    if v is None:
+                        continue
+                    x = left + slot * i + slot * 0.1 + bw * s
+                    y0, y1 = sorted([y(v), y(0)])
+                    out.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{max(y1 - y0, 0.5):.1f}" '
+                               f'style="fill:{COLOURS[s]}">{tip(i, v)}</rect>')
+        every = max(1, n // 12)
+        for i, label in enumerate(labels):
+            if i % every == 0:
+                x = left + slot * (i + 0.5)
+                out.append(f'<text x="{x:.1f}" y="{h - down + 16}" text-anchor="end" transform="rotate(-35 {x:.1f} {h - down + 16})" '
+                           f'style="fill:var(--text-2)">{label_text(label)}</text>')
     if len(series) > 1:
         for s, name in enumerate(series):
             out.append(f'<rect x="{left + s * 140}" y="8" width="10" height="10" style="fill:{COLOURS[s]}"/>'

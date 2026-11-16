@@ -14,6 +14,10 @@ import {
   str,
 } from "../features/transcript/model/entries";
 
+/**
+ * Creates the core event handler that calls `mark` for each open tab, in any session, showing a file a completed Vibe
+ * edit or write just changed. Each write counts once; writes already in a loaded snapshot are not marked.
+ */
 export function createFileActivity(
   core: CoreController,
   sessions: () => Readonly<Record<string, FileWorkspace>>,

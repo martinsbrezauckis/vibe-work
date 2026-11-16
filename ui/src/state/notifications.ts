@@ -18,6 +18,7 @@ type ToastKind = "info" | "warn" | "error";
 
 /** Reasons an entry may be retained in the bell; ordinary feedback has none. */
 export const BELL_KINDS = ["approval", "finished", "failure", "security", "worktrees"] as const;
+/** One reason an entry is kept in the bell. */
 export type BellKind = (typeof BELL_KINDS)[number];
 
 /** Fail closed for unclassified feedback and unknown kinds, including untyped callers. */
@@ -60,6 +61,7 @@ type CoreRefusal = Extract<CoreEvent, { type: "guardRefused" }>;
 export type GuardKind = CoreRefusal["guard"] | "never";
 /** One Security group line: the core's guard refusal, or an ask outcome worded the same way. */
 type GuardRefusal = Omit<CoreRefusal, "guard"> & { guard: GuardKind; fullText?: string };
+/** The name of each guard in Security lines and guard toasts. */
 export const GUARD_NAMES: Record<GuardKind, string> = {
   ask: "Permission prompts",
   // Not "Ask": that is the canonical name of an access mode (vocabulary check).

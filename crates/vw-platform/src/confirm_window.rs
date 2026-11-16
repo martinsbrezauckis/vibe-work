@@ -36,7 +36,7 @@ mod imp;
 #[cfg(windows)]
 pub use imp::{OpenConfirmation, Raise, show};
 #[cfg(target_os = "macos")]
-pub use imp::{close, raise, show};
+pub use imp::{close, raise, raise_shown, show};
 
 /// What one confirmation window shows.
 #[derive(Debug, Clone, PartialEq, Eq)]

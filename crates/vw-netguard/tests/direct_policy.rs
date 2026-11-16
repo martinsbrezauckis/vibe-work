@@ -89,6 +89,14 @@ impl PageContext for Receipts {
     fn loopback<'a>(&'a self, _: &'a str, _: u16) -> ScopeFuture<'a> {
         Box::pin(async { Ok(()) })
     }
+    // A page whose local access the core allows (a page on this computer).
+    fn local_access<'a>(
+        &'a self,
+        _: &'a [String],
+        _: &'a vw_netguard::LocalRequest<'a>,
+    ) -> ScopeFuture<'a> {
+        Box::pin(async { Ok(()) })
+    }
     fn connected(&self, key: &str, host: &str, port: u16, addresses: &[SocketAddr]) {
         self.0
             .lock()

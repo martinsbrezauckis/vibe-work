@@ -42,6 +42,10 @@ pub struct ProcessInfo {
     pub ppid: Option<u32>,
     /// Process group id (Unix only; `None` on Windows or when unreadable).
     pub pgid: Option<u32>,
+    /// POSIX session id (Linux and macOS; `None` on Windows or when unreadable). A process can leave its
+    /// session (`setsid`) but never join another one, so it keeps the session of the shell it was started
+    /// under even after that shell is no longer its parent.
+    pub sid: Option<u32>,
     /// Start token, when readable.
     pub start: Option<StartToken>,
     /// `Some(true)` when the process runs as the same OS user as this app, `Some(false)` when another
@@ -154,6 +158,18 @@ impl Snapshot {
             current = process.ppid.and_then(|p| self.processes.get(&p));
         }
         false
+    }
+
+    /// True when `pid` is a (start-consistent) descendant of this app, such as a browser window the app's
+    /// browser helper started.
+    #[must_use]
+    pub fn descends_from_self(&self, pid: u32) -> bool {
+        pid != self.me.pid
+            && self
+                .processes
+                .get(&self.me.pid)
+                .and_then(ProcessInfo::reference)
+                .is_some_and(|me| self.descends_from(pid, me))
     }
 
     /// True when `pid` descends from `root` (start-consistent parent chain, at most 256 steps).

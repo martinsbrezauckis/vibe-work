@@ -11,11 +11,13 @@
  *   the find bar open, a file in the File tab at the line, a setting in the Settings page at that setting (lit for a
  *   moment), an action runs. While the message index fills, a line says so and the results grow.
  * Adapted from ShellX.
- * Depends on: AppContext, hooks, state/commands, state/shortcuts, hooks/useModalFocus, settings/catalog,
+ * Depends on: AppContext, hooks, state/commands, state/shortcuts, components/Modal, settings/catalog,
  * components/Icon, components/Highlight. Called by: Shell.
  * Invariants: opens fresh every time (selection reset; the query starts with the words a scoped search carried
  * over, else empty); Enter runs the highlighted entry and closes; Escape and a click outside close; focus returns
- * to where it was (the modal-focus hook). With an empty query the list shows every action, then every session, as
+ * to where it was (the modal-focus hook). The field names an active option (`aria-activedescendant`) only after
+ * the arrow keys moved the highlight, and typing clears it, so a screen reader opening the palette is in the field.
+ * With an empty query the list shows every action, then every session, as
  * before (nothing hides behind a filter). Selection follows the result identity while answers arrive; surviving
  * rows update in place and new hits append within their group.
  */
@@ -25,7 +27,7 @@ import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { Highlight } from "../../components/Highlight";
 import { Icon } from "../../components/Icon";
 import { Selector } from "../../components/Selector";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { SEARCH_AUTOLOAD_PAGES } from "../../state/coreStore";
 import { indexNote } from "../search/coreRows";
 import { PaletteEmpty } from "../search/PaletteEmpty";
@@ -57,7 +59,6 @@ function PaletteDialog(): ReactElement {
   const loading = useCoreState((s) => s.index.loading);
   const carried = useShellState((s) => s.paletteQuery);
   const loadedPages = useRef(0);
-  const dialog = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState(carried);
   // A new search handed over while the palette is open replaces the field's text (set during render, React's
@@ -72,7 +73,6 @@ function PaletteDialog(): ReactElement {
   const close = () => {
     shell.actions.setOverlay(null);
   };
-  useModalFocus(true, dialog, close);
   const parsed = paletteQuery(query);
   const { mode, text } =
     filesOnly && parsed.mode === "empty" ? { mode: "text" as const, text: "" } : parsed;
@@ -81,6 +81,9 @@ function PaletteDialog(): ReactElement {
   const byKind = usePaletteResults(query, found);
   const rows = useMemo(() => paletteRows(byKind, mode, filter), [byKind, mode, filter]);
   const { active, selected, select } = usePaletteSelection(rows);
+  // The field names the highlighted option for screen readers only after the arrow keys moved it: while an option
+  // is named, WebKitGTK reports that option as the focus, so a reader opening the palette would not land in the field.
+  const [navigated, setNavigated] = useState(false);
 
   // Searching covers every page: while a query is typed and Vibe has older pages, load them (capped).
   useEffect(() => {
@@ -130,173 +133,169 @@ function PaletteDialog(): ReactElement {
       : null;
 
   return (
-    <>
-      <div data-testid="shell.command-palette-scrim" className="scrim" onClick={close} />
-      <div
-        data-testid="shell.command-palette-palette"
-        className="palette"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        ref={dialog}
-        tabIndex={-1}
-      >
-        <div className="pal-in">
-          <Icon name="search" />
-          <input
-            data-testid="shell.command-palette-set-query"
-            data-dialog-initial-focus="true"
-            data-dialog-manages-tab={mode === "text" ? "true" : undefined}
-            // Focus during commit (before paint), so keys typed right after Ctrl K are never lost.
-            autoFocus
-            role="combobox"
-            aria-label="Search commands"
-            aria-description="Search chats, messages, files and settings. Start with / for actions."
-            aria-expanded="true"
-            aria-controls={LISTBOX}
-            aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
-            aria-autocomplete="list"
-            placeholder="Search chats, messages, files and settings; / for actions"
-            autoComplete="off"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                select(Math.min(active + 1, rows.length - 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                select(Math.max(active - 1, 0));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                run(rows[active]?.result);
-              } else if (e.key === "Tab" && mode === "text") {
-                // This input owns Tab in text mode: cycle the result filter and keep typing focus.
-                e.preventDefault();
-                cycle(e.shiftKey ? -1 : 1);
-              }
-            }}
+    <Modal
+      onClose={close}
+      scrimTestId="shell.command-palette-scrim"
+      data-testid="shell.command-palette-palette"
+      className="palette"
+      aria-label="Command palette"
+    >
+      <div className="pal-in">
+        <Icon name="search" />
+        <input
+          data-testid="shell.command-palette-set-query"
+          data-dialog-initial-focus="true"
+          data-dialog-manages-tab={mode === "text" ? "true" : undefined}
+          // Focus during commit (before paint), so keys typed right after Ctrl K are never lost.
+          autoFocus
+          role="combobox"
+          aria-label="Search commands"
+          aria-description="Search chats, messages, files and settings. Start with / for actions."
+          aria-expanded="true"
+          aria-controls={LISTBOX}
+          aria-activedescendant={navigated && rows.length > 0 ? optionId(active) : undefined}
+          aria-autocomplete="list"
+          placeholder="Search chats, messages, files and settings; / for actions"
+          autoComplete="off"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setNavigated(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setNavigated(true);
+              select(Math.min(active + 1, rows.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setNavigated(true);
+              select(Math.max(active - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              run(rows[active]?.result);
+            } else if (e.key === "Tab" && mode === "text") {
+              // This input owns Tab in text mode: cycle the result filter and keep typing focus.
+              e.preventDefault();
+              cycle(e.shiftKey ? -1 : 1);
+            }
+          }}
+        />
+      </div>
+      {mode === "text" && (
+        <div className="pal-f">
+          <Selector
+            testId="shell.command-palette-selector"
+            label="Show results"
+            value={filter}
+            options={FILTERS.map((f) => ({
+              value: f,
+              label:
+                f === "all"
+                  ? "All"
+                  : `${GROUPS.find((g) => g.kind === f)?.label ?? f} ${String(count(f))}`,
+            }))}
+            onChange={setFilter}
+            compact
           />
         </div>
-        {mode === "text" && (
-          <div className="pal-f">
-            <Selector
-              testId="shell.command-palette-selector"
-              label="Show results"
-              value={filter}
-              options={FILTERS.map((f) => ({
-                value: f,
-                label:
-                  f === "all"
-                    ? "All"
-                    : `${GROUPS.find((g) => g.kind === f)?.label ?? f} ${String(count(f))}`,
-              }))}
-              onChange={setFilter}
-              compact
-            />
-          </div>
-        )}
-        <div className="pal-b">
-          <ul
-            data-testid="shell.command-palette-plist"
-            className="plist"
-            id={LISTBOX}
-            role="listbox"
-            aria-label="Commands"
-            ref={list}
-          >
-            <PaletteEmpty
-              query={text}
-              mode={mode}
-              filter={filter}
-              found={found}
-              empty={rows.length === 0}
-              contentEmpty={
-                byKind.session.length + byKind.message.length + byKind.file.length === 0
-              }
-            />
-            {rows.flatMap(({ result, group, more }, i) => {
-              const meta = GROUPS.find((g) => g.kind === group);
-              const heading =
-                group !== rows[i - 1]?.group ? (
-                  <li key={`h-${group}`} className="secl" role="presentation">
-                    {meta?.label}
-                    {searching && <span className="c">{count(group)}</span>}
-                  </li>
-                ) : null;
-              const showAll =
-                more > 0 ? (
-                  <li
-                    data-item-id={`m-${group}`}
-                    key={`m-${group}`}
-                    className="pal-more"
-                    role="presentation"
-                  >
-                    <Button
-                      data-testid="shell.command-palette-set-filter"
-                      type="button"
-                      appearance="expander"
-                      tabIndex={-1}
-                      onClick={() => {
-                        setFilter(group);
-                      }}
-                    >
-                      Show all {count(group)}
-                    </Button>
-                  </li>
-                ) : null;
-              return [
-                heading,
+      )}
+      <div className="pal-b">
+        <ul
+          data-testid="shell.command-palette-plist"
+          className="plist"
+          id={LISTBOX}
+          role="listbox"
+          aria-label="Commands"
+          ref={list}
+        >
+          <PaletteEmpty
+            query={text}
+            mode={mode}
+            filter={filter}
+            found={found}
+            empty={rows.length === 0}
+            contentEmpty={byKind.session.length + byKind.message.length + byKind.file.length === 0}
+          />
+          {rows.flatMap(({ result, group, more }, i) => {
+            const meta = GROUPS.find((g) => g.kind === group);
+            const heading =
+              group !== rows[i - 1]?.group ? (
+                <li key={`h-${group}`} className="secl" role="presentation">
+                  {meta?.label}
+                  {searching && <span className="c">{count(group)}</span>}
+                </li>
+              ) : null;
+            const showAll =
+              more > 0 ? (
                 <li
-                  data-testid="shell.command-palette-run"
-                  data-item-id={result.id}
-                  key={result.id}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === active}
-                  aria-label={`${result.title}, ${result.path.join(" › ")}${result.hint === undefined ? "" : `, ${result.hint}`}`}
-                  data-kind={group}
-                  onMouseMove={() => {
-                    if (i !== active) select(i);
-                  }}
-                  onClick={() => {
-                    run(result);
-                  }}
+                  data-item-id={`m-${group}`}
+                  key={`m-${group}`}
+                  className="pal-more"
+                  role="presentation"
                 >
-                  <Icon name={meta?.icon ?? "zap"} />
-                  <span className="pr-main">
-                    <span className="pr-title">
-                      <Highlight text={result.title} query={text} />
-                    </span>
-                    <span className="pr-path">{result.path.join(" › ")}</span>
+                  <Button
+                    data-testid="shell.command-palette-set-filter"
+                    type="button"
+                    appearance="expander"
+                    tabIndex={-1}
+                    onClick={() => {
+                      setFilter(group);
+                    }}
+                  >
+                    Show all {count(group)}
+                  </Button>
+                </li>
+              ) : null;
+            return [
+              heading,
+              <li
+                data-testid="shell.command-palette-run"
+                data-item-id={result.id}
+                key={result.id}
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === active}
+                aria-label={`${result.title}, ${result.path.join(" › ")}${result.hint === undefined ? "" : `, ${result.hint}`}`}
+                data-kind={group}
+                onMouseMove={() => {
+                  if (i !== active) select(i);
+                }}
+                onClick={() => {
+                  run(result);
+                }}
+              >
+                <Icon name={meta?.icon ?? "zap"} />
+                <span className="pr-main">
+                  <span className="pr-title">
+                    <Highlight text={result.title} query={text} />
                   </span>
-                  {result.hint !== undefined && <span className="k">{result.hint}</span>}
-                </li>,
-                showAll,
-              ];
-            })}
-          </ul>
-          <PalettePreview result={selected} query={text} />
-        </div>
-        {note !== null && (
-          <p className="pal-note" role="status">
-            {note}
-          </p>
-        )}
-        <div className="palette-hint">
-          <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> open
-          {mode === "text" && (
-            <>
-              {" "}
-              · <kbd>Tab</kbd> next type
-            </>
-          )}{" "}
-          · <kbd>Esc</kbd> close
-        </div>
+                  <span className="pr-path">{result.path.join(" › ")}</span>
+                </span>
+                {result.hint !== undefined && <span className="k">{result.hint}</span>}
+              </li>,
+              showAll,
+            ];
+          })}
+        </ul>
+        <PalettePreview result={selected} query={text} />
       </div>
-    </>
+      {note !== null && (
+        <p className="pal-note" role="status">
+          {note}
+        </p>
+      )}
+      <div className="palette-hint">
+        <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> open
+        {mode === "text" && (
+          <>
+            {" "}
+            · <kbd>Tab</kbd> next type
+          </>
+        )}{" "}
+        · <kbd>Esc</kbd> close
+      </div>
+    </Modal>
   );
 }
 

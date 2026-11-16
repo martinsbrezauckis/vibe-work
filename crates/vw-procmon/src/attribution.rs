@@ -4,8 +4,10 @@
 //! Depends on: `types`, `registry`, `text`. Called by: `monitor`, `stop`, `explain`, tests (synthetic
 //! snapshots). Rules:
 //! 1. Not ours by OS user, or unreadable = "other app". Never a session.
-//! 2. Facts: registered by us (pid + start token), re-attached from the ledger, or descending from such a
-//!    process. Inference: cwd inside a session folder (deepest folder wins), a parent attributed to a
+//! 2. Facts: registered by us (pid + start token), re-attached from the ledger, descending from such a
+//!    process, or (Linux, macOS) a member of the POSIX session a registered, live session leader created (a terminal
+//!    shell): a process can leave a session but never join one, so `(cmd &)` or `nohup cmd &` in a chat's
+//!    terminal stays that chat's after the shell stops being its parent. Inference: cwd inside a session folder (deepest folder wins), a parent attributed to a
 //!    session, or membership in a registered process group (any same-user process can join a group).
 //! 3. Owner = the single session of the facts tier, else of the inference tier; two or more = ambiguous =
 //!    "other app" with all candidates listed.
@@ -127,6 +129,16 @@ pub enum Evidence {
         session_id: String,
         /// The registered ancestor.
         ancestor_pid: u32,
+    },
+    /// It belongs to the POSIX session of a registered, live session leader (a terminal shell) without
+    /// descending from it any more (started detached in that terminal). A session cannot be joined from
+    /// outside, so this is a fact like descent.
+    #[serde(rename_all = "camelCase")]
+    RegisteredSession {
+        /// Session.
+        session_id: String,
+        /// The registered session leader.
+        leader_pid: u32,
     },
     /// Its process group is the registered group of the session, but it does not descend from the
     /// registered process (inference: any same-user process can join a group).
@@ -418,6 +430,25 @@ impl<'a> Attribution<'a> {
                     });
                 }
                 provenance.get_or_insert(own.class);
+            }
+        }
+        if let Some(sid) = info.sid {
+            for own in &self.inputs.own {
+                if own.process.pid == sid
+                    && Some(own.process) != me
+                    && self.is_live(own.process)
+                    && self.snapshot.alive(sid).is_some_and(|l| l.sid == Some(sid))
+                    && !self.snapshot.descends_from(info.pid, own.process)
+                {
+                    if let Some(s) = &own.session_id {
+                        facts.insert(s.clone());
+                        evidence.push(Evidence::RegisteredSession {
+                            session_id: s.clone(),
+                            leader_pid: sid,
+                        });
+                    }
+                    provenance.get_or_insert(own.class);
+                }
             }
         }
         for adopted in &self.inputs.adopted {

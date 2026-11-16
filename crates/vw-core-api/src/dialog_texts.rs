@@ -11,7 +11,8 @@
 //!   `dialog_line`); the requester is the dialog's structured field, never part of this text.
 //! - At most [`MAX_PENDING`] sentences wait; older ones are dropped (a dialog that never came).
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 
@@ -46,7 +47,7 @@ impl DialogTexts {
     }
 
     fn insert(&self, method: &str, params: &Value, text: String, suffix: bool) {
-        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut pending = self.pending.lock_or_recover();
         pending.retain(|(m, p, _)| !(m == method && p == params));
         if pending.len() >= MAX_PENDING {
             pending.remove(0);
@@ -60,7 +61,7 @@ impl DialogTexts {
 
     /// Takes the sentence registered for exactly `method` with `params`.
     pub(crate) fn take(&self, method: &str, params: &Value) -> Option<DialogText> {
-        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut pending = self.pending.lock_or_recover();
         let at = pending
             .iter()
             .position(|(m, p, _)| m == method && p == params)?;

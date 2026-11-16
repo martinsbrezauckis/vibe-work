@@ -112,13 +112,20 @@ pub(crate) fn clean(text: &str) -> String {
 }
 
 /// `text` with every run of at least six characters that also occurs in a vault value withheld: a chat's
-/// auto-title is made from its first message, so it can carry part of a value the whole-value scrub misses.
+/// auto-title is made from its first message, so it can carry part of a value the whole-value scrub misses. One run
+/// is kept, as it is in the chat's messages: an ordinary word that only begins a value, i.e. the value's own start,
+/// shorter than twelve characters and than half the value, standing as a whole word (no letter or digit touches
+/// it) with more words after it. A run from inside a value, and one that ends the text (a title cut inside the
+/// value, also before trailing punctuation or an ellipsis), is always withheld.
 pub(crate) fn withhold_parts(text: &str, values: &[&str]) -> String {
     const MIN: usize = 6;
+    const LONG: usize = 12;
     let text: Vec<char> = text.chars().collect();
     let mut hidden = vec![false; text.len()];
     for value in values {
         let value: Vec<char> = value.chars().collect();
+        let mut runs = Vec::new();
+        let mut kept = Vec::new();
         for i in 0..text.len() {
             for j in 0..value.len() {
                 let n = text[i..]
@@ -126,9 +133,23 @@ pub(crate) fn withhold_parts(text: &str, values: &[&str]) -> String {
                     .zip(&value[j..])
                     .take_while(|(a, b)| a == b)
                     .count();
-                if n >= MIN {
-                    hidden[i..i + n].fill(true);
+                if n < MIN {
+                    continue;
                 }
+                if j == 0 && n < LONG && 2 * n < value.len() && whole_word(&text, i, n) {
+                    kept.push(i..i + n);
+                } else {
+                    runs.push(i..i + n);
+                }
+            }
+        }
+        // A fragment lying inside a kept word is part of that word, which stays whole.
+        for run in runs {
+            if !kept
+                .iter()
+                .any(|k| k.start <= run.start && run.end <= k.end)
+            {
+                hidden[run].fill(true);
             }
         }
     }
@@ -146,6 +167,15 @@ pub(crate) fn withhold_parts(text: &str, values: &[&str]) -> String {
         }
     }
     out
+}
+
+/// Whether `text[i..i + n]` stands as a whole word that more words follow: no letter or digit right before or right
+/// after it, and a letter or digit somewhere after it.
+fn whole_word(text: &[char], i: usize, n: usize) -> bool {
+    let after = &text[i + n..];
+    (i == 0 || !text[i - 1].is_alphanumeric())
+        && after.first().is_some_and(|c| !c.is_alphanumeric())
+        && after.iter().any(|c| c.is_alphanumeric())
 }
 
 /// Read only ownership fields with serde; other metadata and legacy message arrays are skipped.

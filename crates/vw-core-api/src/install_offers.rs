@@ -18,7 +18,8 @@
 //! Depends on: `getrandom` (ids), the ask clock (display dates) and monotonic time (expiry). Called by: `skills` (import, setLatest), `market`
 //! (marketplace install and update).
 use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -110,7 +111,7 @@ fn random_id() -> Option<String> {
 
 impl Offers {
     fn lock(&self) -> MutexGuard<'_, BTreeMap<String, Kept>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// Keeps a new offer for `key` and returns it with its id and expiry filled in.

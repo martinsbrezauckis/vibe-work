@@ -3,8 +3,8 @@
  * the default access mode for new sessions, background processes,
  * subagents, the stalled-answer timeout, each model's compaction point (`state/compaction`), and a model's nucleus
  * sampling and output cap.
- * Read with Vibe's `config/fields/read` and written through a session with `config/write` (the
- * gate's allowlist checks every path and value).
+ * Read with Vibe's `config/fields/read` (through the chat, or without one when the chat is not open) and written
+ * through a session with `config/write` (the gate's allowlist checks every path and value).
  * Depends on: coreStore, protocol/core types, protocol/client (errors), state/compaction. Called by:
  * settings/AgentDefaultsSettings.
  * Invariants:
@@ -135,19 +135,41 @@ function message(thrown: unknown): Error {
   return new Error(toCallError(thrown).error.message, { cause: thrown });
 }
 
-/** Reads the settings through `sessionId`. */
+/**
+ * Vibe's `config/fields/read` answer through `sessionId`. A chat that is not open (every chat right after Vibe Work
+ * starts) answers with no fields, so the settings are then read without a chat: the core reads them through a
+ * short-lived chat of its own and deletes it again. With no chat at all (`null`) that chat-less read is the only one.
+ * Throws what the core throws.
+ */
+export async function readSettingsFields(
+  core: CoreController,
+  sessionId: string | null,
+): Promise<JsonValue> {
+  if (sessionId === null) return readWithoutChat(core);
+  const through = await core.run({
+    type: "call",
+    method: "config/fields/read",
+    params: { sessionId },
+  });
+  if (through.type !== "reply") throw new Error("unexpected answer");
+  const fields = asObject(through.result)?.["fields"];
+  if (!Array.isArray(fields) || fields.length > 0) return through.result;
+  return readWithoutChat(core);
+}
+
+async function readWithoutChat(core: CoreController): Promise<JsonValue> {
+  const own = await core.run({ type: "call", method: "config/fields/read", params: {} });
+  if (own.type !== "reply") throw new Error("unexpected answer");
+  return own.result;
+}
+
+/** Reads the settings through `sessionId` (or without a chat, see `readSettingsFields`). */
 export async function readVibeSettings(
   core: CoreController,
-  sessionId: string,
+  sessionId: string | null,
 ): Promise<VibeSettings> {
   try {
-    const result = await core.run({
-      type: "call",
-      method: "config/fields/read",
-      params: { sessionId },
-    });
-    if (result.type !== "reply") throw new Error("unexpected answer");
-    const parsed = parseVibeSettings(result.result);
+    const parsed = parseVibeSettings(await readSettingsFields(core, sessionId));
     if (parsed === null) throw new Error("Vibe's config did not list its settings.");
     return parsed;
   } catch (thrown) {

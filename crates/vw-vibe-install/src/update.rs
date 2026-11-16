@@ -47,6 +47,9 @@ pub struct SupportConfig {
     pub app_version: String,
     /// This OS's Rust target triple ([`crate::this_target`]).
     pub target: String,
+    /// The Vibe versions this build's launcher guards were checked with ([`crate::guarded_vibe_versions`]). A signed
+    /// entry outside it is never offered: that Vibe would refuse to start. It reads as "not supported yet".
+    pub guarded: Vec<String>,
 }
 
 /// An installable update from the last verified check.
@@ -184,6 +187,7 @@ impl VibeInstaller {
                         running
                     },
                     &self.inner.pinned,
+                    &config.guarded,
                 );
                 // An update already installed in this run (starts next time) is not offered again.
                 let installed = match &state.update {

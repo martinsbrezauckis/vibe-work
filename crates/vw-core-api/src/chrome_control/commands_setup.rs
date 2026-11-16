@@ -1,8 +1,8 @@
 //! Browser setup commands for the Settings Connect action. Uses scoped registration and owner enrollment;
 //! permission failures keep their diagnosis in the notice and the shared add-on state.
 use super::{
-    CommandResult, Core, CoreError, ErrorCode, OFFER_KIND, OfferKey, Origin, ToolsInstallOffer,
-    invalid, setup, store_review,
+    Browser, CommandResult, Core, CoreError, ErrorCode, OFFER_KIND, OfferKey, Origin,
+    ToolsInstallOffer, invalid, setup, store_review,
 };
 
 impl Core {
@@ -88,6 +88,15 @@ impl Core {
             &OfferKey::new(OFFER_KIND, setup::PLUGIN, if edge { "edge" } else { "" }),
             self.shared.asks.now_ms().into(),
         )?;
+        // The person's setup is their Connect after a whole-card Remove: the removed profiles may ask again, as after
+        // the plain Connect (`pairing_approval::ask_again`). A Debug API setup keeps them quiet.
+        if !crate::command_origin::debug_api_acts(&self.shared, origin) {
+            chrome.owner.approvals.forget_removed(if edge {
+                Browser::Edge
+            } else {
+                Browser::Chrome
+            });
+        }
         let state = chrome
             .dir()
             .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NO_APP_FOLDER))?;
@@ -107,9 +116,16 @@ impl Core {
             .as_ref()
             .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NEEDS_KEYRING))?;
         if !installed {
-            keys.create_chrome_owner()
-                .await
-                .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED))?;
+            keys.create_chrome_owner().await.map_err(|error| {
+                invalid(
+                    &if edge {
+                        super::Browser::Edge
+                    } else {
+                        super::Browser::Chrome
+                    }
+                    .words(setup::owner_store_failed(&error)),
+                )
+            })?;
         }
         if let Err(reason) = setup::install_for(
             &chrome.config,

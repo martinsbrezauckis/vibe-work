@@ -16,6 +16,7 @@ import { SearchResults } from "./SearchResults";
 import { shownResults, type Explorer } from "./store";
 import { type ExplorerMenuDeps, type ExplorerTarget, explorerMenu } from "./explorerMenus";
 
+/** Props of {@link ExplorerView}: the explorer, the places to pick from, and what opening, review and setup do. */
 export interface ExplorerViewProps {
   explorer: Explorer;
   places: SelectorOption<string>[];
@@ -32,6 +33,10 @@ export interface ExplorerViewProps {
   /** A file inside a commit: compare it with that commit's version (the default: open it as it is now). */
   onCompare?: (path: string, version: ExplorerVersion) => void;
 }
+/**
+ * The Files panel for the explorer's folder: header with place picker, status line and search, then search results,
+ * the commit history or the file tree. Without a folder it offers Choose folder and the places instead.
+ */
 export function ExplorerView(props: ExplorerViewProps) {
   const { explorer } = props,
     state = useStore(explorer.store, (s) => s),

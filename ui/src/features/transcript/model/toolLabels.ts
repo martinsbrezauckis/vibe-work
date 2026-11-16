@@ -80,6 +80,9 @@ export function builtinTool(tool: string): ToolWords | null {
       return { name: "Ask a question", permission: "asking a question" };
     case "exit_plan_mode":
       return { name: "Finish a plan", permission: "finishing a plan" };
+    case "enter_worktree":
+    case "vibe.enter_worktree":
+      return { name: "Work in a new copy", permission: "working in a new copy" };
     default:
       return null;
   }

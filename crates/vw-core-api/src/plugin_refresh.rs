@@ -4,7 +4,8 @@
 //! A chat this core started this run and never sent work only re-pins (no reattach). A failed re-pin stays
 //! pending, so every later send of that chat retries it first and is refused while it fails.
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::warn;
@@ -33,7 +34,7 @@ pub(crate) struct Refresh {
 
 impl Refresh {
     fn inner(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
 
     pub(crate) async fn lock(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {

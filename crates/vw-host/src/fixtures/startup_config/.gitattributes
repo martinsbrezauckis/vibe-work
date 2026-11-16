@@ -1,0 +1,2 @@
+# Exact config bytes (LF and CRLF) the startup config tests compare: never convert line endings.
+* -text

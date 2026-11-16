@@ -29,7 +29,7 @@
 }
 /* "Needs you": a bold exclamation mark. */
 .sb-bang {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-heading);
   line-height: 1;
 }
@@ -38,7 +38,7 @@
   color: var(--orange);
 }
 .sb.run::before {
-  animation: vw-dot var(--t-busy) var(--ease-pulse) infinite;
+  animation: vw-dot var(--t-loop) var(--ease-pulse) infinite;
 }
 @keyframes vw-dot {
   0%,
@@ -124,7 +124,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .srow.is-unread .t {
   color: var(--text);
@@ -159,7 +159,7 @@
 }
 .twist:focus-visible {
   outline: none;
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-mark);
 }
 .srow-more {
   all: unset;
@@ -191,7 +191,7 @@
   flex: 1;
   min-width: 0;
   font: inherit;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line-3);
@@ -255,7 +255,7 @@
   border-radius: var(--radius-md);
   background: none;
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .col-note.error {
@@ -277,7 +277,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-2);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .modal-actions {
   display: flex;
@@ -288,7 +288,7 @@
 .modal ul {
   margin: 4px 0 0;
   padding-left: 18px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 
@@ -313,7 +313,7 @@
 }
 .proj {
   position: relative;
-  border-radius: var(--radius-9);
+  border-radius: var(--radius-md);
 }
 /* Sessions dragged over a project (or "Not in a project"): the whole group lights up as the target. */
 .proj[data-drop="into"] {
@@ -329,7 +329,7 @@
   left: 6px;
   right: 6px;
   height: 2px;
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-mark);
   background: var(--blue);
   pointer-events: none;
 }
@@ -347,7 +347,7 @@
   -webkit-user-drag: element;
 }
 /* The chip gives way before the title: it shrinks to an ellipsis while the title keeps a few readable words. */
-.srow-main:has(.tag, .loops-row, .vchat-row) .t {
+.srow-main:has(.tag, .loops-row, .vchat-row, .paused-row, .using-browser-row) .t {
   min-width: 5em;
 }
 .srow-main:has(.cli-tag) .t {
@@ -376,7 +376,7 @@
   align-items: baseline;
   gap: 4px 8px;
   padding: 4px 10px 8px 26px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 /* "start one" is a link inside the sentence: no side padding, so the period follows it directly. */
@@ -418,13 +418,13 @@
 .folder-chip {
   padding: 3px 8px;
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   background: var(--raised);
 }
 .folder-hint {
   /* Readable in both themes (the orange ring on the button is the signal; orange text fails contrast on light). */
   color: var(--text);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 /* The composer sits in the welcome column (the column's own padding replaces the composer's). */
 .new-chat-composer {
@@ -435,6 +435,7 @@
 }
 
 .srow-main .loops-row,
+.srow-main .paused-row,
 .srow-main .vchat-row {
   flex: 0 1 auto;
   min-width: 0;
@@ -451,5 +452,19 @@
 }
 .new-chat-work-status.key-line {
   margin: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
+}
+
+/* The chat's agent controls a helper browser: a dot in the chat's agent control frame colour. */
+.srow-main .using-browser-row {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 2px;
+}
+.using-browser-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--agent-frame, var(--agent-frame-0));
 }

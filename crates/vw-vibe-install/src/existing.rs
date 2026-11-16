@@ -19,6 +19,10 @@ use crate::view::ExistingView;
 
 /// Longest a probe may take.
 pub const PROBE_LIMIT: Duration = Duration::from_secs(25);
+/// Longest the start check of the person's remembered install may take: the first start of a Python environment
+/// after a reboot (cold disk cache, a virus scan of every file) can take longer than a search probe's limit, and a
+/// remembered install that answers late must not be reported as one that does not answer.
+pub const SAVED_PROBE_LIMIT: Duration = Duration::from_secs(60);
 /// Candidates probed at most.
 pub const MAX_PROBES: usize = 4;
 
@@ -70,9 +74,7 @@ pub async fn find(
         let supported = version.as_deref() == Some(pinned);
         let warning = match &version {
             Some(v) if v != pinned => Some(version_warning(v, pinned)),
-            None => Some(
-                "This program did not answer like Vibe's app server; it cannot be used.".to_owned(),
-            ),
+            None => Some(NOT_AN_APP_SERVER.to_owned()),
             _ => None,
         };
         out.push(ExistingView {
@@ -102,10 +104,84 @@ pub async fn probe_with_args(
     home: &Path,
     parent_env: &[(OsString, OsString)],
 ) -> Option<String> {
-    tokio::time::timeout(PROBE_LIMIT, probe_inner(program, args, home, parent_env))
+    probe_within(PROBE_LIMIT, program, args, home, parent_env).await
+}
+
+/// [`probe_with_args`] with its own time limit.
+pub async fn probe_within(
+    limit: Duration,
+    program: &Path,
+    args: &[OsString],
+    home: &Path,
+    parent_env: &[(OsString, OsString)],
+) -> Option<String> {
+    probe_checked(limit, program, args, home, parent_env)
         .await
         .ok()
-        .flatten()
+}
+
+/// Why a probe produced no version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeFailure {
+    /// The program started and stayed silent for the whole limit.
+    TimedOut,
+    /// The program could not be started (or its stdin could not be written).
+    Spawn(String),
+    /// The program ended before it answered: its exit code. Its error output is never kept: the probe passes the
+    /// supervisor's environment allowlist (proxy URLs may carry a password) and a failing program may print it.
+    Exited {
+        /// The exit code, when the OS reported one.
+        code: Option<i32>,
+    },
+    /// The program answered, but not with a Vibe app server's `serverInfo.version`.
+    NoVersion,
+}
+
+/// [`probe_within`] with the reason of a failure, so a program that ended is told apart from one that stayed silent.
+///
+/// # Errors
+/// The [`ProbeFailure`] that ended the probe.
+pub async fn probe_checked(
+    limit: Duration,
+    program: &Path,
+    args: &[OsString],
+    home: &Path,
+    parent_env: &[(OsString, OsString)],
+) -> Result<String, ProbeFailure> {
+    tokio::time::timeout(limit, probe_inner(program, args, home, parent_env))
+        .await
+        .unwrap_or(Err(ProbeFailure::TimedOut))
+}
+
+/// The start check's warning for a remembered install: `None` when it is the `pinned` version. Only a real silence
+/// gets the timeout words; any other failure uses the search's wording for a program that is not Vibe's app server.
+#[must_use]
+pub fn saved_warning(
+    result: &Result<String, ProbeFailure>,
+    limit: Duration,
+    pinned: &str,
+) -> Option<String> {
+    match result {
+        Ok(found) if found == pinned => None,
+        Ok(found) => Some(version_warning(found, pinned)),
+        Err(ProbeFailure::TimedOut) => Some(no_answer_warning(limit, pinned)),
+        Err(_) => Some(NOT_AN_APP_SERVER.to_owned()),
+    }
+}
+
+/// The words for a program that ended or answered without being Vibe's app server.
+const NOT_AN_APP_SERVER: &str =
+    "This program did not answer like Vibe's app server; it cannot be used.";
+
+/// The start check's words for a remembered install that did not answer within `limit`: what happened and what
+/// the person can do, without claiming a version it did not report.
+#[must_use]
+pub fn no_answer_warning(limit: Duration, pinned: &str) -> String {
+    format!(
+        "This install did not answer within {} seconds. Start Vibe Work again to check it once more, or choose \
+         another; Vibe Work needs Vibe {pinned}.",
+        limit.as_secs()
+    )
 }
 
 async fn probe_inner(
@@ -113,9 +189,10 @@ async fn probe_inner(
     args: &[OsString],
     home: &Path,
     parent_env: &[(OsString, OsString)],
-) -> Option<String> {
+) -> Result<String, ProbeFailure> {
+    let spawn_failure = |error: &dyn std::fmt::Display| ProbeFailure::Spawn(error.to_string());
     let vibe_home = home.join("vibe-home");
-    std::fs::create_dir_all(&vibe_home).ok()?;
+    std::fs::create_dir_all(&vibe_home).map_err(|e| spawn_failure(&e))?;
     let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     let env = crate::steps::environment(
         parent_env.iter().cloned(),
@@ -137,36 +214,55 @@ async fn probe_inner(
         .kill_on_drop(true);
     let mut child = crate::steps::spawn_with_retry(|| command.spawn())
         .await
-        .ok()?;
-    let params = serde_json::to_value(vw_supervisor::default_initialize_params()).ok()?;
+        .map_err(|e| spawn_failure(&e))?;
+    let params = serde_json::to_value(vw_supervisor::default_initialize_params())
+        .map_err(|e| spawn_failure(&e))?;
     let request =
         serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params});
-    let mut stdin = child.stdin.take()?;
-    stdin
-        .write_all(format!("{request}\n").as_bytes())
-        .await
-        .ok()?;
-    stdin.flush().await.ok()?;
-    let mut lines = BufReader::new(child.stdout.take()?).lines();
+    let mut stdin = child.stdin.take().ok_or(ProbeFailure::NoVersion)?;
+    let wrote = async {
+        stdin.write_all(format!("{request}\n").as_bytes()).await?;
+        stdin.flush().await
+    }
+    .await;
+    let stdout = child.stdout.take().ok_or(ProbeFailure::NoVersion)?;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut answered = false;
     let mut version = None;
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(frame) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        if frame.get("id") == Some(&serde_json::json!(1)) {
-            version = frame
-                .pointer("/result/serverInfo/version")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned);
-            break;
+    if wrote.is_ok() {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(frame) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if frame.get("id") == Some(&serde_json::json!(1)) {
+                answered = true;
+                version = frame
+                    .pointer("/result/serverInfo/version")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                break;
+            }
         }
     }
     drop(stdin);
-    if tokio::time::timeout(Duration::from_secs(5), child.wait())
-        .await
-        .is_err()
-    {
+    let waited = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    let status = if let Ok(status) = waited {
+        status.ok()
+    } else {
         let _ = child.kill().await;
+        None
+    };
+    if let Some(version) = version {
+        return Ok(version);
     }
-    version
+    if answered {
+        return Err(ProbeFailure::NoVersion);
+    }
+    Err(ProbeFailure::Exited {
+        code: status.and_then(|s| s.code()),
+    })
 }
+
+#[cfg(test)]
+#[path = "existing_tests.rs"]
+mod tests;

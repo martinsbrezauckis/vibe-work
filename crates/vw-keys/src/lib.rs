@@ -54,7 +54,5 @@ pub use vw_vault::mcp_binding::McpBinding;
 pub use vw_vault::project_secret::{ProjectSecret, SecretLabel};
 pub use work::WorkFailure;
 
-#[cfg(feature = "agent-vault")]
 mod capture;
-#[cfg(feature = "agent-vault")]
 pub use capture::{CaptureChoice, CapturePlan, CaptureStored};

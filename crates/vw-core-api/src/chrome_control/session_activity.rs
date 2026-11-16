@@ -3,7 +3,8 @@
 use super::{agent_browser::Browser, owner, person_stop::PendingCall};
 use crate::core::Shared;
 use serde_json::{Value, json};
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 async fn resume(
     shared: &Arc<Shared>,
@@ -19,8 +20,7 @@ async fn resume(
         shared
             .chrome_control
             .work
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .state_of(id, chat),
         Some("releasing" | "idle")
     );
@@ -48,8 +48,7 @@ async fn resume(
     shared
         .chrome_control
         .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .resumed(id, chat, pending.turn.as_deref());
     Ok(None)
 }

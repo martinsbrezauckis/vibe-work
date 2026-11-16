@@ -2,6 +2,10 @@
 import type { App } from "../shell/AppContext";
 import { panelOf } from "../../state/shellState";
 import { editorLayoutOf } from "../../state/editorLayout";
+/**
+ * Registers the editor workspace shortcuts (open to the side, close the file tab, find a file, fold chat) and returns
+ * the function that removes them. Registers nothing without file support.
+ */
 export function registerEditorKeys(app: App): () => void {
   const files = app.files;
   if (!files) return () => undefined;

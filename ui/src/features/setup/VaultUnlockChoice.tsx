@@ -3,20 +3,11 @@
  */
 import { useId } from "react";
 import type { VaultUnlockMethod } from "../../protocol/core";
-import { detectMac } from "../../state/shortcuts";
+import { systemUnlockLabel } from "../../state/keyText";
 import { TEXT } from "../../vocabulary";
 
-/** The person's existing OS sign-in, with the platform's own name. */
-export function systemUnlockLabel(): string {
-  if (detectMac()) return TEXT.vaultUnlockMac;
-  const nav = typeof navigator === "undefined" ? undefined : navigator;
-  const platform =
-    (nav as (Navigator & { userAgentData?: { platform?: string } }) | undefined)?.userAgentData
-      ?.platform ??
-    nav?.platform ??
-    "";
-  return /win/i.test(platform) ? TEXT.vaultUnlockWindows : TEXT.vaultUnlockLinux;
-}
+/** The person's existing OS sign-in, with the platform's own name (kept in state/keyText for the error texts). */
+export { systemUnlockLabel };
 
 /** No menu or explanatory copy; the selected radio is the saved or pending choice. */
 export function VaultUnlockChoice({

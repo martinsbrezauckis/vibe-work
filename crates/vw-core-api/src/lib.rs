@@ -55,6 +55,7 @@ mod browser_delegation_receipts;
 mod browser_fill;
 mod browser_guard;
 mod browser_handover;
+mod browser_input_block;
 mod browser_local;
 mod browser_outcomes;
 mod browser_popups;
@@ -102,6 +103,7 @@ mod core;
 mod core_config;
 mod core_viewers;
 mod default_model;
+mod detached_fields;
 mod detached_reads;
 mod detached_runtime;
 mod dialog_texts;
@@ -148,10 +150,13 @@ mod git_draft;
 mod git_identity;
 mod git_identity_ask;
 mod git_pr;
+mod git_pr_list;
 mod git_publish;
 mod git_settings;
 mod git_view;
 mod guard_refusals;
+mod import_setup;
+mod import_view;
 mod interrupted_send;
 mod model_check;
 mod model_choices;
@@ -170,10 +175,19 @@ mod instructions_view;
 mod vibe_rules;
 pub use github_reads_view::{GithubReadsRequest, GithubReadsStatus, GithubReadsView};
 mod keep_awake;
+mod knowledge;
+mod knowledge_view;
+pub use knowledge_view::{KnowledgeKind, KnowledgePlace, KnowledgeRequest, KnowledgeView};
 mod keep_awake_view;
 pub use keep_awake_view::{KeepAwakeRequest, KeepAwakeStatus, KeepAwakeView};
 mod new_chat;
+pub(crate) mod paused_tools;
+mod paused_tools_commands;
+mod paused_tools_gate;
+mod paused_tools_view;
+pub use browser_guard::LOCAL_NETWORK_DIALOG_METHOD;
 pub use new_chat::NEW_CHAT_RESTORE_DIALOG_METHOD;
+pub use paused_tools_view::{PausedTool, PausedToolsRequest, PausedToolsView};
 mod new_chat_view;
 pub use new_chat_view::{NewChatRequest, NewChatView};
 #[cfg(test)]
@@ -219,6 +233,7 @@ mod plan_profile;
 mod plugin_approvals;
 mod plugin_identity;
 mod plugin_refresh;
+mod plugin_switches;
 mod preview_pick;
 mod preview_ports;
 mod preview_readiness;
@@ -254,6 +269,8 @@ mod projects_filing;
 mod projects_view;
 mod prompt_history;
 mod prompt_history_command;
+#[cfg(test)]
+mod prompt_history_session_tests;
 mod provider_errors;
 mod pump;
 mod queue_return;
@@ -335,6 +352,7 @@ mod work;
 mod work_view;
 pub mod working_note;
 mod worktrees;
+mod worktrees_adopt;
 mod worktrees_deleted;
 mod worktrees_remove;
 mod worktrees_restore;
@@ -346,7 +364,7 @@ pub mod ts;
 
 pub use agent_tools::AgentToolsConfig;
 pub use app_settings::write_app_settings;
-pub use browser_view::{BrowserRequest, BrowserResult, BrowserShot};
+pub use browser_view::{BrowserRequest, BrowserResult, BrowserShot, LocalNetworkSite};
 pub use changes_facts::path_key;
 pub use changes_slots::ChangesTestHooks;
 pub use changes_view::{
@@ -377,8 +395,9 @@ pub use git_cmd::DEFAULT_COMMIT_MODEL;
 pub use git_view::{
     BringPlanView, CommitPlanView, DraftSource, GitIdentitySettings, GitIdentitySource,
     GitLocation, GitRepoView, GitRequest, GitResult, GitSettings, GitStatusView, PrCreatedView,
-    PrPlanView, PrSource, PrStatusView, PrVia, PreparedKind, PushPlanView,
+    PrListView, PrPlanView, PrSource, PrStatusView, PrVia, PreparedKind, PushPlanView,
 };
+pub use import_view::{ImportDetected, ImportPick, ImportRequest, ImportResult, ImportSummary};
 pub use instructions::InstructionsConfig;
 pub use instructions_view::{
     InstructionsDoc, InstructionsRequest, InstructionsResult, InstructionsScope,

@@ -56,6 +56,10 @@ const painted = () =>
       });
     });
   });
+/**
+ * Creates the feedback form store and its core calls. Send first asks the core for a review and sends only when the
+ * reviewed text, screenshot and system details match what the form showed.
+ */
 export function createFeedback(core: Pick<CoreController, "run" | "listen" | "trackAction">) {
   const store = createStore<{
     view: FeedbackView | null;
@@ -195,6 +199,7 @@ export function createFeedback(core: Pick<CoreController, "run" | "listen" | "tr
     },
   };
 }
+/** The feedback form controller: its store and actions. */
 export type Feedback = ReturnType<typeof createFeedback>;
 const controllers = new WeakMap<CoreController["store"], Feedback>();
 /** One controller per core, including the composer's origin-bound facades. */

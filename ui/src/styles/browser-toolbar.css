@@ -28,7 +28,7 @@
   overflow: hidden;
   background: var(--raised);
   color: var(--text-2);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .browser-overlay-shot {
   width: 100%;
@@ -98,7 +98,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   background: var(--text-3);
 }
 .browser-strip[data-state="acting"] .browser-strip-dot {
-  animation: browser-pulse var(--t-busy-fast) var(--ease-pulse) infinite;
+  animation: browser-pulse var(--t-loop) var(--ease-pulse) infinite;
 }
 @keyframes browser-pulse {
   50% {
@@ -179,7 +179,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   color: var(--text);
   background: transparent;
   font: inherit;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .browser-menu-item:hover:not(:disabled),
@@ -230,7 +230,7 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   padding: 0 4px 5px;
 }

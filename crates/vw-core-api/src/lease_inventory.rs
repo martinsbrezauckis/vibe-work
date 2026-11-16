@@ -7,11 +7,12 @@ use crate::{CoreError, ErrorCode};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::{
-    Arc, Mutex, PoisonError,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use vw_platform::sync::LockRecover;
 use vw_rpc::Inbound;
 use vw_supervisor::SupervisorState;
 
@@ -42,25 +43,19 @@ fn generation(shared: &Shared) -> Option<u64> {
 impl Inventory {
     pub(super) fn retry_at(&self) -> Option<Instant> {
         self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .retry
             .as_ref()
             .map(|(at, _)| *at)
     }
 
     pub(super) fn holder(&self, id: &str) -> Option<u32> {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .held
-            .get(id)
-            .copied()
+        self.state.lock_or_recover().held.get(id).copied()
     }
 
     pub(super) fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         state.active = None;
         if let Some(task) = state.task.take() {
             task.abort();
@@ -68,14 +63,14 @@ impl Inventory {
     }
 
     fn lost(&self, token: (u64, u64)) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.active == Some(token) {
             state.active = None;
         }
     }
 
     fn update(&self, token: (u64, u64), params: &Value) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_or_recover();
         if state.active != Some(token) {
             return false;
         }
@@ -109,10 +104,7 @@ pub(super) async fn ensure(shared: &Arc<Shared>) -> Result<(), CoreError> {
     }
     let current = generation(shared);
     {
-        let state = inventory
-            .state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let state = inventory.state.lock_or_recover();
         if state.active.is_some_and(|(at, _)| Some(at) == current) {
             return Ok(());
         }
@@ -137,10 +129,7 @@ pub(super) async fn ensure(shared: &Arc<Shared>) -> Result<(), CoreError> {
         ))
     };
     if let Err(error) = &result {
-        let mut state = inventory
-            .state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut state = inventory.state.lock_or_recover();
         state.retry = Some((Instant::now() + super::POLL, error.clone()));
         state.retry_generation = current;
     }
@@ -176,12 +165,7 @@ async fn connect(shared: &Arc<Shared>, current: u64) -> Result<(), CoreError> {
         ));
     }
     let weak = Arc::downgrade(shared);
-    let mut state = shared
-        .holders
-        .inventory
-        .state
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut state = shared.holders.inventory.state.lock_or_recover();
     if shared.holders.inventory.stopped.load(Ordering::Relaxed) {
         return Err(CoreError::new(
             ErrorCode::Cancelled,

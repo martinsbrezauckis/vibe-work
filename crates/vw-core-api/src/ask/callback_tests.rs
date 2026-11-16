@@ -28,7 +28,7 @@ async fn foreign_callback_kinds_never_open_an_ask_and_unscoped_bash_stays_once_o
         start_vibe: false,
         ..crate::CoreConfig::default()
     };
-    let core = crate::Core::start(
+    let core = Box::pin(crate::Core::start(
         vw_supervisor::SupervisorConfig::new(
             dir.join("no-server-requested"),
             dir.join("vibe-home"),
@@ -37,7 +37,7 @@ async fn foreign_callback_kinds_never_open_an_ask_and_unscoped_bash_stays_once_o
         Arc::new(vw_supervisor::NoSecret),
         NoNativePrompt,
         config,
-    )
+    ))
     .await
     .unwrap();
     assert!(core.status().server.pid.is_none());

@@ -9,7 +9,9 @@ import { awayFromHome } from "../shell/home";
 import type { Browser } from "./browser";
 import { reportAppDialog } from "./appDialog";
 
+/** Facts from `previewVisibility`: window visible, selected session, Browser panel open, selected page. */
 export type PreviewVisibilityReport = ReturnType<typeof previewVisibility>;
+/** Why a requested App preview or web tab cannot be captured. */
 export type VisibilityReason =
   | "windowHidden"
   | "mainPage"

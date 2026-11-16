@@ -211,6 +211,30 @@ pub(crate) async fn answer(
     answer_by(shared, origin, session_id, callback_id, output, by).await
 }
 
+/// A person-only card (`vw_ask::Policy::person_only`: the vault save card and every vault decision) takes only the
+/// person's answer. Every callback answer comes through here, so this one check also covers a window click the Debug
+/// API drives (`command_origin::debug_api_acts`), the Debug API's own answer and a spoken answer, before the card is
+/// reserved.
+fn person_answers(
+    shared: &Shared,
+    callback_id: &str,
+    by: AnsweredBy,
+) -> Result<(), crate::CoreError> {
+    let person_only = shared
+        .asks
+        .get(&format!("callback:{callback_id}"))
+        .is_some_and(|ask| ask.person_only);
+    if !person_only || by == AnsweredBy::Person {
+        return Ok(());
+    }
+    let mut error = crate::CoreError::new(
+        crate::ErrorCode::Denied,
+        "This card needs the user's own answer. Ask the user to answer it in Vibe Work's window.",
+    );
+    error.server_code = Some(crate::vault_scope::VAULT_USER_ONLY.into());
+    Err(error)
+}
+
 pub(crate) async fn answer_by(
     shared: &Arc<Shared>,
     origin: crate::Origin,
@@ -220,6 +244,7 @@ pub(crate) async fn answer_by(
     by: AnsweredBy,
 ) -> Result<crate::CommandResult, crate::CoreError> {
     use crate::{CommandResult, CoreError, CoreEvent, ErrorCode};
+    person_answers(shared, &callback_id, by)?;
     if super::tool_calls::local(&callback_id) {
         return super::tool_calls::answer_by(
             shared,

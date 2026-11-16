@@ -35,6 +35,7 @@ import { editorHighlight, editorTheme } from "./theme";
 import type { CodeSelection } from "../files/model/context";
 import { editorActions } from "./actions";
 
+/** The live editor's operations, passed to `onReady` once the editor is mounted (null when it unmounts). */
 export interface EditorHandle extends ReturnType<typeof editorActions> {
   /** Reads the main selection without changing the buffer, caret or focus. */
   selection(): CodeSelection | null;
@@ -52,6 +53,10 @@ export interface EditorHandle extends ReturnType<typeof editorActions> {
   goToLinePrompt(): void;
 }
 
+/**
+ * Props of {@link CodeEditor}: the text and its change callback, the file name that picks the language, the line to
+ * scroll to, and optional read-only, wrapping, save and cancel handling.
+ */
 export interface CodeEditorProps {
   value: string;
   onChange: (text: string) => void;

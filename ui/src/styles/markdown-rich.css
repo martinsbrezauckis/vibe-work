@@ -36,5 +36,5 @@
 }
 .md-render-error {
   color: var(--text-2);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }

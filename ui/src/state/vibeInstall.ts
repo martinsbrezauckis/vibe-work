@@ -44,7 +44,12 @@ export function vibeCovers(s: VibeUi): boolean {
 
 /** Vibe is installed but its start failed: the step offers only to start it again. */
 function startFailed(view: InstallView | null): boolean {
-  return view?.phase.state === "failed" && view.phase.kind === "start";
+  return view?.phase.state === "failed" && (view.phase.kind === "start" || unsupported(view));
+}
+
+/** The installed Vibe is a version Vibe Work does not support yet (a hand-updated Vibe): its start was refused. */
+function unsupported(view: InstallView | null): boolean {
+  return view?.phase.state === "failed" && view.phase.kind === "unsupported";
 }
 
 /**
@@ -52,17 +57,27 @@ function startFailed(view: InstallView | null): boolean {
  * Vibe is installed but did not start.
  */
 export function installTitle(view: InstallView | null): string {
+  if (unsupported(view)) return "Vibe version not supported yet";
   if (startFailed(view)) return "Start Vibe";
   return view?.replacing === undefined ? "Install Vibe" : "Update Vibe";
 }
 
 /**
  * The status bar's words while the server is not installed: an install that runs says so (the replaced version is
- * named after an app update), an installed Vibe that did not start says that, else Vibe is not installed yet. Null
- * when neither applies.
+ * named after an app update), an installed Vibe that did not start says that, an install of the person's own that the
+ * check refused (every one listed is unusable) says why, else Vibe is not installed yet. Null when none applies.
  */
 export function installStatus(view: InstallView | null): string | null {
+  if (unsupported(view)) return "Vibe version not supported yet";
   if (startFailed(view)) return "Vibe did not start";
+  if (
+    view?.phase.state === "notInstalled" &&
+    view.existing.length > 0 &&
+    view.existing.every((install) => !install.supported)
+  )
+    return view.existing.some((install) => install.version !== null)
+      ? "Vibe version not supported yet"
+      : "Vibe did not answer";
   if (view?.phase.state !== "installing") return null;
   return view.replacing === undefined
     ? "Installing Vibe…"

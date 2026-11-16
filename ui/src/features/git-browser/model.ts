@@ -3,6 +3,7 @@ import { TEXT } from "../../vocabulary";
 import type { BrowserStatus, GitStatusView } from "../../protocol/core";
 import { commitBlocked, prBlocked, pushBlocked } from "../git/model";
 
+/** An action a git browser row can take. */
 export type BrowserAction =
   "commit" | "push" | "pr" | "bring" | "new-chat" | "new-task" | "open-chat" | "review";
 type BrowserFile = { path: string; status: string };
@@ -19,6 +20,7 @@ export function fileWords(status: string): string {
           ? "Renamed"
           : "Changed";
 }
+/** A repository or copy in the git browser: its place, Git status, changed files and the chat it belongs to. */
 export type BrowserTarget = {
   id: string;
   kind?: "repository" | "copy";
@@ -37,7 +39,9 @@ export type BrowserTarget = {
   sessionId?: string | null;
   repo?: string | null;
 };
+/** A repository row with the copies listed under it. */
 export type BrowserRepo = BrowserTarget & { copies: BrowserTarget[] };
+/** An action as a row offers it: its label, and why it is not allowed (null when it is). */
 export type BrowserStep = { action: BrowserAction; label: string; reason: string | null };
 
 /** Unknown and blocked state stays visible; it never becomes a clean repository. */

@@ -8,6 +8,58 @@ fn holds_stdin_open_without_reading() {
     std::thread::sleep(Duration::from_secs(120));
 }
 
+#[test]
+#[ignore = "child fixture: run only by the finish test"]
+fn cleans_up_after_stdin_ends() {
+    // Like the helper: at the end of its input it closes the browser window it owns, then exits.
+    let mut sink = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut sink);
+    std::thread::sleep(Duration::from_millis(300));
+    if let Some(mark) = std::env::var_os("VW_PIPE_FINISH_MARK") {
+        std::fs::write(mark, b"closed").unwrap();
+    }
+}
+
+/// PREDICT: quitting Vibe Work killed the helper at once, so it never closed the Firefox window it owns; that
+/// window outlived the app. Finishing now ends the helper's input and waits (bounded) for it to clean up and
+/// exit before anything is killed.
+#[tokio::test]
+async fn finish_lets_the_helper_close_its_browser_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let mark = dir.path().join("closed");
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "chrome_control::pipe::tests::cleans_up_after_stdin_ends",
+            "--ignored",
+        ])
+        .env("VW_PIPE_FINISH_MARK", &mark)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let input = child.stdin.take();
+    let output = BufReader::new(child.stdout.take().unwrap().take(1024 * 1024 + 2));
+    let pipe = Pipe {
+        child,
+        _executable: None,
+        input,
+        output,
+        id: 0,
+        read_buffer: Vec::new(),
+        shared: Weak::new(),
+        tolerant: std::collections::HashSet::new(),
+    };
+    // Let the child start reading before the app quits.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let started = std::time::Instant::now();
+    pipe.finish().await;
+    assert!(mark.is_file(), "the helper was ended before it cleaned up");
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
 // A helper that never reads its stdin cannot hold the dispatcher: each request write is bounded to 500 ms.
 // - Unix (paused clock): the first request, larger than the pipe, fails at exactly 500 ms.
 // - Windows (real time): the child's stdin takes a write into its own buffer at once and writes it to the pipe in

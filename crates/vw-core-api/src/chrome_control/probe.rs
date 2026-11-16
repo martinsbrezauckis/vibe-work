@@ -23,8 +23,9 @@ use crate::search_walk::directory;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
 use cap_std::fs::{Dir, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+use vw_platform::sync::LockRecover;
 
 /// Largest preferences file read.
 pub(super) const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -343,7 +344,7 @@ impl Prober {
     pub(crate) fn probe(&self, profiles: Vec<PathBuf>, extension_id: &str, now: Instant) -> Probe {
         let started = Instant::now();
         let receiver = {
-            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = self.state.lock_or_recover();
             if state.profiles != profiles || state.extension_id != extension_id {
                 // A worker or positive result for another profile cannot diagnose this selection.
                 if state.running {
@@ -381,7 +382,7 @@ impl Prober {
                     #[cfg(test)]
                     std::thread::sleep(delay);
                     let (answer, key) = probe_once(&profiles, &id);
-                    let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut state = shared.lock_or_recover();
                     state.running = false;
                     let read = now;
                     state.last = Some((answer, read));
@@ -397,12 +398,9 @@ impl Prober {
             }
             receive
         };
-        receiver.recv_timeout(WAIT).unwrap_or_else(|_| {
-            self.state
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .recent(now + started.elapsed())
-        })
+        receiver
+            .recv_timeout(WAIT)
+            .unwrap_or_else(|_| self.state.lock_or_recover().recent(now + started.elapsed()))
     }
 
     #[cfg(test)]

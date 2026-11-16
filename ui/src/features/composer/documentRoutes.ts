@@ -13,13 +13,8 @@
  */
 import { toCallError } from "../../protocol/client/types";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function docIdOf(input: Record<string, unknown>): string {
   const id = input["docId"];
@@ -60,7 +55,7 @@ function readDocs(app: App, sessionId: string): unknown {
 
 /** Runs one `ui/documents` request. */
 async function handleDocuments(app: App, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const documents = app.documents;
   if (documents === null) throw new UiControlError("serverUnavailable", "the app has no core");
   const given = input["sessionId"];

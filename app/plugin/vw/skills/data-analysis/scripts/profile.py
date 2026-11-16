@@ -25,18 +25,30 @@ LINE = 220              # characters of one printed line
 ROWS_BUDGET = 1500      # characters for the first rows
 ODD_BUDGET = 800        # characters for the odd values
 DATE = re.compile(r"^\d{4}-\d{2}(-\d{2})?([ T]\d{2}:\d{2}(:\d{2})?)?$|^\d{1,2}[./]\d{1,2}[./]\d{2,4}$")
+DAY_FIRST = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$")
 
 
 def number(text):
-    """A cell as a float, or None. Accepts 1,234.5 / 12% / currency signs; '' is None (missing, not odd)."""
-    t = (text or "").strip().replace(",", "").replace("%", "").replace("€", "").replace("$", "").replace(
-        "£", "").replace(" ", "")
+    """A cell as a float, or None. Accepts 1,234.5 / 12% / currency signs; '' is None (missing, not odd).
+    A value with an inner space (an ID, a phone number) is not a number."""
+    t = (text or "").strip().replace(",", "").replace("%", "").replace("€", "").replace("$", "").replace("£", "")
     if not t:
         return None
     try:
         return float(t)
     except ValueError:
         return None
+
+
+def date_key(value, month_first):
+    """A DATE value as (year, month, day, time) so dates sort by when they are, not as text."""
+    m = DAY_FIRST.match(value)
+    if m is None:
+        return int(value[:4]), int(value[5:7]), int(value[8:10] or 0), value[10:]
+    a, b, year = (int(g) for g in m.groups())
+    if year < 100:
+        year += 2000
+    return (year, a, b, "") if month_first else (year, b, a, "")
 
 
 def short(value):
@@ -125,7 +137,10 @@ def describe(name, values):
                 f"sum {fmt(total)}")
         return line, odd[:3]
     if filled and sum(1 for v in filled if DATE.match(v.strip())) >= 0.8 * len(filled):
-        dates = sorted(v.strip() for v in filled if DATE.match(v.strip()))
+        dates = [v.strip() for v in filled if DATE.match(v.strip())]
+        # 31.01.2020 and 31/01/2020 are day first; a "/" column with a middle part over 12 is month first.
+        month_first = any(int(m.group(2)) > 12 for m in map(DAY_FIRST.match, dates) if m)
+        dates.sort(key=lambda v: date_key(v, month_first))
         return (f"{head}date, {len(filled)} filled, {missing} missing, {distinct} distinct; "
                 f"from {short(dates[0])} to {short(dates[-1])}"), []
     counts = Counter(v.strip() for v in filled).most_common(4)

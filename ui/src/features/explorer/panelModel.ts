@@ -18,6 +18,7 @@ import { summarize } from "../../state/sessionSummary";
 import { TEXT } from "../../vocabulary";
 import type { App } from "../shell/AppContext";
 import type { Explorer } from "./store";
+import { folderName } from "../../state/pathText";
 
 /** The place a person chose in one panel (`key`), or none. */
 export interface ChosenPlace {
@@ -29,6 +30,7 @@ export interface ChosenPlace {
 export function createPlaceStore() {
   return createStore<ChosenPlace>({ key: "", place: null });
 }
+/** The store of the place chosen in the Files panel, shared with the `ui/explorer` route. */
 export type PlaceStore = ReturnType<typeof createPlaceStore>;
 
 /** The panel's folder, its Places and the session it opens files in. */
@@ -42,16 +44,6 @@ export interface PanelContext {
   places: SelectorOption<string>[];
   /** A session is selected (Commit and Revert all live in its Changes tab then). */
   session: boolean;
-}
-
-/** The last part of `path` (either separator), or the path itself for a root. */
-function folderName(path: string): string {
-  return (
-    path
-      .split(/[\\/]/)
-      .filter((part) => part !== "")
-      .pop() ?? path
-  );
 }
 
 /** Computes the panel for `key` from the current app state (reads only). */

@@ -109,12 +109,12 @@ export function LocalPlugins(): ReactElement | null {
             </p>
             <p className="cmuted">
               {p.scope === "project" ? term("workNames", "projectTab").name : "This computer"} ·{" "}
-              {p.off
-                ? p.scope === "global"
-                  ? "Off: found outside the marketplace"
-                  : "Turned off"
-                : p.nativeEnabled === false
-                  ? "Off in Vibe"
+              {p.locked
+                ? "Off — set elsewhere"
+                : p.off
+                  ? p.scope === "global" && p.nativeEnabled !== false
+                    ? "Off: found outside the marketplace"
+                    : "Turned off"
                   : p.available
                     ? "On for new chats"
                     : "Unavailable for new chats"}
@@ -153,16 +153,18 @@ export function LocalPlugins(): ReactElement | null {
             ))}
             {p.managed ? (
               <div className="cactions">
-                <Button
-                  type="button"
+                {p.locked ? null : (
+                  <Button
+                    type="button"
 
-                  data-testid="marketplace.local-plugin-toggle"
-                  onClick={() =>
-                    void actions?.changePlugin(p.off ? "turnOnPlugin" : "turnOffPlugin", p.path)
-                  }
-                >
-                  {p.off ? "Turn on" : "Turn off"}
-                </Button>
+                    data-testid="marketplace.local-plugin-toggle"
+                    onClick={() =>
+                      void actions?.changePlugin(p.off ? "turnOnPlugin" : "turnOffPlugin", p.path)
+                    }
+                  >
+                    {p.off ? "Turn on" : "Turn off"}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   shape="outlined"

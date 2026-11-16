@@ -111,7 +111,8 @@ pub(crate) async fn prepare(
     mut args: Value,
     consent: Option<super::read_consent::Consent>,
 ) -> Result<Execution, String> {
-    super::gateway::validate_public_args(&args)?;
+    let browser = super::agent_browser::selected(shared, session, "chrome_execute", &args);
+    super::gateway::validate_public_args(&args, browser)?;
     // The mode refusal comes first, as in the gateway: the agent learns which mode the action needs.
     super::check::authorize_read(shared, session, "chrome_execute", &args, consent.as_ref())?;
     super::gateway::validate_session(shared, session, "chrome_execute", &args)?;

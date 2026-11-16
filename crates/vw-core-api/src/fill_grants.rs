@@ -13,7 +13,8 @@
 //! read error counts as "no grant" (the dialog asks) or, right before a fill, refuses it.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use vw_keys::{FillGrant, KeyService};
 use vw_vault::fill_grant::{id_for, is_grant_id};
@@ -29,7 +30,7 @@ pub(crate) struct FillUses(Mutex<HashMap<String, (u32, i64)>>);
 impl FillUses {
     /// Counts one use of grant `id`, now.
     pub(crate) fn used(&self, id: &str) {
-        let mut uses = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut uses = self.0.lock_or_recover();
         let entry = uses.entry(id.to_owned()).or_insert((0, 0));
         entry.0 = entry.0.saturating_add(1);
         entry.1 = now_ms();
@@ -38,13 +39,14 @@ impl FillUses {
     /// Uses of grant `id` in this run, and the last one (ms; `None` before the first).
     fn of(&self, id: &str) -> (u32, Option<i64>) {
         self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(id)
             .map_or((0, None), |(n, last)| (*n, Some(*last)))
     }
 }
 
+/// Milliseconds since the Unix epoch as the vault's signed timestamp; 0 before the epoch or past `i64::MAX`.
+/// Shared by the vault-facing modules; unsigned wall-clock readings use `vw_changes::now_ms`.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

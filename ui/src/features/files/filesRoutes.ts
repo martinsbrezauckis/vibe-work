@@ -21,6 +21,7 @@ import { toCallError } from "../../protocol/client/types";
 import type { Files } from "../../state/files";
 import { tabOf } from "../../state/files";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import { type DroppedItem, MAX_DROP_BYTES, runDrop } from "./drop";
 import { saveEdit } from "./saveEdit";
@@ -29,12 +30,6 @@ import { editableKind, runFileRefAction } from "./fileRefActions";
 
 /** Most characters of the shown text in a `state` answer. */
 const STATE_TEXT_LIMIT = 65_536;
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -135,7 +130,7 @@ function dropItems(input: Record<string, unknown>): DroppedItem[] {
       "files must be a non-empty array of {name, data, folder?}",
     );
   return list.map((raw: unknown) => {
-    const file = asObject(raw);
+    const file = bodyObject(raw);
     const name = text(file, "name");
     const folder = file["folder"] === true;
     const data = typeof file["data"] === "string" ? file["data"] : "";
@@ -153,7 +148,7 @@ function dropItems(input: Record<string, unknown>): DroppedItem[] {
 
 /** One `ui/files` request. */
 async function route(app: App, files: Files, body: unknown): Promise<unknown> {
-  const input = asObject(body);
+  const input = bodyObject(body);
   const given = input["sessionId"];
   const sessionId =
     typeof given === "string" && given !== "" ? given : app.shell.store.get().selected;

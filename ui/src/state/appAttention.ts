@@ -20,7 +20,11 @@ export function startAppAttention(app: App): () => void {
     const waiting = waitingSessions(state);
     const prompts = waitingPrompts(state);
     const shell = app.shell.store.get();
-    const open = documentFocused() && !awayFromHome(app) ? shell.selected : null;
+    const focused = documentFocused();
+    // Acknowledgement only holds while the window is active: once the person switches away, every
+    // chat still waiting counts again, including one that was open when its prompt arrived.
+    if (!focused) seen.clear();
+    const open = focused && !awayFromHome(app) ? shell.selected : null;
     const pending = new Set<string>();
     let count = 0;
     for (const entry of Object.values(state.sessions)) {
@@ -62,11 +66,13 @@ export function startAppAttention(app: App): () => void {
     if (store) off.push(store.subscribe(update));
   }
   window.addEventListener("focus", update);
+  window.addEventListener("blur", update);
   document.addEventListener("visibilitychange", update);
   update();
   return () => {
     for (const stop of off) stop();
     window.removeEventListener("focus", update);
+    window.removeEventListener("blur", update);
     document.removeEventListener("visibilitychange", update);
   };
 }

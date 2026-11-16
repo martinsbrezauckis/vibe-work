@@ -24,6 +24,7 @@ interface EditorPair {
   focus: "left" | "right";
   compare?: boolean;
 }
+/** One open editor tab: what it shows, its last-used order, and whether a Vibe write changed the file. */
 export interface OpenDocument {
   shown: Shown;
   used: number;
@@ -36,6 +37,7 @@ export interface OpenDocument {
   /** The rendered preview of `shown` (`preview:<file>`), beside its code. */
   preview?: true;
 }
+/** One session's open documents, their tab order, the focused document and the optional side-by-side pair. */
 export interface FileWorkspace {
   order: readonly string[];
   documents: Readonly<Record<string, OpenDocument>>;

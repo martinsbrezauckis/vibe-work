@@ -1,0 +1,64 @@
+/*
+ * Settings > Knowledge base: list geometry for the two groups of named places and their Add forms. Typography, fields,
+ * buttons and theme colours come from the shared Settings styles. Imported by settings-page.css.
+ */
+.knowledge-group {
+  padding: 10px 0 14px;
+}
+.knowledge-group + .knowledge-group {
+  border-top: 1px solid var(--line);
+}
+.knowledge-group h4 {
+  margin: 0 0 6px;
+}
+.knowledge-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.knowledge-place {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  font-size: var(--text-md);
+}
+.knowledge-place + .knowledge-place {
+  border-top: 1px solid var(--line);
+}
+.knowledge-place-text {
+  /* Long paths wrap so the buttons keep their width. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-place-text .d {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  display: block;
+}
+.knowledge-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.knowledge-add {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+/* The fields shrink with a narrow window (a phone) instead of pushing past the page edge. */
+.knowledge-add > *,
+.knowledge-add .key-field > * {
+  min-width: 0;
+}
+.knowledge-add .key-field-row input {
+  /* Its natural width counts toward the row's minimum; it still grows to fill the row (flex: 1). */
+  width: 0;
+}
+
+@container window (max-width: 640px) {
+  .knowledge-place {
+    grid-template-columns: 1fr;
+  }
+}

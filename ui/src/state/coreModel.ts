@@ -73,6 +73,8 @@ export interface CoreState {
   held: Readonly<Record<string, number>>;
   /** Whether a foreign holder is another app window or the terminal. */
   heldKind: Readonly<Record<string, string>>;
+  /** Chats whose browser the person paused (`pausedTools` events): chat id -> whether an agent call waits. */
+  pausedBrowser: Readonly<Record<string, boolean>>;
   /** Which client answered a callback through the core, by callback id (the audit row). */
   answeredBy: Readonly<Record<string, Origin>>;
   /**
@@ -119,6 +121,7 @@ export const initialCore: CoreState = {
   stuck: {},
   held: {},
   heldKind: {},
+  pausedBrowser: {},
   answeredBy: {},
   subagentCards: {},
   rateLimits: null,
@@ -319,6 +322,14 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
       if (event.stuck) stuck[event.sessionId] = event.continuedIn;
       return { ...state, stuck };
     }
+    case "pausedTools": {
+      const pausedBrowser = Object.fromEntries(
+        Object.entries(state.pausedBrowser).filter(([id]) => id !== event.view.sessionId),
+      );
+      const browser = event.view.paused.find((tool) => tool.tool === "browser");
+      if (browser !== undefined) pausedBrowser[event.view.sessionId] = browser.waiting;
+      return { ...state, pausedBrowser };
+    }
     case "sessionHolder": {
       const held = Object.fromEntries(
         Object.entries(state.held).filter(([id]) => id !== event.sessionId),
@@ -377,6 +388,7 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     case "browserChanged":
     case "pagesChanged":
     case "pageMenu":
+    case "blockedPagePress":
     case "filesChanged":
     case "lineCommentsChanged":
     case "projectsChanged":

@@ -1,7 +1,8 @@
 //! Browser names and legacy UUID aliases at the helper boundary. The gateway validates feature gates;
 //! session opening resolves explicit browser names from trusted status, keeping Edge scoped.
 use serde_json::Value;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 pub(super) struct ProfileIds(Mutex<Option<bool>>);
@@ -21,21 +22,17 @@ impl ProfileIds {
         if !scoped && profiles.is_none_or(Vec::is_empty) {
             return;
         }
-        let mut current = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut current = self.0.lock_or_recover();
         *current = Some(current.unwrap_or(false) || scoped);
     }
     pub(super) fn clear(&self) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.0.lock_or_recover() = None;
     }
     pub(super) fn needs_status(&self, args: &Value) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_none()
-            && bare(args)
+        self.0.lock_or_recover().is_none() && bare(args)
     }
     pub(super) fn normalize(&self, args: &mut Value) {
-        if *self.0.lock().unwrap_or_else(PoisonError::into_inner) != Some(true) {
+        if *self.0.lock_or_recover() != Some(true) {
             return;
         }
         for path in ["/profileId", "/_tabContext/profileId"] {

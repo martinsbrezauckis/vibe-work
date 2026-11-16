@@ -2,9 +2,11 @@
 //! Binds owner, source/call, tool and input; the tool consumes the prepared action once, and only after the core saw
 //! Vibe carry the receipt into a running call of the receipt's own chat (`announced`).
 use super::announced::{self, Announcement, Origin};
-use super::{Calls, PoisonError, Shared, Value, json, names};
+use super::{Calls, Shared, Value, json, names};
+use crate::paused_tools_gate;
 use std::sync::Arc;
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 /// The refusal for a receipt no running Vibe call of its chat carries.
 pub(crate) const NOT_STARTED_BY_VIBE: &str =
@@ -16,6 +18,11 @@ const READ_AGAIN: Duration = Duration::from_millis(750);
 /// How long a reported decision stays usable: Vibe's own limit for a session tool call. A call Vibe gave up on (its
 /// tool server died, the request was dropped) cannot be completed later by whoever reads the decision from history.
 const REPORTED_LIFETIME: Duration = Duration::from_secs(60);
+/// How long a decision no Vibe call has reported stays usable. Vibe runs the hook before its own approval prompt, so a
+/// call can wait on the person's answer there; a call Vibe skipped (a No on its prompt) is gone after this.
+const UNREPORTED_LIFETIME: Duration = Duration::from_secs(30 * 60);
+/// The live decisions one chat may hold: a chat that fills its own share leaves the other chats' tools working.
+const PER_CHAT: usize = 1000;
 
 pub(crate) type Execution =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>>;
@@ -32,6 +39,8 @@ pub(super) struct Receipt {
     /// Vibe's report of this receipt in a running call of its own source session (the first report counts), and when
     /// it arrived (`REPORTED_LIFETIME`).
     announced: Option<(Announcement, std::time::Instant)>,
+    /// When the hook issued it (`UNREPORTED_LIFETIME`).
+    issued: std::time::Instant,
 }
 fn clean(args: &Value) -> Result<Value, String> {
     let mut args = args
@@ -76,8 +85,7 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
             .filter(|s| !s.is_empty() && s.len() <= 256)
             .ok_or_else(|| format!("Missing or invalid {key}."))
     };
-    let source = field("session_id")?;
-    let call = field("tool_call_id")?;
+    let (source, call) = (field("session_id")?, field("tool_call_id")?);
     let owner = payload["parent_session_id"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -93,7 +101,7 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
     if !tools.table.has_session(owner) {
         return Err("The originating chat is not registered.".into());
     }
-    let stop = crate::stops::generation(shared, owner);
+    let stop = paused_tools_gate::receipt(shared, owner, tool, &args, Some((source, call))).await?;
     let mut reservation = None;
     let mut replay = None;
     match super::browser_requests::admit(shared, owner, source, call, tool, &args)? {
@@ -164,6 +172,7 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
             execution,
             stop,
             announced: None,
+            issued: std::time::Instant::now(),
         },
     )?;
     if let Some(guard) = reservation {
@@ -179,17 +188,15 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
 }
 fn save(shared: &Shared, receipt: Receipt) -> Result<(), String> {
     let calls = super::calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?;
-    let mut pending = calls
-        .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut pending = calls.transports.lock_or_recover();
     pending.retain(|r| {
         crate::stops::generation(shared, &r.owner) == r.stop
-            && r.announced
-                .as_ref()
-                .is_none_or(|(_, at)| at.elapsed() <= REPORTED_LIFETIME)
+            && match &r.announced {
+                Some((_, at)) => at.elapsed() <= REPORTED_LIFETIME,
+                None => r.issued.elapsed() <= UNREPORTED_LIFETIME,
+            }
     });
-    if pending.len() >= 1000 {
+    if pending.iter().filter(|r| r.owner == receipt.owner).count() >= PER_CHAT {
         return Err("Too many tool calls are in progress.".into());
     }
     pending.push_back(receipt);
@@ -218,8 +225,7 @@ pub(crate) fn observe(
 fn mark(calls: &Calls, key: &str, tool: &str, session: &str, origin: Origin) -> bool {
     let marked = calls
         .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .iter_mut()
         .find(|r| r.key == key && r.tool == tool && r.source == session && r.announced.is_none())
         .map(|receipt| {
@@ -247,8 +253,7 @@ pub(crate) fn announce_for_fixture(shared: &Shared, key: &str) -> bool {
     };
     let found = calls
         .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .iter()
         .find(|r| r.key == key)
         .map(|r| (r.source.clone(), r.tool.clone()));
@@ -273,8 +278,7 @@ pub(crate) async fn await_vibe_call(shared: &Arc<Shared>, caller: &str, args: &V
         notified.as_mut().enable();
         let state = calls
             .transports
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .iter()
             .find(|r| r.key == key && r.owner == caller)
             .map(|r| (r.announced.is_some(), r.source.clone(), r.tool.clone()));
@@ -339,10 +343,7 @@ pub(super) fn verify(
     tool: &str,
     args: &Value,
 ) -> Result<(), String> {
-    let pending = calls
-        .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let pending = calls.transports.lock_or_recover();
     let receipt = &pending[index(&pending, owner, tool, args)?];
     if receipt.source != source
         || !crate::one_ask::callback_matches_call(callback_id, &receipt.call)
@@ -363,10 +364,7 @@ pub(crate) fn take(
     args: &mut Value,
 ) -> Result<Prepared, String> {
     let calls = super::calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?;
-    let mut pending = calls
-        .transports
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut pending = calls.transports.lock_or_recover();
     let index = index(&pending, owner, tool, args)?;
     let receipt = pending.remove(index).ok_or("Tool decision already used.")?;
     drop(pending);

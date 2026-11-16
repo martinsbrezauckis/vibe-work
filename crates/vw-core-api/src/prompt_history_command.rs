@@ -1,12 +1,20 @@
 //! Typed prompt-history handler. Uses the CLI home resolved at startup and the title vault-value guard;
-//! callers cannot select a file or read secrets by writing a prompt.
+//! callers cannot select a file or read secrets by writing a prompt. The core itself keeps a temporary chat's
+//! prompts out of the shared file, whichever client sends them.
 use crate::core::Shared;
 use crate::{CommandResult, CoreError, ErrorCode};
 use std::sync::Arc;
 pub(crate) async fn execute(
     shared: &Arc<Shared>,
     text: Option<String>,
+    session_id: Option<String>,
 ) -> Result<CommandResult, CoreError> {
+    // The file outlives every chat: a prompt is kept only when its chat is known and not temporary.
+    let text = text.filter(|_| {
+        session_id
+            .as_deref()
+            .is_some_and(|id| !shared.temporary.ids().iter().any(|t| t == id))
+    });
     let Some(home) = shared.instructions.cli_home.clone() else {
         return Ok(CommandResult::PromptHistory {
             entries: Vec::new(),

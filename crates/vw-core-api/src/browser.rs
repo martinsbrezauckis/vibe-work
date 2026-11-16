@@ -188,6 +188,8 @@ fn browser_state(shared: &Shared, owner: &str) -> Result<vw_browser::BrowserStat
             }
         }
     }
+    // The frame says Working for the rest of a turn in which the agent used the browser, as the input block holds.
+    state.agent_active |= crate::browser_input_block::acted_this_turn(shared, owner);
     state.log.sort_by_key(|entry| entry.at_ms);
     if state.log.len() > vw_browser::LOG_CAP {
         state.log.drain(..state.log.len() - vw_browser::LOG_CAP);
@@ -360,6 +362,14 @@ impl Core {
             }
             BrowserRequest::Shields {} | BrowserRequest::SetShields { .. } => {
                 crate::browser_shields::run(shared, &request).await?
+            }
+            BrowserRequest::LocalNetworkSites {} | BrowserRequest::SetLocalNetworkSite { .. } => {
+                crate::browser_guard::sites(
+                    shared,
+                    &request,
+                    crate::command_origin::debug_api_acts(shared, origin),
+                )
+                .await?
             }
             BrowserRequest::EnginePool {} | BrowserRequest::SetEnginePool { .. } => {
                 pool_result(shared, &request).await?
@@ -649,6 +659,7 @@ async fn annotate_request(
         .map(|target| crate::preview_pick::annotate_target(mode, Some(target)))
         .transpose()?;
     let annotation = annotate::annotate(
+        &hub(shared)?.browser,
         service,
         &page,
         session_id,
@@ -659,3 +670,7 @@ async fn annotate_request(
     .map_err(|e| CoreError::new(ErrorCode::InvalidParams, e))?;
     Ok(BrowserResult::Annotation { annotation })
 }
+
+#[cfg(test)]
+#[path = "browser_annotate_protected_tests.rs"]
+mod annotate_protected_tests;

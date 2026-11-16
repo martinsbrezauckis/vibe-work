@@ -59,7 +59,7 @@ select:disabled {
   color: var(--text);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
   white-space: nowrap;
@@ -117,7 +117,7 @@ select:disabled {
   color: var(--text);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   text-align: left;
 }
@@ -130,17 +130,23 @@ select:disabled {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* An option's label is one line: the menu is as wide as its widest row (Selector.tsx); a label wider than the window
+   ends in an ellipsis instead of breaking mid-word. */
+.ui-selector-option .ui-selector-text {
+  display: block;
+  white-space: nowrap;
+}
 .ui-selector-description {
   display: block;
   color: var(--text-3);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   font-weight: var(--weight-regular);
 }
 .ui-selector-empty {
   margin: 0;
   padding: var(--space-control-gap);
   color: var(--text-3);
-  font: var(--text-12)/var(--leading-ui) var(--font-ui);
+  font: var(--text-sm)/var(--leading-ui) var(--font-ui);
 }
 .ui-disclosure {
   display: flex;
@@ -164,24 +170,24 @@ select:disabled {
 .ui-panel,
 .ui-body {
   font-family: var(--font-ui);
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   font-weight: var(--weight-regular);
   line-height: var(--leading-ui);
 }
 .ui-heading {
   margin: 0;
-  font-size: var(--text-14);
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
 }
 .ui-caption {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   font-weight: var(--weight-regular);
   color: var(--text-2);
 }
 .ui-help {
   margin: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-regular);
   line-height: var(--leading-helper);
   color: var(--text-3);
@@ -272,7 +278,7 @@ select:disabled {
   height: 14px;
   border-radius: var(--radius-round);
   background: var(--primary-bg);
-  transition: left var(--t-fade) var(--ease-native);
+  transition: left var(--t-hover) var(--ease-std);
 }
 .switch[aria-checked="true"] {
   background: var(--orange);
@@ -285,7 +291,7 @@ select:disabled {
 /* Shared detail roles retain established paragraph and inline-source typography. */
 .ui-help[data-detail="paragraph"] {
   margin: 0 0 10px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   line-height: inherit;
   color: var(--text-2);
   overflow-wrap: anywhere;
@@ -338,7 +344,7 @@ select:disabled {
   box-sizing: border-box;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   cursor: pointer;
   color: var(--text-2);
 }
@@ -381,7 +387,7 @@ select:disabled {
 .menu-keys {
   flex: none;
   font: inherit;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -392,7 +398,7 @@ select:disabled {
 .menu-heading,
 .menu-note {
   padding: 7px 10px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .menu-heading {

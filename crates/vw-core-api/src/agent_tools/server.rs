@@ -91,9 +91,8 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                     let browser_answer = names::BROWSER_TOOLS.contains(&request.tool.as_str());
                     // Direct vault capture returns app metadata only. Its requested name must stay usable;
                     // the page-key heuristic is for observations, while the stored-value scrub still applies.
-                    let filter_page_answer = browser_answer
-                        && !(cfg!(feature = "agent-vault")
-                            && request.tool == names::BROWSER_CAPTURE_SECRET);
+                    let filter_page_answer =
+                        browser_answer && request.tool != names::BROWSER_CAPTURE_SECRET;
                     let answer = if browser_answer {
                         // The socket owns this browser call. Dropping its future on EOF or timeout
                         // also drops a pending native permission wait and its action guard.
@@ -108,8 +107,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                         };
                         answer
                     } else if (cfg!(feature = "video") && request.tool == "video_frames")
-                        || (cfg!(feature = "agent-vault")
-                            && request.tool == names::SECRET_CAPTURE_COMMAND)
+                        || request.tool == names::SECRET_CAPTURE_COMMAND
                         || names::CHROME_TOOLS.contains(&request.tool.as_str())
                         || matches!(
                             request.tool.as_str(),

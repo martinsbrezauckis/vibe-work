@@ -93,19 +93,27 @@ fn in_flight<'a>(shared: &'a Shared, method: &str, params: &Value) -> Option<InF
     Some(InFlight(shared, id.to_owned()))
 }
 
-/// The chat's send lock for its Stop, or `None` once a compaction holds it (checked again every 50 ms while the
-/// Stop waits, so a compaction that took the lock first is not waited for either).
+/// The chat's send lock for its Stop, or `None` once a compaction holds it: checked first, and again whenever a
+/// compaction starts while the Stop waits, so a compaction that took the lock first is not waited for either.
 pub(crate) async fn stop_lock(
     shared: &Shared,
     canonical: &str,
 ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
     loop {
+        // Registered before the check, so a compaction noted between the check and the wait is not missed.
+        let started = crate::stops::compaction_started(shared);
+        tokio::pin!(started);
+        started.as_mut().enable();
         if crate::stops::compacting(shared, canonical) {
             return None;
         }
         tokio::select! {
             held = shared.plugin_refresh.lock(canonical) => return Some(held),
-            () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+            () = &mut started => {}
         }
     }
 }
+
+#[cfg(test)]
+#[path = "dispatch_compaction_tests.rs"]
+mod tests;

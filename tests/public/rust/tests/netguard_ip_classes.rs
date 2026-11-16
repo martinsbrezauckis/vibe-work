@@ -1,11 +1,14 @@
-//! Address classes of the agent browser's network guard (`vw_netguard::ip::classify`): the browser reaches only
-//! public addresses, so every row below that is not `Public` is an address the guard refuses.
+//! Address classes of the agent browser's network guard (`vw_netguard::ip::classify`). A `Public` address is reached
+//! without a question. Every other class is this computer, the local network or a special range: backend fetches
+//! refuse it, and a page in the built-in browser reaches it only through Local Network Access (a page from the web is
+//! asked for first and the answer is kept per site; a page opened on this computer or the local network is not asked;
+//! Vibe Work's own ports are always refused).
 //!
 //! Covers each range in `ip.rs`, the first address past its edge where that edge is easy to get wrong
 //! (`172.15/172.32`, `100.63/100.128`, `198.20`, `3fff:fff::/3fff:1000::`, `2001:1ff::/2001:200::`), and the IPv6 forms that carry an IPv4
 //! address inside (IPv4-mapped, IPv4-compatible, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`), which are judged by that
 //! IPv4 address.
-//! PREDICT: every row gets its class; none of the refused rows comes out `Public`.
+//! PREDICT: every row gets its class; no non-public row comes out `Public`.
 
 use std::net::{IpAddr, Ipv4Addr};
 

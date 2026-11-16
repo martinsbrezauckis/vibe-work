@@ -9,6 +9,10 @@ interface Pending {
   viewer: boolean;
 }
 
+/**
+ * Creates the batched re-read of shown files and the file viewer per session, driven by core events and a poll of each
+ * watched file. One read per session runs at a time; a change during it queues another.
+ */
 export function createFileRefresh(
   core: CoreController,
   sessions: () => readonly string[],

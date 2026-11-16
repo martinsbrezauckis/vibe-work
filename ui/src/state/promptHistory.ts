@@ -48,16 +48,51 @@ export class PromptHistory {
   }
 }
 
-/** Refreshes from the CLI file or records an accepted submission; optional recall never blocks sending. */
+/** One prompt search result: the entry's position in the history list (oldest first) and its text. */
+export interface HistoryMatch {
+  readonly index: number;
+  readonly text: string;
+}
+
+/** At most this many prompts are listed by a search. */
+export const HISTORY_SEARCH_LIMIT = 50;
+
+/**
+ * Prompt search (Ctrl+R): the entries that contain every word of `query` anywhere, ignoring case, newest first.
+ * A prompt sent several times is listed once, at its newest place. An empty query lists the newest prompts.
+ */
+export function searchHistory(entries: readonly string[], query: string): HistoryMatch[] {
+  const words = query
+    .toLocaleLowerCase()
+    .split(/\s+/u)
+    .filter((word) => word !== "");
+  const seen = new Set<string>();
+  const matches: HistoryMatch[] = [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const text = entries[index];
+    if (text === undefined || seen.has(text)) continue;
+    seen.add(text);
+    const lower = text.toLocaleLowerCase();
+    if (!words.every((word) => lower.includes(word))) continue;
+    matches.push({ index, text });
+    if (matches.length === HISTORY_SEARCH_LIMIT) break;
+  }
+  return matches;
+}
+
+/**
+ * Refreshes from the CLI file or records an accepted submission with its chat (the core keeps a temporary chat's
+ * prompts out of the file); optional recall never blocks sending.
+ */
 export async function syncPromptHistory(
   core: CoreController,
   composer: ComposerStore,
-  text?: string,
+  sent?: { text: string; sessionId: string },
 ): Promise<void> {
   try {
     const answer = await core.run({
       type: "promptHistory",
-      ...(text === undefined ? {} : { text }),
+      ...(sent === undefined ? {} : { text: sent.text, sessionId: sent.sessionId }),
     });
     if (answer.type === "promptHistory") composer.history.set(() => answer.entries);
   } catch {

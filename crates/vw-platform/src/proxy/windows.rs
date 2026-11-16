@@ -1,5 +1,6 @@
 //! `WinHTTP`/IE proxy settings and native out-of-process PAC/WPAD. Called on a bounded worker.
 //! Async callbacks use integer registry keys (never borrowed pointers), so timeouts cannot leave dangling contexts.
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -122,10 +123,7 @@ unsafe extern "system" fn callback(
         return;
     }
     if let Some(waiters) = WAITERS.get()
-        && let Some(sender) = waiters
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&context)
+        && let Some(sender) = waiters.lock_or_recover().get(&context)
     {
         let result = if status == WINHTTP_CALLBACK_STATUS_GETPROXYFORURL_COMPLETE {
             Ok(())
@@ -192,10 +190,7 @@ fn automatic(url: &str, ie: &WINHTTP_CURRENT_USER_IE_PROXY_CONFIG) -> Result<Vec
         let id = next_id().map_err(|_| Failure::Internal)?;
         let (sender, receiver) = mpsc::channel();
         let waiters = WAITERS.get_or_init(Mutex::default);
-        waiters
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(id, sender);
+        waiters.lock_or_recover().insert(id, sender);
         let pending = WinHttpGetProxyForUrlEx(
             resolver.0,
             PCWSTR(wide.as_ptr()),
@@ -214,10 +209,7 @@ fn automatic(url: &str, ie: &WINHTTP_CURRENT_USER_IE_PROXY_CONFIG) -> Result<Vec
         } else {
             Err(Failure::WinHttp(pending))
         };
-        waiters
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&id);
+        waiters.lock_or_recover().remove(&id);
         completion?;
         let mut result = WINHTTP_PROXY_RESULT::default();
         if WinHttpGetProxyResult(resolver.0, &raw mut result) != 0 {

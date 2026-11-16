@@ -14,6 +14,7 @@
 
 /** Shortest and longest pause a user can choose (the Settings slider). */
 export const PAUSE_MIN_MS = 800;
+/** Longest pause a user can choose. */
 export const PAUSE_MAX_MS = 2_500;
 /** The default pause. */
 export const PAUSE_DEFAULT_MS = 800;

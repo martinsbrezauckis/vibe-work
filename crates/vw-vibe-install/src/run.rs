@@ -32,6 +32,12 @@
 //! view's `update` part (the running Vibe and the setup phase stay as they are); it ends with `active.json` written
 //! (the next start uses it) instead of a start.
 //!
+//! A runtime **refresh** ([`Slot::Refresh`], [`crate::refresh`]) runs steps 1-5 for the running version into a second
+//! venv of the same folder (`venv-<hash>`), from the embedded requirements; step 1 keeps the install's uv when it is
+//! the pinned version (only packages change). It reports nothing on the view. Before
+//! its commit the new server must answer the version probe as the pinned Vibe; the commit switches `installed.json`
+//! to it (the next start uses it). A failure removes only the new venv; the running install is never touched.
+//!
 //! Depends on: [`crate::fetch`], [`crate::steps`], [`crate::layout`], [`crate::manager`]. Called by: the manager.
 
 use std::ffi::OsString;
@@ -62,6 +68,8 @@ pub(crate) enum Slot {
     Setup,
     /// A Vibe update next to the running install.
     Update,
+    /// The running version's environment rebuilt from newer requirements, beside the running one.
+    Refresh,
 }
 
 /// One install to run.
@@ -160,10 +168,7 @@ pub(crate) fn steps(sources: &Sources, layout: &Layout, limits: &Limits) -> Vec<
                 os(&sources.index_url),
                 os("--no-config"),
                 os("-r"),
-                layout
-                    .install_dir()
-                    .join("requirements.txt")
-                    .into_os_string(),
+                layout.requirements().into_os_string(),
             ],
             limit: limits.packages,
         },
@@ -201,10 +206,10 @@ fn uv_env(inner: &Inner, layout: &Layout, step_index: usize) -> Vec<(OsString, O
     steps::environment(inner.config.parent_env.iter().cloned(), &own)
 }
 
-struct Run<'a> {
-    inner: &'a Arc<Inner>,
-    started: Instant,
-    slot: Slot,
+pub(crate) struct Run<'a> {
+    pub(crate) inner: &'a Arc<Inner>,
+    pub(crate) started: Instant,
+    pub(crate) slot: Slot,
 }
 
 impl Run<'_> {
@@ -228,11 +233,11 @@ fn millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-struct Failure {
-    step: String,
-    kind: FailKind,
-    error: String,
-    tail: String,
+pub(crate) struct Failure {
+    pub(crate) step: String,
+    pub(crate) kind: FailKind,
+    pub(crate) error: String,
+    pub(crate) tail: String,
 }
 
 /// The install, from the download to the start. Publishes progress; ends in `installed` or `failed`.
@@ -359,6 +364,7 @@ pub(crate) async fn start(
     };
     let mut state = inner.lock();
     state.cancel = None;
+    let output_tail = std::mem::take(&mut state.start_output);
     state.phase = match outcome {
         Ok(()) => {
             state.start_again = None;
@@ -368,9 +374,9 @@ pub(crate) async fn start(
             state.start_again = Some((server, installed));
             InstallPhase::Failed {
                 step: step.to_owned(),
-                kind: FailKind::Start,
+                kind: FailKind::for_start(&error),
                 error,
-                output_tail: String::new(),
+                output_tail,
             }
         }
     };
@@ -429,7 +435,7 @@ async fn waiting_start(
     }
 }
 
-fn fail(step: &str, kind: FailKind, error: String, tail: String) -> Failure {
+pub(crate) fn fail(step: &str, kind: FailKind, error: String, tail: String) -> Failure {
     Failure {
         step: step.to_owned(),
         kind,
@@ -442,8 +448,9 @@ fn disk(step: &str, error: &std::io::Error) -> Failure {
     fail(step, FailKind::Disk, error.to_string(), String::new())
 }
 
-/// Steps 1-5: download, uv steps, check. Ends with `installed.json` written (the commit point).
-async fn install_steps(
+/// Steps 1-5: download, uv steps, check. Ends with `installed.json` written (the commit point); a refresh's new
+/// server must first answer as the pinned Vibe ([`crate::refresh::answers_as`]).
+pub(crate) async fn install_steps(
     run: &Run<'_>,
     job: &Job,
     cancel: watch::Receiver<bool>,
@@ -451,7 +458,14 @@ async fn install_steps(
     let (sources, layout) = (&job.sources, &job.layout);
     download_uv(run, job, cancel.clone()).await?;
     run_uv_steps(run, sources, layout, cancel).await?;
-    finish(run, sources, layout)
+    let record = finish(run, sources, layout)?;
+    if run.slot == Slot::Refresh {
+        crate::refresh::answers_as(run.inner, &record).await?;
+    }
+    layout
+        .save_installed(&record)
+        .map_err(|e| disk("Check the install", &e))?;
+    Ok(record)
 }
 
 /// Kind of a failed download.
@@ -476,14 +490,14 @@ async fn download_uv(
     let (sources, layout) = (&job.sources, &job.layout);
     let dir = layout.install_dir();
     let first = match job.slot {
-        Slot::Setup => "Download uv",
+        Slot::Setup | Slot::Refresh => "Download uv",
         Slot::Update => "Download the requirements and uv",
     };
     layout.remove_unfinished().map_err(|e| disk(first, &e))?;
     for sub in ["dl", "uv"] {
         std::fs::create_dir_all(dir.join(sub)).map_err(|e| disk(first, &e))?;
     }
-    let requirements = dir.join("requirements.txt");
+    let requirements = layout.requirements();
     match &job.requirements {
         None => {
             std::fs::write(&requirements, &sources.requirements).map_err(|e| disk(first, &e))?;
@@ -505,6 +519,10 @@ async fn download_uv(
                 )
             })?;
         }
+    }
+    if job.slot == Slot::Refresh && installed_uv_is_pinned(job) {
+        // Only the packages change: the install's uv is the pinned version (checked when it was installed).
+        return Ok(());
     }
     let archive = dir.join("dl").join(format!("uv.{}", sources.uv.archive));
     let mut next_report = 0_u64;
@@ -533,6 +551,14 @@ async fn download_uv(
     fetch::unpack_uv(&archive, &sources.uv.archive, &layout.uv_dir())
         .map_err(|e| fail(first, FailKind::Checksum, e.to_string(), String::new()))?;
     Ok(())
+}
+
+/// The finished install's uv is there and is the version the job installs with.
+fn installed_uv_is_pinned(job: &Job) -> bool {
+    job.layout
+        .installed()
+        .is_some_and(|record| record.uv == job.sources.uv_version)
+        && job.layout.uv_dir().join(fetch::uv_name()).is_file()
 }
 
 /// Steps 2-4: the uv commands, with their progress and output tail.
@@ -579,7 +605,7 @@ async fn run_uv_steps(
     Ok(())
 }
 
-/// Step 5: Vibe and its server are there; the download and cache go; `installed.json` is written last.
+/// Step 5: Vibe and its server are there; the download and cache go. The record is written by the caller.
 fn finish(run: &Run<'_>, sources: &Sources, layout: &Layout) -> Result<Installed, Failure> {
     let dir = layout.install_dir();
     let check = "Check the install";
@@ -611,9 +637,6 @@ fn finish(run: &Run<'_>, sources: &Sources, layout: &Layout) -> Result<Installed
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
     };
-    let text = serde_json::to_string_pretty(&record)
-        .map_err(|e| fail(check, FailKind::Disk, e.to_string(), String::new()))?;
-    std::fs::write(layout.marker(), text).map_err(|e| disk(check, &e))?;
     Ok(record)
 }
 

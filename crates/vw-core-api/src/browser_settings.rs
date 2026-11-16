@@ -2,10 +2,8 @@
 //! Shared core state owns this model; browser admission and composer views read its confirmed values.
 use crate::{BrowserRequest, BrowserResult, CoreConfig, CoreError, ErrorCode, core::Shared};
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    sync::{Mutex, PoisonError},
-};
+use std::{path::PathBuf, sync::Mutex};
+use vw_platform::sync::LockRecover;
 
 /// Browser represented in the composer's tab menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,22 +86,15 @@ impl Settings {
         }
     }
     pub(crate) fn view(&self, available: bool) -> BrowserPreferences {
-        let mut view = self
-            .current
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let mut view = self.current.lock_or_recover().clone();
         view.builtin_available = available;
         view
     }
     pub(crate) fn enabled(&self) -> bool {
-        self.current
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .builtin_enabled
+        self.current.lock_or_recover().builtin_enabled
     }
     fn update(&self, change: impl FnOnce(&mut BrowserPreferences)) -> Result<(), CoreError> {
-        let mut current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut current = self.current.lock_or_recover();
         let mut next = current.clone();
         change(&mut next);
         if let Some(path) = &self.path {

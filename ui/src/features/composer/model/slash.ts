@@ -85,6 +85,7 @@ const ALL_COMMANDS: readonly SlashCommandRow[] = [
   { name: "new", description: "Same as /clear", runs: "session/history/clear" },
 ];
 
+/** The GUI command rows of the `/` menu, in menu order, each with its description and what it runs. */
 export const SLASH_COMMANDS = ALL_COMMANDS;
 
 /** A skill as the menu shows it. */

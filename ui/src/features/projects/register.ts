@@ -17,6 +17,7 @@ import { term } from "../../vocabulary";
 import { startFolderFor } from "../../state/projectStartFolder";
 import type { StatusFilter } from "../../state/projects";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
 import {
   STATUS_ORDER,
@@ -26,12 +27,6 @@ import {
   overviewItems,
   projectStatus,
 } from "./model";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, name: string): string {
   if (typeof value !== "string" || value === "")
@@ -102,7 +97,7 @@ export function registerProjects(app: App): () => void {
       },
     }),
     app.uiControl.register("projects", async (body) => {
-      const input = asObject(body);
+      const input = bodyObject(body);
       const project = () => target(input);
       switch (input["action"] ?? "state") {
         case "state":

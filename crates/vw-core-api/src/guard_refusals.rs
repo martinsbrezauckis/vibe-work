@@ -5,8 +5,9 @@ use crate::core::Shared;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use vw_platform::sync::LockRecover;
 
 /// User-facing guard classes shared by the bell and every refusal producer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,8 +39,7 @@ impl Refusals {
     pub(crate) fn events(&self) -> Vec<CoreEvent> {
         let mut events: Vec<_> = self
             .chats
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .values()
             .flat_map(|chat| chat.iter().cloned())
             .collect();
@@ -50,7 +50,7 @@ impl Refusals {
         events
     }
     fn retain(&self, session: &str, event: CoreEvent) -> bool {
-        let mut chats = self.chats.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut chats = self.chats.lock_or_recover();
         let chat = chats.entry(session.to_owned()).or_default();
         if let CoreEvent::GuardRefused { step_id: Some(step), guard, .. } = &event
             && chat.iter().any(|old| matches!(old, CoreEvent::GuardRefused { step_id: Some(id), guard: kind, .. } if id == step && kind == guard)) {

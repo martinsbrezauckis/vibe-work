@@ -3,6 +3,7 @@
 //! acknowledged. The fake helper below takes each change as its new rule in arrival order, as the helper does.
 use serde_json::{Value, json};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 async fn core_with_chrome(name: &str) -> crate::Core {
     crate::offline_core::start_with(name, |config, dir| {
@@ -13,8 +14,7 @@ async fn core_with_chrome(name: &str) -> crate::Core {
 
 /// The switch values the helper took as its rule, in arrival order.
 fn rules(seen: &std::sync::Mutex<Vec<(String, Value)>>) -> Vec<bool> {
-    seen.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    seen.lock_or_recover()
         .iter()
         .filter_map(|(_, args)| args["_netPolicyChange"]["localNetwork"].as_bool())
         .collect()

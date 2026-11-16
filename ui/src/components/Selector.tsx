@@ -5,6 +5,7 @@
  * Keyboard arrows/Home/End move, Enter/Space pick, Escape closes and restores trigger focus.
  * The trigger's tooltip is withdrawn while the menu is open, so it never lies over the first choices.
  * `align="end"` lines a wider menu up with the trigger's right edge (a trigger at the end of a Settings row).
+ * An option's label stays on one line inside its row (the menu is as wide as its widest row, up to the window).
  * An option's accessible name is its visible label alone; its description line is its accessible description,
  * so "Click <label>" in voice control and screen readers find the option by what it shows.
  */
@@ -133,8 +134,14 @@ export function Selector<T extends string>({
       const footerTop = document.querySelector(".statusbar")?.getBoundingClientRect().top ?? 0;
       const bottom = footerTop > 0 ? Math.min(window.innerHeight, footerTop) : window.innerHeight;
       const height = Math.min(menu.current?.scrollHeight || 280, 280, bottom - 2 * inset);
+      // The menu's own fractional width, rounded up: a rounded-down offsetWidth alone leaves the widest row (label,
+      // gap, check mark) a fraction of a pixel short, and its label would break inside the row.
       const width = Math.min(
-        Math.max(bounds.width, menu.current?.offsetWidth ?? 0),
+        Math.max(
+          bounds.width,
+          menu.current?.offsetWidth ?? 0,
+          Math.ceil(menu.current?.getBoundingClientRect().width ?? 0),
+        ),
         window.innerWidth - 2 * inset,
       );
       const below = bottom - bounds.bottom - inset;

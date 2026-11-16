@@ -81,7 +81,6 @@ pub fn parse(args: &Value) -> Result<RunSpec, String> {
 /// Checks a bounded command whose stdout is a new vault value; existing input secrets are optional.
 /// # Errors
 /// Invalid command arguments, bindings or time limit.
-#[cfg(feature = "agent-vault")]
 pub fn parse_capture(args: &Value) -> Result<RunSpec, String> {
     if !args.is_object() || args.get("cwd").is_some_and(|cwd| !cwd.is_string()) {
         return Err(

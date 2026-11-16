@@ -539,3 +539,48 @@ fn assert_catalog_features(status: &Value) {
         "every supported action survives compact status"
     );
 }
+
+/// PREDICT (written before the status tables were kept whole): an over-budget status halves its largest array, the
+/// shared `featureLists` table, so a profile's `{"list":1}` points at nothing and the agent reads "no capabilities".
+#[tokio::test]
+async fn an_over_budget_status_keeps_every_feature_list_its_profiles_name() {
+    let core = core("chrome-output-feature-lists-budget").await;
+    test_support::answering(&core.shared, |_, args| {
+        let mut result = status(args);
+        let names: Vec<Value> = (0..200)
+            .map(|i| json!(format!("extension.capability.{i:03}.v1")))
+            .collect();
+        for profile in result["structuredContent"]["profiles"]
+            .as_array_mut()
+            .unwrap()
+        {
+            profile["extensionCapabilities"] = json!(names);
+        }
+        result
+    });
+    for args in [json!({}), json!({"profileId":"chrome:profile-0"})] {
+        let answer = gateway::call(&core.shared, "s", "chrome_status", args.clone())
+            .await
+            .unwrap();
+        let status = &answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"];
+        let lists = status["featureLists"].as_array().unwrap();
+        let defaults = status["profileDefaults"].clone();
+        for profile in status["profiles"].as_array().unwrap() {
+            for key in ["features", "extensionCapabilities"] {
+                let reference = profile.get(key).unwrap_or(&defaults[key]);
+                let index = usize::try_from(reference["list"].as_u64().unwrap()).unwrap();
+                assert!(
+                    index < lists.len(),
+                    "{args}: {key} -> {index} of {}",
+                    lists.len()
+                );
+            }
+        }
+        let text = answer["vwMcpResult"]["content"].to_string();
+        assert!(
+            text.contains("extension.capability.199.v1"),
+            "{args}: list cut"
+        );
+    }
+    core.shutdown().await;
+}

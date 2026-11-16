@@ -8,7 +8,6 @@ our tool guards. No installed Vibe files are changed; original handlers apply al
 An admitted background process finishes its acknowledgment even when its turn is interrupted,
 so it stays listed and its own Stop can finish. Turn Stop never waits for the process to exit.
 """
-import importlib.metadata
 import sys
 
 
@@ -195,6 +194,30 @@ def install_builtin_skill_filter():
     PluginResolver._load_skills = load_skills
 
 
+def install_agent_worktree_policy():
+    """The agent's own working copies follow the chat's access mode, with nothing added to the agent's prompt.
+
+    Vibe pins `enter_worktree` to "allow". Here it goes through Vibe's permission resolver like the other tools
+    that act on real work: Ask and Accept edits show a card before the copy is made, Full access makes it
+    directly. Vibe's rule that has the agent ask "new worktree or this checkout?" before every edit is left out:
+    the user chose the folder or a copy at chat start, and the agent does not steer that choice.
+    """
+    from functools import wraps
+    # Checked against Vibe's `enter_worktree` permission table and prompt builder.
+    require_guarded_vibe("agent worktree policy")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
+    from vibe.app_server import _provided_tools, _runtime
+
+    _provided_tools.VIBE_PROVIDED_TOOL_MODES[_provided_tools.ENTER_WORKTREE_TOOL_NAME] = "ask"
+    original = _runtime._build_unified_system_instructions
+
+    @wraps(original)
+    def without_worktree_rule(*args, **kwargs):
+        kwargs["worktree_rule"] = None
+        return original(*args, **kwargs)
+
+    _runtime._build_unified_system_instructions = without_worktree_rule
+
+
 def install_process_start_guard():
     """Cancellation must not lose a live process's publication or leave its Stop barrier locked."""
     import asyncio
@@ -265,10 +288,9 @@ def install_process_start_guard():
 
 
 def install():
-    # These releases share the guarded runtime boundaries. Keep the previous pin
-    # usable during upgrades; a new release still needs its own compatibility audit.
-    if importlib.metadata.version("mistral-vibe") not in {"3.0.4", "3.1.0", "3.1.1", "3.1.2"}:
-        return
+    # Every guard below was checked against the releases in vibe_guard_versions.py; any other Vibe stops here
+    # with that message rather than running with some or all guards missing.
+    require_guarded_vibe("launcher")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild
     from mistralai_vibe_local_harness.vibe._subagents._controller import success_output
@@ -276,12 +298,14 @@ def install():
     install_config_switch_guard(adapter)
     install_plugin_hook_guard()
     install_builtin_skill_filter()
+    install_agent_worktree_policy()
     install_mcp_projection_guard(adapter)  # noqa: F821 - launch.rs prepends vibe_mcp_projection.py
     install_skill_cleanup_guard()  # noqa: F821 - launch.rs prepends vibe_skill_cleanup.py
     install_restored_turn_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
     install_resumed_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
     install_macos_keychain_guard()  # noqa: F821 - launch.rs prepends vibe_keychain_guard.py
     install_windows_credential_guard()  # noqa: F821 - launch.rs prepends vibe_keychain_guard.py
+    install_remote_cache_guard()  # noqa: F821 - launch.rs prepends vibe_remote_cache_guard.py
     install_bundled_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_plugin_enablement.py
     install_process_start_guard()
     install_process_tracking()  # noqa: F821 - launch.rs prepends vibe_process_tracking.py

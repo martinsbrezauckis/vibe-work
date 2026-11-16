@@ -7,9 +7,10 @@
 //! Depends on: the key service (the vault's values), `secret_scan_cache::withhold_parts` (the rule the session-log
 //! scan's findings use: every run of six or more characters that also occurs in a value), and
 //! `secret_scan_worker::filter_inputs` (the same values the scan compares: long and strong enough to be told from
-//! ordinary words). Called by: `dispatch` (every forwarded reply), `pump` (every notification, resync reads), the
+//! ordinary words). Called by: `dispatch` (every forwarded reply, and a rename's typed title via `prepare_model_input`), `pump` (every notification, resync reads), the
 //! core's own session reads and listings; `core` (the first read at start, and the owned [`watch`] task).
 //! Invariants:
+//! - A rename's typed text is guarded before it is forwarded; the reply's title is what the client shows.
 //! - Values are known once the vault was open in this run, and kept while it is locked (as the Debug API's
 //!   registry keeps them, `vw-secrets`), so locking never brings a withheld value back. Before the vault was ever
 //!   open in this run nothing can be compared, and titles pass unchanged.
@@ -17,7 +18,8 @@
 //!   whose `path` ends in `/title` or `/preview`. Ids, structure and every other field stay as Vibe sent them.
 //! - Values are never logged, returned or written anywhere.
 
-use std::sync::{Arc, PoisonError, RwLock, Weak};
+use std::sync::{Arc, RwLock, Weak};
+use vw_platform::sync::RwLockRecover;
 
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -40,7 +42,7 @@ impl TitleGuard {
     }
     /// `text` with the parts of a vault value withheld, or `None` when nothing is withheld.
     fn withheld(&self, text: &str) -> Option<String> {
-        let values = self.values.read().unwrap_or_else(PoisonError::into_inner);
+        let values = self.values.read_or_recover();
         if values.is_empty() {
             return None;
         }
@@ -58,15 +60,20 @@ pub(crate) fn withhold_text(shared: &Shared, text: &str) -> String {
         .unwrap_or_else(|| text.to_owned())
 }
 
+/// The title a rename request carries, guarded before Vibe stores it (a rename's text is the person's own).
+pub(crate) fn withhold_rename(shared: &Shared, method: &str, params: &mut Value) {
+    if method != "session/rename" {
+        return;
+    }
+    if let Some(Value::String(title)) = params.get_mut("title") {
+        *title = withhold_text(shared, title);
+    }
+}
+
 /// Withholds vault-value parts in every chat title and preview inside `value` (module invariants).
 pub(crate) fn withhold_in(shared: &Shared, value: &mut Value) {
     let guard = &shared.titles;
-    if guard
-        .values
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .is_empty()
-    {
+    if guard.values.read_or_recover().is_empty() {
         return;
     }
     walk(guard, value);
@@ -106,11 +113,7 @@ fn refresh_now(shared: &Shared) {
         return;
     };
     let (secrets, _) = crate::secret_scan_worker::filter_inputs(secrets);
-    let mut values = shared
-        .titles
-        .values
-        .write()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut values = shared.titles.values.write_or_recover();
     // Values removed from the vault stay: a title that held one is still withheld (nothing is brought back).
     for secret in secrets {
         if !values
@@ -146,6 +149,10 @@ pub(crate) async fn watch(shared: Weak<Shared>, mut events: broadcast::Receiver<
 }
 
 #[cfg(test)]
+#[path = "title_guard_tests.rs"]
+pub(crate) mod rename_tests;
+
+#[cfg(test)]
 mod history_tests {
     use super::*;
     #[tokio::test]
@@ -174,7 +181,10 @@ mod history_tests {
             f.core
                 .execute(
                     crate::Origin::Ui,
-                    crate::Command::PromptHistory { text: Some(text) },
+                    crate::Command::PromptHistory {
+                        text: Some(text),
+                        session_id: Some("chat".into()),
+                    },
                 )
                 .await
                 .unwrap();
@@ -185,6 +195,7 @@ mod history_tests {
                 crate::Origin::Ui,
                 crate::Command::PromptHistory {
                     text: Some("ordinary prompt".into()),
+                    session_id: Some("chat".into()),
                 },
             )
             .await
@@ -193,6 +204,47 @@ mod history_tests {
             std::fs::read_to_string(&path).unwrap(),
             "\"ordinary prompt\"\n"
         );
+        f.finish().await;
+    }
+
+    /// Coverage: a prompt saved before its value went into the vault is dropped when the history is read.
+    #[tokio::test]
+    async fn a_vault_value_added_later_is_filtered_when_the_history_is_read() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let value = "readTIME42$Synthet1c_V4lue";
+        let path = f.root.join("cli/vibehistory");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!("\"older {value} prompt\"\n\"plain prompt\"\n"),
+        )
+        .unwrap();
+        f.core
+            .shared
+            .titles
+            .values
+            .write()
+            .unwrap()
+            .push(VaultScanSecret {
+                id: "later".into(),
+                name: "later".into(),
+                login_id: None,
+                modified_ms: 0,
+                website_password: false,
+                value: vw_vault::SecretString::exact(value),
+            });
+        let answer = f
+            .core
+            .execute(
+                crate::Origin::Ui,
+                serde_json::from_value(serde_json::json!({"type":"promptHistory"})).unwrap(),
+            )
+            .await
+            .unwrap();
+        let crate::CommandResult::PromptHistory { entries } = answer else {
+            panic!("unexpected answer");
+        };
+        assert_eq!(entries, ["plain prompt"]);
         f.finish().await;
     }
 }

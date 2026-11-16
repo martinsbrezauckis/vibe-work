@@ -1,6 +1,7 @@
 //! System `GStreamer` video-only pipeline. Explicit file source/demux/parser/decoder; no URI or audio source.
 //! The helper supplies the sandbox/deadline; every job owns a fresh pipeline and bounded appsink.
 use super::{Frame, Metadata, geometry};
+use crate::sync::LockRecover;
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app::AppSink;
@@ -42,9 +43,7 @@ fn element(name: &str) -> Result<gst::Element, Error> {
         .map_err(|error| Error::at(Code::MediaInitialization { media }, name, error))
 }
 fn lock(track: &Mutex<Track>) -> std::sync::MutexGuard<'_, Track> {
-    track
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    track.lock_or_recover()
 }
 impl Decoder {
     /// Opens a regular staged input, with metadata and source bounds checked before video decoding.

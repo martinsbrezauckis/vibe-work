@@ -86,6 +86,18 @@ export function sessionForPick(core: CoreController, selected: string | null): s
   return best?.id ?? null;
 }
 
+/**
+ * What a settings read through [`sessionForPick`] depends on: the open chat's id, `"latest"` when the read goes
+ * through the most recently updated chat, `null` without one. A settings read does not repeat when only the most recent
+ * chat changes: the values are the same through any chat, and the core's short-lived helper chat (used to read through
+ * a chat that is not open) would otherwise become the most recent one and start the read again.
+ */
+export function settingsReadKey(core: CoreController, selected: string | null): string | null {
+  const via = sessionForPick(core, selected);
+  if (via === null) return null;
+  return via === selected ? via : "latest";
+}
+
 /** Reads the model list; rejects with a plain-words `Error`. */
 export async function readModels(core: CoreController): Promise<ModelList> {
   try {

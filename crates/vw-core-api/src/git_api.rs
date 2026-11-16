@@ -9,8 +9,8 @@
 //! Invariants: GET only, to `CoreConfig::github_api_base` (tests point it at a local fake); a 10 s limit per
 //! request.
 
-use std::sync::PoisonError;
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use vw_git::forge::Forge;
@@ -69,12 +69,7 @@ pub(crate) async fn fetch(
     cached: CardCache,
     now: crate::clock::ClockReading,
 ) -> CardCache {
-    let resume = shared
-        .git
-        .api_pause
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .left(now);
+    let resume = shared.git.api_pause.lock_or_recover().left(now);
     if resume > 0 {
         return CardCache {
             note: Some(format!(
@@ -155,14 +150,79 @@ pub(crate) async fn fetch(
     if let Some((left, reset)) = budget
         && left < LOW_BUDGET
     {
-        shared
-            .git
-            .api_pause
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set(now, reset);
+        shared.git.api_pause.lock_or_recover().set(now, reset);
     }
     result
+}
+
+/// Every pull request whose head is one of `branches` (state, title, draft; checks and reviews need gh), one
+/// request per branch within the same hourly budget as the card, and a note for the person.
+pub(crate) async fn list_pulls(
+    shared: &Shared,
+    forge: &Forge,
+    branches: &[String],
+) -> (Vec<vw_git::pr::PrCard>, Option<String>) {
+    let now = crate::clock::ClockReading::now();
+    let paused = shared.git.api_pause.lock_or_recover().left(now);
+    if paused > 0 {
+        return (
+            Vec::new(),
+            Some(
+                "GitHub's public API limit is nearly used up; sign in to gh for the list."
+                    .to_owned(),
+            ),
+        );
+    }
+    let Ok(client) = vw_mistral::https_client() else {
+        return (Vec::new(), Some("HTTPS is not available.".to_owned()));
+    };
+    let base = shared.config.github_api_base.trim_end_matches('/');
+    let owner = forge.path.split('/').next().unwrap_or("");
+    let mut cards = Vec::new();
+    for branch in branches {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("head", &format!("{owner}:{branch}"))
+            .append_pair("state", "all")
+            .append_pair("per_page", "30")
+            .finish();
+        let Some(answer) = get(
+            &client,
+            &format!("{base}/repos/{}/pulls?{query}", forge.path),
+        )
+        .await
+        else {
+            return (cards, Some("GitHub could not be reached.".to_owned()));
+        };
+        if answer.remaining.is_some_and(|r| r < LOW_BUDGET) {
+            shared
+                .git
+                .api_pause
+                .lock_or_recover()
+                .set(now, answer.reset_s);
+        }
+        if answer.status != 200 {
+            return (
+                cards,
+                Some("GitHub's public API cannot list this repository's pull requests (private?). Sign in to gh.".to_owned()),
+            );
+        }
+        cards.extend(
+            answer
+                .body
+                .as_ref()
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|pull| vw_git::pr::from_rest(pull, None, None, None)),
+        );
+    }
+    (
+        cards,
+        Some(
+            "Checks and reviews show with gh signed in; the public API lists the state only."
+                .to_owned(),
+        ),
+    )
 }
 
 /// The card of pull request `number`: the PR, its head commit's check runs and status, its reviews.
@@ -215,12 +275,7 @@ pub(crate) async fn annotations(
     check_run: u64,
 ) -> Result<Option<String>, String> {
     let now = crate::clock::ClockReading::now();
-    let resume = shared
-        .git
-        .api_pause
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .left(now);
+    let resume = shared.git.api_pause.lock_or_recover().left(now);
     if resume > 0 {
         return Err(
             "GitHub's public API limit is nearly used up; sign in to gh to include the log"
@@ -239,12 +294,7 @@ pub(crate) async fn annotations(
     if answer.remaining.is_some_and(|r| r < LOW_BUDGET)
         && let Some(reset) = answer.reset_s
     {
-        shared
-            .git
-            .api_pause
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set(now, Some(reset));
+        shared.git.api_pause.lock_or_recover().set(now, Some(reset));
     }
     if answer.status != 200 {
         return Err(format!(

@@ -6,6 +6,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use vw_mistral::network::{self, NetworkSettings, has_sign_in};
 use vw_netguard::{NetGuard, SystemResolver, Upstream};
+use vw_platform::sync::LockRecover;
 
 pub(crate) fn bind(resolver: Arc<dyn vw_netguard::Resolve>) -> Result<NetGuard, KeyError> {
     let guard = NetGuard::bind(resolver)
@@ -105,10 +106,7 @@ impl KeyService {
         settings: &NetworkSettings,
         resolver: Option<Arc<dyn vw_netguard::Resolve>>,
     ) -> Result<(NetworkProbe, NetworkSettings), KeyError> {
-        let _transition = self
-            .network_use
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _transition = self.network_use.lock_or_recover();
         if crate::proxy_credentials::protected(settings) && !self.proxy_sign_in_ready() {
             return Err(KeyError::InvalidSecret(
                 "Unlock the vault to use the proxy sign-in.",
@@ -121,10 +119,7 @@ impl KeyService {
         configure(&guard, settings);
         guard.serve();
         let public = public(settings, &guard);
-        self.network_probes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(guard.clone());
+        self.network_probes.lock_or_recover().push(guard.clone());
         Ok((
             NetworkProbe {
                 guard,
@@ -138,29 +133,15 @@ impl KeyService {
 impl KeyService {
     /// Register the existing browser guard. Its trusted settings never come from Vibe's writable .env.
     pub fn register_browser_guard(&self, guard: NetGuard) {
-        self.browser_guards
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(guard);
+        self.browser_guards.lock_or_recover().push(guard);
         self.refresh_browser_guards();
     }
 
     pub(crate) fn refresh_browser_guards(&self) {
-        let _transition = self
-            .network_use
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let network = self
-            .network
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _transition = self.network_use.lock_or_recover();
+        let network = self.network.lock_or_recover();
         let settings = &network.browser;
-        for guard in self
-            .browser_guards
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-        {
+        for guard in self.browser_guards.lock_or_recover().iter() {
             if self.proxy_sign_in_ready() || !crate::proxy_credentials::protected(settings) {
                 guard.set_upstream(
                     Upstream::from_values(
@@ -189,8 +170,7 @@ impl Drop for NetworkProbe {
         self.guard.set_enabled(false);
         self.guard.shutdown();
         self.probes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .retain(|guard| guard.proxy_url() != self.guard.proxy_url());
     }
 }

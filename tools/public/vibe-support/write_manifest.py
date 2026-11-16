@@ -23,6 +23,10 @@ Usage: python3 -I write_manifest.py --out <dir> --entry <pin dir>,min=0.1.0[,max
                   it is listed. Default: the field is left out (the app shows the store link).
   --chrome-min-version  adds `"chromeExtension": {"minVersion": ...}`: the oldest Chrome extension version this
                   release works with; an older installed extension reads "Update the extension". Default: left out.
+Refused: a version this tree's launcher guards were not checked with (`GUARDED_VIBE_VERSIONS` in
+`crates/vw-supervisor/src/vibe_guard_versions.py`) for an app range that reaches this tree's version (`Cargo.toml`
+`[workspace.package] version`): the app would not offer it, and an older app would install a Vibe that then refuses
+to start. An entry only for older apps (`max` below this tree's version) is not checked against this list.
 Needs: Python 3.10+, stdlib only. Called by: the release step, maintainers, the tests.
 """
 
@@ -54,6 +58,32 @@ NEVER_OFFER = {
 
 class ManifestError(Exception):
     """A refused input (the message says which and why)."""
+
+
+REPO = Path(__file__).resolve().parents[3]
+GUARD_FILE = REPO / "crates" / "vw-supervisor" / "src" / "vibe_guard_versions.py"
+
+
+def guarded_versions() -> set[str]:
+    """This tree's guarded Vibe versions, read (not imported) from the line the launcher and the app use."""
+    for line in GUARD_FILE.read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r'GUARDED_VIBE_VERSIONS = frozenset\(\{(.*)\}\)', line)
+        if match:
+            items = [item.strip() for item in match.group(1).split(",") if item.strip()]
+            versions = {item[1:-1] for item in items if len(item) > 2 and item[0] == item[-1] == '"'}
+            if len(versions) != len(items) or not all(PLAIN.match(v) for v in versions):
+                raise ManifestError(f"{GUARD_FILE}: the guarded-version line does not read as plain versions")
+            return versions
+    raise ManifestError(f"{GUARD_FILE}: no GUARDED_VIBE_VERSIONS line")
+
+
+def tree_version() -> tuple[int, ...]:
+    """This tree's Vibe Work version (`[workspace.package] version` of the root Cargo.toml)."""
+    text = (REPO / "Cargo.toml").read_text(encoding="utf-8")
+    match = re.search(r'^\[workspace\.package\]\n(?:[^\[].*\n)*?version = "([0-9]+\.[0-9]+\.[0-9]+)', text, re.M)
+    if not match:
+        raise ManifestError("the root Cargo.toml has no [workspace.package] version")
+    return version_key(match.group(1))
 
 
 def version_key(version: str) -> tuple[int, ...]:
@@ -100,6 +130,9 @@ def load_entry(folder: Path, minimum: str, maximum: str | None, out: Path) -> di
         raise ManifestError("Vibe 2.26.1 needs max=0.1.1 or earlier")
     if app_max is not None and app_max < app_min:
         raise ManifestError("max must not be earlier than min")
+    if (app_max is None or app_max >= tree_version()) and version not in guarded_versions():
+        raise ManifestError(f"this tree's launcher guards were not checked with Vibe {version} "
+                            f"(guarded: {', '.join(sorted(guarded_versions()))}); the app would refuse to start it")
     requirements = (folder / vibe.get("requirements", "vibe.requirements.txt")).read_bytes()
     digest = hashlib.sha256(requirements).hexdigest()
     if digest != vibe["requirementsSha256"]:

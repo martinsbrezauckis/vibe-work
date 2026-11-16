@@ -61,7 +61,8 @@ class PluginReads(unittest.TestCase):
 
     def invoke(self, kind, audit=False, extra="", folders=None):
         guard = SOURCE / "plugin_read_guard.py"
-        script = (REPO / "crates/vw-supervisor/src/vibe_plugin_enablement.py").read_text() + "\n"
+        script = (REPO / "crates/vw-supervisor/src/vibe_guard_versions.py").read_text() + "\n"
+        script += (REPO / "crates/vw-supervisor/src/vibe_plugin_enablement.py").read_text() + "\n"
         script += guard.read_text() if guard.exists() else ""
         script += "\n" + (SOURCE / f"plugin_{kind}.py").read_text()
         if audit:
@@ -177,7 +178,9 @@ class PluginReads(unittest.TestCase):
                     for i in range(8193):
                         (root / str(i)).mkdir()
                 elif kind == "depth":
-                    root.joinpath(*(["deep"] * 34)).mkdir(parents=True)
+                    # One-letter names keep the whole path under the 260-character limit of a Windows without
+                    # long paths (about 70 characters for the 34 levels), so the depth budget is checked there too.
+                    root.joinpath(*(["d"] * 34)).mkdir(parents=True)
                 else:
                     for i in range(TREE_LIMIT // MIB + 1):
                         with (root / str(i)).open("wb") as stream:

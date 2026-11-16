@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 use crate::config::PagesError;
 use crate::page::PageFacts;
@@ -140,8 +141,7 @@ impl PagesService {
         let print = crate::handbook::files::fingerprint(&root);
         let cached = self
             .hubs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .get(&root)
             .filter(|(p, hub)| *p == print && hub.folder == folder.relative)
             .map(|(_, hub)| hub.clone());
@@ -150,8 +150,7 @@ impl PagesService {
         }
         let hub = crate::hub::build(&root, &folder);
         self.hubs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_or_recover()
             .insert(root, (print, hub.clone()));
         Some(hub)
     }

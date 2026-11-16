@@ -7,10 +7,10 @@
   margin-block: 0 8px;
   min-width: 0;
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-9);
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .loops-bar {
   display: flex;
@@ -71,12 +71,12 @@
   white-space: nowrap;
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
 }
 .loops-help {
   margin: 0;
   color: var(--text-3);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   line-height: var(--leading-helper);
 }
 /* The mark on a session's row: icon only (a word squeezed the title at 1280 px, see the voice chat mark). */

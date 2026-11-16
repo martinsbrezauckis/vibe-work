@@ -1,6 +1,7 @@
 //! Browser activity across snapshots and questions. Uses the real pump, offline core and recording helper;
 //! no native page operation is permitted, and release tasks are drained before checking their effects.
 use super::*;
+use serde_json::json;
 use std::path::PathBuf;
 use vw_preview::{
     ConsoleEntry, EngineFuture, HistoryStep, MountId, MountSpec, Placement, PreviewEngine,

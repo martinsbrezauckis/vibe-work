@@ -1,7 +1,8 @@
 //! `WebView2`'s asynchronous `PrintToPdf` API (the COM counterpart of `PrintToPdfAsync`).
 //! Called on the UI thread; a completion handler owns private staging through cancellation.
 use super::{PdfFile, PngDone};
-use std::sync::{Arc, Mutex, PoisonError};
+use crate::sync::LockRecover;
+use std::sync::{Arc, Mutex};
 use webview2_com::{
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2_7, ICoreWebView2Controller, ICoreWebView2Environment,
@@ -57,7 +58,7 @@ pub fn print_pdf(
                         Err("the browser could not print the PDF".into())
                     }
                 });
-                if let Some(done) = finish.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                if let Some(done) = finish.lock_or_recover().take() {
                     done(result);
                 }
                 Ok(())
@@ -67,10 +68,7 @@ pub fn print_pdf(
         })()
     };
     if let Err(error) = result
-        && let Some(done) = completion
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
+        && let Some(done) = completion.lock_or_recover().take()
     {
         done(Err(error));
     }

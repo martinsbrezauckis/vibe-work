@@ -11,7 +11,8 @@
 //!   finish after the reply; `process_reply` never lets them hide a successful spawn behind a timeout.
 //! - Blocking: called on `spawn_blocking`.
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use vw_agent_tools::output;
@@ -44,11 +45,7 @@ fn random_name() -> String {
     )
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
+use vw_changes::now_ms;
 
 fn check_command(command: &str) -> Result<(), String> {
     if command.is_empty() || command.contains('\0') {
@@ -198,19 +195,15 @@ pub(crate) fn process_start(
         log: log.clone(),
         started_ms: now_ms(),
     });
-    tools
-        .started
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(
-            process,
-            StartedHere {
-                session_id: request.session_id.to_owned(),
-                started: started.clone(),
-                log: log.clone(),
-                command: command.to_owned(),
-            },
-        );
+    tools.started.lock_or_recover().insert(
+        process,
+        StartedHere {
+            session_id: request.session_id.to_owned(),
+            started: started.clone(),
+            log: log.clone(),
+            command: command.to_owned(),
+        },
+    );
     // The guard survives any tool reply timeout because this worker continues. Only a true spawn
     // failure/early exit drops it; the recorded identity releases the port when the process exits.
     reservation.record(process);

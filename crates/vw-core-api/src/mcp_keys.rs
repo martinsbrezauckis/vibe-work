@@ -18,7 +18,17 @@
 //!   confirmer never answers this method for the Debug API (`vault_scope::DIALOG_METHODS`), and "always" comes only
 //!   from the dialog's answer, never from a request. Declining writes nothing.
 //! - A revoke takes effect on the next forwarded request (the resolver reads the grant every time).
+//! - A server without a grant that was never revoked asks the person once per run at the agent's first request
+//!   (`mcp_keys_first_use`), with the same dialog as Allow key; a revoked one is refused at once.
+//! - Every read of a key for a forwarded request, before and after the consent, goes through one checked path
+//!   (`mcp_keys_gate`); an answer covers only the record the dialog showed (`gate::Shown`).
 
+#[path = "mcp_keys_facts.rs"]
+pub(crate) mod facts;
+#[path = "mcp_keys_first_use.rs"]
+mod first_use;
+#[path = "mcp_keys_gate.rs"]
+mod gate;
 #[path = "mcp_keys_runtime.rs"]
 mod runtime;
 pub(crate) use runtime::{at_start, prepare_config, uninstall};
@@ -70,18 +80,27 @@ const RESERVED_HEADERS: &[&str] = &[
 /// record, so a revoked grant cannot remain usable through stale state.
 #[derive(Default)]
 pub(crate) struct McpKeysState {
-    /// Binding id -> the record's `revokedMs` when the user gave the plain grant. The grant holds only while the
-    /// record still carries that value: any revoke since (this window, another window or app on the same vault) moves
-    /// it, so the decision never compares two wall-clock readings (a clock stepped back could otherwise let a plain
-    /// grant outlive a revoke; 10 parallel test runs once failed at the same moment this way).
-    plain: Mutex<HashMap<String, i64>>,
+    /// Binding id -> the record's `revokedMs` when the user gave the plain grant, and what the dialog showed. The
+    /// grant holds only while the record still carries that value and that destination: any revoke since (this
+    /// window, another window or app on the same vault) moves the stamp, so the decision never compares two
+    /// wall-clock readings (a clock stepped back could otherwise let a plain grant outlive a revoke; 10 parallel
+    /// test runs once failed at the same moment this way), and a record pointed elsewhere is not the one allowed.
+    plain: Mutex<HashMap<String, (i64, gate::Shown)>>,
     /// Binding id -> (requests forwarded with its key in this run, the last one in ms).
     uses: Mutex<HashMap<String, (u32, i64)>>,
+    /// The consent asked at a key server's first use in this run (`first_use`).
+    first_use: first_use::FirstUse,
 }
 
 impl McpKeysState {
-    fn plain(&self) -> std::sync::MutexGuard<'_, HashMap<String, i64>> {
+    fn plain(&self) -> std::sync::MutexGuard<'_, HashMap<String, (i64, gate::Shown)>> {
         self.plain.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Records this run's plain grant for record `b` as it is now (its revoke stamp and destination).
+    fn give_plain(&self, b: &McpBinding) {
+        self.plain()
+            .insert(b.id.clone(), (b.revoked_ms, gate::Shown::of(b)));
     }
 
     /// Times binding `id` was used in this run, and the last use (ms; `None` before the first).
@@ -111,12 +130,13 @@ impl McpKeysState {
         }
     }
 
-    /// True when this run's plain grant of `b` exists and no revoke happened since it was given (the record's
-    /// `revokedMs` is still the one seen then; a revoke in another window or app on the same vault changes it).
+    /// True when this run's plain grant of `b` exists, no revoke happened since it was given (the record's
+    /// `revokedMs` is still the one seen then; a revoke in another window or app on the same vault changes it), and
+    /// the record still points where it pointed then.
     fn plain_holds(&self, b: &McpBinding) -> bool {
         self.plain()
             .get(&b.id)
-            .is_some_and(|seen| *seen == b.revoked_ms)
+            .is_some_and(|(seen, shown)| *seen == b.revoked_ms && *shown == gate::Shown::of(b))
     }
 
     /// Decides one forwarded request for `b` (the vault's current record).
@@ -196,7 +216,7 @@ fn checked_header(header: Option<&str>) -> Result<(String, bool), CoreError> {
 }
 
 /// A Vibe server name: Vibe's own normalisation (`core/config/models.py:195-199`), from the request or the host.
-fn server_name(requested: Option<&str>, url: &str) -> Result<String, CoreError> {
+pub(crate) fn server_name(requested: Option<&str>, url: &str) -> Result<String, CoreError> {
     let normalize = |text: &str| -> String {
         let mapped: String = text
             .chars()
@@ -248,7 +268,7 @@ fn header_text(b: &McpBinding) -> String {
 /// The consent: the native dialog for every origin (module docs). Returns true for "always".
 async fn consent(
     shared: &Shared,
-    origin: Origin,
+    requester: vw_gate::Requester,
     server: &str,
     address: &str,
     header: &str,
@@ -256,7 +276,7 @@ async fn consent(
 ) -> Result<bool, CoreError> {
     let request = ConfirmationRequest {
         method: METHOD.to_owned(),
-        requester: crate::command::requester(origin),
+        requester,
         summary: consent_summary(server, address, header, secret_name),
         params: json!({"server": server, "address": address, "header": header, "secret": secret_name}),
         always: Some(ALWAYS_LABEL.to_owned()),
@@ -367,7 +387,15 @@ pub(crate) async fn add(
     } else {
         header.clone()
     };
-    let always = consent(shared, origin, &name, &url, &shown_header, chosen.name()).await?;
+    let always = consent(
+        shared,
+        crate::command::requester(origin),
+        &name,
+        &url,
+        &shown_header,
+        chosen.name(),
+    )
+    .await?;
     let answered = now_ms();
     let (secret_id, secret_name) = match chosen {
         Chosen::Existing { id, name } => (id, name),
@@ -407,11 +435,7 @@ pub(crate) async fn add(
         return Err(config_error(&error));
     }
     if !always {
-        shared
-            .connectors
-            .mcp_keys
-            .plain()
-            .insert(binding.id.clone(), binding.revoked_ms);
+        shared.connectors.mcp_keys.give_plain(&binding);
     }
     tracing::info!(always, answered, "mcp key server added");
     shared.emit(CoreEvent::SecretsChanged {});
@@ -423,13 +447,23 @@ pub(crate) async fn add(
 /// # Errors
 /// `notFound` (no key server of that name), `confirmationDeclined`, `keyService`.
 pub(crate) async fn allow(shared: &Shared, origin: Origin, name: &str) -> Result<(), CoreError> {
-    let keys = keys(shared)?;
     let list = bindings(shared)
         .await
         .map_err(|e| crate::keys::key_error(&e))?;
     let binding = list.into_iter().find(|b| b.server == name).ok_or_else(|| {
         CoreError::new(ErrorCode::NotFound, "no MCP server with a key of that name")
     })?;
+    allow_binding(shared, crate::command::requester(origin), binding).await
+}
+
+/// The consent for `binding` asked of the person on behalf of `requester` (the window, the Debug API, or the agent
+/// at a key server's first use, `first_use`), and the grant the answer gives.
+pub(crate) async fn allow_binding(
+    shared: &Shared,
+    requester: vw_gate::Requester,
+    binding: McpBinding,
+) -> Result<(), CoreError> {
+    let keys = keys(shared)?;
     check_item(&binding.secret_id)?;
     let current_name = keys
         .project_secrets()
@@ -442,9 +476,11 @@ pub(crate) async fn allow(shared: &Shared, origin: Origin, name: &str) -> Result
     let asked = now_ms();
     // The record's revoke stamp before the dialog: a revoke while it is open changes it (`revoke` always moves it).
     let revoked_at_ask = binding.revoked_ms;
+    // What the dialog shows: the answer covers this record only.
+    let shown = gate::Shown::of(&binding);
     let chosen_always = consent(
         shared,
-        origin,
+        requester,
         &binding.server,
         &binding.upstream,
         &header_text(&binding),
@@ -453,11 +489,16 @@ pub(crate) async fn allow(shared: &Shared, origin: Origin, name: &str) -> Result
     .await?;
     let answered = now_ms();
     // The record as it is now, changed atomically (`update_mcp_binding`): a revoke made while the dialog was open
-    // (its `revokedMs` at or after the moment the dialog opened) wins over the answer, which is then refused: fail
-    // closed, the user can allow again.
+    // (its `revokedMs` at or after the moment the dialog opened) or a record pointed elsewhere meanwhile wins over
+    // the answer, which is then refused: fail closed, the user can allow again.
+    let shown_at_ask = shown.clone();
     let after = keys
         .update_mcp_binding(binding.id.clone(), move |b| {
-            if b.revoked_ms != revoked_at_ask || b.revoked_ms >= asked || !chosen_always || b.always
+            if b.revoked_ms != revoked_at_ask
+                || b.revoked_ms >= asked
+                || gate::Shown::of(b) != shown_at_ask
+                || !chosen_always
+                || b.always
             {
                 return false;
             }
@@ -475,14 +516,18 @@ pub(crate) async fn allow(shared: &Shared, origin: Origin, name: &str) -> Result
         error.server_code = Some("revokedMeanwhile".to_owned());
         return Err(error);
     }
+    if gate::Shown::of(&after) != shown {
+        let mut error = CoreError::new(
+            ErrorCode::Denied,
+            "the server's key record changed while the dialog was open; choose Allow key again",
+        );
+        error.server_code = Some("changedMeanwhile".to_owned());
+        return Err(error);
+    }
     if !chosen_always {
         // Given at the answer with the record's current revoke stamp: any revoke after it voids it (`plain_holds`).
         tracing::debug!(answered, "mcp key plain grant");
-        shared
-            .connectors
-            .mcp_keys
-            .plain()
-            .insert(binding.id.clone(), after.revoked_ms);
+        shared.connectors.mcp_keys.give_plain(&after);
     }
     shared.emit(CoreEvent::SecretsChanged {});
     Ok(())
@@ -629,4 +674,97 @@ mod kg1_tests {
             assert!(text.contains(fact), "missing {fact}");
         }
     }
+}
+
+/// A key server a bring added (for Undo).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ImportedKey {
+    pub(crate) binding: String,
+    pub(crate) secret: String,
+    pub(crate) server: String,
+}
+
+/// A key server brought from another agent's setup: the key goes into the vault (labelled for MCP, permission
+/// Ask), the binding is not allowed until the person allows it (as a server added in Tools whose dialog was
+/// answered "not now"), and Vibe's config gets only the forwarder's address. The import's own native confirmation,
+/// which named the server and the key, is the consent to store it. `header` is the setting's name; an
+/// `Authorization: Bearer <key>` value is stored without its `Bearer ` word.
+///
+/// # Errors
+/// `keyService` (no vault, locked, a secret name taken), `invalidParams` (address, header), `internal` (config).
+pub(crate) async fn import_key_server(
+    shared: &Shared,
+    name: &str,
+    url: &str,
+    header: &str,
+    value: String,
+) -> Result<ImportedKey, CoreError> {
+    let keys = keys(shared)?;
+    let url = vw_gate::check_mcp_server_url(url).map_err(|r| invalid(r.to_string()))?;
+    let bearer_value = value.strip_prefix("Bearer ").map(str::to_owned);
+    let (header, bearer) = if header.eq_ignore_ascii_case("authorization") && bearer_value.is_some()
+    {
+        checked_header(None)?
+    } else {
+        checked_header(Some(header))?
+    };
+    let secret = vw_vault::SecretString::new(bearer_value.unwrap_or(value));
+    let stored = keys
+        .store_secret_labelled(
+            format!("{name} key"),
+            secret,
+            None,
+            Some(vw_keys::SecretLabel::Mcp),
+        )
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
+    let binding = McpBinding {
+        id: vw_vault::mcp_binding::new_id(),
+        server: name.to_owned(),
+        upstream: url,
+        header,
+        bearer,
+        secret_id: stored.secret.id.clone(),
+        secret_name: stored.secret.name,
+        always: false,
+        revoked_ms: 0,
+        created_ms: now_ms(),
+    };
+    keys.store_mcp_binding(binding.clone())
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
+    if let Err(error) = add_entry(
+        &shared.instructions.own_home,
+        name,
+        &forwarder_url(keys.proxy_base(), &binding.id),
+    ) {
+        let _ = keys.remove_mcp_binding(binding.id.clone()).await;
+        let _ = keys.remove_secret(stored.secret.id).await;
+        return Err(config_error(&error));
+    }
+    shared.emit(CoreEvent::SecretsChanged {});
+    Ok(ImportedKey {
+        binding: binding.id,
+        secret: binding.secret_id,
+        server: name.to_owned(),
+    })
+}
+
+/// Undoes [`import_key_server`]: the binding and its key leave the vault (the config entry goes with the restored
+/// config file).
+///
+/// # Errors
+/// `keyService` (locked vault).
+pub(crate) async fn remove_imported(
+    shared: &Shared,
+    imported: &ImportedKey,
+) -> Result<(), CoreError> {
+    let keys = keys(shared)?;
+    keys.remove_mcp_binding(imported.binding.clone())
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
+    keys.remove_secret(imported.secret.clone())
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
+    Ok(())
 }

@@ -487,6 +487,20 @@ fn firefox_addon_setup_is_explicit_and_removal_preserves_chrome() {
 #[path = "setup_repair_tests.rs"]
 mod repair_tests;
 
+#[cfg(unix)]
+#[path = "setup_leftover_tests.rs"]
+mod leftover_tests;
+
+#[cfg(all(unix, feature = "your-firefox"))]
+#[path = "setup_firefox_leftover_tests.rs"]
+mod firefox_leftover_tests;
+
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    feature = "your-firefox"
+))]
+#[path = "firefox_mac_setup_tests.rs"]
+mod firefox_mac_setup;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[path = "macos_data_tests.rs"]
 mod macos_data;

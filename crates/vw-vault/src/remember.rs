@@ -1,8 +1,11 @@
 //! "Remember this device", ShellX's scheme (the standalone Vault app has none), reproduced
 //! exactly so ShellX and Vibe Work unlock each other's vault:
 //! - a 32-byte random device secret, hex (`backend.rs:2360-2362` @ e38c2b5c), is stored in the OS
-//!   credential store under service `shellx-vault`, account
-//!   `remembered-device-v1-<BLAKE3 hex of the profile folder path string>` (`:959-963,2349-2350`);
+//!   credential store under an account
+//!   `remembered-device-v1-<BLAKE3 hex of the profile folder path string>` (`:959-963,2349-2350`).
+//!   ShellX's shared vault keeps ShellX's service `shellx-vault`; Vibe Work's own vaults and every other
+//!   entry of the app use [`KEYRING_SERVICE`], and entries an older version kept under `shellx-vault`
+//!   move there on first use (`remember_rename`);
 //! - `rememberedKeyfileJson` in `profile.json` is the keyfile rewrapped under that secret
 //!   (`Keyfile::rewrap(passphrase, device_secret)`, `:2364-2373`), so the secret unlocks the vault
 //!   like a passphrase;
@@ -46,6 +49,31 @@ pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120
 pub const NO_ANSWER: &str = "the system keyring did not answer";
 /// Why the app's fallback store keeps nothing (no OS credential store could be opened).
 pub const NO_STORE: &str = "this computer has no system keyring";
+/// What the person reads when the OS credential store itself failed (no Secret Service, no default collection, a
+/// locked or refused store): the store by its name, never the store's own error text, which goes to the log.
+#[cfg(target_os = "linux")]
+pub const STORE_UNAVAILABLE: &str =
+    "the system keyring (Secret Service) is not available or has no default keyring";
+/// See the Linux text.
+#[cfg(windows)]
+pub const STORE_UNAVAILABLE: &str = "Windows Credential Manager is not available";
+/// See the Linux text.
+#[cfg(target_os = "macos")]
+pub const STORE_UNAVAILABLE: &str = "the login keychain is not available";
+/// See the Linux text.
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+pub const STORE_UNAVAILABLE: &str = "the system keyring is not available";
+
+/// A failure of the OS credential store as a [`VaultError::Remember`] in plain words: [`NO_ANSWER`] stays as it is,
+/// anything else becomes [`STORE_UNAVAILABLE`] and the store's own text is logged.
+#[must_use]
+pub fn store_failure(raw: String) -> VaultError {
+    if raw == NO_ANSWER {
+        return VaultError::Remember(raw);
+    }
+    tracing::warn!(reason = %raw, "system credential store failed");
+    VaultError::Remember(STORE_UNAVAILABLE.to_owned())
+}
 
 /// Runs `call` with a deadline on Linux (module doc); elsewhere it runs as it is. A call past the deadline keeps
 /// its own thread until the store answers or the app quits; the caller gets [`NO_ANSWER`] at once.
@@ -71,8 +99,10 @@ pub fn bounded<T: Send + 'static>(
         .unwrap_or_else(|_| Err(NO_ANSWER.to_owned()))
 }
 
-/// OS credential store service name (ShellX's).
-pub const KEYRING_SERVICE: &str = "shellx-vault";
+/// OS credential store service name of every entry the app keeps (its bundle identifier).
+pub const KEYRING_SERVICE: &str = "app.vibework.desktop";
+/// ShellX's service name: its shared vault's remembered device, and where older versions kept every entry.
+pub const SHELLX_KEYRING_SERVICE: &str = "shellx-vault";
 /// Account prefix (ShellX's).
 pub const ACCOUNT_PREFIX: &str = "remembered-device-v1";
 
@@ -167,6 +197,10 @@ impl MemoryDeviceStore {
 
 impl DeviceSecretStore for MemoryDeviceStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, VaultError> {
+        // The fallback never held Chrome Control's identity: its absence is the missing keyring, not a lost credential.
+        if self.1 && account.starts_with(CHROME_OWNER_PREFIX) {
+            return Err(VaultError::Remember(NO_STORE.to_owned()));
+        }
         Ok(self
             .0
             .lock()
@@ -202,14 +236,18 @@ impl DeviceSecretStore for MemoryDeviceStore {
     }
 }
 
-/// The OS credential store (Windows Credential Manager, macOS login keychain, Linux Secret Service).
-pub struct OsDeviceStore {
+/// The OS credential store (Windows Credential Manager, macOS login keychain, Linux Secret Service), with the
+/// move of older entries to [`KEYRING_SERVICE`].
+pub struct OsDeviceStore(crate::remember_rename::Renamed<OsNamedStore>);
+
+/// The platform store addressed by service name.
+pub(crate) struct OsNamedStore {
     #[cfg(not(target_os = "macos"))]
     store: Arc<keyring_core::api::CredentialStore>,
 }
 
 fn remember_error(error: &keyring_core::Error) -> VaultError {
-    VaultError::Remember(error.to_string())
+    store_failure(error.to_string())
 }
 
 /// The platform's credential store (shared with vw-keys, which reads Vibe's own key entry for
@@ -236,7 +274,7 @@ pub fn os_credential_store() -> Result<Arc<keyring_core::api::CredentialStore>, 
         if error == NO_ANSWER {
             SILENT.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        VaultError::Remember(error)
+        store_failure(error)
     })?;
     #[cfg(windows)]
     let store: Arc<keyring_core::api::CredentialStore> =
@@ -259,29 +297,56 @@ impl OsDeviceStore {
     /// [`VaultError::Remember`] when the platform has no usable store (e.g. no Secret Service
     /// session on Linux).
     pub fn new() -> Result<Self, VaultError> {
-        Ok(Self {
+        Ok(Self(crate::remember_rename::Renamed::new(OsNamedStore {
             #[cfg(not(target_os = "macos"))]
             store: os_credential_store()?,
-        })
+        })))
     }
 
-    #[cfg(not(target_os = "macos"))]
-    fn entry(&self, account: &str) -> Result<keyring_core::Entry, VaultError> {
-        self.store
-            .build(KEYRING_SERVICE, account, None)
-            .map_err(|e| remember_error(&e))
+    /// Keeps the remembered device of ShellX's shared vault at `profile_dir` under ShellX's service name, where
+    /// ShellX reads and writes it.
+    #[must_use]
+    pub fn sharing_with_shellx(self, profile_dir: &Path) -> Self {
+        Self(self.0.sharing(account_for(profile_dir)))
     }
 }
 
 impl DeviceSecretStore for OsDeviceStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, VaultError> {
+        let found = self.0.get(account)?;
+        if let Some(secret) = &found {
+            secret.register_as(vw_secrets::SecretKind::VaultValue);
+        }
+        Ok(found)
+    }
+
+    fn set(&self, account: &str, secret: &SecretString) -> Result<(), VaultError> {
+        self.0.set(account, secret)
+    }
+
+    fn delete(&self, account: &str) -> Result<(), VaultError> {
+        self.0.delete(account)
+    }
+}
+
+impl OsNamedStore {
+    #[cfg(not(target_os = "macos"))]
+    fn entry(&self, service: &str, account: &str) -> Result<keyring_core::Entry, VaultError> {
+        self.store
+            .build(service, account, None)
+            .map_err(|e| remember_error(&e))
+    }
+}
+
+impl crate::remember_rename::NamedStore for OsNamedStore {
+    fn read(&self, service: &str, account: &str) -> Result<Option<SecretString>, VaultError> {
         #[cfg(target_os = "macos")]
         let found = vw_platform::vault_keychain::get(
-            KEYRING_SERVICE,
+            service,
             account,
             vw_vocabulary::label("vaultKinds", "vibeWork"),
         )
-        .map_err(VaultError::Remember)?
+        .map_err(store_failure)?
         .map(|bytes| {
             std::str::from_utf8(&bytes)
                 .map(SecretString::new)
@@ -289,14 +354,14 @@ impl DeviceSecretStore for OsDeviceStore {
         })
         .transpose()?;
         #[cfg(not(target_os = "macos"))]
-        let entry = self.entry(account)?;
+        let entry = self.entry(service, account)?;
         #[cfg(not(target_os = "macos"))]
         let found = bounded(CALL_TIMEOUT, move || match entry.get_password() {
             Ok(secret) => Ok(Some(SecretString::new(secret))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
         })
-        .map_err(VaultError::Remember)?;
+        .map_err(store_failure)?;
         #[cfg(windows)]
         let found = match found {
             Some(stored) => {
@@ -304,7 +369,7 @@ impl DeviceSecretStore for OsDeviceStore {
                     Some(secret)
                 } else {
                     // Migrate the same value, including Chrome identity/policy; never regenerate an owner key.
-                    self.set(account, &stored)?;
+                    crate::remember_rename::NamedStore::write(self, service, account, &stored)?;
                     Some(stored)
                 }
             }
@@ -316,18 +381,18 @@ impl DeviceSecretStore for OsDeviceStore {
         Ok(found)
     }
 
-    fn set(&self, account: &str, secret: &SecretString) -> Result<(), VaultError> {
+    fn write(&self, service: &str, account: &str, secret: &SecretString) -> Result<(), VaultError> {
         #[cfg(target_os = "macos")]
         return vw_platform::vault_keychain::set(
-            KEYRING_SERVICE,
+            service,
             account,
             vw_vocabulary::label("vaultKinds", "vibeWork"),
             secret.expose().as_bytes(),
         )
-        .map_err(VaultError::Remember);
+        .map_err(store_failure);
         #[cfg(not(target_os = "macos"))]
         {
-            let entry = self.entry(account)?;
+            let entry = self.entry(service, account)?;
             #[cfg(windows)]
             let secret = crate::stored_secret::protect(account, secret)?;
             #[cfg(not(windows))]
@@ -337,22 +402,25 @@ impl DeviceSecretStore for OsDeviceStore {
                     .set_password(secret.expose())
                     .map_err(|e| e.to_string())
             })
-            .map_err(VaultError::Remember)
+            .map_err(store_failure)
         }
     }
 
-    fn delete(&self, account: &str) -> Result<(), VaultError> {
+    fn remove(&self, service: &str, account: &str) -> Result<(), VaultError> {
         #[cfg(target_os = "macos")]
-        return vw_platform::vault_keychain::delete(KEYRING_SERVICE, account)
-            .map_err(VaultError::Remember);
+        return vw_platform::vault_keychain::delete(service, account).map_err(store_failure);
         #[cfg(not(target_os = "macos"))]
         {
-            let entry = self.entry(account)?;
+            let entry = self.entry(service, account)?;
             bounded(CALL_TIMEOUT, move || match entry.delete_credential() {
                 Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
                 Err(error) => Err(error.to_string()),
             })
-            .map_err(VaultError::Remember)
+            .map_err(store_failure)
         }
     }
 }
+
+#[cfg(test)]
+#[path = "remember_store_tests.rs"]
+mod store_tests;

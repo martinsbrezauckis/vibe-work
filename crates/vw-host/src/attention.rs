@@ -94,6 +94,35 @@ pub fn badge_at_size(count: u32, size: u32) -> Option<Vec<u8>> {
     Some(pixels)
 }
 
+/// The macOS Dock icon with the count in its top-right corner, or `None` when nothing waits (the bundle icon
+/// comes back). The badge is part of the icon itself: macOS hides `NSDockTile` labels while the app's
+/// notifications are not allowed, and an app icon is always drawn. `None` also when `base` is not
+/// `width` x `height` RGBA.
+#[must_use]
+pub fn dock_icon(base: &[u8], width: u32, height: u32, count: u32) -> Option<Vec<u8>> {
+    if base.len() != (width as usize) * (height as usize) * 4 {
+        return None;
+    }
+    // Two fifths of the icon, like the system badge; `badge_at_size` draws 16-128 px.
+    let side = (width.min(height) * 2 / 5).clamp(BADGE_SIZE, 128);
+    if side > width.min(height) {
+        return None;
+    }
+    let badge = badge_at_size(count, side)?;
+    let (side, width) = (side as usize, width as usize);
+    let left = width - side;
+    let mut pixels = base.to_vec();
+    for (row, line) in badge.chunks_exact(side * 4).enumerate() {
+        for (col, pixel) in line.as_chunks::<4>().0.iter().enumerate() {
+            if pixel[3] != 0 {
+                let at = (row * width + left + col) * 4;
+                pixels[at..at + 4].copy_from_slice(pixel);
+            }
+        }
+    }
+    Some(pixels)
+}
+
 /// Adds the tray dot; a template uses black so macOS supplies the menu bar's current tint.
 #[must_use]
 pub fn tray(base: &[u8], width: u32, height: u32, template: bool, waiting: bool) -> Vec<u8> {

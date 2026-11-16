@@ -159,9 +159,15 @@ scope: string,
  */
 managed: boolean,
 /**
- * Kept in the app's off folder, outside Vibe discovery.
+ * Turned off: by Vibe's own switch (`disabled_plugins`, or off by default and not in `enabled_plugins`), or
+ * kept in the app's off folder outside Vibe discovery.
  */
 off: boolean,
+/**
+ * Off by a Vibe setting the Tools page does not write (another config layer or the environment): Turn on
+ * is not offered.
+ */
+locked: boolean,
 /**
  * Native Vibe switch state, separate from the app-owned off folder; absent for unreadable/old inventories.
  */
@@ -225,7 +231,7 @@ foreign: boolean,
  */
 folder: string | null,
 /**
- * This catalog install is kept outside Vibe's discovery roots.
+ * This catalog install is turned off: by Vibe's own switch, or kept outside Vibe's discovery roots.
  */
 off: boolean,
 /**

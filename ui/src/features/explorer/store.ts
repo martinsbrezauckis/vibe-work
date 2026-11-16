@@ -11,6 +11,7 @@ import type { CoreController } from "../../state/coreStore";
 import { createStore } from "../../state/createStore";
 
 type FolderPage = { entries: ExplorerEntry[]; ignored: string[]; next: number | null };
+/** The Files panel's state: the folder and its loaded pages, git status, search results, history, the open commit. */
 export interface ExplorerState {
   folder: string | null;
   view: "files" | "history";
@@ -520,4 +521,5 @@ export function createExplorer(core: CoreController) {
   };
   return controller;
 }
+/** The Files explorer controller made by {@link createExplorer}: its store and the actions that read the folder. */
 export type Explorer = ReturnType<typeof createExplorer>;

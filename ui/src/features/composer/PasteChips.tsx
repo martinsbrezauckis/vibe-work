@@ -3,7 +3,7 @@
  * marker in the draft and makes one Backspace (or Delete) remove a whole marker; `PasteChips` shows each
  * marker's paste as a chip ("Pasted text, +42 lines") with Open and Remove; Open shows the full text with
  * "Put in the message box", which swaps the marker for the text.
- * Depends on: AppContext, the composer store hooks, the composer model, Badge, Button, Icon, useModalFocus.
+ * Depends on: AppContext, the composer store hooks, the composer model, Badge, Button, Icon, TextPreview.
  * Called by: Composer.
  * Invariants: every fold, removal or expansion is one draft change that Ctrl+Z (Cmd+Z) takes back while the box
  * still holds its result; the paste text is shown as a text node, never as HTML.
@@ -21,7 +21,7 @@ import {
 import { Badge } from "../../components/Badge";
 import { Button } from "../../components/Controls";
 import { Icon } from "../../components/Icon";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { TextPreview } from "./TextPreview";
 import { pasteIntoDraft } from "../../state/composerPaste";
 import { useApp } from "../shell/AppContext";
 import { NONE, useComposerState } from "./hooks";
@@ -202,56 +202,31 @@ function PastePreview({
   onClose: () => void;
   onExpand: () => void;
 }): ReactElement {
-  const ref = useRef<HTMLDivElement>(null);
-  useModalFocus(true, ref, onClose);
   return (
-    <>
-      <div data-testid="composer.paste-preview-scrim" className="scrim" onClick={onClose} />
-      <div
-        data-testid="composer.paste-preview-modal"
-        ref={ref}
-        className="modal doc-preview"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="paste-preview-title"
-        tabIndex={-1}
-      >
-        <header>
-          <h2 id="paste-preview-title">Pasted text #{String(item.n)}</h2>
-        </header>
-        <section>
-          <p className="d">
-            {String(lineCount(item.text))} lines · {item.text.length.toLocaleString("en")}{" "}
-            characters. Sent in full with your message.
-          </p>
-          <pre className="out plain doc-text" data-testid="paste-preview-text">
-            {item.text}
-          </pre>
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="composer.paste-preview-expand"
-            type="button"
-            shape="outlined"
-            title="Put the full text in the message box to edit it"
-            aria-label="Put the full text in the message box to edit it"
-            onClick={onExpand}
-          >
-            Put in the message box
-          </Button>
-          <Button
-            data-testid="composer.paste-preview-close"
-            type="button"
-            appearance="dialog"
-            title="Close pasted text (Escape)"
-            aria-label="Close pasted text (Escape)"
-            data-dialog-initial-focus="true"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-        </footer>
-      </div>
-    </>
+    <TextPreview
+      id="paste-preview"
+      title={`Pasted text #${String(item.n)}`}
+      facts={
+        <p className="d">
+          {String(lineCount(item.text))} lines · {item.text.length.toLocaleString("en")} characters.
+          Sent in full with your message.
+        </p>
+      }
+      text={item.text}
+      actions={
+        <Button
+          data-testid="composer.paste-preview-expand"
+          type="button"
+          shape="outlined"
+          title="Put the full text in the message box to edit it"
+          aria-label="Put the full text in the message box to edit it"
+          onClick={onExpand}
+        >
+          Put in the message box
+        </Button>
+      }
+      close={{ testId: "paste-preview-close", label: "Close pasted text (Escape)" }}
+      onClose={onClose}
+    />
   );
 }

@@ -2,6 +2,10 @@
 import { TEXT_SIZES } from "../../state/accessibility";
 import type { App } from "./AppContext";
 
+/**
+ * Applies the contrast, motion and text size preferences to the document, follows the system theme, and handles
+ * Ctrl/Cmd with +, - and 0 for text size. Returns the function that removes all of it.
+ */
 export function startAccessibility(app: App): () => void {
   const root = document.documentElement;
   const contrast =

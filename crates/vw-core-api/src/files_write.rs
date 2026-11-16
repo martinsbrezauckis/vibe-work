@@ -20,6 +20,7 @@
 //! Invariants: nothing is written unless every rule passed; a failed write leaves the old file and no temporary file.
 
 use vw_platform::atomic_file::{MetadataPolicy, replace_file};
+use vw_platform::sync::LockRecover;
 
 use crate::changes::Review;
 use crate::core::Core;
@@ -90,7 +91,7 @@ impl Core {
         blocking(move || {
             let tracker = folder.as_deref().map(|folder| hub.changes.ensure(&id, folder, claim.as_ref()));
             // The same lock serializes a save with Changes keep/revert and the watcher refresh.
-            let mut review = tracker.as_ref().map(|tracker| tracker.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+            let mut review = tracker.as_ref().map(|tracker| tracker.lock_or_recover());
             let meta = std::fs::metadata(&path).map_err(|_| refuse("the file is not there any more"))?;
             let stale = || {
                 CoreError::new(

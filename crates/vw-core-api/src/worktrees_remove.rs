@@ -107,6 +107,19 @@ fn plan_branch(record: &Record, found: &Inspection) -> BranchPlan {
 impl Core {
     fn worktree_target(&self, session_id: &str) -> Result<Target, CoreError> {
         let records = self.shared.worktrees.records()?;
+        let cwd = self
+            .shared
+            .store
+            .view(session_id)
+            .and_then(|v| crate::changes_facts::facts(&v.state).cwd);
+        if let Some(cwd) = cwd.as_deref() {
+            crate::worktrees_adopt::adopt(
+                &records,
+                session_id,
+                cwd,
+                self.shared.worktrees.vibe_root(),
+            );
+        }
         let record = records.get(session_id).ok_or_else(|| {
             CoreError::new(
                 ErrorCode::NotFound,

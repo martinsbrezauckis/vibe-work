@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use crate::error::{CoreError, ErrorCode};
 
@@ -54,7 +55,59 @@ impl PluginApprovals {
 
     pub(crate) fn before_launch(&self, program: &Path) -> Result<(), CoreError> {
         self.identity.set_program(program);
+        // A failed move never keeps Vibe from starting: each step leaves the plugin off, and the next start retries.
+        if let Err(problem) = self.migrate_off_folders() {
+            tracing::warn!(%problem, "plugins: the move of turned-off plugins did not finish");
+        }
         self.sweep()
+    }
+
+    /// Once per app data folder: every readable plugin an earlier version turned off by moving it to
+    /// `plugins-off` goes back to `plugins`, approved, after its name is written to Vibe's `disabled_plugins`, so
+    /// it stays off (Vibe's switch decides from now on). The name is written first: an interruption between the
+    /// steps leaves the plugin off either way, and the next start finishes. A folder whose name another plugin
+    /// in `plugins` already has, or whose place in `plugins` is taken, stays where it is.
+    fn migrate_off_folders(&self) -> Result<(), CoreError> {
+        let done = self.file.with_file_name("plugin-switches-migrated");
+        if std::fs::symlink_metadata(&done).is_ok() {
+            return Ok(());
+        }
+        let _held = self.lock.lock_or_recover();
+        let off_root = self.home.join("plugins-off");
+        let plain = std::fs::symlink_metadata(&off_root)
+            .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
+        if plain {
+            let mut folders = Vec::new();
+            for entry in std::fs::read_dir(&off_root).map_err(error)? {
+                let entry = entry.map_err(error)?;
+                if entry.file_type().map_err(error)?.is_dir() {
+                    folders.push(entry.path());
+                }
+            }
+            let names = self.identity.names(&folders, &self.home)?;
+            let mut approved = self.read()?;
+            let config = self.home.join("config.toml");
+            for (folder, name) in folders.into_iter().zip(names) {
+                let (Some(name), Some(key)) = (name, folder.file_name().and_then(|n| n.to_str()))
+                else {
+                    continue;
+                };
+                let target = self.home.join("plugins").join(key);
+                if approved
+                    .iter()
+                    .any(|(other, live)| other != key && *live == name)
+                    || std::fs::symlink_metadata(&target).is_ok()
+                {
+                    continue;
+                }
+                crate::plugin_switches::add_disabled(&config, &name).map_err(error)?;
+                std::fs::create_dir_all(self.home.join("plugins")).map_err(error)?;
+                std::fs::rename(&folder, &target).map_err(error)?;
+                approved.insert(key.to_owned(), name);
+                self.write(&approved)?;
+            }
+        }
+        vw_platform::replace_private(&done, b"1").map_err(error)
     }
 
     fn read(&self) -> Result<BTreeMap<String, String>, CoreError> {
@@ -70,7 +123,7 @@ impl PluginApprovals {
 
     /// The caller has resolved this name through Vibe and confirmed the user action.
     pub(crate) fn set(&self, folder: &Path, name: Option<&str>) -> Result<(), CoreError> {
-        let _held = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
+        let _held = self.lock.lock_or_recover();
         let Some(key) = folder.file_name().and_then(|n| n.to_str()) else {
             return Err(error("the plugin folder has no name"));
         };
@@ -101,7 +154,7 @@ impl PluginApprovals {
         id: &str,
         staging: &Path,
     ) -> Result<(), vw_market::MarketError> {
-        let _held = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
+        let _held = self.lock.lock_or_recover();
         let record_error = |e: CoreError| {
             vw_market::MarketError::io(
                 "record plugin approval",
@@ -144,7 +197,7 @@ impl PluginApprovals {
     /// [`Self::sweep`], returning the names of the folders it left in `plugins/` (all approved). A folder that
     /// appears after this call is not in the list: readers use it to skip folders no sweep has checked yet.
     pub(crate) fn sweep_kept(&self) -> Result<Vec<String>, CoreError> {
-        let _held = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
+        let _held = self.lock.lock_or_recover();
         let root = self.home.join("plugins");
         let mut kept = Vec::new();
         match std::fs::symlink_metadata(&root) {

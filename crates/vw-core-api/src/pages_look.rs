@@ -12,7 +12,8 @@
 //! - `pagesChanged` (for every session) only after a check actually ran.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 use crate::core::Shared;
 use crate::event::CoreEvent;
@@ -26,7 +27,7 @@ pub(crate) fn queue_checks(shared: &Arc<Shared>, project: &Path, pages: Vec<Stri
     if !hub.service.can_check() || pages.is_empty() {
         return;
     }
-    let mut slot = hub.checks.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut slot = hub.checks.lock_or_recover();
     if slot.as_ref().is_some_and(|task| !task.is_finished()) {
         return;
     }

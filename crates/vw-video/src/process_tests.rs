@@ -262,8 +262,10 @@ async fn cancelled_helper_removes_its_executable_copy_after_reaping() {
         .unwrap();
     task.abort();
     let _ = task.await;
+    // Cancellation reaps the worker and removes the copy in the background. Windows can finish releasing the
+    // process object a moment after the file is gone, so wait (bounded) for both before checking either.
     let started = std::time::Instant::now();
-    while path.exists() && started.elapsed() < Duration::from_secs(5) {
+    while (path.exists() || exists(pid)) && started.elapsed() < Duration::from_secs(10) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(!exists(pid), "cancelled worker is still running");

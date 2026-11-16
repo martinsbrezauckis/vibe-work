@@ -183,6 +183,9 @@ pub(crate) struct Entry {
     pub(crate) pending_admitted_urls: Vec<Url>,
     /// A load of `pending_open` has started in this mount.
     pub(crate) pending_started: bool,
+    /// The host (lowercase, no brackets) and port of the last top-level navigation the hooks admitted, and when:
+    /// Local Network Access lets that navigation through like Chrome (a page that navigates away is not asked).
+    pub(crate) navigation_target: Option<(String, u16, std::time::Instant)>,
     pub(crate) browser_mount: BrowserMountState,
     pub(crate) width: DeviceWidth,
     pub(crate) viewport: Option<(u32, u32)>,
@@ -253,6 +256,7 @@ impl Entry {
             pending_requested_admitted: None,
             pending_admitted_urls: Vec::new(),
             pending_started: false,
+            navigation_target: None,
             browser_mount: BrowserMountState::Ready,
             width: DeviceWidth::Fit,
             viewport: None,
@@ -462,6 +466,10 @@ pub(crate) struct State {
     pub(crate) generation: u64,
     /// Storage keys a page was mounted with in this run (that owner has website data of its own).
     pub(crate) used_keys: std::collections::HashSet<crate::ids::StorageKey>,
+    /// Every chat's servers now: the ports where a listener attributed to a chat session accepts connections, as the
+    /// core's latest process scan saw them, with that scan's number and the check that each one's server still runs
+    /// (`PreviewService::set_chat_servers`; `None`: no attribution source, a rig without the core).
+    pub(crate) chat_servers: Option<(u64, Vec<u16>, crate::ServerAlive)>,
 }
 
 /// Ordered pages of one session; the app page is implicit and pinned first.
@@ -470,6 +478,9 @@ pub(crate) struct SessionTabs {
     pub(crate) web: Vec<String>,
     pub(crate) owners: HashMap<String, crate::tabs::PageTabOwner>,
     pub(crate) selected: Option<String>,
+    /// The selected web tab was brought forward by the agent's own browser call, not chosen by the person: the
+    /// agent's App preview tools may select App preview again (`PreviewService::reselect_app_preview`).
+    pub(crate) agent_selected: bool,
     pub(crate) agent: Option<String>,
     pub(crate) snapshots: HashMap<String, String>,
     pub(crate) popups: crate::popups::Tracker,
@@ -522,8 +533,8 @@ impl State {
             .collect()
     }
 
-    /// The URL rules for `session_id`'s mount of `class`: a Local mount reaches the ports any session's
-    /// preview holds, never one of `internal`
+    /// The URL rules for `session_id`'s mount of `class`: a Local mount (the App preview held to them by its own
+    /// rules) reaches the ports any session's preview holds, never one of `internal`
     /// (Vibe Work's own); a Lan mount its own host. `internal` unknown (`None`, no guard): fail closed, a Local mount
     /// reaches only its own session's listed ports (never "no internal ports").
     pub(crate) fn rule_page(
@@ -540,24 +551,64 @@ impl State {
                 .get(session_id)
                 .and_then(|e| e.lan_host.clone())
                 .map_or(RulePage::Web, |host| RulePage::Lan { host }),
-            crate::policy::PageClass::Local => {
-                let mut ports: Vec<u16> = match internal {
-                    Some(internal) => self
-                        .entries
-                        .values()
-                        .flat_map(|e| e.allowed.iter().copied())
-                        .filter(|p| !internal.contains(p))
-                        .collect(),
-                    None => self
-                        .entries
-                        .get(session_id)
-                        .map(|e| e.allowed.clone())
-                        .unwrap_or_default(),
-                };
-                ports.sort_unstable();
-                ports.dedup();
-                RulePage::Local { ports }
+            crate::policy::PageClass::Local if self.is_app_preview(session_id) => RulePage::App {
+                ports: self.chat_ports(session_id, internal),
+            },
+            crate::policy::PageClass::Local => RulePage::Local {
+                ports: self.chat_ports(session_id, internal),
+            },
+        }
+    }
+
+    /// True for a chat's pinned App preview (its key is the chat's session id, never a web page's key).
+    pub(crate) fn is_app_preview(&self, session_id: &str) -> bool {
+        !self.page_owners.contains_key(session_id) && !session_id.starts_with("web-page-")
+    }
+
+    /// The ports on this computer a Local page of `session_id` (the App preview included) may reach: every chat's
+    /// servers (the backend in one chat, the frontend in another), i.e. the listeners the core's latest scan
+    /// attributed to a chat session whose server still runs now (`chat_servers`; a free leased port or a port whose
+    /// server stopped is not one, also before the next scan),
+    /// never one of `internal` (Vibe Work's own). Without an attribution source: every preview entry's ports.
+    /// `internal` unknown (`None`, no guard): fail closed, only `session_id`'s own listed ports. Sorted, without
+    /// repeats.
+    pub(crate) fn chat_ports(&self, session_id: &str, internal: Option<&[u16]>) -> Vec<u16> {
+        let mut ports: Vec<u16> = match (internal, &self.chat_servers) {
+            (Some(internal), Some((_, servers, alive))) => servers
+                .iter()
+                .copied()
+                .filter(|p| !internal.contains(p) && alive(*p))
+                .collect(),
+            (Some(internal), None) => self
+                .entries
+                .values()
+                .flat_map(|e| e.allowed.iter().copied())
+                .filter(|p| !internal.contains(p))
+                .collect(),
+            (None, _) => self
+                .entries
+                .get(session_id)
+                .map(|e| e.allowed.clone())
+                .unwrap_or_default(),
+        };
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
+    /// Whether a Local page of `session_id` may reach loopback `port`: the same answer as
+    /// `chat_ports(..).contains(&port)`, asking the running-server check about `port` only (one request, one port).
+    pub(crate) fn chat_port_allowed(
+        &self,
+        session_id: &str,
+        internal: Option<&[u16]>,
+        port: u16,
+    ) -> bool {
+        match (internal, &self.chat_servers) {
+            (Some(internal), Some((_, servers, alive))) => {
+                !internal.contains(&port) && servers.contains(&port) && alive(port)
             }
+            _ => self.chat_ports(session_id, internal).contains(&port),
         }
     }
 

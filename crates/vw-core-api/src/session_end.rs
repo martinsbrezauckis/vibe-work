@@ -18,7 +18,8 @@
 //! - The titles kept for the "left running" list are pruned to sessions that still have a process on it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::info;
@@ -126,7 +127,7 @@ pub(crate) struct Ends {
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.lock_or_recover()
 }
 
 impl Ends {

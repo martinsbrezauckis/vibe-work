@@ -1,6 +1,5 @@
 //! Restores missing app-owned comments beside their settings after Vibe serializes its config.
-//! Called by config default ensure functions; values and every existing byte stay unchanged.
-use std::path::Path;
+//! Called by the startup config steps ([`crate::startup_config`]); values and every existing byte stay unchanged.
 
 pub(crate) fn insert_missing(
     existing: &str,
@@ -49,25 +48,14 @@ pub(crate) fn insert_missing(
     ))
 }
 
-pub(crate) fn restore(
-    path: &Path,
+/// The text with the missing notes restored above `key`, or `None` when nothing is missing or the notes would change
+/// the config's data. Pure: [`crate::startup_config`] writes the result with the other startup fixes.
+pub(crate) fn restored(
     existing: &str,
     section: Option<&str>,
     key: &str,
     notes: &[&str],
-) -> Result<(), String> {
-    let Some(updated) = insert_missing(existing, section, key, notes) else {
-        return Ok(());
-    };
-    if updated.parse::<toml::Table>().ok() != existing.parse::<toml::Table>().ok() {
-        return Ok(());
-    }
-    let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    if !metadata.is_file()
-        || metadata.len() > 1024 * 1024
-        || std::fs::read_to_string(path).map_err(|e| e.to_string())? != existing
-    {
-        return Ok(());
-    }
-    vw_platform::replace_private(path, updated.as_bytes()).map_err(|e| e.to_string())
+) -> Option<String> {
+    let updated = insert_missing(existing, section, key, notes)?;
+    (updated.parse::<toml::Table>().ok() == existing.parse::<toml::Table>().ok()).then_some(updated)
 }

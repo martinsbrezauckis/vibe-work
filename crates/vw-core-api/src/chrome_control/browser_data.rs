@@ -16,8 +16,8 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::PoisonError,
 };
+use vw_platform::sync::LockRecover;
 
 /// System Settings at Privacy & Security, Files & Folders, where the person allows Vibe Work to read a browser's data.
 pub(super) const FILES_AND_FOLDERS: &str =
@@ -34,12 +34,7 @@ pub(super) fn readable(chrome: &ChromeControl, data: &Path) -> bool {
     if !chrome.config.is_macos() {
         return true;
     }
-    if let Some(known) = chrome
-        .name_folders
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(data)
-    {
+    if let Some(known) = chrome.name_folders.lock_or_recover().get(data) {
         return *known;
     }
     // Not under the lock: the system's permission check may take a while.
@@ -57,8 +52,7 @@ pub(super) fn readable(chrome: &ChromeControl, data: &Path) -> bool {
     };
     chrome
         .name_folders
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(data.to_owned(), known);
     known
 }
@@ -71,8 +65,7 @@ pub(super) fn refused(chrome: &ChromeControl, browser: Browser) -> Option<bool> 
     }
     let refused: Vec<PathBuf> = chrome
         .name_folders
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .iter()
         .filter(|(_, readable)| !**readable)
         .map(|(data, _)| data.clone())
@@ -82,8 +75,7 @@ pub(super) fn refused(chrome: &ChromeControl, browser: Browser) -> Option<bool> 
     }
     let paired = chrome
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .records
         .iter()
         .any(|(id, record)| browser.owns_profile(id) && !record.removed && !record.deleted);
@@ -105,10 +97,7 @@ pub(super) fn refused(chrome: &ChromeControl, browser: Browser) -> Option<bool> 
 pub(super) fn recheck(shared: &crate::core::Shared) {
     let chrome = &shared.chrome_control;
     let forgotten = {
-        let mut checked = chrome
-            .name_folders
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut checked = chrome.name_folders.lock_or_recover();
         let before = checked.len();
         checked.retain(|_, readable| *readable);
         checked.len() != before
@@ -117,11 +106,7 @@ pub(super) fn recheck(shared: &crate::core::Shared) {
         return;
     }
     // The unproven identities are searched now, not after the usual retry delay.
-    chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .scanned = None;
+    chrome.profiles.lock_or_recover().scanned = None;
     super::profile_presence::reconcile(shared);
     super::owner::publish(shared);
 }

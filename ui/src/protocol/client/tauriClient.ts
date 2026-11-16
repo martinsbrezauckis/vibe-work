@@ -90,7 +90,7 @@ export function createTauriClient(): CoreClient {
         await call<boolean>("ui_control_reply", { reply });
       },
     },
-    pickFolder: () => call<string | null>("pick_folder", {}),
+    pickFolder: (purpose = "work") => call<string | null>("pick_folder", { purpose }),
     pickDocuments: () => call<DocumentsPicked>("pick_documents", {}),
     pickCertificate: () => call<string | null>("pick_certificate", {}),
     pickLibraryFiles: (libraryId: string) =>

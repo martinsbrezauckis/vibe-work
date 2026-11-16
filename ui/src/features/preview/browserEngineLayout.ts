@@ -10,6 +10,7 @@ export interface BrowserEngineLayoutRect {
   height: number;
 }
 
+/** Rectangle sent to the native browser engine, in logical window pixels. */
 export interface BrowserEngineSyncBounds {
   x: number;
   y: number;
@@ -45,6 +46,7 @@ export function browserEngineSyncBoundsForRect(
   };
 }
 
+/** True when the bounds are the offscreen parking rectangle. */
 export function browserEngineBoundsAreParked(bounds: BrowserEngineSyncBounds): boolean {
   return bounds.x === BROWSER_ENGINE_PARKED_OFFSET && bounds.y === BROWSER_ENGINE_PARKED_OFFSET;
 }

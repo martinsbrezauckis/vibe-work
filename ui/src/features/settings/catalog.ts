@@ -3,10 +3,13 @@
  * setting by name, description and keywords. The index feeds the search inside Settings ("In: Settings") and the
  * Settings results of the global search; each entry names the category that holds it and the `data-setting` anchor of
  * its row, so a hit opens the right category and lights up the right row.
- * Depends on: components/Icon (names only). Called by: SettingsNav, SettingsPage, the palette, settingsRoutes, tests.
+ * Depends on: components/Icon (names only), settingsSynonyms. Called by: SettingsNav, SettingsPage, the palette, settingsRoutes, tests.
  * Invariants: every entry's `category` is a listed category; every entry's id is unique and is the value of exactly
  * one `data-setting` attribute on the page (a test checks both), except the Tools page's items (`opens`); search is plain word matching (every typed word must
- * appear in the entry's text), so results are predictable, with label hits ranked before description hits.
+ * appear in the entry's text), so results are predictable. An entry's `label` is the words its row shows (a test
+ * compares them), so a person who picks a hit finds the same words on the page; the familiar words other apps use
+ * for the same setting live in settingsSynonyms.ts and find the row too. Ranking: hits whose label holds every typed
+ * word, then hits whose synonyms hold every typed word, then label hits on any word, then the rest.
  */
 import type { IconName } from "../../components/Icon";
 import { detectMac } from "../../state/shortcuts";
@@ -14,6 +17,7 @@ import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { accessibilityCatalog } from "./accessibilityCatalog";
 import { chromeCatalog } from "./chrome/chromeRows";
+import { SETTING_SYNONYMS } from "./settingsSynonyms";
 
 /** A category of the Settings page. */
 export interface SettingsCategory {
@@ -36,6 +40,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   // All permissions live together directly under Safety.
   { id: "allowed", label: "Allowed without asking", icon: "list-checks" },
   { id: "instructions", label: "Instructions", icon: "scroll-text" },
+  { id: "knowledge", label: "Knowledge base", icon: "folder-open" },
   { id: "voice", label: "Voice", icon: "audio-lines" },
   { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "privacy", label: "Privacy and data", icon: "shield" },
@@ -54,6 +59,8 @@ export interface SettingEntry {
   description: string;
   /** Extra words people may type (not shown). */
   keywords: string;
+  /** Familiar names for the setting (not shown), from settingsSynonyms.ts; each ranks the row near the top. */
+  synonyms?: readonly string[];
   /** Lives on another page (Connectors): a hit opens that page instead of a Settings category. */
   opens?: "connectors";
 }
@@ -78,7 +85,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "ask-allowed",
     category: "safety",
-    label: "What you have allowed without asking",
+    label: "Allowed without asking",
     description:
       "How many answers, earlier rules and vault grants let Vibe act without asking; Review lists them.",
     keywords: "allowed without asking always grants revoke approved",
@@ -101,7 +108,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "allowed-vault",
     category: "allowed",
-    label: "Vault: lasting “Always” answers",
+    label: "Allowed without asking · Vault",
     description:
       "Commands that may use a secret, sites where a login may be filled, MCP servers that get a key.",
     keywords: "always allow earlier rules vault grant command site mcp key revoke secret login",
@@ -109,14 +116,14 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "git-identity",
     category: "general",
-    label: "Git name and email",
+    label: "Git · Name and email",
     description: "The author identity for commits and new repositories in Vibe Work.",
     keywords: "git commit author identity name email repository version history",
   },
   {
     id: "cli-sharing",
     category: "general",
-    label: "Keep chats separate from the Vibe command line",
+    label: "Keep Vibe Work chats separate from the CLI",
     description: "Whether chats started here also show in the CLI's list, and the other way round.",
     keywords: "cli terminal command line share sharing vibe home",
   },
@@ -126,6 +133,15 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "Chat copies",
     description: "Review or remove chat copies (git worktrees) no chat uses anymore.",
     keywords: "git worktree worktrees leftover kept copies review remove cleanup",
+  },
+  {
+    id: "import-setup",
+    category: "general",
+    label: "Import from another agent",
+    description:
+      "Instructions, skills and connectors from other coding agents, shown before anything is brought.",
+    keywords:
+      "import migrate switch agent instructions skills mcp servers connectors codex opencode cursor",
   },
   {
     id: "error-detail",
@@ -258,14 +274,14 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "vault-mistral-key",
     category: "secrets",
-    label: "Mistral key in Vault",
+    label: "Mistral key",
     description: "See the stored model key's source and test result; manage it in Account.",
     keywords: "model api key vault test source account",
   },
   {
     id: "add-entry",
     category: "secrets",
-    label: "Add Vault entry",
+    label: "Add entry",
     description:
       "Store a secret, website login or MCP key; choose a project to set its permission.",
     keywords: "add new secret login password mcp token store vault generate",
@@ -273,35 +289,35 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "safety-delete-protected",
     category: "safety",
-    label: "Stop deleting your home folder, drives or the project's parent",
+    label: "Deleting your home folder, a drive or system root, or the project's parent folders",
     description: "A safety reminder for agent commands like rm -rf ~ or Remove-Item -Recurse C:\\.",
     keywords: "safety rm rf delete home root drive dangerous reminder hook",
   },
   {
     id: "safety-permissions-protected",
     category: "safety",
-    label: "Stop recursive permission changes on your home or system folders",
+    label: "Changing permissions or owners of your home folder or a system root, recursively",
     description: "chmod -R or chown -R on your home folder or a system root.",
     keywords: "safety chmod chown permissions owner recursive",
   },
   {
     id: "safety-disk-tools",
     category: "safety",
-    label: "Stop disk tools",
+    label: "Disk tools that erase or repartition drives (mkfs, dd to a device, diskpart, format)",
     description: "mkfs, dd to a device, diskpart, format: they can erase a drive.",
     keywords: "safety disk format mkfs dd diskpart erase",
   },
   {
     id: "safety-shutdown",
     category: "safety",
-    label: "Stop shutdown and restart",
+    label: "Shutting down or restarting the computer",
     description: "An agent never shuts down or restarts the computer.",
     keywords: "safety shutdown reboot restart poweroff",
   },
   {
     id: "safety-custom",
     category: "safety",
-    label: "Your own safety rules",
+    label: "Stop a command that contains",
     description: "Stop any agent command that contains a text you choose.",
     keywords: "safety custom rule block command pattern",
   },
@@ -354,6 +370,14 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "Vibe Work browser · Ad blocking",
     description: "Off, Balanced, Strict",
     keywords: "browser ads trackers shields easylist easyprivacy",
+  },
+  {
+    id: "browser-local-network-sites",
+    category: "browser",
+    label: "Vibe Work browser · Sites that can reach your local network",
+    description: "Allow or Block per site, Forget",
+    keywords:
+      "browser local network localhost lan devices private network access permission site allow block",
   },
   {
     id: "builtin-control-enabled",
@@ -437,9 +461,25 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "instructions",
     category: "instructions",
-    label: "Your instructions",
+    label: "Instructions",
     description: "Your personal AGENTS.md: plain text Vibe reads before it works, for every chat.",
     keywords: "agents.md agents md prompt rules custom system personal",
+  },
+  {
+    id: "knowledge-mistral",
+    category: "knowledge",
+    label: "Knowledge base · In your Mistral account",
+    description: "Your Mistral Libraries the agent looks at first when you name them.",
+    keywords: "knowledge library libraries documents look at our library places shortcut",
+  },
+  {
+    id: "knowledge-local",
+    category: "knowledge",
+    label: "Knowledge base · On this computer and your drives",
+    description:
+      "Folders on this computer and your cloud drives the agent looks at first when you name them.",
+    keywords:
+      "knowledge folder folders drive drives google drive onedrive dropbox icloud synced library places shortcut",
   },
   {
     id: "microphone",
@@ -522,7 +562,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "network-proxy",
     category: "network",
-    label: "Proxy for company networks",
+    label: "HTTPS proxy",
     description:
       "Send Vibe Work's and Vibe's internet requests through your company's proxy; test the connection.",
     keywords:
@@ -547,8 +587,8 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "update-status",
     category: "updates",
-    label: "Check for updates",
-    description: "The installed version, a newer one if there is one, and Check now.",
+    label: "Updates · Check for updates",
+    description: "The installed version, a newer one if there is one, and Check for updates.",
     keywords: "update version new release check download install",
   },
   {
@@ -583,7 +623,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   {
     id: "about",
     category: "about",
-    label: "Version and licence",
+    label: "Version",
     description:
       "Vibe Work's version. Independent project, not affiliated with Mistral AI. MIT License.",
     keywords:
@@ -622,7 +662,7 @@ export const SEARCH_INDEX: readonly SettingEntry[] = [
     keywords: `${l.keywords} mistral website link`,
   })),
   ...ELSEWHERE,
-];
+].map((e) => ({ ...e, synonyms: SETTING_SYNONYMS[e.id] ?? [] }));
 
 /** The category with `id`, else the first one. */
 export function categoryOf(id: string): SettingsCategory {
@@ -640,8 +680,18 @@ function queryWords(query: string): string[] {
 }
 
 /**
- * Settings matching `query`: every word must appear in the label, description, keywords or category name. Label hits
- * first, then the rest, each in page order. An empty query matches nothing.
+ * Whether `text` holds `word`; a plural ending in "s" also matches its singular ("extensions" finds "extension"), so
+ * the most common way people type a setting's name does not miss it.
+ */
+function holds(text: string, word: string): boolean {
+  if (text.includes(word)) return true;
+  return word.length > 3 && word.endsWith("s") && text.includes(word.slice(0, -1));
+}
+
+/**
+ * Settings matching `query`: every word must appear in the label, description, keywords, synonyms or category name.
+ * Ranked in four groups (label holds every word; synonyms hold every word; label holds a word; the rest), each in
+ * page order. An empty query matches nothing.
  */
 export function searchSettings(
   query: string,
@@ -661,12 +711,23 @@ export function searchSettings(
       return false;
     if (!safariAvailable && (e.id.startsWith("safari-control") || e.id === "safari-composer"))
       return false;
+    const synonyms = (e.synonyms ?? []).join(" | ");
     const hay =
-      `${e.label} ${e.description} ${e.keywords} ${categoryOf(e.category).label}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
+      `${e.label} ${e.description} ${e.keywords} ${synonyms} ${categoryOf(e.category).label}`.toLowerCase();
+    return words.every((w) => holds(hay, w));
   });
-  const inLabel = (e: SettingEntry) => words.some((w) => e.label.toLowerCase().includes(w));
-  return [...hits.filter(inLabel), ...hits.filter((e) => !inLabel(e))];
+  const rank = (e: SettingEntry): number => {
+    const label = e.label.toLowerCase();
+    if (words.every((w) => holds(label, w))) return 0;
+    const synonyms = (e.synonyms ?? []).join(" | ");
+    if (words.every((w) => holds(synonyms, w))) return 1;
+    return words.some((w) => holds(label, w)) ? 2 : 3;
+  };
+  // Array.prototype.sort is stable, so page order holds inside each group.
+  return hits
+    .map((e) => ({ e, r: rank(e) }))
+    .sort((a, b) => a.r - b.r)
+    .map(({ e }) => e);
 }
 
 /** The path a result shows: `Settings › Voice`, or `Tools` for the Tools page's items. */

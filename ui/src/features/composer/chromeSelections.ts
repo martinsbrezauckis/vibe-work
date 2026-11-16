@@ -3,6 +3,10 @@ import type { ChromeControlView } from "../../protocol/core";
 import { NEW_CHAT } from "../../state/newChatKey";
 import type { App } from "../shell/AppContext";
 
+/**
+ * Claims each pending person-shared browser selection, adds it as a context chip to its chat (or New chat) and selects
+ * that chat. Returns the function that stops listening.
+ */
 export function startChromeSelections(app: App): () => void {
   const core = app.core;
   if (core === null) return () => {};

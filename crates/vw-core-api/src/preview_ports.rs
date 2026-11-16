@@ -15,6 +15,7 @@
 //! - Views carry the executable name and pid only (never arguments).
 
 use std::collections::{BTreeMap, BTreeSet};
+use vw_platform::sync::LockRecover;
 
 use vw_agent_tools::output;
 use vw_preview::PortOwner;
@@ -58,6 +59,7 @@ impl SessionPorts {
 /// Scans and attributes, for `session_id` (its lease is topped up first, like `processes_list`).
 pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<SessionPorts, String> {
     let _ = shared.procmon.lease(session_id);
+    let scan = next_scan();
     let snapshot = shared.procmon.scan().map_err(|e| e.to_string())?;
     let sessions = crate::processes::contexts(&shared.store);
     let inputs = shared.procmon.inputs(&sessions);
@@ -66,8 +68,10 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
     let mut proven: BTreeSet<u16> = BTreeSet::new();
     let mut targets: Vec<PreviewTarget> = Vec::new();
     let leased = shared.procmon.leases().of(session_id);
+    let mut chat_servers = ChatServers::new();
     for item in attribution.listeners() {
         let port = item.listener.port;
+        note_listener(&mut chat_servers, &item, &snapshot);
         let owner = match &item.attributed.owner {
             Owner::Session { session_id: s } if s == session_id => PortOwner::ThisSession,
             Owner::Session { .. } => {
@@ -101,6 +105,7 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
             owners.insert(port, owner);
         }
     }
+    publish_chat_servers(shared, scan, chat_servers);
     targets.retain(|t| owners.get(&t.port) == Some(&PortOwner::ThisSession));
     for target in &mut targets {
         target.proven = proven.contains(&target.port) || leased.contains(&target.port);
@@ -125,6 +130,93 @@ pub(crate) fn session_ports(shared: &Shared, session_id: &str) -> Result<Session
     })
 }
 
+/// Per port seen in one scan: true while every listener on it is a chat session's, and each listener's process
+/// (`None`: not identified).
+type ChatServers = BTreeMap<u16, (bool, Vec<Option<vw_procmon::ProcessRef>>)>;
+
+/// Scans in the order they started (a slower, older scan never replaces a newer scan's chat servers).
+static SCANS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_scan() -> u64 {
+    SCANS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+fn note_listener(
+    servers: &mut ChatServers,
+    item: &vw_procmon::AttributedListener,
+    snapshot: &vw_procmon::Snapshot,
+) {
+    let (chat, processes) = servers
+        .entry(item.listener.port)
+        .or_insert((true, Vec::new()));
+    *chat &= matches!(item.attributed.owner, Owner::Session { .. });
+    processes.push(
+        item.listener
+            .pid
+            .and_then(|pid| snapshot.processes.get(&pid))
+            .and_then(vw_procmon::ProcessInfo::reference),
+    );
+}
+
+/// Gives the preview the chats' servers scan `scan` found: ports whose every listener is attributed to a chat session
+/// (`PreviewService::set_chat_servers`; one listener of another owner on the port keeps it out), with the check that
+/// each one's server still runs ([`server_alive`]).
+fn publish_chat_servers(shared: &Shared, scan: u64, servers: ChatServers) {
+    if let Some(hub) = &shared.preview {
+        let servers: BTreeMap<u16, Vec<Option<vw_procmon::ProcessRef>>> = servers
+            .into_iter()
+            .filter_map(|(port, (chat, processes))| chat.then_some((port, processes)))
+            .collect();
+        let ports = servers.keys().copied().collect();
+        hub.service
+            .set_chat_servers(scan, ports, server_alive(servers));
+    }
+}
+
+/// How long a port's "not held" answer is reused: every proxied preview request asks about the chat servers, and
+/// one read of the socket table can take a millisecond or more. A "held" answer is never reused, so a listener that
+/// takes over a vacated port is never reached on an earlier answer.
+const ABSENT_REUSE: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// True for a port while the processes that listened there in the scan still run and still hold every listener on
+/// it ([`vw_procmon::port_held_by`]: one port's socket table and those processes, no new scan), read at each ask. A
+/// server that exited or closed its socket takes its port out at once, before another program's listener on the
+/// port is reached (not only at the next scan); it stays out for [`ABSENT_REUSE`] at least. A listener whose process
+/// the scan could not identify keeps its port out.
+fn server_alive(
+    servers: BTreeMap<u16, Vec<Option<vw_procmon::ProcessRef>>>,
+) -> vw_preview::ServerAlive {
+    let absent: std::sync::Mutex<std::collections::HashMap<u16, std::time::Instant>> =
+        std::sync::Mutex::default();
+    std::sync::Arc::new(move |port| {
+        let Some(processes) = servers.get(&port) else {
+            return false;
+        };
+        let lock = || {
+            absent
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if lock()
+            .get(&port)
+            .is_some_and(|at| at.elapsed() < ABSENT_REUSE)
+        {
+            return false;
+        }
+        let held = processes
+            .iter()
+            .copied()
+            .collect::<Option<Vec<_>>>()
+            .is_some_and(|known| vw_procmon::port_held_by(port, &known));
+        if held {
+            lock().remove(&port);
+        } else {
+            lock().insert(port, std::time::Instant::now());
+        }
+        held
+    })
+}
+
 /// What the previews' port re-check sees.
 pub(crate) struct LivePorts {
     /// Per asked session: listeners attributed to it (any confidence) and its leased ports.
@@ -133,12 +225,13 @@ pub(crate) struct LivePorts {
     pub(crate) listeners: std::collections::HashMap<String, Vec<u16>>,
 }
 
-/// The ports each of `sessions` holds now (re-check). One scan; leases
-/// are not topped up (a re-check never keeps a lease alive).
+/// The ports each of `sessions` holds now (re-check), and every chat's servers for the preview
+/// (`publish_chat_servers`). One scan; leases are not topped up (a re-check never keeps a lease alive).
 ///
 /// # Errors
 /// The scan's error.
 pub(crate) fn live_ports(shared: &Shared, sessions: &[String]) -> Result<LivePorts, String> {
+    let scan = next_scan();
     let snapshot = shared.procmon.scan().map_err(|e| e.to_string())?;
     let contexts = crate::processes::contexts(&shared.store);
     let inputs = shared.procmon.inputs(&contexts);
@@ -152,7 +245,9 @@ pub(crate) fn live_ports(shared: &Shared, sessions: &[String]) -> Result<LivePor
         .collect();
     let mut listeners: std::collections::HashMap<String, BTreeSet<u16>> =
         std::collections::HashMap::new();
+    let mut chat_servers = ChatServers::new();
     for item in attribution.listeners() {
+        note_listener(&mut chat_servers, &item, &snapshot);
         if let Owner::Session { session_id } = &item.attributed.owner
             && let Some(ports) = live.get_mut(session_id)
         {
@@ -163,6 +258,7 @@ pub(crate) fn live_ports(shared: &Shared, sessions: &[String]) -> Result<LivePor
                 .insert(item.listener.port);
         }
     }
+    publish_chat_servers(shared, scan, chat_servers);
     Ok(LivePorts {
         sessions: live
             .into_iter()
@@ -241,8 +337,7 @@ pub(crate) fn busy_ports(shared: &Shared, session_id: &str) -> Vec<BusyPortView>
     };
     let logs: Vec<std::path::PathBuf> = tools
         .started
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_or_recover()
         .values()
         .filter(|s| s.session_id == session_id)
         .map(|s| s.log.clone())
@@ -319,5 +414,175 @@ pub(crate) fn navigation_text(
             ErrorCode::InvalidParams,
             "give either a url or a port",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader, Write};
+
+    /// Set in the child copy of this test binary: that copy is the stand-in server (see [`stand_in_server`]).
+    const CHILD: &str = "VW_PREVIEW_PORTS_TEST_CHILD";
+
+    /// The child copy: listens on a free loopback port and prints it; on a line from stdin it closes that socket and
+    /// keeps running, still holding a second listener (as a dev server keeps its other ports). Without the child
+    /// variable this test does nothing.
+    #[test]
+    fn stand_in_server() {
+        if std::env::var_os(CHILD).is_none() {
+            return;
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let kept = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        println!("{}", listener.local_addr().unwrap().port());
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+        drop(listener);
+        println!("closed");
+        let _kept = kept;
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    /// A stand-in server: this test binary itself, so the test needs no tool on PATH on any platform.
+    struct Server {
+        child: std::process::Child,
+        port: u16,
+        output: BufReader<std::process::ChildStdout>,
+    }
+
+    impl Server {
+        fn start() -> Self {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "preview_ports::tests::stand_in_server",
+                    "--test-threads=1",
+                    "--nocapture",
+                    "--quiet",
+                ])
+                .env(CHILD, "1")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            let mut output = BufReader::new(child.stdout.take().unwrap());
+            let port = Self::line(&mut output).parse().unwrap();
+            Self {
+                child,
+                port,
+                output,
+            }
+        }
+
+        /// The next line the server printed that is not the test harness's own.
+        fn line(output: &mut BufReader<std::process::ChildStdout>) -> String {
+            loop {
+                let mut line = String::new();
+                assert!(output.read_line(&mut line).unwrap() > 0, "server ended");
+                let line = line.trim();
+                if line.parse::<u16>().is_ok() || line == "closed" {
+                    return line.to_owned();
+                }
+            }
+        }
+
+        fn close_socket(&mut self) {
+            let stdin = self.child.stdin.as_mut().unwrap();
+            stdin.write_all(b"close\n").unwrap();
+            stdin.flush().unwrap();
+            assert_eq!(Self::line(&mut self.output), "closed");
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// The published check follows the listening process itself: once it exited, its port is out at once (no scan).
+    #[test]
+    fn a_servers_port_leaves_when_its_process_exits() {
+        if std::env::var_os(CHILD).is_some() {
+            return;
+        }
+        let mut server = Server::start();
+        let process = vw_procmon::identity(server.child.id());
+        assert!(process.is_some());
+        let unknown = 40_002;
+        let alive = super::server_alive(
+            [(server.port, vec![process]), (unknown, vec![None])]
+                .into_iter()
+                .collect(),
+        );
+        assert!(alive(server.port));
+        assert!(!alive(unknown), "a listener without a known process");
+        assert!(!alive(40_003), "a port the scan did not see");
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+        std::thread::sleep(super::ABSENT_REUSE);
+        assert!(!alive(server.port), "its server exited");
+    }
+
+    /// PREDICT (before the check asked who listens on the port now): a server that closed its listening socket but
+    /// kept running left its port admitted, because only the process was checked; a program that then took the port
+    /// received the App preview's requests until the next scan.
+    #[test]
+    fn a_port_leaves_when_its_server_closes_the_socket_and_keeps_running() {
+        if std::env::var_os(CHILD).is_some() {
+            return;
+        }
+        let mut server = Server::start();
+        let process = vw_procmon::identity(server.child.id());
+        assert!(process.is_some());
+        let alive = super::server_alive([(server.port, vec![process])].into_iter().collect());
+        assert!(alive(server.port), "its server listens");
+        server.close_socket();
+        std::thread::sleep(super::ABSENT_REUSE);
+        assert!(
+            vw_procmon::is_alive(process.unwrap()),
+            "the server still runs"
+        );
+        assert!(!alive(server.port), "its server no longer listens there");
+        // Another program (this test process) takes the port over.
+        let other = std::net::TcpListener::bind(("127.0.0.1", server.port)).unwrap();
+        std::thread::sleep(super::ABSENT_REUSE);
+        assert!(
+            !alive(server.port),
+            "a listener of another process on the port is not the chat's server"
+        );
+        drop(other);
+    }
+
+    /// PREDICT (before a positive answer stopped being reused): right after a request found the chat's server on its
+    /// port, the server closed its socket and another program bound the port; the next request inside the reuse
+    /// window received the earlier "held" answer and the App preview reached the other program's listener.
+    #[test]
+    fn a_takeover_right_after_a_positive_answer_is_refused() {
+        if std::env::var_os(CHILD).is_some() {
+            return;
+        }
+        let mut server = Server::start();
+        let process = vw_procmon::identity(server.child.id());
+        let alive = super::server_alive([(server.port, vec![process])].into_iter().collect());
+        assert!(alive(server.port), "its server listens");
+        // Cost of one positive answer: each proxied App preview request asks for every chat server's port.
+        let started = std::time::Instant::now();
+        for _ in 0..200 {
+            assert!(alive(server.port));
+        }
+        eprintln!(
+            "port check: {:?} per positive answer",
+            started.elapsed() / 200
+        );
+        server.close_socket();
+        let other = std::net::TcpListener::bind(("127.0.0.1", server.port)).unwrap();
+        assert!(
+            !alive(server.port),
+            "a listener of another process on the port, at once, is not the chat's server"
+        );
+        drop(other);
     }
 }

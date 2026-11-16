@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use crate::baseline::Baseline;
 use crate::error::ChangesError;
 use crate::git::{Call, Index};
-use crate::linediff::{hunks, is_binary, split_lines};
+use crate::linediff::{hunks, hunks_compared, is_binary, split_lines};
 use crate::model::{ContentKind, Diff, FileChange, FileStatus, Hunk};
 use crate::objects::{Entries, read_blobs};
 use crate::parse::{RawEntry, fnv_hex};
@@ -262,19 +262,46 @@ fn describe(baseline: &Baseline, entries: &[RawEntry]) -> Result<Vec<FileChange>
         blobs.extend(read_blobs(repo, &index, &batch)?);
     }
     let empty = Vec::new();
+    let side = |id: &str| -> Option<&[u8]> {
+        if zero(id) {
+            Some(empty.as_slice())
+        } else {
+            blobs.get(id).map(Vec::as_slice)
+        }
+    };
+    let forms = stored_forms(baseline, entries, &side);
     Ok(entries
         .iter()
         .map(|e| {
-            let side = |id: &str| -> Option<&[u8]> {
-                if zero(id) {
-                    Some(empty.as_slice())
-                } else {
-                    blobs.get(id).map(Vec::as_slice)
-                }
-            };
-            file_of(e, side(&e.old_id), side(&e.new_id))
+            let stored = forms.get(&e.path).map(Vec::as_slice);
+            file_of(e, side(&e.old_id), side(&e.new_id), stored)
         })
         .collect())
+}
+
+/// For an edited file whose baseline blob has no CR but whose working bytes have CRLF (git checked it out
+/// with CRLF), the working bytes in the form git stores: the line diff compares that form with the blob, as
+/// `git diff` does, so only the lines that were edited differ. Empty when git cannot answer (the bytes are
+/// then compared as they are).
+fn stored_forms<'a>(
+    baseline: &Baseline,
+    entries: &[RawEntry],
+    side: &impl Fn(&str) -> Option<&'a [u8]>,
+) -> HashMap<Vec<u8>, Vec<u8>> {
+    let crlf = |bytes: &[u8]| bytes.windows(2).any(|w| w == b"\r\n");
+    let asked: Vec<(&[u8], &[u8])> = entries
+        .iter()
+        .filter(|e| {
+            e.status == 'M' && e.old_mode.starts_with("100") && e.new_mode.starts_with("100")
+        })
+        .filter_map(|e| {
+            let (old, new) = (side(&e.old_id)?, side(&e.new_id)?);
+            (!old.contains(&b'\r') && crlf(new) && !is_binary(new))
+                .then_some((e.path.as_slice(), new))
+        })
+        .collect();
+    let index = baseline.dir().current_index();
+    crate::eol::stored_forms(baseline.repo(), &index, &asked).unwrap_or_default()
 }
 
 /// Sizes of blobs (`cat-file --batch-check`, which reads no content and runs no filter).
@@ -319,7 +346,31 @@ fn blob_sizes(
     Ok(sizes)
 }
 
-fn file_of(entry: &RawEntry, old: Option<&[u8]>, new: Option<&[u8]>) -> FileChange {
+/// The hunks of `old` against `new`; when `new_stored` (see [`stored_forms`]) is given, `new` is matched
+/// through it, unless that finds no difference at all (only line endings differ: shown as they are).
+fn line_hunks(
+    old: &[&[u8]],
+    new: &[&[u8]],
+    new_stored: Option<&[u8]>,
+) -> Vec<crate::linediff::LineHunk> {
+    if let Some(stored) = new_stored {
+        let compared = split_lines(stored);
+        if compared.len() == new.len() {
+            let like_git = hunks_compared(old, new, &compared);
+            if !like_git.is_empty() {
+                return like_git;
+            }
+        }
+    }
+    hunks(old, new)
+}
+
+fn file_of(
+    entry: &RawEntry,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+    new_stored: Option<&[u8]>,
+) -> FileChange {
     let status = match entry.status {
         'A' | 'C' => FileStatus::Added,
         'D' => FileStatus::Deleted,
@@ -365,7 +416,7 @@ fn file_of(entry: &RawEntry, old: Option<&[u8]>, new: Option<&[u8]>) -> FileChan
         return file;
     }
     let (old_lines, new_lines) = (split_lines(old), split_lines(new));
-    let found = hunks(&old_lines, &new_lines);
+    let found = line_hunks(&old_lines, &new_lines, new_stored);
     let count = |kind| {
         found
             .iter()

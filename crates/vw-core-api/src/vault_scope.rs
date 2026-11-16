@@ -183,6 +183,13 @@ pub fn vault_act(command: &Command) -> Option<String> {
         Command::Secrets { request } => Some(format!("secrets.{}", op_name(request))),
         Command::Connectors { request } => connectors_act(request).map(str::to_owned),
         Command::Browser { request } => browser_act(request).map(str::to_owned),
+        // A bring stores keys in the vault; undo removes them. Both are the person's own acts (no line in ACTS).
+        Command::ImportSetup {
+            request: crate::import_view::ImportRequest::Apply { .. },
+        } => Some("importSetup.apply".to_owned()),
+        Command::ImportSetup {
+            request: crate::import_view::ImportRequest::Undo { .. },
+        } => Some("importSetup.undo".to_owned()),
         _ => None,
     }
 }
@@ -241,6 +248,8 @@ fn browser_act(request: &BrowserRequest) -> Option<&'static str> {
         | BrowserRequest::TakeBackTab { .. }
         | BrowserRequest::Shields {}
         | BrowserRequest::SetShields { .. }
+        | BrowserRequest::LocalNetworkSites {}
+        | BrowserRequest::SetLocalNetworkSite { .. }
         | BrowserRequest::EnginePool {}
         | BrowserRequest::SetEnginePool { .. }
         | BrowserRequest::Permissions {}

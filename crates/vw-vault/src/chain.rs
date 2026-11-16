@@ -25,7 +25,8 @@
 //! Invariant: the known head only moves forward along a verified chain.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use vault_core::{MasterKey, Snapshot};
 
@@ -64,7 +65,7 @@ impl ChainGuard {
         repo: &LocalRepo,
         master: &MasterKey,
     ) -> Result<Option<(Head, Snapshot)>, VaultError> {
-        let mut known = self.known.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut known = self.known.lock_or_recover();
         if known.as_ref().is_some_and(|k| k.dir != repo.dir()) {
             *known = None;
         }

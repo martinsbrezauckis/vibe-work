@@ -3,6 +3,10 @@ import { TEXT } from "../../../vocabulary";
 import { Button, SettingsRow } from "../../../components/Controls";
 import type { ChromeControlState } from "./useChromeControl";
 
+/**
+ * Firefox card rows: the connection state with a Turn on, Open window or Close button, and the sharing add-on row
+ * when the core reports one. Renders nothing before the core view arrives.
+ */
 export function FirefoxConnection({ chrome }: { chrome: ChromeControlState }) {
   const view = chrome.view;
   if (view === null) return null;

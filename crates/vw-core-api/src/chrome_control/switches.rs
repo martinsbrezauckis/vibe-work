@@ -3,29 +3,21 @@
 use super::{ChromeControl, agent_browser::Browser};
 use crate::{CommandResult, Core, CoreError, core::Shared};
 use serde_json::{Value, json};
-use std::sync::{Arc, PoisonError, atomic::Ordering};
+use std::sync::{Arc, atomic::Ordering};
+use vw_platform::sync::LockRecover;
 
 impl ChromeControl {
     pub(crate) fn enabled(&self) -> bool {
-        self.switches
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .chrome
+        self.switches.lock_or_recover().chrome
     }
     pub(super) fn edge_enabled(&self) -> bool {
-        self.switches
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .edge
+        self.switches.lock_or_recover().edge
     }
     pub(super) fn firefox_enabled(&self) -> bool {
-        self.switches
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .firefox
+        self.switches.lock_or_recover().firefox
     }
     pub(crate) fn any_enabled(&self) -> bool {
-        let switches = self.switches.lock().unwrap_or_else(PoisonError::into_inner);
+        let switches = self.switches.lock_or_recover();
         switches.chrome
             || (cfg!(feature = "your-edge") && switches.edge)
             || (cfg!(feature = "your-firefox") && switches.firefox)
@@ -38,7 +30,7 @@ impl ChromeControl {
         browser: Browser,
         enabled: bool,
     ) -> Result<(), String> {
-        let mut saved = self.switches.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut saved = self.switches.lock_or_recover();
         let mut next = *saved;
         let target = if browser == Browser::Edge {
             &mut next.edge
@@ -66,10 +58,7 @@ impl ChromeControl {
                 };
                 generation.fetch_add(1, Ordering::SeqCst);
                 if browser == Browser::Firefox {
-                    self.local_documents
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .clear();
+                    self.local_documents.lock_or_recover().clear();
                 }
             }
         }
@@ -88,15 +77,8 @@ impl ChromeControl {
 
 pub(super) fn payload(shared: &Shared) -> Value {
     let chrome = &shared.chrome_control;
-    let switches = *chrome
-        .switches
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let disabled = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .disabled();
+    let switches = *chrome.switches.lock_or_recover();
+    let disabled = chrome.profiles.lock_or_recover().disabled();
     let mut payload = json!({"chrome":switches.chrome,"edge":cfg!(feature = "your-edge") && switches.edge,
         "safari":super::safari::enabled(shared),"firefox":cfg!(feature = "your-firefox") && switches.firefox,"generation":chrome.switch_generation.load(Ordering::SeqCst)});
     if !disabled.is_empty() {
@@ -148,8 +130,8 @@ pub(super) async fn deliver(shared: &Arc<Shared>) -> Result<(), CoreError> {
 pub(super) fn stop_work(shared: &Shared, browser: Browser) {
     let chrome = &shared.chrome_control;
     let active = {
-        let mut tasks = chrome.tasks.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut work = chrome.work.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut tasks = chrome.tasks.lock_or_recover();
+        let mut work = chrome.work.lock_or_recover();
         let selected = |id: &str| {
             work.profile_of(id)
                 .map(str::to_owned)
@@ -175,6 +157,26 @@ pub(super) fn stop_work(shared: &Shared, browser: Browser) {
     }
 }
 
+/// Your Firefox switched off: the agent's own Firefox window (and its temporary profile) closes now, with the same
+/// close as Settings' Close window, before the helper hears that Firefox is off. With another browser on, the helper
+/// keeps running, so its own stop (which also closes the window) does not come.
+async fn close_owned_firefox(shared: &Shared) {
+    let chrome = &shared.chrome_control;
+    if !cfg!(feature = "your-firefox") || !chrome.owner.is_running() {
+        return;
+    }
+    let closed = chrome
+        .owner
+        .call("chrome_status", json!({"_firefoxWindow":"close"}))
+        .await;
+    let state = closed.value()["structuredContent"]["firefoxWindow"]
+        .as_str()
+        .and_then(super::PairingState::firefox_window);
+    if let Some(state) = state {
+        *chrome.owner.firefox_pairing.lock_or_recover() = (state, None);
+    }
+}
+
 impl Core {
     pub(super) async fn browser_enabled(
         &self,
@@ -188,6 +190,9 @@ impl Core {
             .map_err(|reason| super::commands::invalid(&reason))?;
         if !enabled {
             stop_work(&self.shared, browser);
+            if browser == Browser::Firefox {
+                close_owned_firefox(&self.shared).await;
+            }
             if matches!(browser, Browser::Chrome | Browser::Edge) {
                 let enrollment = if browser == Browser::Edge {
                     super::enroll_browser::Browser::Edge
@@ -199,8 +204,7 @@ impl Core {
                     .store(false, Ordering::SeqCst);
                 enrollment
                     .enroll(&self.shared)
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .lock_or_recover()
                     .connection_ended(enrollment);
             }
         }

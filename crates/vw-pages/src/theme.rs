@@ -7,15 +7,13 @@
 
 use crate::config::PagesError;
 use crate::service::{PagesService, bounded, mount_id};
+use vw_platform::sync::LockRecover;
 
 impl PagesService {
     /// The app theme the viewer passes to pages (`light` or `dark`).
     #[must_use]
     pub fn theme(&self) -> String {
-        self.theme
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.theme.lock_or_recover().clone()
     }
 
     /// Sets the app theme the viewer passes to pages (anything but `light` is `dark`, the app's default). A change
@@ -27,10 +25,7 @@ impl PagesService {
     pub async fn set_theme(&self, theme: &str) -> Result<(), PagesError> {
         let theme = if theme == "light" { "light" } else { "dark" };
         {
-            let mut current = self
-                .theme
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut current = self.theme.lock_or_recover();
             if *current == theme {
                 return Ok(());
             }

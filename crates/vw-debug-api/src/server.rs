@@ -12,7 +12,6 @@
 //! - While running, the core's flag says `enabled` with the reason; `shutdown` (or dropping the
 //!   handle) turns it off, ends every SSE stream and removes the descriptor.
 
-use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -114,7 +113,7 @@ impl DebugApi {
         let token =
             TokenStore::load_or_create(&config.descriptor_dir, config.keys, config.test_token_file)
                 .await?;
-        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        let (listener, own) = vw_netguard::listeners::bind_own_tokio()
             .await
             .map_err(DebugApiError::Bind)?;
         let port = listener.local_addr().map_err(DebugApiError::Bind)?.port();
@@ -145,6 +144,8 @@ impl DebugApi {
             .with_state(state);
         let mut shutdown = stop_rx;
         let task = tokio::spawn(async move {
+            // The port stays one of Vibe Work's own (refused for every browser page) until the listener closes.
+            let _own = own;
             let served = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let _ = shutdown.wait_for(|stop| *stop).await;

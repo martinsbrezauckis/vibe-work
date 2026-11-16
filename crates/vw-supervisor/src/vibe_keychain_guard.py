@@ -1,18 +1,18 @@
 """Write fitting macOS Keychain values through Apple's tool on standard input; keep Vibe's writer as fallback.
 On Windows, split values longer than one Credential Manager entry holds into parts.
 
-Installed by the launcher for the audited pin. Items keep the attributes Vibe gives them,
+Installed by the launcher; a Vibe outside the guarded list stops the start (vibe_guard_versions.py). Items keep the attributes Vibe gives them,
 so Vibe's reads stay unchanged. Diagnostics never name items.
 """
 
 
 def install_macos_keychain_guard():
-    import importlib.metadata
     import subprocess
     import sys
 
-    if sys.platform != "darwin" or importlib.metadata.version("mistral-vibe") != "3.1.2":
+    if sys.platform != "darwin":
         return
+    require_guarded_vibe("macOS Keychain guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from vibe.utils import keyring
 
     current = keyring._set_password
@@ -102,13 +102,19 @@ def install_windows_credential_guard():
     1783. OAuth tokens are often longer. A long value is stored as numbered parts, each its own credential, and Vibe's
     entry then holds only a marker with the part count and the SHA-256 of the whole value. Reads join and check the
     parts; a missing or changed part reads as no value, so the next sign-in starts fresh. Diagnostics never name items.
+
+    Vibe's entry always names every part that may exist, so a write or delete stopped half way (Vibe stopped, a failed
+    CredWrite) leaves nothing the next write or delete does not remove: a long write first replaces the entry with a
+    pending marker (no digest: reads as absent) naming the larger of the new and old part counts, then writes the
+    parts, removes the old extra ones, and writes the final marker last; a short write or a delete removes the parts
+    while the entry still names them, and replaces or deletes the entry last.
     """
     import hashlib
-    import importlib.metadata
     import sys
 
-    if sys.platform != "win32" or importlib.metadata.version("mistral-vibe") != "3.1.2":
+    if sys.platform != "win32":
         return
+    require_guarded_vibe("Windows credential guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from vibe.utils import keyring
 
     limit = 1280
@@ -157,22 +163,24 @@ def install_windows_credential_guard():
     def set_password(service, username, password):
         before = stored_parts(service, username)
         if units(password) <= limit:
-            set_original(service, username, password)
             remove_parts(service, username, 0, before)
+            set_original(service, username, password)
             return
         parts = split(password)
+        set_original(service, username, f"{prefix}{max(len(parts), before)}:")
         for index, part in enumerate(parts):
             set_original(part_service(service, username, index), username, part)
+        remove_parts(service, username, len(parts), before)
         digest = hashlib.sha256(password.encode("utf-8", errors="surrogatepass")).hexdigest()
         set_original(service, username, f"{prefix}{len(parts)}:{digest}")
-        remove_parts(service, username, len(parts), before)
 
     def get_password(service, username):
         head = get_original(service, username)
         if head is None or not head.startswith(prefix):
             return head
         count, _, digest = head[len(prefix):].partition(":")
-        if not count.isdigit():
+        if not count.isdigit() or not digest:
+            # No digest: a long write that has not finished (or was stopped); its parts are not a value yet.
             return None
         parts = [get_original(part_service(service, username, index), username) for index in range(int(count))]
         if any(part is None for part in parts):
@@ -186,8 +194,8 @@ def install_windows_credential_guard():
 
     def delete_password(service, username):
         before = stored_parts(service, username)
-        delete_original(service, username)
         remove_parts(service, username, 0, before)
+        delete_original(service, username)
 
     for function, original in zip((set_password, get_password, delete_password),
                                   (set_original, get_original, delete_original)):

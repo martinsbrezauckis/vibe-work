@@ -4,8 +4,9 @@
 //! Called by core, dispatch and session tools. Per-session reads/publication remain serialized.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tokio::task::JoinHandle;
 
@@ -66,8 +67,8 @@ impl Drop for Holders {
 impl Holders {
     /// Coalesces event-driven checks. Ordinary polling visits only currently viewed chats.
     fn changed(&self, id: Option<&str>) {
-        let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut changed = self.changed.lock().unwrap_or_else(PoisonError::into_inner);
+        let held = self.held.lock_or_recover();
+        let mut changed = self.changed.lock_or_recover();
         if let Some(id) = id {
             if held.contains_key(id) {
                 changed.insert(id.to_owned());
@@ -83,8 +84,7 @@ impl Holders {
     async fn reading(&self, session_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = self
             .reading
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .entry(session_id.to_owned())
             .or_default()
             .clone();
@@ -93,7 +93,7 @@ impl Holders {
 
     /// Current ownership for a fresh subscription or a subscriber that missed events.
     pub(crate) fn events(&self) -> Vec<CoreEvent> {
-        let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let held = self.held.lock_or_recover();
         held.iter()
             .map(|(session_id, holder)| CoreEvent::SessionHolder {
                 session_id: session_id.to_owned(),
@@ -105,11 +105,7 @@ impl Holders {
     /// Aborts the poll task (core shutdown).
     pub(crate) fn stop_poll(&self) {
         self.inventory.stop();
-        let poll = self
-            .poll
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let poll = self.poll.lock_or_recover().take();
         if let Some(poll) = poll {
             poll.abort();
         }
@@ -117,7 +113,7 @@ impl Holders {
 
     /// Records `holder` for `session_id`; true when it changed.
     fn set(&self, session_id: &str, holder: Option<u32>, kind: &str) -> bool {
-        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut held = self.held.lock_or_recover();
         let before = held.get(session_id).cloned().flatten();
         let after = holder.map(|pid| (pid, kind.to_owned()));
         held.insert(session_id.to_owned(), after.clone());
@@ -252,11 +248,7 @@ impl Core {
 /// Starts the poll task (owned by the core, aborted at shutdown): the viewed sessions no channel of ours holds.
 pub(crate) fn start_poll(shared: &Arc<Shared>) {
     let task = spawn_poll(shared);
-    *shared
-        .holders
-        .poll
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *shared.holders.poll.lock_or_recover() = Some(task);
 }
 
 fn spawn_poll(shared: &Arc<Shared>) -> JoinHandle<()> {
@@ -291,11 +283,7 @@ fn spawn_poll(shared: &Arc<Shared>) -> JoinHandle<()> {
             }
             let mut ids = shared.channels.viewed_ids();
             ids.extend(std::mem::take(
-                &mut *shared
-                    .holders
-                    .changed
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner),
+                &mut *shared.holders.changed.lock_or_recover(),
             ));
             ids.sort();
             ids.dedup();

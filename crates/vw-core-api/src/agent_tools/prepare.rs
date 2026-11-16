@@ -32,15 +32,14 @@ async fn prepare_inner(
     }
     // Without the Chrome package the check below refuses every Chrome tool with "not in this version" first.
     if tool == "chrome_execute" && shared.chrome_control.config.available() {
-        crate::chrome_control::gateway::validate_execute_args(args)?;
+        let browser = crate::chrome_control::agent_browser::selected(shared, owner, tool, args);
+        crate::chrome_control::gateway::validate_execute_args(args, browser)?;
     }
-    #[cfg(feature = "agent-vault")]
     if tool == names::SECRET_CAPTURE_COMMAND {
         return super::secret_capture::prepare(shared, owner, args)
             .await
             .map(Some);
     }
-    #[cfg(feature = "agent-vault")]
     if tool == names::BROWSER_CAPTURE_SECRET {
         return super::vault_capture::prepare(shared, owner, args)
             .await

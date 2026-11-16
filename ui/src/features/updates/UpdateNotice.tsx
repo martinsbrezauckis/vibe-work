@@ -17,7 +17,7 @@ import { Fragment, type RefObject, useLayoutEffect, useRef } from "react";
 
 import { reserve } from "../../components/nativeLayer";
 import { useStore } from "../../state/createStore";
-import { type NoticeAction, noticeFor } from "../../state/updates";
+import { type NoticeAction, noticeFor, offersUpdate } from "../../state/updates";
 import { useApp } from "../shell/AppContext";
 import { TEXT } from "../../vocabulary";
 import { ReleaseHost } from "./ReleaseHost";
@@ -48,9 +48,20 @@ export function UpdateNotice() {
     // toasts keep clear of the update cards too (a top-right toast would cover them).
     <div className="update-notices" ref={stack} data-toast-avoid="updates">
       {!onUpdatesPage && updates !== null && <Card updates={updates} />}
-      {!onUpdatesPage && <VibeUpdateCard />}
+      {!onUpdatesPage &&
+        (updates === null ? (
+          <VibeUpdateCard appUpdateOffered={false} />
+        ) : (
+          <VibeBeside updates={updates} />
+        ))}
     </div>
   );
+}
+
+/** The Vibe card, told whether a Vibe Work update is offered beside it. */
+function VibeBeside({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["updates"]> }) {
+  const offered = useStore(updates.store, (s) => s.available && offersUpdate(s.view));
+  return <VibeUpdateCard appUpdateOffered={offered} />;
 }
 
 /** The reservation key of the card in `nativeLayer`. */

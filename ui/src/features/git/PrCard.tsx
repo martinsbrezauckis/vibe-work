@@ -15,7 +15,16 @@ import { type ReactElement, useEffect, useState } from "react";
 import { useStore } from "../../state/createStore";
 import { CARD_POLL_MS, type Git } from "../../state/git";
 import { useApp } from "../shell/AppContext";
-import { checksText, fetchedText, httpsLink, mergeText, reviewText, stateText } from "./model";
+import {
+  checksText,
+  fetchedText,
+  httpsLink,
+  mergeText,
+  reviewText,
+  stateText,
+  statusNotes,
+  statusText,
+} from "./model";
 
 /** The card for `sessionId`. */
 export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): ReactElement | null {
@@ -99,6 +108,24 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
         </Button>
       </div>
       <ul className="pr-lines">
+        {statusText(card) !== null && (
+          <li
+            data-git="pr-status"
+            className={
+              card.status.reason === "ready"
+                ? "ok"
+                : (card.status.reason ?? "").startsWith("checksPending") ||
+                    card.status.reason === "reviewRequired"
+                  ? "wait"
+                  : "bad"
+            }
+          >
+            {statusText(card)}
+          </li>
+        )}
+        {statusNotes(card).map((text) => (
+          <li key={text}>{text}</li>
+        ))}
         <li
           className={
             card.checks.failed > 0

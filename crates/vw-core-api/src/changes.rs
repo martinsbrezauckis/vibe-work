@@ -17,10 +17,11 @@
 mod changes_refresh;
 use changes_refresh::run;
 pub(crate) use changes_refresh::{build_view, refresh_and_emit};
+use vw_platform::sync::LockRecover;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -124,12 +125,7 @@ pub(crate) struct Hub {
 
 impl Drop for Hub {
     fn drop(&mut self) {
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
     }
@@ -170,11 +166,7 @@ impl Hub {
 
     /// Stops scheduling refreshes and joins the current refresh, including its blocking git work.
     pub(crate) async fn shutdown(&self) {
-        let task = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let task = self.task.lock_or_recover().take();
         self.stop.notify_one();
         if let Some(task) = task {
             let _ = task.await;
@@ -183,7 +175,7 @@ impl Hub {
         let trackers = self.watch_trackers();
         let _ = tokio::task::spawn_blocking(move || {
             for tracker in trackers {
-                let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut guard = tracker.lock_or_recover();
                 if let Some(Review::Git { watcher, .. }) = &mut guard.review {
                     drop(watcher.take());
                 }
@@ -212,7 +204,7 @@ impl Hub {
                 // would be late, so it does nothing.
                 return tracker;
             }
-            let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut guard = tracker.lock_or_recover();
             let moved = guard.opened && guard.folder != folder;
             let git_entry = nearest_git_entry(folder);
             let initialized = guard.opened
@@ -242,9 +234,9 @@ impl Hub {
                 // The session moved on its first turn in a Vibe worktree: review the new folder from
                 // its HEAD (a fresh checkout), never against the old folder's baseline.
                 // A newly initialized repository also starts at HEAD so existing edits remain visible.
-                self.open_review(session_id, folder, true, true)
+                self.open_review(session_id, folder, true, true, claim)
             } else {
-                self.open_review(session_id, folder, claim.is_some(), false)
+                self.open_review(session_id, folder, claim.is_some(), false, claim)
             };
             if writer && let Some(hooks) = &self.hooks {
                 hooks.before_install(session_id);
@@ -285,6 +277,7 @@ impl Hub {
         folder: &Path,
         take: bool,
         from_head: bool,
+        claim: Option<&Claim>,
     ) -> Option<Review> {
         let Some(dir) = &self.dir else {
             return Some(Review::Unavailable(
@@ -327,6 +320,11 @@ impl Hub {
                 }
             }
         };
+        if let Some(claim) = claim {
+            claim
+                .written
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let watcher = self.start_watcher(session_id, &baseline);
         Some(Review::Git {
             baseline: Box::new(baseline),
@@ -345,7 +343,7 @@ impl Hub {
     ) -> Arc<Mutex<Tracker>> {
         self.renew(session_id);
         let (tracker, generation) = self.get_or_insert(session_id, folder);
-        let mut guard = tracker.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut guard = tracker.lock_or_recover();
         let fresh = self.dir.as_ref().and_then(|dir| {
             let repo = vw_changes::discover(folder).ok().flatten()?;
             let session_dir = SessionDir::open(dir, session_id).ok()?;
@@ -414,12 +412,7 @@ impl Hub {
 
     /// Starts the refresh task (once).
     pub(crate) fn spawn(&self, shared: &Arc<Shared>) {
-        let Some(receiver) = self
-            .receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        else {
+        let Some(receiver) = self.receiver.lock_or_recover().take() else {
             return;
         };
         if self.dir.is_none() {
@@ -432,7 +425,7 @@ impl Hub {
             receiver,
             self.stop.clone(),
         ));
-        *self.task.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+        *self.task.lock_or_recover() = Some(task);
     }
 }
 

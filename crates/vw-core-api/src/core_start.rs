@@ -3,8 +3,9 @@
 //! The initial subscription precedes service work, and recovery sweeps finish before clients receive the core.
 
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
+use vw_platform::sync::LockRecover;
 
 use tokio::sync::{broadcast, mpsc, watch};
 use tracing::info;
@@ -65,7 +66,10 @@ async fn start_supervisor(
                 Err(error @ SupervisorError::BeforeLaunch(_)) => return Err(error),
                 Err(error) => {
                     tracing::warn!(%error, "Vibe did not start; the setup screen offers Try again");
-                    installer.start_failed(format!("Vibe did not start: {error}"));
+                    installer.start_failed(
+                        vw_supervisor::start_failure_message(&error),
+                        vw_supervisor::start_failure_stderr(&error).join("\n"),
+                    );
                 }
             }
             Arc::new(pending)
@@ -99,7 +103,15 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
                 {
                     Ok(())
                 }
-                Err(error) => Err(format!("Vibe did not start: {error}")),
+                Err(error) => {
+                    // Details of the failed start show the server's last output.
+                    if let Some(installer) = &shared.config.vibe_install {
+                        installer.note_start_output(
+                            vw_supervisor::start_failure_stderr(&error).join("\n"),
+                        );
+                    }
+                    Err(vw_supervisor::start_failure_message(&error))
+                }
             }
         })
     }));
@@ -107,6 +119,12 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
     if let Err(error) = installer.upgrade_previous_private() {
         tracing::warn!(%error, "could not prepare the updated app's Vibe install");
     }
+    // An install made from an earlier app version's pin is rebuilt beside the running one from this pin (same Vibe
+    // version); the next start uses it. The running Vibe is not touched, and a failure is tried again next start.
+    let refreshing = installer.clone();
+    tokio::spawn(async move {
+        refreshing.refresh_runtime().await;
+    });
     let weak = Arc::downgrade(shared);
     // A check that changes the Chrome store state also refreshes Your Chrome (no restart).
     let mut extension = installer.extension_store();
@@ -130,10 +148,7 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
             }
         }
     });
-    *shared
-        .vibe_events
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *shared.vibe_events.lock_or_recover() = Some(task);
 }
 
 /// Starts the owned task that re-emits the key service's events (when the core has a key service).
@@ -143,10 +158,7 @@ fn spawn_key_forwarder(shared: &Arc<Shared>) {
             Arc::downgrade(shared),
             keys.subscribe(),
         ));
-        *shared
-            .key_events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(forwarder);
+        *shared.key_events.lock_or_recover() = Some(forwarder);
     }
 }
 
@@ -162,10 +174,7 @@ fn spawn_owned_tasks(shared: &Arc<Shared>) {
     crate::files::start_events(shared);
     crate::plan_profile::start(shared);
     shared.changes.spawn(shared);
-    *shared
-        .procmon_tick
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(crate::processes::spawn_tick(shared));
+    *shared.procmon_tick.lock_or_recover() = Some(crate::processes::spawn_tick(shared));
     crate::session_holder::start_poll(shared);
 }
 
@@ -295,6 +304,7 @@ fn build_shared(state: Startup) -> Shared {
         plugin_refresh: crate::plugin_refresh::Refresh::default(),
         interrupted_send: crate::interrupted_send::State::default(),
         stops: crate::stops::Stops::default(),
+        paused_tools: Box::default(),
         stuck: crate::stuck::StuckSessions::default(),
         resync_reads: AtomicU64::new(0),
         gate: state.gate,
@@ -310,6 +320,8 @@ fn build_shared(state: Startup) -> Shared {
         projects: crate::projects_filing::ProjectsState::new(config.projects_dir.clone()),
         market: crate::market::MarketState::new(&config.market, state.plugin_roots),
         plugin_approvals: state.plugin_approvals,
+        import_home: std::sync::Mutex::new(None),
+        import_brings: crate::import_setup::Brings::default(),
         // Only metadata from this app run is retained for the Settings use log.
         secret_uses: crate::secret_uses::SecretUses::default(),
         work: crate::work::WorkState::open(&config.work),
@@ -481,12 +493,9 @@ async fn start_tasks(
         Arc::downgrade(shared),
         shared.events.subscribe(),
     ));
-    *shared
-        .title_events
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(watcher);
+    *shared.title_events.lock_or_recover() = Some(watcher);
     let task = tokio::spawn(pump::run(Arc::downgrade(shared), first, loads_rx, feeds_rx));
-    *shared.pump.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *shared.pump.lock_or_recover() = Some(task);
     spawn_key_forwarder(shared);
     connect_vibe_install(shared);
     crate::processes::note_vibe_server(shared);
@@ -506,6 +515,7 @@ async fn start_tasks(
     .await;
     crate::recovery_schedules::start(shared);
     crate::keep_awake::publish(shared);
+    crate::paused_tools::publish_changes(shared);
     crate::secret_scan::start(shared);
     // Repair app-owned browser packages in the background; startup does not wait.
     let refreshing = shared.clone();

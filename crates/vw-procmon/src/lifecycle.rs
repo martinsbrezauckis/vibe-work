@@ -12,6 +12,7 @@
 //!   process, nor one marked keep-running.
 
 use std::collections::BTreeSet;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -225,17 +226,11 @@ impl ProcMon {
     }
 
     fn lock_adopted(&self) -> std::sync::MutexGuard<'_, Vec<Adopted>> {
-        self.inner
-            .adopted
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.adopted.lock_or_recover()
     }
 
     fn lock_deleted(&self) -> std::sync::MutexGuard<'_, Vec<LedgerEntry>> {
-        self.inner
-            .deleted_session
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.deleted_session.lock_or_recover()
     }
 
     /// Rescans and rewrites the ledger: registered processes, the running `vibe-app-server`s (owned,

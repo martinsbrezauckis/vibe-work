@@ -45,7 +45,16 @@ impl Core {
         let name = command.name();
         // A Stop counts before it waits for anything (`stops.rs`).
         let stopping = crate::stops::requested(&self.shared, &command);
+        // Calls the Stop ended while the browser was paused answer the agent before the interrupt follows.
+        for id in &stopping {
+            self.shared.paused_tools.answers_delivered(id).await;
+            self.shared
+                .paused_tools
+                .answers_delivered(&self.shared.channels.canonical(id))
+                .await;
+        }
         crate::secret_scan::note_command(&self.shared, &command);
+        crate::paused_tools_commands::note_command(&self.shared, &command);
         // A Debug API pick names its target or is refused by name, before the session lease or any native work.
         let unanswered = match &command {
             Command::AnswerCallback { callback_id, .. } => {
@@ -123,11 +132,9 @@ impl Core {
         if let Some(result) = self.intercept_proxy_write(origin, &command).await {
             return result;
         }
-        // Vibe's unified harness has no `tools/list`: answered here from the session's `runtime/read`.
-        if let Command::Call { method, params, .. } = &command
-            && method == crate::tools_list::METHOD
-        {
-            return crate::tools_list::answer(self, origin, params.clone()).await;
+        // Calls the core answers itself (`tools/list`; `config/fields/read` without a chat).
+        if let Some(result) = self.answered_by_core(origin, &command).await {
+            return result;
         }
         match plan(command) {
             Planned::Session { method, params } => self.session_call(origin, method, params).await,
@@ -262,6 +269,10 @@ impl Core {
                 view: self.feedback(origin, request).await?,
             }),
             Command::KeepAwake { request } => self.keep_awake(request).await,
+            Command::PausedTools { request } => {
+                crate::paused_tools_commands::run(&self.shared, request)
+            }
+            Command::Knowledge { request } => self.knowledge(request).await,
             Command::NewChat { request } => self.new_chat(origin, request).await,
             Command::SecretScan { request } => self.secret_scan(request).await,
             Command::ListSessions {
@@ -395,6 +406,10 @@ impl Core {
             }),
             Command::Terminal { request } => self.terminal(request).await,
             Command::Instructions { request } => self.instructions(origin, request).await,
+            // Boxed: a bring holds its plan across awaits, which would grow every command's future.
+            Command::ImportSetup { request } => Ok(CommandResult::ImportSetup {
+                result: Box::pin(self.import_setup(origin, request)).await?,
+            }),
             Command::ProjectInstructions { request } => {
                 self.project_instructions(origin, request).await
             }
@@ -443,8 +458,8 @@ impl Core {
             Command::SessionTools { request } => Ok(CommandResult::SessionTools {
                 result: self.session_tools(origin, request).await?,
             }),
-            Command::PromptHistory { text } => {
-                crate::prompt_history_command::execute(&self.shared, text).await
+            Command::PromptHistory { text, session_id } => {
+                crate::prompt_history_command::execute(&self.shared, text, session_id).await
             }
             Command::Search { request } => Ok(CommandResult::Search {
                 result: self.search(request).await?,

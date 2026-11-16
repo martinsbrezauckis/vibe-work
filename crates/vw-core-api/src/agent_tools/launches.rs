@@ -12,7 +12,8 @@
 //! Invariant: the lock is never held across an await (plain methods).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use vw_procmon::ProcessRef;
@@ -54,7 +55,7 @@ pub(crate) struct Launches {
 
 impl Launches {
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Launch>> {
-        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+        self.entries.lock_or_recover()
     }
 
     /// Loads `path` (missing or unreadable = empty; an unreadable file is left in place and logged).

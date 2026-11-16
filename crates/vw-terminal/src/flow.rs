@@ -22,6 +22,7 @@
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use std::{io, thread};
+use vw_platform::sync::LockRecover;
 
 use tracing::warn;
 
@@ -50,7 +51,7 @@ struct Shared {
 
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     fn flush_loop(&self) {

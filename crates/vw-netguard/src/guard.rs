@@ -107,6 +107,20 @@ pub trait PageContext: Send + Sync {
         let _ = key;
         None
     }
+
+    /// `Ok` when a request on a store whose live browser mounts are `keys` may reach the non-public target of
+    /// `request` (Local Network Access: the core asks the person for a public page and remembers the answer per site);
+    /// else the reason. Vibe Work's own ports never reach this question. Default: refused.
+    fn local_access<'a>(
+        &'a self,
+        keys: &'a [String],
+        request: &'a crate::decide::LocalRequest<'a>,
+    ) -> ScopeFuture<'a> {
+        let _ = (keys, request);
+        Box::pin(async {
+            Err("this page cannot reach this computer or the local network".to_owned())
+        })
+    }
 }
 
 /// Whose rights a listener applies.
@@ -146,10 +160,38 @@ pub(crate) struct Inner {
     /// Canary tokens seen and not yet collected, oldest first, at most [`SEEN_CAP`] (a page can send canary-shaped
     /// requests of its own: bounded, oldest dropped).
     seen: Mutex<VecDeque<String>>,
+    /// Loopback probes announced and still waiting (token, listener port), at most [`SEEN_CAP`]: only these are
+    /// answered at a listener's own port ([`NetGuard::announce_loopback`]).
+    pub(crate) announced: Mutex<VecDeque<(String, u16)>>,
     seen_changed: Notify,
     pub(crate) slots: Arc<Semaphore>,
     /// The user's proxy for public requests ([`NetGuard::set_upstream`]; the system's until then).
     pub(crate) upstream: std::sync::RwLock<Arc<crate::Upstream>>,
+    /// True once this guard gives its own ports to the browser content rules ([`NetGuard::publish_internal_ports`]).
+    publishes: std::sync::atomic::AtomicBool,
+    /// Held across reading and publishing the ports, so an older snapshot never replaces a newer one.
+    publish_lock: Mutex<()>,
+    /// This guard's entry in the process-wide listener set ([`crate::listeners`]).
+    id: u64,
+}
+
+impl Inner {
+    /// Puts this guard's current listeners (shared and per store) in the process-wide set. The store lock is held
+    /// across the snapshot and the update, so an older snapshot never replaces a newer one (the set takes no guard
+    /// lock: the order is always stores, then the set).
+    fn sync_listeners(&self) {
+        let stores = lock(&self.stores);
+        let mut ports: Vec<u16> = stores.values().map(|s| s.port).collect();
+        ports.push(self.shared_addr.port());
+        crate::listeners::set(self.id, ports);
+        drop(stores);
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        crate::listeners::set(self.id, Vec::new());
+    }
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -235,11 +277,13 @@ impl Inner {
             .route(tls, host, port)
     }
 
-    /// True for a port of Vibe Work itself: a registered internal port or a listener of this guard.
+    /// True for a port of Vibe Work itself: a registered internal port, a listener of this guard or of any other
+    /// guard in the process.
     fn is_internal(&self, port: u16) -> bool {
         port == self.shared_addr.port()
             || lock(&self.internal).contains(&port)
             || lock(&self.stores).values().any(|s| s.port == port)
+            || crate::listeners::contains(port)
     }
 
     /// The mounts registered on the store `key` now (a snapshot); empty when there are more than [`MEMBER_LIMIT`]
@@ -316,6 +360,33 @@ impl Scope for ListenerScope {
         })
     }
 
+    fn local_access<'a>(&'a self, request: &'a crate::decide::LocalRequest<'a>) -> ScopeFuture<'a> {
+        Box::pin(async move {
+            // Vibe Work's own ports, for every page whatever the person answered (`0.0.0.0` reaches this computer too).
+            if request.class == crate::ip::IpClass::Loopback && self.inner.is_internal(request.port)
+            {
+                return Err(format!(
+                    "port {} belongs to Vibe Work itself and is never opened",
+                    request.port
+                ));
+            }
+            let nobody = || {
+                "this computer and the local network are not reachable from this page".to_owned()
+            };
+            let Some(context) = self.inner.context.get() else {
+                return Err(nobody());
+            };
+            let Who::Store(store, generation) = &self.who else {
+                return Err(nobody());
+            };
+            let members = self.inner.store_members(store, *generation);
+            if members.is_empty() {
+                return Err(nobody());
+            }
+            context.local_access(&members, request).await
+        })
+    }
+
     fn local_network(&self, host: &str) -> bool {
         let Some(context) = self.inner.context.get() else {
             return false;
@@ -357,7 +428,7 @@ impl NetGuard {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let shared_addr = listener.local_addr()?;
-        Ok(Self {
+        let guard = Self {
             inner: Arc::new(Inner {
                 enabled: tokio::sync::watch::channel(true).0,
                 canaries: std::sync::atomic::AtomicBool::new(true),
@@ -373,11 +444,17 @@ impl NetGuard {
                 log: Mutex::new(VecDeque::new()),
                 seq: AtomicU64::new(0),
                 seen: Mutex::new(VecDeque::new()),
+                announced: Mutex::new(VecDeque::new()),
                 seen_changed: Notify::new(),
                 slots: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
                 upstream: std::sync::RwLock::new(Arc::new(crate::Upstream::system())),
+                publishes: std::sync::atomic::AtomicBool::new(false),
+                publish_lock: Mutex::new(()),
+                id: crate::listeners::next_id(),
             }),
-        })
+        };
+        guard.inner.sync_listeners();
+        Ok(guard)
     }
 
     /// Sets the user's proxy for public requests (Settings > Network; the system's proxy is used until this is
@@ -496,6 +573,9 @@ impl NetGuard {
                 members: label.map(str::to_owned).into_iter().collect(),
             },
         );
+        drop(stores);
+        self.inner.sync_listeners();
+        self.republish();
         Ok(url)
     }
 
@@ -510,8 +590,11 @@ impl NetGuard {
     /// Closes the listener of the website data store `store` (the store was deleted; a later store with the same key
     /// starts fresh, on a new port).
     pub fn forget_store(&self, store: &str) {
-        if let Some(listener) = lock(&self.inner.stores).remove(store) {
+        let removed = lock(&self.inner.stores).remove(store);
+        if let Some(listener) = removed {
             listener.task.abort();
+            self.inner.sync_listeners();
+            self.republish();
         }
     }
 
@@ -525,6 +608,8 @@ impl NetGuard {
             }
             keep
         });
+        self.inner.sync_listeners();
+        self.republish();
     }
 
     /// Stops every listener (quit).
@@ -533,9 +618,12 @@ impl NetGuard {
         for task in lock(&self.inner.tasks).drain(..) {
             task.abort();
         }
-        for (_, listener) in lock(&self.inner.stores).drain() {
+        let mut stores = lock(&self.inner.stores);
+        for (_, listener) in stores.drain() {
             listener.task.abort();
         }
+        crate::listeners::set(self.inner.id, Vec::new());
+        drop(stores);
     }
 
     /// Sets the core's loopback answers (once; later calls are ignored).
@@ -547,16 +635,45 @@ impl NetGuard {
     /// through the guard, whoever asks.
     pub fn add_internal_port(&self, port: u16) {
         lock(&self.inner.internal).insert(port);
+        self.republish();
     }
 
     /// Removes a registered internal port (its listener closed).
     pub fn remove_internal_port(&self, port: u16) {
         lock(&self.inner.internal).remove(&port);
+        self.republish();
     }
 
-    /// Vibe Work's own ports for strict backend scopes (registered ones and this guard's listeners).
+    /// Makes this guard's [`Self::internal_ports`] the ports the browser content rules hold for every page
+    /// (`rules::set_internal_ports`, macOS: loopback literals never reach the proxy there), now and after every
+    /// change. Only the browser's guard does this (one per process); other guards' registered ports stay theirs, while
+    /// every guard's listeners are held for every page anyway ([`crate::listeners`]: no guard has to publish them).
+    pub fn publish_internal_ports(&self) {
+        self.inner.publishes.store(true, Ordering::SeqCst);
+        self.republish();
+    }
+
+    fn republish(&self) {
+        if self.inner.publishes.load(Ordering::SeqCst) {
+            let _one_at_a_time = lock(&self.inner.publish_lock);
+            crate::rules::set_internal_ports(self.own_ports());
+        }
+    }
+
+    /// Vibe Work's own ports for strict backend scopes (registered ones, this guard's listeners and every other
+    /// guard's listeners in the process).
     #[must_use]
     pub fn internal_ports(&self) -> Vec<u16> {
+        let mut ports = self.own_ports();
+        ports.extend(crate::listeners::ports());
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
+    /// The ports this guard publishes: registered ones and its own listeners. Other guards' listeners are not copied
+    /// here (the rules read them live from [`crate::listeners`], so a closed guard's ports never linger).
+    fn own_ports(&self) -> Vec<u16> {
         let mut ports: Vec<u16> = lock(&self.inner.internal).iter().copied().collect();
         ports.push(self.inner.shared_addr.port());
         ports.extend(lock(&self.inner.stores).values().map(|s| s.port));
@@ -602,20 +719,34 @@ impl NetGuard {
         )
     }
 
-    /// Waits until the loopback canary of `token` arrived in proxy form, or a CONNECT tunnel to the listener `port`
-    /// itself (an engine that tunnels everything), (true) or `limit` passed (false).
+    /// Announces the loopback canary of `token` on the listener `port` before it is loaded: a listener answers a
+    /// canary at its own port only for an announced probe, until [`Self::wait_seen_loopback`] for it returns; any
+    /// other request for that port is refused like every page's request for Vibe Work's own ports.
+    pub fn announce_loopback(&self, token: &str, port: u16) {
+        let mut announced = lock(&self.inner.announced);
+        announced.push_back((token.to_owned(), port));
+        while announced.len() > SEEN_CAP {
+            announced.pop_front();
+        }
+    }
+
+    /// Waits until the announced loopback canary of `token` arrived in proxy form, or a CONNECT tunnel to the
+    /// listener `port` itself (an engine that tunnels everything), (true) or `limit` passed (false); then ends the
+    /// announcement.
     pub async fn wait_seen_loopback(&self, token: &str, port: u16, limit: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + limit;
         let (by_token, by_port) = (format!("loopback:{token}"), format!("loopback-port:{port}"));
-        loop {
+        let seen = loop {
             let notified = self.inner.seen_changed.notified();
             if self.inner.take_seen(&by_token) || self.inner.take_seen(&by_port) {
-                return true;
+                break true;
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return self.inner.take_seen(&by_token) || self.inner.take_seen(&by_port);
+                break self.inner.take_seen(&by_token) || self.inner.take_seen(&by_port);
             }
-        }
+        };
+        lock(&self.inner.announced).retain(|(t, p)| !(t == token && *p == port));
+        seen
     }
 
     /// Waits until a DIRECT (origin-form) loopback canary request of `token` arrived (true: the engine's request

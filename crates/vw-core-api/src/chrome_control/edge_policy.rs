@@ -1,5 +1,6 @@
 //! Read-only managed Edge policy refusals for setup. Depends on local OS policy files; never changes policy.
 use serde_json::Value;
+use vw_platform::sync::LockRecover;
 
 pub(super) const BLOCKED: &str = "Blocked by your organization";
 
@@ -47,14 +48,11 @@ pub(super) fn refusal(config: &super::setup::ChromeControlConfig) -> Option<&'st
 
 fn policy() -> Vec<Value> {
     // Polling Settings must not start OS readers repeatedly. Policy changes are observed on the next read interval.
-    use std::sync::{Mutex, OnceLock, PoisonError};
+    use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
     type Snapshot = Option<(Instant, Vec<Value>)>;
     static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
-    let mut cache = CACHE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut cache = CACHE.get_or_init(|| Mutex::new(None)).lock_or_recover();
     if let Some((when, values)) = &*cache
         && when.elapsed() < Duration::from_secs(3)
     {

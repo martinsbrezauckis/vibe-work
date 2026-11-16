@@ -6,12 +6,10 @@ It preserves native routes/warnings and never changes the accepted snapshot.
 
 
 def install_mcp_projection_guard(adapter):
-    import importlib.metadata
     from dataclasses import replace
     from functools import wraps
 
-    if importlib.metadata.version("mistral-vibe") != "3.1.2":
-        return
+    require_guarded_vibe("MCP schema projection guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     original = adapter._session_mcp_state
     if getattr(original, "_vw_schema_projection_guard", False):
         return

@@ -7,6 +7,9 @@
 //! the identity for this app run: its requests are answered "Not now" without a dialog, the card says the removed
 //! profile is still connected in Chrome and offers Connect, and only that Connect lets the next request ask. A profile
 //! that was never removed still asks at once.
+//!
+//! PREDICT (label): the removed profile's card read "Waiting for your approval", the Not now card's label, although the
+//! person removed it and no approval waits. It now reads "Not connected" with the same step and Connect.
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -105,6 +108,25 @@ fn card(core: &crate::Core, browser: Browser) -> super::AddonView {
     view
 }
 
+/// Waits until the "Not now" for `profile` is recorded. That happens only after the helper answered
+/// `owner.pairing.approve` (`pairing_approval::answered`, in a spawned task), so a fixed 50 ms sleep raced it: under
+/// the full gate's load Connect ran first and sent nothing.
+async fn not_now_recorded(core: &crate::Core, profile: &str) {
+    let approvals = &core.shared.chrome_control.owner.approvals;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !approvals
+        .declined_for(Browser::from_profile(profile))
+        .iter()
+        .any(|p| p == profile)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Not now for {profile} was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 fn declined_quietly(calls: &Calls, id: &str) -> bool {
     calls.lock().unwrap().iter().any(|(tool, args)| {
         tool == "owner.pairing.approve" && *args == json!({"requestId":id,"approved":false})
@@ -124,7 +146,7 @@ async fn remove_row(core: &crate::Core, profile: &str) {
 
 #[tokio::test]
 async fn a_removed_profile_does_not_ask_by_itself_and_connect_lets_it_ask_again() {
-    let (core, mut receive) = start("rmquiet-row").await;
+    let (core, mut receive) = start("pairing-removed-row").await;
     let profile = format!("chrome:{PROFILE}");
     connected(&core, &[&profile]);
     let calls = answering(&core);
@@ -136,14 +158,16 @@ async fn a_removed_profile_does_not_ask_by_itself_and_connect_lets_it_ask_again(
         "the extension's reconnect after Remove must not ask",
     )
     .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    not_now_recorded(&core, &profile).await;
     assert!(
         declined_quietly(&calls, REQUESTS[0]),
         "the helper hears Not now so it stops asking: {:?}",
         calls.lock().unwrap()
     );
+    // The person removed the profile; nothing waits for their approval, so the card keeps a plain "Not connected"
+    // label ("Waiting for your approval" stays the Not now card's).
     let view = card(&core, Browser::Chrome);
-    assert_eq!(view.label, "Waiting for your approval", "{view:?}");
+    assert_eq!(view.label, "Not connected", "{view:?}");
     assert_eq!(
         view.action,
         Some(super::addon::AddonAction::Connect),
@@ -175,7 +199,10 @@ async fn a_removed_profile_does_not_ask_by_itself_and_connect_lets_it_ask_again(
     );
     assert_eq!(
         *calls.lock().unwrap(),
-        vec![("owner.profileUnpair".into(), json!({"profileId":profile}))],
+        vec![(
+            "owner.profileUnpair".into(),
+            json!({"profileId":profile,"keepPin":true})
+        )],
         "Connect only lets the helper ask again"
     );
     notify(&core, REQUESTS[2], &profile);
@@ -191,7 +218,7 @@ async fn a_removed_profile_does_not_ask_by_itself_and_connect_lets_it_ask_again(
 
 #[tokio::test]
 async fn a_profile_that_was_never_removed_still_asks_at_once() {
-    let (core, mut receive) = start("rmquiet-new").await;
+    let (core, mut receive) = start("pairing-removed-new").await;
     let removed = format!("chrome:{PROFILE}");
     let fresh = format!("chrome:{OTHER}");
     connected(&core, &[&removed]);
@@ -205,7 +232,7 @@ async fn a_profile_that_was_never_removed_still_asks_at_once() {
         request.summary
     );
     answer.send(Confirmation::Declined).unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    not_now_recorded(&core, &fresh).await;
     let view = card(&core, Browser::Chrome);
     assert!(
         view.step
@@ -214,12 +241,13 @@ async fn a_profile_that_was_never_removed_still_asks_at_once() {
             .contains("you chose Not now"),
         "a person's own Not now keeps its text: {view:?}"
     );
+    assert_eq!(view.label, "Waiting for your approval", "{view:?}");
     core.shutdown().await;
 }
 
 #[tokio::test]
 async fn removing_the_whole_chrome_card_keeps_its_profiles_quiet_until_connect() {
-    let (core, mut receive) = start("rmquiet-card").await;
+    let (core, mut receive) = start("pairing-removed-card").await;
     let profile = format!("chrome:{PROFILE}");
     connected(&core, &[&profile]);
     let _calls = answering(&core);
@@ -250,7 +278,7 @@ async fn removing_the_whole_chrome_card_keeps_its_profiles_quiet_until_connect()
 #[cfg(feature = "your-edge")]
 #[tokio::test]
 async fn a_removed_edge_profile_does_not_ask_by_itself() {
-    let (core, mut receive) = start("rmquiet-edge").await;
+    let (core, mut receive) = start("pairing-removed-edge").await;
     core.shared
         .chrome_control
         .set_browser_enabled(Browser::Edge, true)
@@ -265,7 +293,7 @@ async fn a_removed_edge_profile_does_not_ask_by_itself() {
         "a removed Edge profile must not ask by itself",
     )
     .await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    not_now_recorded(&core, &profile).await;
     assert!(
         declined_quietly(&calls, REQUESTS[0]),
         "{:?}",
@@ -321,4 +349,277 @@ async fn a_debug_api_connect_never_lets_a_removed_profile_ask_again() {
     )
     .await;
     assert!(declined_quietly(&calls, REQUESTS[1]));
+    core.shutdown().await;
+}
+
+fn unpaired(calls: &Calls) -> usize {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(tool, _)| tool == "owner.profileUnpair")
+        .count()
+}
+
+/// The person's "Not now" is kept the same way: a Debug API Connect, or a window Connect sent while the Debug API drives
+/// the window, does not make the helper forget it; the person's own Connect then asks again.
+///
+/// PREDICT (written before any change; the code already gates both): green. With the `debug_api_acts` gate removed
+/// from `ask_again` both driven Connects send `owner.profileUnpair` and the test fails.
+#[tokio::test]
+async fn not_now_survives_a_debug_api_and_a_window_driven_connect() {
+    let (core, mut receive) = start("pairing-removed-not-now").await;
+    let drive = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let probe = Arc::clone(&drive);
+    core.set_window_drive(move || probe.load(std::sync::atomic::Ordering::SeqCst));
+    let profile = format!("chrome:{OTHER}");
+    let calls = answering(&core);
+    notify(&core, REQUESTS[0], &profile);
+    let (_, answer) = prompt(&mut receive).await;
+    answer.send(Confirmation::Declined).unwrap();
+    not_now_recorded(&core, &profile).await;
+    let connect = |origin| core.chrome_control(origin, super::ChromeControlRequest::Connect {});
+    let _ = connect(crate::Origin::DebugApi).await;
+    assert_eq!(unpaired(&calls), 0, "{:?}", calls.lock().unwrap());
+    drive.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = connect(crate::Origin::Ui).await;
+    assert_eq!(unpaired(&calls), 0, "{:?}", calls.lock().unwrap());
+    drive.store(false, std::sync::atomic::Ordering::SeqCst);
+    let own = connect(crate::Origin::Ui).await.unwrap();
+    let crate::CommandResult::ChromeControl { hint, .. } = own else {
+        panic!("Connect answers with the browser view");
+    };
+    assert!(hint.unwrap_or_default().contains("Check connection"));
+    assert_eq!(unpaired(&calls), 1, "{:?}", calls.lock().unwrap());
+    core.shutdown().await;
+}
+
+/// A removed Edge profile stays quiet through the Debug API's Edge Connect (`OpenEdgeStore`).
+///
+/// PREDICT (written before any change; the code already gates it): green. Without the gate the Debug API's Edge
+/// Connect forgets the removal and the next reconnect opens the dialog.
+#[cfg(feature = "your-edge")]
+#[tokio::test]
+async fn a_debug_api_edge_connect_keeps_a_removed_edge_profile_quiet() {
+    let (core, mut receive) = start("pairing-removed-edge-debug-api").await;
+    core.shared
+        .chrome_control
+        .set_browser_enabled(Browser::Edge, true)
+        .unwrap();
+    let profile = format!("edge:{PROFILE}");
+    connected(&core, &[&profile]);
+    let calls = answering(&core);
+    remove_row(&core, &profile).await;
+    calls.lock().unwrap().clear();
+    let _ = core
+        .chrome_control(
+            crate::Origin::DebugApi,
+            super::ChromeControlRequest::OpenEdgeStore {},
+        )
+        .await;
+    notify(&core, REQUESTS[0], &profile);
+    no_prompt(&mut receive, "a Debug API Edge Connect keeps the quiet").await;
+    not_now_recorded(&core, &profile).await;
+    assert!(declined_quietly(&calls, REQUESTS[0]));
+    assert_eq!(unpaired(&calls), 0, "{:?}", calls.lock().unwrap());
+    core.shutdown().await;
+}
+
+/// The person's Connect after "Not now" asks the helper to keep a saved pin (`keepPin`): the helper decides from its
+/// own pins, so a pin Vibe Work holds no record of is never dropped by asking again.
+///
+/// PREDICT: red before `keepPin` — Connect sent only `{"profileId"}`, the plain removal that drops a helper pin.
+#[tokio::test]
+async fn connect_after_not_now_asks_the_helper_to_keep_a_saved_pin() {
+    let (core, mut receive) = start("pairing-removed-keep-pin").await;
+    let profile = format!("chrome:{OTHER}");
+    let calls = answering(&core);
+    notify(&core, REQUESTS[0], &profile);
+    let (_, answer) = prompt(&mut receive).await;
+    answer.send(Confirmation::Declined).unwrap();
+    not_now_recorded(&core, &profile).await;
+    let _ = core
+        .chrome_control(crate::Origin::Ui, super::ChromeControlRequest::Connect {})
+        .await;
+    let sent: Vec<Value> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(tool, _)| tool == "owner.profileUnpair")
+        .map(|(_, args)| args.clone())
+        .collect();
+    assert_eq!(sent, [json!({"profileId":profile,"keepPin":true})]);
+    notify(&core, REQUESTS[1], &profile);
+    let _ = prompt(&mut receive).await;
+    core.shutdown().await;
+}
+
+/// An older helper refuses the `keepPin` field: Connect then sends the plain request it always sent, so asking
+/// again still works.
+///
+/// PREDICT: red before the fallback — with only the `keepPin` request the older helper's refusal left the "Not now"
+/// in place and the next request opened no dialog.
+#[tokio::test]
+async fn connect_after_not_now_falls_back_for_an_older_helper() {
+    let (core, mut receive) = start("pairing-removed-keep-pin-old").await;
+    let profile = format!("chrome:{OTHER}");
+    let calls = core
+        .shared
+        .chrome_control
+        .owner
+        .answering(|tool, args| match tool {
+            "owner.profileUnpair" if args.get("keepPin").is_some() => {
+                json!({"rpcError":{"code":-32602,"message":"Browser connection could not be removed"}})
+            }
+            "owner.profileUnpair" => json!({"unpaired":true}),
+            "owner.pairing.approve" => json!({"approved":false}),
+            _ => json!({"applied":true}),
+        });
+    notify(&core, REQUESTS[0], &profile);
+    let (_, answer) = prompt(&mut receive).await;
+    answer.send(Confirmation::Declined).unwrap();
+    not_now_recorded(&core, &profile).await;
+    let _ = core
+        .chrome_control(crate::Origin::Ui, super::ChromeControlRequest::Connect {})
+        .await;
+    let sent: Vec<Value> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(tool, _)| tool == "owner.profileUnpair")
+        .map(|(_, args)| args.clone())
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            json!({"profileId":profile,"keepPin":true}),
+            json!({"profileId":profile})
+        ]
+    );
+    assert!(
+        core.shared
+            .chrome_control
+            .owner
+            .approvals
+            .declined_for(Browser::Chrome)
+            .is_empty(),
+        "the older helper's plain removal forgets the Not now"
+    );
+    notify(&core, REQUESTS[1], &profile);
+    let _ = prompt(&mut receive).await;
+    core.shutdown().await;
+}
+
+// PREDICT (red before the change): two Chrome profiles were paired; the person removed the one whose extension was
+// connected while the other stayed offline. The helper's status still listed the removed profile as connected, the
+// card took that as the browser's own connection, and kept "Connected" ("Paired" on macOS) with the removed-profile
+// step beside it, so the agent also read Your Chrome as connected. A profile the person removed is not this browser's
+// connection: the card now reads "Not connected" with the same step and Connect, and the agent reads the same state.
+#[tokio::test]
+async fn removing_the_connected_profile_while_another_is_offline_reads_not_connected() {
+    let (core, mut receive) = start("pairing-removed-connected").await;
+    let removed = format!("chrome:{PROFILE}");
+    let offline = format!("chrome:{OTHER}");
+    // The packaged helper and Set up's record, with the same scripted helper answers as `answering`.
+    let _calls = super::test_support::answering(&core.shared, |tool, _| match tool {
+        "owner.profileUnpair" | "owner.browserUnpair" => json!({"unpaired":true}),
+        "owner.pairing.approve" => json!({"approved":false}),
+        _ => json!({"applied":true}),
+    });
+    let chrome = &core.shared.chrome_control;
+    chrome
+        .owner
+        .tools
+        .lock()
+        .unwrap()
+        .push(json!({"name":"chrome_status"}));
+    // The extension is in a profile folder of a Chrome user data folder that Set up registered.
+    let data = chrome
+        .config
+        .user_home
+        .as_ref()
+        .unwrap()
+        .join("removed-connected-data");
+    let folder = data.join("Default");
+    std::fs::create_dir_all(
+        folder
+            .join("Extensions")
+            .join(&chrome.config.extension_id)
+            .join("0.1.12_0"),
+    )
+    .unwrap();
+    std::fs::write(
+        chrome.dir().unwrap().join("setup.json"),
+        json!({"files":[],"browsers":["Google Chrome"],"userData":[data]}).to_string(),
+    )
+    .unwrap();
+    let status = |removed_connected: bool| {
+        super::test_support::observe_status(
+            &core.shared,
+            &json!({"profiles":[
+                {"profileId":removed,"name":"Your Chrome","connected":removed_connected},
+                {"profileId":offline,"name":"Work","connected":false}]}),
+        );
+    };
+    status(true);
+    assert_eq!(
+        super::commands::addon(&core.shared).state,
+        super::AddonState::Connected
+    );
+    remove_row(&core, &removed).await;
+    // The removed extension asks again at once; it is answered Not now without a dialog.
+    notify(&core, REQUESTS[0], &removed);
+    no_prompt(&mut receive, "a removed profile does not ask by itself").await;
+    not_now_recorded(&core, &removed).await;
+    // The next status poll still lists the removed profile's extension as connected.
+    status(true);
+    let view = super::commands::addon(&core.shared);
+    assert_ne!(view.state, super::AddonState::Connected, "{view:?}");
+    assert_eq!(view.label, "Not connected", "{view:?}");
+    assert_eq!(
+        view.action,
+        Some(super::addon::AddonAction::Connect),
+        "{view:?}"
+    );
+    assert_eq!(
+        view.step.as_deref(),
+        Some(
+            "You removed a Chrome profile that is still connected in Chrome. Click Connect Chrome to pair it again."
+        ),
+        "{view:?}"
+    );
+    assert!(
+        !view.instruction.contains("is connected."),
+        "the agent is not told the removed profile is connected: {}",
+        view.instruction
+    );
+    core.shutdown().await;
+}
+
+/// The same rule for Edge: a removed Edge profile that the helper still lists as connected is not Edge's connection.
+#[cfg(feature = "your-edge")]
+#[tokio::test]
+async fn a_removed_edge_profile_still_listed_as_connected_is_not_edges_connection() {
+    let (core, _receive) = start("pairing-removed-edge-connected").await;
+    core.shared
+        .chrome_control
+        .set_browser_enabled(Browser::Edge, true)
+        .unwrap();
+    let removed = format!("edge:{PROFILE}");
+    let _calls = answering(&core);
+    connected(&core, &[&removed]);
+    let edge = || {
+        core.shared
+            .chrome_control
+            .owner
+            .edge_pairing
+            .lock()
+            .unwrap()
+            .0
+    };
+    assert_eq!(edge(), super::PairingState::Paired);
+    remove_row(&core, &removed).await;
+    connected(&core, &[&removed]);
+    assert_ne!(edge(), super::PairingState::Paired);
+    core.shutdown().await;
 }

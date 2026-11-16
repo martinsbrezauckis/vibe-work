@@ -4,9 +4,10 @@ use super::{AddonState, agent_browser::Browser};
 use crate::core::Shared;
 use serde_json::{Value, json};
 use std::{
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
     time::Duration,
 };
+use vw_platform::sync::LockRecover;
 
 const WAIT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
@@ -25,7 +26,7 @@ struct State {
 pub(super) struct Attempts(Mutex<State>);
 impl Attempts {
     pub(super) fn connected(&self, shared: &Shared) {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         for browser in [Browser::Chrome, Browser::Edge] {
             if super::availability::live(shared, browser) {
                 state.attempts[usize::from(browser == Browser::Edge)] = None;
@@ -33,20 +34,13 @@ impl Attempts {
         }
     }
     pub(super) fn clear(&self) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .attempts = [None, None];
+        self.0.lock_or_recover().attempts = [None, None];
     }
     fn pending(&self, browser: Browser) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .attempts[usize::from(browser == Browser::Edge)]
-        .is_some()
+        self.0.lock_or_recover().attempts[usize::from(browser == Browser::Edge)].is_some()
     }
     fn begin(&self, shared: &Shared, browser: Browser) -> Option<u64> {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         let index = usize::from(browser == Browser::Edge);
         if state.attempts[index].is_some() || super::availability::live(shared, browser) {
             return None;
@@ -57,19 +51,14 @@ impl Attempts {
         Some(id)
     }
     fn finish(&self, browser: Browser, id: u64, result: Result<(), String>) {
-        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.0.lock_or_recover();
         let attempt = &mut state.attempts[usize::from(browser == Browser::Edge)];
         if matches!(attempt, Some(Attempt::Pending(current)) if *current == id) {
             *attempt = Some(Attempt::Finished(result));
         }
     }
     fn error(&self, browser: Browser) -> Option<String> {
-        match &self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .attempts[usize::from(browser == Browser::Edge)]
-        {
+        match &self.0.lock_or_recover().attempts[usize::from(browser == Browser::Edge)] {
             Some(Attempt::Finished(Err(reason))) => Some(reason.clone()),
             _ => None,
         }

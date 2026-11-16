@@ -1,0 +1,90 @@
+/* The agent control frame of the built-in browser and the chat's paused line. One frame colour for every chat now
+   (index 0, the same orange as the helper browsers' frame); a chat's own colour can replace it later. */
+/* The page area's frame: the native page sits inside the viewport box, so the outline is drawn around it. */
+.preview-tab[data-agent-frame="working"] .preview-viewport {
+  outline: 3px solid var(--agent-frame, var(--agent-frame-0));
+  outline-offset: 1px;
+}
+.preview-tab[data-agent-frame="paused"] .preview-viewport {
+  outline: 3px dashed var(--agent-frame-paused);
+  outline-offset: 1px;
+}
+
+.agent-frame-line[data-state="off"] {
+  /* Empty while off: no space taken (the words are said by the app's announcer). */
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.agent-frame-line {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+  margin: 4px auto;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--agent-frame, var(--agent-frame-0));
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.agent-frame-line[data-state="paused"] {
+  border-left-style: dashed;
+  border-left-color: var(--agent-frame-paused);
+}
+.agent-frame-dot,
+.paused-line-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: var(--radius-round);
+  background: var(--agent-frame-0);
+}
+.agent-frame-line[data-state="paused"] .agent-frame-dot,
+.paused-line-dot {
+  background: var(--agent-frame-paused);
+}
+.agent-frame-text {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paused-line[data-state="none"] {
+  /* Empty while nothing is paused: no space taken (the words are said by the app's announcer). */
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.paused-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 24px;
+  padding: 6px 10px;
+  border: 1px dashed var(--agent-frame-paused);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--text);
+}
+.paused-line-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.paused-line-error {
+  color: var(--red);
+}
+
+/* The session row's mark while the chat's browser is paused (icon only, like the loops mark). */
+.paused-row {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--agent-frame-paused);
+}

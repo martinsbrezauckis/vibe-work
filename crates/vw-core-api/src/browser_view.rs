@@ -41,6 +41,17 @@ pub enum BrowserRequest {
         /// Exact mounted page key from the Browser pane.
         page_key: String,
     },
+    /// The sites the person answered for Local Network Access (public pages reaching this computer or the local
+    /// network), with their answers.
+    LocalNetworkSites {},
+    /// Changes a site's Local Network Access answer; `answer` absent forgets it (the site is asked again).
+    SetLocalNetworkSite {
+        /// The site (`https://example.com`; a full address is reduced to its site).
+        site: String,
+        /// The new answer, or none to forget it.
+        #[serde(default)]
+        answer: Option<vw_preview::SiteAnswer>,
+    },
     /// Current native ad-filter settings.
     Shields {},
     /// Change native ad filtering; Strict downloads its lists on first use.
@@ -339,6 +350,11 @@ pub enum BrowserResult {
         /// Current saved settings and native availability.
         preferences: crate::BrowserPreferences,
     },
+    /// The remembered Local Network Access answers, by site.
+    LocalNetworkSites {
+        /// Every remembered site and its answer, sorted by site.
+        sites: Vec<LocalNetworkSite>,
+    },
     /// Confirmed native ad filtering.
     Shields {
         /// Confirmed mode and platform availability.
@@ -413,4 +429,15 @@ pub enum BrowserResult {
     },
     /// `cancelAnnotate` or `cancelSecret`.
     Done {},
+}
+
+/// One remembered Local Network Access answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct LocalNetworkSite {
+    /// The site (`https://example.com`).
+    pub site: String,
+    /// Allow or Block.
+    pub answer: vw_preview::SiteAnswer,
 }

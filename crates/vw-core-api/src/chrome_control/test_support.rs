@@ -25,6 +25,25 @@ pub(crate) fn answering(
     chrome.owner.answering(answer)
 }
 
+/// Waits until an approved Safari pairing has run to its end (the approval task sets `safari_approved` last), bounded
+/// at 10 s. A fixed short sleep is not enough when a loaded machine runs the approval task later.
+#[cfg(feature = "your-safari")]
+pub(crate) async fn until_safari_approved(shared: &Shared) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !shared
+        .chrome_control
+        .owner
+        .safari_approved
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the approved Safari pairing never finished"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 /// Feed a complete helper status through the same observer used by the owner task.
 pub(crate) fn observe_status(shared: &Arc<Shared>, data: &Value) {
     super::owner::update_pairing(&Arc::downgrade(shared), &json!({"structuredContent":data}));

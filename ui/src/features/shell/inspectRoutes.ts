@@ -11,6 +11,7 @@
  * answers within its timeout (default 5 s, at most 30 s) and says whether the UI really went quiet.
  */
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import { queryNeutral } from "./secretSafety";
 import { screenshotSecrets } from "./screenshotSecrets";
 import type { App } from "./AppContext";
@@ -22,12 +23,6 @@ const OVERLAYS =
   '[role="menu"], [role="listbox"], [role="dialog"], [role="tooltip"], .popover, .menu';
 /** Elements whose text must not be cut off. */
 const TEXTUAL = "button, h1, h2, h3, [role='tab'], [role='menuitem']";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function numberIn(value: unknown, fallback: number, max: number): number {
   if (value === undefined) return fallback;
@@ -258,14 +253,14 @@ export function registerInspectRoutes(app: App): () => void {
     app.uiControl.register(
       "settle",
       (body) => {
-        const { quietMs, timeoutMs } = asObject(body);
+        const { quietMs, timeoutMs } = bodyObject(body);
         return counter.settle(numberIn(quietMs, 250, 10_000), numberIn(timeoutMs, 5_000, 30_000));
       },
       // A wait sends no commands: background work must not join it and extend its final reply.
       () => true,
     ),
     app.uiControl.register("rect", (body) => {
-      const { selector } = asObject(body);
+      const { selector } = bodyObject(body);
       if (typeof selector !== "string" || selector === "")
         throw new UiControlError("invalidParams", "selector must be a non-empty CSS selector");
       const base = { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
@@ -302,7 +297,7 @@ export function registerInspectRoutes(app: App): () => void {
     // Debug API compares both answers and discards the capture when anything moved (`secretSafety.ts`).
     app.uiControl.register(
       "secrets",
-      (body) => screenshotSecrets(asObject(body).lock),
+      (body) => screenshotSecrets(bodyObject(body).lock),
       () => true,
     ),
   ];

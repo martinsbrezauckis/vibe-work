@@ -103,6 +103,140 @@ linked: boolean,
  */
 editable: boolean, };
 
+export type ImportRequest = { "op": "detect", } | { "op": "scan",
+/**
+ * A project folder the person picked, for its own files.
+ */
+project?: string, } | { "op": "apply",
+/**
+ * The rows to bring.
+ */
+picks: Array<ImportPick>,
+/**
+ * The project the scan used.
+ */
+project?: string, } | { "op": "last", } | { "op": "undo",
+/**
+ * The bring's id (from its summary).
+ */
+bring: string, };
+
+export type ImportResult = { "kind": "detected",
+/**
+ * The agents, each with the name shown for it.
+ */
+agents: Array<ImportDetected>, } | { "kind": "plan",
+/**
+ * Every row found.
+ */
+rows: Array<ImportFound>, } | { "kind": "brought",
+/**
+ * What it did.
+ */
+summary: ImportSummary, } | { "kind": "last",
+/**
+ * What it did.
+ */
+summary: ImportSummary | null, } | { "kind": "undone",
+/**
+ * The bring that was put back.
+ */
+bring: string, };
+
+export type ImportPick = {
+/**
+ * The row's id.
+ */
+id: string,
+/**
+ * Its fingerprint when shown.
+ */
+fingerprint: string, };
+
+export type ImportDetected = {
+/**
+ * Which agent.
+ */
+agent: ImportAgent,
+/**
+ * Its name.
+ */
+label: string, };
+
+export type ImportSummary = {
+/**
+ * Its id, for Undo.
+ */
+bring: string,
+/**
+ * Rows brought as they were.
+ */
+brought: number,
+/**
+ * Rows brought with a change.
+ */
+changed: number,
+/**
+ * Picked rows that could not be brought now, each with why.
+ */
+left: Array<string>, };
+
+export type ImportFound = {
+/**
+ * Stable id for picking (agent, kind, name and source).
+ */
+id: string,
+/**
+ * Where it comes from.
+ */
+agent: ImportAgent,
+/**
+ * The agent's name as shown.
+ */
+agentLabel: string,
+/**
+ * What it is.
+ */
+kind: ImportKind,
+/**
+ * Its name.
+ */
+name: string,
+/**
+ * The file or folder it was read from.
+ */
+source: string,
+/**
+ * Where it goes in Vibe Work (`None` when it cannot be brought).
+ */
+target: string | null,
+/**
+ * Ready, changed or cannot be brought.
+ */
+status: ImportStatus,
+/**
+ * The change, or why it cannot be brought.
+ */
+note: string | null,
+/**
+ * The exact command a program server runs, or a server's address.
+ */
+detail: string | null,
+/**
+ * Names of keys that go to the vault (never their values).
+ */
+keys: Array<string>,
+/**
+ * Changes when the source changes (apply refuses a row whose source changed since the person saw it).
+ */
+fingerprint: string, };
+
+export type ImportAgent = "claudeCode" | "codex" | "openCode" | "cursor";
+
+export type ImportKind = "instructions" | "skill" | "mcpServer" | "permissions" | "hooks" | "subagent" | "command" | "rules";
+
+export type ImportStatus = "ready" | "changed" | "cantBring";
+
 export type ProjectInstructionsRequest = { "op": "list",
 /**
  * Saved project ID.

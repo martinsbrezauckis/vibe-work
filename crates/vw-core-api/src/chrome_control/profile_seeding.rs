@@ -5,7 +5,7 @@
 use super::{agent_browser::Browser, profile_ids, profiles};
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 /// The profiles the person must choose from before this open: an unbound chat whose browser has a default that is
 /// not connected now, or no default and more than one paired profile (connected or not); an older chat whose tasks
@@ -22,12 +22,11 @@ pub(super) fn choice_needed(
     let bound = super::profile_bindings::selected(chrome, chat);
     let ambiguous = chrome
         .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .ambiguous
         .contains_key(chat);
     let browser = Browser::from_profile(bound.as_deref().unwrap_or(requested));
-    let paired: Vec<_> = profiles::view(shared)
+    let paired: Vec<_> = profiles::agent_view(shared)
         .into_iter()
         .filter(|row| {
             row.state != super::ProfileState::Unavailable && browser.owns_profile(&row.profile_id)
@@ -68,8 +67,7 @@ pub(super) fn choice_needed(
             .map(|row| crate::ask::tool_calls::ProfileChoice {
                 agent_name: chrome
                     .profiles
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .lock_or_recover()
                     .agent_name(&row.profile_id),
                 profile_id: row.profile_id,
                 name: row.name,
@@ -110,7 +108,7 @@ pub(super) async fn ask_person(
 /// note: the default's shown name when the default is one of them (`closedDefault`), else whether any other paired
 /// profile is (`closedOthers`).
 fn closed_windows(shared: &Shared, browser: Browser) -> Value {
-    let paired: Vec<_> = profiles::view(shared)
+    let paired: Vec<_> = profiles::agent_view(shared)
         .into_iter()
         .filter(|row| {
             row.state != super::ProfileState::Unavailable && browser.owns_profile(&row.profile_id)
@@ -139,12 +137,13 @@ pub(super) fn resolve(
     let shorthand = [browser.id(), browser.name(), browser.short_name()]
         .iter()
         .any(|name| name.eq_ignore_ascii_case(&requested));
-    let bound = chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(chat)
-        .cloned();
+    if shorthand && browser == Browser::Firefox {
+        // The agent's only Firefox is Vibe Work's own window; the person's own Firefox never takes agent actions,
+        // so the browser's name opens the owned window, with the same checks as its exact id.
+        args["profileId"] = Value::String(profiles::AGENT_FIREFOX.to_owned());
+        return resolve(shared, chat, args, status);
+    }
+    let bound = chrome.chat_profiles.lock_or_recover().get(chat).cloned();
     let selected = if let Some(bound) = bound {
         super::profile_bindings::check(chrome, chat, &bound)?;
         if !shorthand && !profile_ids::same(&bound, &requested) {
@@ -155,7 +154,7 @@ pub(super) fn resolve(
         }
         bound
     } else {
-        let mine: Vec<_> = profiles::view(shared)
+        let mine: Vec<_> = profiles::agent_view(shared)
             .into_iter()
             .filter(|row| browser.owns_profile(&row.profile_id))
             .collect();

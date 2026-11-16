@@ -10,7 +10,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +79,7 @@ pub struct OwnProcessRegistry {
 
 impl OwnProcessRegistry {
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<RegistrationId, OwnProcess>> {
-        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+        self.entries.lock_or_recover()
     }
 
     /// Registers a process; returns the id to unregister it with.

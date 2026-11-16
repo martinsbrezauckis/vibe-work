@@ -24,12 +24,15 @@ pub(crate) mod browser_start;
 mod browser_start_tests;
 mod browser_text;
 pub(crate) mod builtin;
+#[cfg(test)]
+mod builtin_send_tests;
 pub(crate) mod builtin_share;
 mod capabilities;
 #[cfg(test)]
 mod capability_tests;
 pub(crate) mod check;
 pub(crate) mod commands;
+mod commands_view;
 mod connection_notice;
 mod content;
 #[cfg(test)]
@@ -44,19 +47,23 @@ mod enroll;
 mod enroll_browser;
 mod escalation;
 mod extension_install;
+#[cfg(test)]
+mod no_keeps_tabs_tests;
 use vw_platform::extension_registry;
 #[cfg(test)]
 #[cfg(feature = "your-firefox")]
 mod firefox_boundary_tests;
 mod firefox_commands;
-#[cfg(all(test, feature = "your-firefox"))]
-mod firefox_hidden_tests;
 mod firefox_package;
 mod firefox_probe;
 mod firefox_setup;
 mod firefox_sharing;
+#[cfg(all(test, feature = "your-firefox"))]
+mod firefox_sharing_tests;
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 mod firefox_switch_tests;
+mod frame_colours;
+pub(crate) mod frames;
 pub(crate) mod gateway;
 mod helper_refresh;
 #[cfg(all(test, feature = "your-edge"))]
@@ -96,6 +103,8 @@ mod owner;
 #[cfg(test)]
 mod owner_credential_tests;
 #[cfg(test)]
+mod owner_keyring_tests;
+#[cfg(test)]
 mod page_tool_output_tests;
 mod pairing;
 mod pairing_approval;
@@ -103,18 +112,26 @@ pub use pairing_approval::BROWSER_PAIRING_DIALOG_METHOD;
 #[cfg(test)]
 mod pairing_approval_tests;
 #[cfg(test)]
+mod pairing_key_change_tests;
+#[cfg(test)]
+mod pairing_removed_setup_tests;
+#[cfg(test)]
 mod pairing_removed_tests;
 pub use pairing::PairingState;
 #[cfg(test)]
 mod ask_policy_tests;
 #[cfg(test)]
 mod close_consent_tests;
+#[cfg(test)]
+mod held_stop_tests;
 pub(crate) mod interaction_consent;
 #[cfg(test)]
 mod interaction_consent_tests;
 mod person_stop;
 #[cfg(test)]
 mod person_stop_tests;
+#[cfg(test)]
+mod pill_stop_tests;
 mod pipe;
 mod probe;
 mod profile_agent;
@@ -169,6 +186,8 @@ mod reconnect_tests;
 #[cfg(test)]
 mod registry_native_tests;
 mod remove;
+#[cfg(all(test, feature = "your-edge"))]
+mod remove_save_tests;
 #[cfg(all(test, feature = "your-safari"))]
 mod safari_action_tests;
 #[cfg(all(test, feature = "your-safari"))]
@@ -260,6 +279,9 @@ pub(crate) struct ChromeControl {
     left_in_chrome: Mutex<Vec<PathBuf>>,
     removed_external: AtomicBool,
     work: Mutex<work::Work>,
+    /// What each helper session's agent control frame shows, and the person's applied pause clicks.
+    /// Boxed for the same large-future limit as `Shared::paused_tools`.
+    frames: Box<Mutex<frames::Frames>>,
     selections: Mutex<selection::Selections>,
     tasks: Mutex<std::collections::HashMap<String, String>>,
     output_cache: Mutex<output_cache::Cache>,
@@ -333,6 +355,7 @@ impl ChromeControl {
             left_in_chrome: Mutex::new(Vec::new()),
             removed_external: AtomicBool::new(false),
             work: Mutex::new(work::Work::default()),
+            frames: Box::default(),
             selections: Mutex::new(selection::Selections::default()),
             tasks: Mutex::new(std::collections::HashMap::new()),
             output_cache: Mutex::new(output_cache::Cache::default()),
@@ -603,6 +626,9 @@ pub(crate) fn same_profile(left: &str, right: &str) -> bool {
 pub(crate) fn end_chat(shared: &crate::core::Shared, chat: &str, deleted: bool) {
     shared.chrome_control.end_chat(chat, deleted);
     if deleted {
+        frames::forget_chat(shared, chat);
+    }
+    if deleted {
         profile_presence::prune(shared);
     }
     owner::publish(shared);
@@ -610,6 +636,7 @@ pub(crate) fn end_chat(shared: &crate::core::Shared, chat: &str, deleted: bool) 
 /// The person stopped the chat in Vibe Work: its Chrome work ends and is not reopened by an earlier id.
 pub(crate) fn stop_chat(shared: &crate::core::Shared, chat: &str) {
     shared.chrome_control.stop_chat(chat);
+    frames::sync_chat(shared, chat);
     owner::publish(shared);
 }
 /// Publish availability after the question and all browsers' released state are visible.
@@ -623,6 +650,8 @@ pub(crate) fn end_turn(shared: &crate::core::Shared, chat: &str) {
     } else {
         shared.chrome_control.end_turn(chat);
     }
+    // The agent lets go visually at turn end; the session stays for a follow-up.
+    frames::sync_chat(shared, chat);
     owner::publish(shared);
 }
 #[cfg(feature = "ts")]
@@ -671,6 +700,8 @@ mod sharing_tests;
 
 #[cfg(test)]
 mod page_media_tests;
+#[cfg(test)]
+mod page_video_tests;
 
 #[cfg(test)]
 mod local_file_tests;

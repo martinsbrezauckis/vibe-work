@@ -125,15 +125,15 @@ impl PagesServer {
         pdf: bool,
         snapshot: Option<crate::snapshot::Snapshot>,
     ) -> std::io::Result<Self> {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+        let (listener, own) = vw_netguard::listeners::bind_own_tokio().await?;
         let port = listener.local_addr()?.port();
         let scripts = Arc::new(AtomicBool::new(scripts));
         let mut token = [0u8; 16];
         getrandom::fill(&mut token).map_err(|e| std::io::Error::other(e.to_string()))?;
-        let check = format!("{CHECK_PREFIX}{}", crate::comments::hex(&token));
+        let check = format!("{CHECK_PREFIX}{}", hex::encode(token));
         let mut capability = [0u8; 32];
         getrandom::fill(&mut capability).map_err(|e| std::io::Error::other(e.to_string()))?;
-        let capability = crate::comments::hex(&capability);
+        let capability = hex::encode(capability);
         let state = Arc::new(ServerState {
             snapshot,
             capability: capability.clone(),
@@ -147,6 +147,8 @@ impl PagesServer {
         let router = Router::new().fallback(handle).with_state(state);
         let (tx, rx) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
+            // The port stays one of Vibe Work's own (refused for every browser page) until the listener closes.
+            let _own = own;
             let served = axum::serve(listener, router)
                 .with_graceful_shutdown(async {
                     let _ = rx.await;

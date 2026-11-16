@@ -4,7 +4,8 @@ use super::{profile_bindings, profiles};
 use crate::core::Shared;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{collections::BTreeMap, sync::PoisonError, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
+use vw_platform::sync::LockRecover;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Release {
@@ -38,17 +39,8 @@ pub struct ChatBrowserProfile {
 }
 
 pub(super) fn view(chrome: &super::ChromeControl) -> Option<Vec<ChatBrowserProfile>> {
-    let chats = chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
-    let pending = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .pending
-        .clone();
+    let chats = chrome.chat_profiles.lock_or_recover().clone();
+    let pending = chrome.bindings.lock_or_recover().pending.clone();
     let mut rows: Vec<_> = chats
         .into_iter()
         .map(|(session_id, profile_id)| {
@@ -68,13 +60,7 @@ pub(super) fn view(chrome: &super::ChromeControl) -> Option<Vec<ChatBrowserProfi
             }
         })
         .collect();
-    for chat in chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .ambiguous
-        .keys()
-    {
+    for chat in chrome.bindings.lock_or_recover().ambiguous.keys() {
         if !rows.iter().any(|row| &row.session_id == chat) {
             rows.push(ChatBrowserProfile {
                 session_id: chat.clone(),
@@ -121,8 +107,7 @@ pub(super) async fn select_picked(
     shared
         .chrome_control
         .picked_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(chat.into(), profiles::canonical(profile));
     Ok(released)
 }
@@ -142,13 +127,7 @@ async fn select_with(
     let _held = chrome.binding_changes.lock().await;
     eligible(shared, profile, offline)?;
     let profile = profiles::canonical(profile);
-    let pending = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .pending
-        .get(chat)
-        .cloned();
+    let pending = chrome.bindings.lock_or_recover().pending.get(chat).cloned();
     if pending.is_none()
         && profile_bindings::selected(chrome, chat)
             .as_deref()
@@ -169,8 +148,8 @@ async fn select_with(
     profile_bindings::begin_change(chrome, chat, change.clone())?;
     crate::ask::tool_calls::cancel_browser_chat(shared, chat);
     {
-        let mut tasks = chrome.tasks.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut work = chrome.work.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut tasks = chrome.tasks.lock_or_recover();
+        let mut work = chrome.work.lock_or_recover();
         for release in &change.releases {
             tasks.remove(&release.id);
             work.ask_stop(&release.id, chat);
@@ -194,17 +173,12 @@ async fn select_with(
 fn releases(chrome: &super::ChromeControl, chat: &str) -> Vec<Release> {
     let saved = chrome
         .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .leases
         .get(chat)
         .cloned()
         .unwrap_or_default();
-    let work = chrome
-        .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .releases(chat);
+    let work = chrome.work.lock_or_recover().releases(chat);
     saved
         .into_iter()
         .chain(work)
@@ -223,8 +197,7 @@ async fn release_acknowledged(
     let same_owner = || {
         chrome
             .bindings
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .check_session(chat, &release.id, &release.profile)
             .is_ok()
     };

@@ -320,6 +320,11 @@ pub fn run() -> tauri::Result<()> {
         #[cfg(target_os = "macos")]
         if let RunEvent::Reopen { .. } = event {
             let _ = tray::reveal_main_window(app_handle);
+            // An agent's question waiting in a window of its own comes forward over the main window just shown (queued
+            // after the reveal's own main-thread work).
+            let _ = app_handle.run_on_main_thread(|| {
+                let _ = vw_platform::confirm_window::raise_shown();
+            });
         }
         // On this (UI) thread, bounded even when a runtime task waits for this thread (`vw_host::exit`).
         if let RunEvent::Exit = event

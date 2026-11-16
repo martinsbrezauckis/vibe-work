@@ -4,8 +4,9 @@
 //!
 //! A removal discards (listed in [`Inspection::files`], so the user confirms them by name):
 //! - tracked changes and new files the ignore rules do not hide: `vw_changes::diff_against_head` (files read in
-//!   Rust, hashed with `--no-filters`; a filter repository's file can show as changed when only its filtered
-//!   form matches: the safe direction), plus staged-only changes (`git diff-index --cached HEAD`);
+//!   Rust, hashed with `--no-filters`; line endings git converts on checkout count as unchanged, like `git
+//!   status`; a file with a filter driver can show as changed when only its filtered form matches: the safe
+//!   direction), plus staged-only changes (`git diff-index --cached HEAD`);
 //! - **ignored files that are not known build output** (`node_modules/`, `target/`, `dist/`, `*.pyc`,...: the
 //!   list is [`BUILD_OUTPUT`]): a `.env` or a notes file someone ignored is work too. Known build output is
 //!   only counted;

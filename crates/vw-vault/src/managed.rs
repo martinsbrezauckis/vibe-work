@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,9 +28,7 @@ pub(crate) struct Creating(PathBuf);
 impl Creating {
     /// `None` while another creation of the same folder is running.
     pub(crate) fn begin(dir: &Path) -> Option<Self> {
-        let mut creating = CREATING
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut creating = CREATING.lock_or_recover();
         creating
             .insert(dir.to_owned())
             .then(|| Self(dir.to_owned()))
@@ -38,18 +37,12 @@ impl Creating {
 
 impl Drop for Creating {
     fn drop(&mut self) {
-        CREATING
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&self.0);
+        CREATING.lock_or_recover().remove(&self.0);
     }
 }
 
 fn being_created(dir: &Path) -> bool {
-    CREATING
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains(dir)
+    CREATING.lock_or_recover().contains(dir)
 }
 
 fn private_vault_name() -> &'static str {

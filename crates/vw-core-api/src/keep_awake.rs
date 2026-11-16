@@ -2,9 +2,10 @@
 //! Depends on the platform backend, store and gate; the pump and callback events reconcile it.
 //! The owning thread acquires/drops every OS handle; refusal is latched until work becomes idle.
 
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use tokio::sync::{oneshot, watch};
 use vw_platform::keep_awake::{IdleSleepBackend, IdleSleepHold};
+use vw_platform::sync::LockRecover;
 
 use crate::core::Shared;
 
@@ -57,11 +58,7 @@ impl AwakeState {
 
     pub async fn shutdown(&self) {
         let _ = self.send.send(Update::Stop);
-        let worker = self
-            .worker
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let worker = self.worker.lock_or_recover().take();
         if let Some(worker) = worker {
             let _ = tokio::task::spawn_blocking(move || worker.join()).await;
         }
@@ -71,12 +68,7 @@ impl AwakeState {
 impl Drop for AwakeState {
     fn drop(&mut self) {
         let _ = self.send.send(Update::Stop);
-        if let Some(worker) = self
-            .worker
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(worker) = self.worker.lock_or_recover().take() {
             let _ = worker.join();
         }
     }

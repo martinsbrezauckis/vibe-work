@@ -1,5 +1,6 @@
 //! Windows automatic-proxy selection, independent of `WinHTTP` so Linux tests exercise the same policy.
 //! Called by the Windows adapter with native lookup and manual/default fallback closures.
+use crate::sync::LockRecover;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -62,10 +63,7 @@ impl Policy {
         // Only cache absence, never per-URL PAC routes or manual settings. Each call reads fresh
         // IE/default settings; an explicit PAC always runs, even while a negative entry is live.
         // No network watcher is needed: moving to another network costs at most five minutes.
-        let mut absent_until = self
-            .absent_until
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut absent_until = self.absent_until.lock_or_recover();
         if mode != Mode::Discover {
             *absent_until = None;
             drop(absent_until);
@@ -86,11 +84,7 @@ impl Policy {
         drop(absent_until);
         match automatic() {
             Err(error) if error.discovery_absent() => {
-                *self
-                    .absent_until
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                    Some(Instant::now() + NEGATIVE_TTL);
+                *self.absent_until.lock_or_recover() = Some(Instant::now() + NEGATIVE_TTL);
                 fallback()
             }
             result => result.map_err(|_| FAILED),

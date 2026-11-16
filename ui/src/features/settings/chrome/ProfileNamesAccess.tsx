@@ -5,7 +5,7 @@
  * ask the core to read the folder again; once the person allowed it, the names appear and the line goes, without a
  * restart. Never shown on Windows or Linux (the core never reports the fact there). Used by `YourChromeSettings`.
  */
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { Button, SettingsRow } from "../../../components/Controls";
 import { TEXT, wording } from "../../../vocabulary";
 import { useApp } from "../../shell/AppContext";
@@ -14,6 +14,10 @@ import type { ChromeControlState } from "./useChromeControl";
 /** One recheck at a time for every card: the core reads all refused folders in one go. */
 let rechecking: Promise<unknown> | null = null;
 
+/**
+ * Line and System Settings button shown while macOS refuses reading the browser's profile folder; asks the core to
+ * read it again on mount, focus and visibility change.
+ */
 export function ProfileNamesAccess({
   browser,
   chrome,
@@ -23,6 +27,7 @@ export function ProfileNamesAccess({
 }) {
   const { core } = useApp();
   const refused = chrome.view?.setup.profileNamesRefused === true;
+  const lineId = useId();
 
   useEffect(() => {
     if (!refused || core === null) return;
@@ -51,9 +56,10 @@ export function ProfileNamesAccess({
   });
   return (
     <SettingsRow data-setting={`${browser.toLowerCase()}-profile-names-access`}>
-      <span>{text}</span>
+      <span id={lineId}>{text}</span>
       <Button
         data-testid={`settings.${browser.toLowerCase()}-profile-names-settings`}
+        aria-describedby={lineId}
         shape="outlined"
         disabled={chrome.busy !== null}
         onClick={() => {

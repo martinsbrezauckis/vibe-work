@@ -5,6 +5,7 @@ import { OFFERS_INITIAL, type OffersState } from "../../state/installOffers";
 import { SKILLS_INITIAL, type SkillsState } from "../../state/skills";
 const NONE = createStore<SkillsState>(SKILLS_INITIAL);
 const NO_OFFERS = createStore<OffersState>(OFFERS_INITIAL);
+/** Selects from the skills store (an empty store when the app has no skills controller). */
 export function useSkills<T>(select: (s: SkillsState) => T): T {
   return useStore(useApp().skills?.store ?? NONE, select);
 }

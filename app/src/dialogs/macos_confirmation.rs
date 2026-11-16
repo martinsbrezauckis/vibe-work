@@ -4,7 +4,8 @@
 //! Depends on: Tauri's main thread and main window, vw-platform (the window), vw-host (heading, button order), a Tokio
 //! one-shot reply. Called by: `dialogs::show_dialog`.
 //! The declining button is first (rightmost) with Return; Escape declines; a dropped request (a
-//! cancelled call) closes its sheet or takes it out of the queue, and a late press never approves.
+//! cancelled call) closes its sheet or takes it out of the queue, and a late press never approves. Only a sheet
+//! brings the main window forward first; an agent's window of its own does not (`super::present_for`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -60,9 +61,11 @@ pub(super) async fn show_dialog<R: Runtime>(
         id: Arc::new(AtomicU64::new(0)),
         canceled: Arc::new(AtomicBool::new(false)),
     };
-    // A sheet on a hidden or background window could wait unseen: present the main window first. Native input itself
-    // never brings a window forward or uses this path to obtain focus.
-    let _ = crate::tray::reveal_main_window(app);
+    // A sheet on a hidden or background window could wait unseen: present the main window first. An agent's request
+    // (a window of its own) never brings the app forward or takes the focus: the chat's badge and the Dock badge say
+    // it waits, and showing that chat raises it (`super::raise_prompt`). Native input itself never brings a window
+    // forward or uses this path to obtain focus.
+    super::present_for(app, modal);
     let (send, receive) = oneshot::channel();
     let (id, canceled, handle) = (owner.id.clone(), owner.canceled.clone(), app.clone());
     let posted = app.run_on_main_thread(move || {

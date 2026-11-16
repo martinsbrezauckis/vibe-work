@@ -1,5 +1,7 @@
 //! Vault unlock choice and password transitions. Called by the typed UI commands; persists policy before removing
 //! an unlock secret, and never writes one in password mode. The password and all vault contents stay unchanged.
+//! Only the person changes the choice: when the computer's store cannot keep the key (locked, unavailable), that
+//! unlock falls back to the password with a note, the choice stays System, and the next password unlock tries again.
 use super::{KeyService, blocking};
 use crate::{KeyError, UnlockMethod};
 use std::sync::{Arc, atomic::Ordering};
@@ -49,16 +51,14 @@ impl KeyService {
         let remember = self.unlock_method() == UnlockMethod::System;
         let vault = Arc::clone(&self.vault);
         blocking(move || vault.create(&passphrase, remember)).await??;
-        if remember && self.vault.remember_note().is_some() {
-            self.save_unlock_method(UnlockMethod::Password)?;
-        }
         self.password_typed();
         self.network_unlocked().await;
         self.refresh_key().await;
         Ok(())
     }
 
-    /// Unlocks with a password, retaining the persisted choice on every subsequent unlock.
+    /// Unlocks with a password, retaining the persisted choice on every subsequent unlock. With the System choice it
+    /// tries to keep the key again; a store that refuses leaves the choice unchanged and sets the remember note.
     /// # Errors
     /// Wrong password, selection errors, or vault I/O fails.
     pub async fn unlock(
@@ -88,9 +88,6 @@ impl KeyService {
         let remember = self.unlock_method() == UnlockMethod::System;
         let vault = Arc::clone(&self.vault);
         blocking(move || vault.unlock(&passphrase, Some(remember), choice)).await??;
-        if remember && self.vault.remember_note().is_some() {
-            self.save_unlock_method(UnlockMethod::Password)?;
-        }
         self.password_typed();
         self.network_unlocked().await;
         self.refresh_key().await;

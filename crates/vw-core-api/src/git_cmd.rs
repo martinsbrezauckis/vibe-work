@@ -14,7 +14,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use vw_git::GitError;
 use vw_git::commit::{self, Expected};
@@ -96,6 +97,8 @@ pub(crate) struct GitHub {
     pub(crate) lock: tokio::sync::Mutex<()>,
     /// PR cards per session and selected repository.
     pub(crate) cards: Mutex<HashMap<String, CardCache>>,
+    /// The Git panel's pull request lists, per session and repository (`git_pr_list`).
+    pub(crate) lists: Mutex<HashMap<String, crate::git_pr_list::ListCache>>,
     /// Nested roots discovered from this loaded session's file effects; every use revalidates them.
     pub(crate) repos: Mutex<HashMap<String, (PathBuf, BTreeSet<String>)>>,
     /// GitHub's public API: the monotonic pause after a low rate budget.
@@ -108,6 +111,7 @@ impl GitHub {
             root: changes_dir.map(|d| d.join("git")),
             lock: tokio::sync::Mutex::new(()),
             cards: Mutex::new(HashMap::new()),
+            lists: Mutex::new(HashMap::new()),
             repos: Mutex::new(HashMap::new()),
             api_pause: Mutex::new(ApiPause::default()),
         }
@@ -135,8 +139,7 @@ impl GitHub {
 
     pub(crate) fn card(&self, session: &str, root: &Path) -> CardCache {
         self.cards
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(&format!("{session}:{}", root.display()))
             .cloned()
             .unwrap_or_default()

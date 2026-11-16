@@ -6,7 +6,8 @@
 //! `pages` (`currentPlan`, the tick), `pages::session_ended` (forgets the watch).
 //! Invariant: only the plan file a `currentPlan` answer named is watched per session (one `stat` per tick each).
 
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 use vw_pages::PagesService;
 
@@ -37,10 +38,7 @@ impl Core {
         .map_err(|e| core_error(&e))?;
         let Some((plan, facts, file)) = found else {
             if let Some(hub) = &self.shared.pages {
-                hub.plans
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(session_id);
+                hub.plans.lock_or_recover().remove(session_id);
             }
             return Ok(PagesResult::CurrentPlan {
                 path: None,
@@ -50,8 +48,7 @@ impl Core {
         if let Some(hub) = &self.shared.pages {
             let seen = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
             hub.plans
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+                .lock_or_recover()
                 .insert(session_id.to_owned(), (file, seen));
         }
         Ok(PagesResult::CurrentPlan {
@@ -65,7 +62,7 @@ impl Core {
 pub(crate) fn plan_tick(shared: &Arc<Shared>) {
     let Some(hub) = &shared.pages else { return };
     let changed: Vec<String> = {
-        let mut plans = hub.plans.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut plans = hub.plans.lock_or_recover();
         plans
             .iter_mut()
             .filter_map(|(session, (file, seen))| {

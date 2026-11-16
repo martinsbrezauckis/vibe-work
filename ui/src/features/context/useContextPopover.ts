@@ -4,6 +4,10 @@
 import { type RefObject, useLayoutEffect } from "react";
 import { reserve } from "../../components/nativeLayer";
 
+/**
+ * Shows `panel` as a popover above `trigger`, fitted to the window and refitted on resize or scroll, and focuses it.
+ * Escape or a click or focus outside calls `close`; closing returns focus to `trigger` unless focus moved elsewhere.
+ */
 export function useContextPopover(
   panel: RefObject<HTMLDivElement | null>,
   trigger: RefObject<HTMLButtonElement | null>,

@@ -14,13 +14,8 @@
  * Invariants: bodies are validated (`invalidParams`); every action calls the controller function a click calls.
  */
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "./AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (body === undefined || body === null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 /** The list as the window shows it. */
 function leftRunningJson(app: App) {
@@ -65,7 +60,7 @@ async function sessionAction(app: App, input: Record<string, unknown>): Promise<
 /** Registers `ui/processes`; returns the function that removes it. */
 export function registerProcessRoutes(app: App): () => void {
   return app.uiControl.register("processes", async (body) => {
-    const input = asObject(body);
+    const input = bodyObject(body);
     const left = app.leftRunning;
     if (left === null) throw new UiControlError("serverUnavailable", "the core is not running");
     switch (input["action"] ?? "read") {

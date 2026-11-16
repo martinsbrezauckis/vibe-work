@@ -1,5 +1,6 @@
 /** Search anchors for Accessibility; consumed by the shared Settings catalogue. */
 import type { SettingEntry } from "./catalog";
+/** Settings search entries for the Accessibility rows: row id, label and extra search words. */
 export const accessibilityCatalog: readonly SettingEntry[] = [
   ["a11y-prompt-sound", "Sound when Vibe asks", "sound permission prompt"],
   ["a11y-read-prompts", "Read prompts aloud", "speak voice question"],

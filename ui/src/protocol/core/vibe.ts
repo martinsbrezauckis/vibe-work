@@ -194,7 +194,7 @@ supported: boolean,
  */
 warning: string | null, };
 
-export type FailKind = "network" | "checksum" | "timeout" | "cancelled" | "step" | "start" | "disk";
+export type FailKind = "network" | "checksum" | "timeout" | "cancelled" | "step" | "start" | "unsupported" | "disk";
 
 export type InstallSource = "private" | "existing";
 

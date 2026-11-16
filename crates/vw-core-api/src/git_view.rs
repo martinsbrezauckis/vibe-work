@@ -168,6 +168,19 @@ pub enum GitRequest {
         /// Ask the forge now.
         refresh: bool,
     },
+    /// Every pull request of the chat's branches (its folder's branch and its copy's), newest first. `refresh`
+    /// asks the forge now (subject to the same floor as the card), else the cached list. Asked only while the
+    /// list is on screen.
+    PrList {
+        /// Session id.
+        session_id: String,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        /// Repository root relative to the session folder (default: session repository).
+        repo: Option<String>,
+        /// Ask the forge now.
+        refresh: bool,
+    },
     /// A prepared composer message (never sent by the core).
     PrepareMessage {
         /// Session id.
@@ -475,6 +488,24 @@ pub struct PrStatusView {
     pub open_url: Option<String>,
 }
 
+/// The pull requests of a chat's branches.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PrListView {
+    /// Newest first, at most 30 per branch, each once.
+    pub cards: Vec<PrCard>,
+    /// The branches asked about.
+    pub branches: Vec<String>,
+    /// Where they came from.
+    pub source: PrSource,
+    /// When the forge was last asked (ms since the epoch; 0 = never).
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fetched_at_ms: u64,
+    /// Rate limit, private repository, no forge, checks not read (plain words).
+    pub note: Option<String>,
+}
+
 /// The "Bring into <base>" dialog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -575,6 +606,11 @@ pub enum GitResult {
     PrStatus {
         /// The card.
         status: PrStatusView,
+    },
+    /// `prList`.
+    PrList {
+        /// The list.
+        list: PrListView,
     },
     /// `prepareMessage`.
     Prepared {

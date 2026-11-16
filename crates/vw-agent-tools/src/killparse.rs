@@ -87,11 +87,13 @@ pub(crate) fn command_name(word: &str) -> String {
 
 /// Reads command starts after assignments and transparent wrappers in the unquoted literal, Bash and Windows readings
 /// (`gitparse::readings`): a quoted program name or a quoted argument with a space is read like the shell reads
-/// it, and every target or reason any reading finds counts.
+/// it, and every target or reason any reading finds counts. An `osascript` that quits an app counts as a stop of
+/// that app (`killparse_cmds::osascript_quit`).
 #[must_use]
 pub fn scan(command: &str) -> KillScan {
     let mut out = KillScan::default();
     scan_into(command, &mut out, 0);
+    cmds::osascript_quit(command, &mut out);
     out
 }
 

@@ -19,6 +19,11 @@ import { DelegationReceipts } from "./DelegationReceipts";
 import { AddressBar } from "./AddressBar";
 import { BrowserOverlayLayer } from "./BrowserOverlayLayer";
 import { AgentStrip } from "./AgentStrip";
+import { AgentFrame, frameColour, frameState } from "./AgentFrame";
+import { usePausedTools } from "../../state/usePausedTools";
+import { runningTurnId } from "../composer/model/session";
+import { sessionTitle } from "../../state/sessionSummary";
+import { useCoreState } from "../shell/hooks";
 import type { Capture } from "./capture";
 import { CaptureMenu } from "./CaptureMenu";
 import { Annotations } from "./Annotations";
@@ -78,6 +83,14 @@ export function PreviewTab({
   const picking = useStore(browser.store, (s) =>
     sessionId === null ? undefined : s.picking[sessionId],
   );
+  const entry = useCoreState((s) => (sessionId === null ? undefined : s.sessions[sessionId]));
+  const pausedTools = usePausedTools(app.core, sessionId);
+  // The chat's saved frame colour (index 0, the one default colour, unless it was set for this chat).
+  const colour = useCoreState((s) =>
+    sessionId === null ? undefined : s.chromeControl?.frameColours?.[sessionId],
+  );
+  const turnRunning = runningTurnId(entry?.state ?? null, entry?.session) !== null;
+  const frame = frameState(agent, turnRunning, pausedTools.browser !== null);
   useEffect(() => {
     if (sessionId === null) return;
     void previews.load(sessionId);
@@ -124,7 +137,12 @@ export function PreviewTab({
       <Servers sessionId={sessionId} list={list} previews={previews} busy={busy} />
     );
   return (
-    <div className="preview-tab" data-open={open}>
+    <div
+      className="preview-tab"
+      data-open={open}
+      data-agent-frame={frame}
+      style={{ "--agent-frame": frameColour(colour) } as React.CSSProperties}
+    >
       <BrowserOverlayLayer
         previews={previews}
         sessionId={sessionId}
@@ -182,6 +200,7 @@ export function PreviewTab({
         activity={
           <AgentStrip
             state={agent}
+            turnRunning={turnRunning}
             onStop={() => void browser.stopAgent(sessionId)}
             onResume={() => void browser.resumeAgent(sessionId)}
           />
@@ -296,6 +315,14 @@ export function PreviewTab({
           {notice.text}
         </p>
       )}
+      <AgentFrame
+        state={frame}
+        chat={sessionTitle(entry?.session)}
+        colour={colour ?? 0}
+        onPause={() => void pausedTools.pause("the built-in browser")}
+        onResume={() => void pausedTools.resume()}
+        onStop={() => void app.composer.actions?.stop(sessionId)}
+      />
       {local && <Annotations browser={browser} sessionId={sessionId} controls={false} />}
       {open && <PreviewNotes preview={preview} showRefused={!stopped} />}
       <Viewport

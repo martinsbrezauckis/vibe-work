@@ -1,4 +1,5 @@
-//! Preview maintenance: release idle browsers, report stopped servers and withdraw expired port rights.
+//! Preview maintenance: release idle browsers, report stopped servers, withdraw expired port rights and keep the
+//! previews' URL rules on the chats' current server ports.
 //! Depends on preview changes and process attribution; started and aborted by the preview hub.
 //! Sleeps without a timer when there are no admitted browsers, port rights or stopped-server notices.
 
@@ -88,6 +89,8 @@ pub(super) fn start(shared: &Arc<Shared>) -> JoinHandle<()> {
                 Ok(Err(error)) => tracing::debug!(%error, "preview port re-check skipped"),
                 Err(error) => tracing::debug!(%error, "preview port re-check failed"),
             }
+            // The chats' server ports changed without a change of this preview (another chat leased or started one).
+            hub.service.refresh_local_rules().await;
         }
     })
 }

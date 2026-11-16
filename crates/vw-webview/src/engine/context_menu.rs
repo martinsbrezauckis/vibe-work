@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tauri::{Webview, Wry};
 use vw_preview::MountId;
@@ -80,24 +81,14 @@ impl Pollers {
                 }
             }
         });
-        if let Some(previous) = self
-            .tasks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.label.clone(), task)
-        {
+        if let Some(previous) = self.tasks.lock_or_recover().insert(id.label.clone(), task) {
             previous.abort();
         }
     }
 
     /// Stops a browser mount's poll immediately.
     pub(super) fn stop(&self, label: &str) {
-        if let Some(task) = self
-            .tasks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(label)
-        {
+        if let Some(task) = self.tasks.lock_or_recover().remove(label) {
             task.abort();
         }
     }

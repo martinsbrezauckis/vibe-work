@@ -28,7 +28,6 @@ export const rawClasses = new Map([
   ["transcript/rows/SourcesList.tsx", new Set(["source"])],
   ["transcript/rows/StepItem.tsx", new Set(["step-h"])],
   ["transcript/rows/StepsGroup.tsx", new Set(["steps-h", "thought"])],
-  ["voice/NarrationBar.tsx", new Set(["ibtn"])],
   ["worktrees/CopiesButton.tsx", new Set(["rbtn-wide"])],
 ]);
 export const rawExpressions = new Map([
@@ -69,13 +68,6 @@ export const bareControls = new Map([
   ],
 ]);
 export const passiveClasses = new Map([["worktrees/LocationChip.tsx", new Set(["wt-chip-text"])]]);
-
-// Existing repository/project pickers retain their native popup and geometry in this consolidation.
-// New selects, even in these files, still require Selector.
-export const nativeSelectors = new Map([
-  ["git/BranchBar.tsx", new Set(["git.branch-bar-select-repo"])],
-  ["git-browser/register.tsx", new Set(["git-browser.project-select"])],
-]);
 
 // An ask card's answer options are a visible list, never a picker: every option and its description must be readable
 // before choosing. One radio list, by its hook; any other radio still requires Selector.

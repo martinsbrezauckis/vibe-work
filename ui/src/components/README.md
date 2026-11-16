@@ -11,6 +11,10 @@ Use `compact` where space is limited; option descriptions, disabled choices and 
 share the same trigger and keyboard menu. Navigation tabs, checkboxes and action buttons retain
 their own semantics.
 
+`Modal.tsx` is the modal dialog: the scrim beside a `role="dialog"` `aria-modal` element with the focus
+rules of `hooks/useModalFocus` (initial focus, Tab kept inside, inert background, Escape). Render it only while
+the dialog is open; a scrim click closes unless `scrimCloses` is false.
+
 `RowMenu.tsx` provides action menus at a pointer or keyboard opener for sessions, projects and files.
 It handles window edges, arrow keys, Escape and focus return; chooser rows can add a sibling action.
 

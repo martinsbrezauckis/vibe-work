@@ -36,7 +36,9 @@
 //!
 //! [`evaluate`] turns an accepted manifest into what the update area shows: the newest version this app may
 //! update to (only ever newer than the running one, never a downgrade), a newer Vibe on `PyPI` that has no support
-//! yet (`pypiLatest`, never installable), or, for a user's own install, a version notice only.
+//! yet (`pypiLatest`, never installable), or, for a user's own install, a version notice only. Only versions this
+//! build's launcher guards were checked with are offered (`vibe_guard_versions.py`, the list the launcher enforces):
+//! a signed entry outside that list reads like `pypiLatest`, "not supported yet", and is never installed.
 //!
 //! Depends on: minisign-verify, base64, semver, serde. Called by: [`crate::update`], the private tests.
 
@@ -404,7 +406,7 @@ fn applies(entry: &SupportedVibe, app: &semver::Version, target: &str) -> bool {
 }
 
 /// Turns `manifest` into the update area's content for this app (`app_version`, semver), this OS (`target`), the
-/// running Vibe and the build's pinned version.
+/// running Vibe, the build's pinned version and the versions its launcher guards were checked with (`guarded`).
 #[must_use]
 pub fn evaluate(
     manifest: &Manifest,
@@ -412,15 +414,26 @@ pub fn evaluate(
     target: &str,
     running: &Running,
     pinned: &str,
+    guarded: &[String],
 ) -> Evaluation {
     let Ok(app) = semver::Version::parse(app_version) else {
         return Evaluation::default();
     };
-    let mut usable: Vec<&SupportedVibe> = manifest
+    let (mut usable, unguarded): (Vec<&SupportedVibe>, Vec<&SupportedVibe>) = manifest
         .versions
         .iter()
         .filter(|e| applies(e, &app, target))
-        .collect();
+        .partition(|e| guarded.contains(&e.version));
+    // The newest signed version this build may not run yet: named like `pypiLatest`, never installed.
+    let newest_unguarded = unguarded
+        .iter()
+        .map(|e| e.version.as_str())
+        .max_by(|a, b| compare_versions(a, b).unwrap_or(Ordering::Equal));
+    let upcoming_candidate = match (manifest.pypi_latest.as_deref(), newest_unguarded) {
+        (Some(latest), Some(signed)) if newer(signed, latest) => Some(signed),
+        (Some(latest), _) => Some(latest),
+        (None, signed) => signed,
+    };
     usable.sort_by(|a, b| compare_versions(&a.version, &b.version).unwrap_or(Ordering::Equal));
     let newest_supported = usable.last().map(|e| e.version.clone());
     match running {
@@ -434,12 +447,10 @@ pub fn evaluate(
             let ceiling = available
                 .as_ref()
                 .map_or(current.as_str(), |e| e.version.as_str());
-            let upcoming = manifest
-                .pypi_latest
-                .as_ref()
+            let upcoming = upcoming_candidate
                 .filter(|latest| newer(latest, ceiling))
-                .filter(|latest| !usable.iter().any(|e| &e.version == *latest))
-                .cloned();
+                .filter(|latest| !usable.iter().any(|e| e.version == *latest))
+                .map(str::to_owned);
             Evaluation {
                 available,
                 upcoming,
@@ -454,13 +465,14 @@ pub fn evaluate(
                 .unwrap_or_else(|| pinned.to_owned());
             let mismatch = if !supported.contains(current) {
                 Some(format!(
-                    "Your own Vibe is version {current}; Vibe Work is tested with Vibe {best}. Some features may \
-                     not work as expected. Update your own install to {best}, or let Vibe Work use its own copy."
+                    "Vibe Work does not support your own Vibe {current} yet: it works with Vibe {best}. Use Vibe \
+                     {best} in your own install, or let Vibe Work use its own copy."
                 ))
             } else if newer(&best, current) {
                 Some(format!(
                     "Vibe {best} is now supported; your own Vibe is version {current}. Vibe Work does not change \
-                     your own install: update it yourself when you are ready."
+                     your own install: update it to Vibe {best} yourself when you are ready. A newer Vibe waits for \
+                     a Vibe Work update."
                 ))
             } else {
                 None

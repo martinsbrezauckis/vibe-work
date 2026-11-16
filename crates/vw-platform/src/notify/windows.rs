@@ -2,6 +2,7 @@
 //! Depends on windows and the portable store; OS callback threads take entries before invoking a click.
 //! Installed toasts survive banner timeout; their COM activator takes the same callback as `WinRT`.
 
+use crate::sync::LockRecover;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -56,8 +57,7 @@ fn store() -> MutexGuard<'static, ToastStore<LiveToast>> {
     static TOASTS: OnceLock<Mutex<ToastStore<LiveToast>>> = OnceLock::new();
     TOASTS
         .get_or_init(|| Mutex::new(ToastStore::new()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_or_recover()
 }
 
 fn event(id: u64, reason: ToastEvent, open: bool) {

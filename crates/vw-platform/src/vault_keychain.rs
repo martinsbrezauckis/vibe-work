@@ -44,7 +44,7 @@ pub fn set(service: &str, account: &str, label: &str, secret: &[u8]) -> Result<(
     let mut attempts = OPERATIONS
         .lock()
         .map_err(|_| "Keychain operation interrupted")?;
-    attempts.run(service, account, || {
+    attempts.save(service, account, || {
         policy::set(&mut native::Store::open(service, account, label)?, secret)
     })
 }

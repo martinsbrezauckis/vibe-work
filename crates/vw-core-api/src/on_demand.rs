@@ -2,8 +2,9 @@
 //! Session reopen preserves history and waits for pending work; Stop cancels automatic continuation.
 //! Called by agent tools, session lifecycle and the event pump.
 use std::collections::{BTreeSet, HashMap};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::{info, warn};
@@ -166,7 +167,7 @@ impl OnDemand {
         self.inner().consented.insert(session.to_owned());
     }
     fn inner(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
 
     pub(crate) fn interrupting(&self, session: &str) -> Interruption<'_> {

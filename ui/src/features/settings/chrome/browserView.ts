@@ -1,8 +1,13 @@
 /** Projects one browser's confirmed core facts into the shared connection control; used by Settings and composer. */
 import type { ChromeControlView } from "../../../protocol/core";
 
+/** The browsers with their own connection card in Browser settings. */
 export type SettingsBrowser = "Chrome" | "Edge" | "Safari" | "Firefox";
 
+/**
+ * The connection view of one browser in the Chrome view's shape (Edge, Firefox and Safari facts moved into `setup`
+ * and `enabled`); null when the core reports nothing for that browser.
+ */
 export function browserView(
   view: ChromeControlView | null | undefined,
   browser: SettingsBrowser,

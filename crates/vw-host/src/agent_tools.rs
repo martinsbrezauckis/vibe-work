@@ -322,11 +322,6 @@ pub fn prepare(
     configure_hooks(supervisor, &config)?;
     core.agent_tools = Some(config);
     let plugin = plugin_root.filter(|r| r.join("vw").join("plugin.json").is_file());
-    let staged = match (plugin, vw_core_api::working_note::vault_capture_line()) {
-        (Some(root), Some(line)) => Some(crate::vault_plugin::stage(root, data_dir, line)?),
-        _ => None,
-    };
-    let plugin = staged.as_deref().or(plugin);
     if let Some(root) = plugin {
         supervisor
             .extra_args

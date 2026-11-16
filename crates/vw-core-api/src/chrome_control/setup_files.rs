@@ -237,6 +237,29 @@ pub(in crate::chrome_control) fn access(
     Ok(())
 }
 
+/// Firefox on macOS reads per-user hosts from `~/Library/Application Support/Mozilla/NativeMessagingHosts`, but
+/// Firefox itself keeps its data under `…/Firefox` and never makes the `Mozilla` folder. Create only that folder
+/// (owner-only) inside an existing Application Support; an existing entry, link or not, is left to the checked
+/// open that follows, which refuses links.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn mozilla_folder(config: &ChromeControlConfig, data: &Path) -> io::Result<()> {
+    use rustix::fs::Mode;
+    let Some(support) = data
+        .parent()
+        .filter(|_| data.file_name().is_some_and(|name| name == "Mozilla"))
+        .filter(|support| support.ends_with("Library/Application Support"))
+    else {
+        return Ok(());
+    };
+    access(config, Access::Traverse, support)?;
+    let support = vw_platform::search_directory::open(support)?;
+    access(config, Access::CreateDir, data)?;
+    match rustix::fs::mkdirat(&support, "Mozilla", Mode::RWXU) {
+        Ok(()) | Err(rustix::io::Errno::EXIST) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn native_host_parent(
     config: &ChromeControlConfig,
@@ -254,6 +277,9 @@ fn native_host_parent(
     let data = folder.parent().ok_or_else(refused)?;
     // Search-only is essential: a read handle to Chrome itself triggers app-data protection.
     // The kernel rejects links in every ancestor, so mkdirat cannot be redirected elsewhere.
+    if create {
+        mozilla_folder(config, data)?;
+    }
     access(config, Access::Traverse, data)?;
     let parent = vw_platform::search_directory::open(data).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound

@@ -11,6 +11,7 @@ import type {
   CoreClient,
   DocumentsPicked,
   ExecuteOptions,
+  FolderPurpose,
   HandOverView,
   HostEvent,
   OsNotification,
@@ -92,7 +93,9 @@ export interface FakeClient extends CoreClient {
   sendTo(request: SendToRequest): Promise<SendToView>;
   /** Notifications the UI asked the host to show. */
   notifications: OsNotification[];
-  pickFolder: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
+  pickFolder: ReturnType<
+    typeof vi.fn<(purpose?: FolderPurpose) => Promise<string | null>>
+  >;
   /** The native document picker: answers what `pickedDocuments` holds (default: nothing). */
   pickDocuments: ReturnType<typeof vi.fn<() => Promise<DocumentsPicked>>>;
   pickedDocuments: DocumentsPicked;
@@ -264,7 +267,7 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     options: [],
     replies: [],
     notifications: [],
-    pickFolder: vi.fn<() => Promise<string | null>>(() =>
+    pickFolder: vi.fn<(purpose?: FolderPurpose) => Promise<string | null>>(() =>
       Promise.resolve("/work/picked"),
     ),
     pickedDocuments: { added: [], refused: [] },

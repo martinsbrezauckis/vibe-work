@@ -19,7 +19,8 @@
 //! `config.toml` keeps user edits; relative extension entries are dropped and a session-title model is added when it
 //! names none ([`crate::title_model`]; both launches), and Vibe is set to verify HTTPS with the OS certificate store unless
 //! the config sets that itself ([`crate::trust_store`]; both launches), and Mistral's experiments cannot switch on
-//! unsupported features ([`crate::experiment_pins`]; both launches). The selected access mode is kept. Config parsing never fails launch; the dev server runs unsandboxed, so
+//! unsupported features ([`crate::experiment_pins`]; both launches); these fixes are one guarded write
+//! ([`crate::startup_config`]). The selected access mode is kept. Config parsing never fails launch; the dev server runs unsandboxed, so
 //! live development uses the same vault and proxy flow as a user build.
 
 use std::ffi::OsString;
@@ -153,11 +154,7 @@ impl DevLaunch {
             })?;
         }
         crate::launch_version::check(&self.server_bin, &self.run_dir)?;
-        crate::extension_paths::prepare(&config);
-        log_title_model(&vibe_home);
-        log_commit_signature(&vibe_home);
-        log_trust_store(&vibe_home);
-        log_experiment_pins(&vibe_home);
+        crate::startup_config::prepare_dev(&vibe_home);
         clear_connector_cache(&vibe_home);
         let gitconfig = home.join(".gitconfig");
         if !gitconfig.exists() {
@@ -266,15 +263,12 @@ impl ProductLaunch {
                 }
             })?;
         }
-        crate::default_model::ensure(&vibe_home).map_err(|source| LaunchError::Prepare {
-            path: vibe_home.join("config.toml"),
-            source,
+        crate::startup_config::prepare_product(&vibe_home).map_err(|source| {
+            LaunchError::Prepare {
+                path: vibe_home.join("config.toml"),
+                source,
+            }
         })?;
-        crate::extension_paths::prepare(&vibe_home.join("config.toml"));
-        log_title_model(&vibe_home);
-        log_commit_signature(&vibe_home);
-        log_trust_store(&vibe_home);
-        log_experiment_pins(&vibe_home);
         clear_connector_cache(&vibe_home);
         let mut supervisor = SupervisorConfig::new(self.server_bin.clone(), vibe_home, work);
         supervisor.extra_env = vec![("PYTHONUNBUFFERED".to_owned(), OsString::from("1"))];
@@ -304,79 +298,5 @@ fn clear_connector_cache(vibe_home: &Path) {
         Err(error) => {
             tracing::warn!(%error, "connectors: Vibe's catalog cache could not be removed");
         }
-    }
-}
-
-/// Turns the agent's commit credit line off by default in `vibe_home/config.toml`
-/// ([`crate::commit_signature`]) and logs what happened. Never fails the launch.
-fn log_commit_signature(vibe_home: &Path) {
-    use crate::commit_signature::CommitSignature;
-    match crate::commit_signature::ensure(vibe_home) {
-        Ok(CommitSignature::Added) => {
-            tracing::info!("agent commits: credit line off (include_commit_signature = false)");
-        }
-        Ok(CommitSignature::Kept(on)) => tracing::info!(
-            on,
-            "agent commits: config sets include_commit_signature, kept"
-        ),
-        Ok(CommitSignature::Skipped(why)) => {
-            tracing::warn!(%why, "agent commits: config not changed");
-        }
-        Err(error) => tracing::warn!(%error, "agent commits: config.toml could not be updated"),
-    }
-}
-
-/// Makes Vibe verify HTTPS with the OS certificate store by default in `vibe_home/config.toml`
-/// ([`crate::trust_store`]) and logs what happened. Never fails the launch: without it Vibe falls back to its bundled
-/// certificate list.
-fn log_trust_store(vibe_home: &Path) {
-    use crate::trust_store::TrustStore;
-    match crate::trust_store::ensure(vibe_home) {
-        Ok(TrustStore::Added) => {
-            tracing::info!(
-                "TLS trust: system certificate store on (enable_system_trust_store = true)"
-            );
-        }
-        Ok(TrustStore::Kept(true)) => {
-            tracing::info!("TLS trust: config sets enable_system_trust_store = true, kept");
-        }
-        Ok(TrustStore::Kept(false)) => tracing::warn!(
-            "TLS trust: config sets enable_system_trust_store = false, kept (Vibe uses its bundled certificate list)"
-        ),
-        Ok(TrustStore::Skipped(why)) => {
-            tracing::warn!(%why, "TLS trust: config not changed");
-        }
-        Err(error) => tracing::warn!(%error, "TLS trust: config.toml could not be updated"),
-    }
-}
-
-/// Pins the experiment-driven keys off in `vibe_home/config.toml` ([`crate::experiment_pins`]) and logs what happened,
-/// by key name. Invalid config remains for Vibe to diagnose.
-fn log_experiment_pins(vibe_home: &Path) {
-    match crate::experiment_pins::ensure(vibe_home) {
-        Ok(outcome) => {
-            if let Some(why) = &outcome.skipped {
-                tracing::warn!(%why, "experiments: config not changed");
-            }
-            for key in &outcome.added {
-                tracing::info!(key, "experiments: pinned off");
-            }
-            for key in &outcome.disabled {
-                tracing::info!(key, "experiments: unsupported feature pinned off");
-            }
-        }
-        Err(error) => tracing::warn!(%error, "experiments: config.toml could not be updated"),
-    }
-}
-
-/// Sets the session-title model in `vibe_home/config.toml` ([`crate::title_model`]) and logs what
-/// happened. Never fails the launch: without it sessions may only miss their automatic title.
-fn log_title_model(vibe_home: &Path) {
-    match crate::title_model::ensure(vibe_home) {
-        Ok(outcome @ crate::title_model::TitleModel::Skipped(_)) => {
-            tracing::warn!("{}", outcome.log_line());
-        }
-        Ok(outcome) => tracing::info!("{}", outcome.log_line()),
-        Err(error) => tracing::warn!(%error, "session titles: config.toml could not be updated"),
     }
 }

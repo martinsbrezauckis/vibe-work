@@ -4,21 +4,16 @@ use crate::{
     KeyError, KeyService, proxy_credentials as credentials, proxy_forwarder as forwarder,
     proxy_migration as migration, service::blocking,
 };
-use std::{collections::BTreeMap, path::PathBuf, sync::PoisonError};
+use std::{collections::BTreeMap, path::PathBuf};
 use vw_mistral::network::NetworkSettings;
+use vw_platform::sync::LockRecover;
 
 impl KeyService {
     /// Pause a route before a confirmed write publishes its credential-free address to Vibe.
     pub fn pause_vibe_proxy(&self, settings: &NetworkSettings) {
         if credentials::protected(settings) {
-            let _transition = self
-                .network_use
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            self.network
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .requires_vault = true;
+            let _transition = self.network_use.lock_or_recover();
+            self.network.lock_or_recover().requires_vault = true;
             self.vibe_forwarder.set_enabled(false);
             self.vibe_forwarder
                 .set_upstream(vw_netguard::Upstream::none());
@@ -36,7 +31,7 @@ impl KeyService {
         let vault = self.vault();
         let transition = self.network_use.clone();
         let settings = blocking(move || {
-            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
+            let _transition = transition.lock_or_recover();
             let mut settings = migration::read(&dotenv)?;
             for (key, value) in changes {
                 settings.proxy_credentials.remove(&key);
@@ -63,13 +58,13 @@ impl KeyService {
         let guard = self.vibe_forwarder.clone();
         let state = self.network.clone();
         blocking(move || {
-            let _transition = transition.lock().unwrap_or_else(PoisonError::into_inner);
+            let _transition = transition.lock_or_recover();
             let restored = credentials::restore(&vault, &settings)?;
             migration::write(&dotenv, &settings, &guard)?;
             let environment = NetworkSettings::from_environment();
             // Credential-specific roots from the vault override the writable Vibe CA paths.
             forwarder::configure(&guard, &NetworkSettings::effective(&restored, &environment));
-            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut state = state.lock_or_recover();
             state.dotenv = dotenv;
             state.vibe_locked =
                 forwarder::locked(&NetworkSettings::effective(&settings, &environment));

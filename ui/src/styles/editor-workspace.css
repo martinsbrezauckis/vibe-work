@@ -52,7 +52,7 @@
   background: var(--orange);
 }
 .file-saved-label {
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .open-file-menu-row {
@@ -63,7 +63,7 @@
 }
 .open-file-folder {
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
   overflow-wrap: anywhere;
 }
@@ -177,7 +177,7 @@
   position: relative;
   width: 32px;
   border: 1px solid var(--line-2);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
 }
 .session-strip-items .ibtn svg {
   display: none;
@@ -190,7 +190,7 @@
 .chat-strip-state {
   writing-mode: vertical-rl;
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .body.has-editors.has-panel {
   transition: none;
@@ -245,7 +245,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   min-width: 0;
 }
 .saved-compare-host {

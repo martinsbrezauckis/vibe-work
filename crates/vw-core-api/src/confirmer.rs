@@ -11,7 +11,8 @@
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer, Requester};
 use vw_session::SessionStore;
@@ -136,17 +137,11 @@ impl DynConfirmer {
 
     /// A person (or the Debug API acting as the person) approved Delete of this exact id.
     pub(crate) fn deletion_confirmed(&self, id: &str) -> bool {
-        self.2
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(id)
+        self.2.lock_or_recover().contains(id)
     }
 
     pub(crate) fn deletion_finished(&self, id: &str) {
-        self.2
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id);
+        self.2.lock_or_recover().remove(id);
     }
 
     /// Registers the native ask before its owned presentation is scheduled.
@@ -164,10 +159,7 @@ fn record_delete(deletes: &Mutex<BTreeSet<String>>, request: &ConfirmationReques
     if request.method == "session/delete"
         && let Some(id) = request.params["sessionId"].as_str()
     {
-        deletes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_owned());
+        deletes.lock_or_recover().insert(id.to_owned());
     }
 }
 

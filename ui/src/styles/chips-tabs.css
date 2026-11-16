@@ -10,7 +10,7 @@
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-2);
-  font: var(--weight-medium) var(--text-11)/var(--leading-helper) var(--font-ui);
+  font: var(--weight-medium) var(--text-xs)/var(--leading-helper) var(--font-ui);
   white-space: nowrap;
 }
 button.ui-badge {
@@ -40,7 +40,7 @@ button.ui-badge:hover:where(:not(:disabled)) {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-2);
-  font: var(--weight-medium) var(--text-12-5)/var(--leading-ui) var(--font-ui);
+  font: var(--weight-medium) var(--text-base)/var(--leading-ui) var(--font-ui);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -63,7 +63,7 @@ button.ui-badge:hover:where(:not(:disabled)) {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
-  font: var(--text-14)/var(--leading-ui) var(--font-ui);
+  font: var(--text-md)/var(--leading-ui) var(--font-ui);
   cursor: pointer;
 }
 .ui-tab-close:hover:where(:not(:disabled)) {

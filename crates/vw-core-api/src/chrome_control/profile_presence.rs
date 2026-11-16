@@ -9,9 +9,9 @@ use crate::core::Shared;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::PoisonError,
     time::{Duration, Instant},
 };
+use vw_platform::sync::LockRecover;
 
 /// One file of the extension's `IndexedDB`; larger files are not this extension's few small keys.
 const STORAGE_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -31,10 +31,7 @@ const RETRIES: [Duration; 4] = [
 pub(super) fn reconcile(shared: &Shared) {
     let chrome = &shared.chrome_control;
     let (unproven, proven) = {
-        let mut saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut saved = chrome.profiles.lock_or_recover();
         let unproven: BTreeSet<String> = saved
             .records
             .iter()
@@ -74,10 +71,7 @@ pub(super) fn reconcile(shared: &Shared) {
         .map(|(id, _)| id)
         .collect();
     if !found.is_empty() || !deleted.is_empty() {
-        let mut saved = chrome
-            .profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut saved = chrome.profiles.lock_or_recover();
         let mut next = saved.clone();
         for (id, folder) in found {
             if let Some(record) = next.records.get_mut(&id) {
@@ -116,8 +110,7 @@ pub(super) fn prune(shared: &Shared) {
     let chrome = &shared.chrome_control;
     let candidates: Vec<String> = chrome
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .records
         .iter()
         .filter(|(_, record)| record.deleted && !record.removed)
@@ -130,10 +123,7 @@ pub(super) fn prune(shared: &Shared) {
     if unused.is_empty() {
         return;
     }
-    let mut saved = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.profiles.lock_or_recover();
     let mut next = saved.clone();
     for id in &unused {
         if let Some(record) = next.records.get_mut(id)
@@ -155,18 +145,14 @@ fn in_use(shared: &Shared, id: &str) -> bool {
     let same = |other: &str| profile_ids::same(other, id);
     if chrome
         .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .values()
         .any(|profile| same(profile))
     {
         return true;
     }
     {
-        let bindings = chrome
-            .bindings
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let bindings = chrome.bindings.lock_or_recover();
         if bindings.chats().values().any(|profile| same(profile))
             || bindings.pending.values().any(|change| same(&change.target))
             || bindings
@@ -213,8 +199,7 @@ pub(super) struct Asking {
 pub(super) fn asking(chrome: &super::ChromeControl, id: &str) -> Asking {
     let known = chrome
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .records
         .get(id)
         .filter(|record| !record.removed && !record.deleted)

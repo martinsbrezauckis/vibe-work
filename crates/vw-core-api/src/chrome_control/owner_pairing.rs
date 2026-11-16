@@ -1,6 +1,7 @@
 //! Routes trusted helper pairing events to each browser's pending Connect and enrollment state.
 //! Depends on the owner's pairing view and enrollment; called by the owner's pipe observer.
-use std::sync::{Arc, PoisonError, atomic::Ordering};
+use std::sync::{Arc, atomic::Ordering};
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 
@@ -26,8 +27,7 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value, mut result: Value) {
     if let Some(browser) = browser {
         browser
             .enroll(shared)
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .observe_state(state, params, browser);
         if browser == Browser::Chrome && state == Some("mismatch") {
             shared.chrome_control.forget_paired();

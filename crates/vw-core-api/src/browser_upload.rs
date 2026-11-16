@@ -67,7 +67,8 @@ fn locate<'a>(folders: &'a [PathBuf], path: &str) -> Option<(&'a Path, PathBuf)>
 
 /// The part of an absolute `named` path below `folder` (the chat's folder, resolved). A path named through a link
 /// above the folder (macOS `/var` is `/private/var`) is matched by its shortest leading part that resolves to the
-/// folder, so the rest keeps every link below the folder for the no-follow open to refuse.
+/// folder, so the rest keeps every link below the folder for the no-follow open to refuse. Leading parts are resolved
+/// only while they lead to the folder (`inside_resolved`).
 fn inside_folder(folder: &Path, named: &Path) -> Option<PathBuf> {
     if let Ok(inside) = named.strip_prefix(folder) {
         return Some(inside.to_path_buf());
@@ -76,15 +77,33 @@ fn inside_folder(folder: &Path, named: &Path) -> Option<PathBuf> {
     if cfg!(windows) {
         return None;
     }
+    inside_resolved(folder, named, |leading| {
+        vw_platform::canonical_plain(leading)
+    })
+}
+
+/// `inside_folder`'s walk with the resolver passed in (tests watch which paths it resolves).
+fn inside_resolved(
+    folder: &Path,
+    named: &Path,
+    mut resolve: impl FnMut(&Path) -> std::io::Result<PathBuf>,
+) -> Option<PathBuf> {
     let mut leading = PathBuf::new();
     let mut parts = named.components();
     for part in parts.by_ref() {
         leading.push(part);
         // Only a leading part that names a folder (not a bare drive prefix or root) can resolve to the chat folder.
-        if matches!(part, std::path::Component::Normal(_))
-            && vw_platform::canonical_plain(&leading).is_ok_and(|resolved| resolved == folder)
-        {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            continue;
+        }
+        // Each name is looked up inside a folder that already leads to the chat folder; a part that resolves
+        // elsewhere ends the walk, so no name below it (an automounted `/net/<host>`) is ever looked up.
+        let resolved = resolve(&leading).ok()?;
+        if resolved == folder {
             return Some(parts.as_path().to_path_buf());
+        }
+        if !folder.starts_with(&resolved) {
+            return None;
         }
     }
     None
@@ -175,6 +194,42 @@ pub(crate) fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PREDICT (red before the change): every leading part of a named absolute path was resolved, so
+    /// `/net/attacker.example/x` made Vibe Work look up `/net/attacker.example` (on macOS an automounted host: a
+    /// network lookup and an NFS mount attempt) before refusing. Now the walk resolves a leading part only while
+    /// the parts before it lead to the chat folder: `/net` resolves to itself, which is not on the way, and the
+    /// walk stops there. A path named through a link above the folder (`/var` for `/private/var`) still matches.
+    #[test]
+    fn upload_paths_resolve_only_leading_parts_on_the_way_to_the_folder() {
+        let folder = Path::new("/private/var/chat");
+        let mut seen = Vec::new();
+        // Compared as paths, not strings: on Windows the walk builds `\var` for the same components as `/var`.
+        let resolve = |seen: &mut Vec<PathBuf>, path: &Path| {
+            seen.push(path.to_path_buf());
+            Ok(if path == Path::new("/var") {
+                PathBuf::from("/private/var")
+            } else if path == Path::new("/var/chat") {
+                folder.to_path_buf()
+            } else {
+                path.to_path_buf()
+            })
+        };
+        let outside = inside_resolved(folder, Path::new("/net/attacker.example/x"), |p| {
+            resolve(&mut seen, p)
+        });
+        assert_eq!(outside, None);
+        assert_eq!(
+            seen,
+            [PathBuf::from("/net")],
+            "nothing below /net is looked up"
+        );
+        seen.clear();
+        let through_link = inside_resolved(folder, Path::new("/var/chat/notes.txt"), |p| {
+            resolve(&mut seen, p)
+        });
+        assert_eq!(through_link, Some(PathBuf::from("notes.txt")));
+    }
 
     #[test]
     fn upload_refuses_an_uncleared_hard_link_in_a_large_protected_tree() {

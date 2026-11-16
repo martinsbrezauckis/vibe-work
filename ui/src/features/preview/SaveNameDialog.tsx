@@ -8,7 +8,7 @@ import { literalInputProps } from "../../components/inputProps";
 import { type ReactElement, type SubmitEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { reserve } from "../../components/nativeLayer";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import type { VaultChoice } from "./browser";
 
 const DIALOG_RESERVATION = "save-vault-dialog";
@@ -27,7 +27,6 @@ export function SaveNameDialog({
 }): ReactElement {
   const [name, setName] = useState(choice.suggestedName);
   const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(true, dialog, busy ? () => undefined : onClose);
   useLayoutEffect(() => {
     const element = dialog.current;
     if (element === null) return;
@@ -64,66 +63,58 @@ export function SaveNameDialog({
     if (name.trim() !== "" && !busy) onSave(name.trim());
   };
   return (
-    <>
-      <div
-        data-testid="preview.save-name-dialog-scrim"
-        className="scrim"
-        onClick={busy ? undefined : onClose}
-      />
-      <div
-        data-testid="preview.save-name-dialog-modal"
-        className="modal preview-save-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preview-save-title"
-        data-native-overlay="preview-save"
-        ref={dialog}
-        tabIndex={-1}
-      >
-        <form onSubmit={submit}>
-          <header>
-            <h2 id="preview-save-title">Save to vault</h2>
-          </header>
-          <section>
-            <label className="preview-save-name">
-              <span>Name</span>
-              <input
-                {...literalInputProps}
-                data-testid="preview.save-name-dialog-set-name"
-                data-vault-save-name
-                data-dialog-initial-focus="true"
-                value={name}
-                maxLength={80}
-                autoComplete="off"
-                onChange={(event) => {
-                  setName(event.target.value);
-                }}
-              />
-            </label>
-            <p className="preview-save-hint">The selected value goes straight to your vault.</p>
-          </section>
-          <footer className="modal-actions">
-            <Button
-              data-testid="preview.save-name-dialog-tb-btn"
-              type="button"
+    <Modal
+      onClose={busy ? () => undefined : onClose}
+      scrimTestId="preview.save-name-dialog-scrim"
+      dialogRef={dialog}
+      data-testid="preview.save-name-dialog-modal"
+      className="modal preview-save-dialog"
+      aria-labelledby="preview-save-title"
+      data-native-overlay="preview-save"
+    >
+      <form onSubmit={submit}>
+        <header>
+          <h2 id="preview-save-title">Save to vault</h2>
+        </header>
+        <section>
+          <label className="preview-save-name">
+            <span>Name</span>
+            <input
+              {...literalInputProps}
+              data-testid="preview.save-name-dialog-set-name"
+              data-vault-save-name
+              data-dialog-initial-focus="true"
+              value={name}
+              maxLength={80}
+              autoComplete="off"
+              onChange={(event) => {
+                setName(event.target.value);
+              }}
+            />
+          </label>
+          <p className="preview-save-hint">The selected value goes straight to your vault.</p>
+        </section>
+        <footer className="modal-actions">
+          <Button
+            data-testid="preview.save-name-dialog-tb-btn"
+            type="button"
 
-              disabled={busy}
-              onClick={onClose}
-            >
-              Cancel
-            </Button>
-            <Button
-              data-testid="preview.save-name-dialog-btn-primary"
-              type="submit"
-              appearance="dialog"
-              data-vault-save-confirm
-              disabled={busy || name.trim() === ""}
-            >
-              {busy ? "Saving…" : "Save to vault"}
-            </Button>
-          </footer>
-        </form>
-      </div>
-    </>
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button
+            data-testid="preview.save-name-dialog-btn-primary"
+            type="submit"
+            appearance="dialog"
+            data-vault-save-confirm
+            disabled={busy || name.trim() === ""}
+          >
+            {busy ? "Saving…" : "Save to vault"}
+          </Button>
+        </footer>
+      </form>
+    </Modal>
   );
 }

@@ -41,9 +41,9 @@ const required = new Map([
   ["vw-gate", ["proxy-transports"]],
   ["tauri", ["tray-icon"]],
 ]);
-const permanent = ["plan-usage", "context-composition", "feedback", "click-marker"];
+const permanent = ["plan-usage", "context-composition", "feedback", "click-marker", "agent-vault"];
 // Permanent behavior cannot acquire a Cargo off-path again, even when not selected in defaults.
-for (const name of ["app", "vw-keyproxy", "vw-core-api", "vw-gate", "vw-agent-tools", "vw-browser", "vw-preview", "vw-webview", "vw-platform"]) {
+for (const name of ["app", "vw-keyproxy", "vw-core-api", "vw-gate", "vw-agent-tools", "vw-browser", "vw-preview", "vw-webview", "vw-platform", "vw-keys", "vw-vault", "vw-ask"]) {
   const path = name === "app" ? "app/Cargo.toml" : `crates/${name}/Cargo.toml`;
   const manifest = readFileSync(join(REPO_ROOT, path), "utf8");
   for (const feature of permanent)
@@ -53,7 +53,6 @@ for (const name of ["app", "vw-keyproxy", "vw-core-api", "vw-gate", "vw-agent-to
 const forbidden = new Set([
   "your-safari",
   "video-test",
-  "agent-vault",
 ]);
 if (safariPackage) {
   if (!selectedTarget?.includes("apple-darwin"))
@@ -138,6 +137,6 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Release features: Edge, Firefox, proxies, tray and video on; plan usage, context breakdown, feedback and click markers permanent; agent vault off; Safari ${safariPackage ? "package enabled" : "off"}${firefoxSigned ? `; signed Firefox add-on ${firefoxSigned}` : ""}`,
+    `Release features: Edge, Firefox, proxies, tray and video on; plan usage, context breakdown, feedback, click markers and agent vault saves permanent; Safari ${safariPackage ? "package enabled" : "off"}${firefoxSigned ? `; signed Firefox add-on ${firefoxSigned}` : ""}`,
   );
 }

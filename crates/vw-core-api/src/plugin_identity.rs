@@ -5,8 +5,9 @@
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use crate::error::{CoreError, ErrorCode};
 
@@ -35,20 +36,14 @@ impl PluginIdentity {
     /// The actual server path also covers a deferred install or a newly selected Vibe environment (on Windows also
     /// a uv or pipx launcher that has no interpreter beside it: [`vw_supervisor::server_python`]).
     pub(crate) fn set_program(&self, program: &Path) {
-        *self
-            .runtime_python
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = vw_supervisor::server_python(program);
+        *self.runtime_python.lock_or_recover() = vw_supervisor::server_python(program);
     }
 
     /// The pinned Vibe's Python: the configured one, else the one next to the running server.
     pub(crate) fn python(&self) -> Option<PathBuf> {
-        self.python.clone().or_else(|| {
-            self.runtime_python
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-        })
+        self.python
+            .clone()
+            .or_else(|| self.runtime_python.lock_or_recover().clone())
     }
 
     /// Fresh identities in bounded batches; only the Python startup is shared, never an approval decision.

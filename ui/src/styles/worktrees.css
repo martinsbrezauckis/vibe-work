@@ -22,7 +22,7 @@
 .copy-reason {
   margin: 0;
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .copy-fields {
   display: grid;
@@ -31,10 +31,10 @@
 /* "More options": the base branch, the branch name and the git-ignored files note, closed by default. */
 .copy-more summary {
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   cursor: pointer;
   width: fit-content;
-  border-radius: var(--radius-5);
+  border-radius: var(--radius-xs);
 }
 .copy-more summary:focus-visible {
   outline: 2px solid var(--text-2);
@@ -45,7 +45,7 @@
 .copy-fields label {
   display: grid;
   gap: 4px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .copy-fields select,
@@ -101,7 +101,7 @@
 }
 .wt-location-full {
   margin-top: 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
@@ -133,7 +133,7 @@
   margin-top: 18px;
 }
 .wt-orphans h3 {
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   margin: 0 0 6px;
 }
 .wt-orphans ul {
@@ -154,7 +154,7 @@
 
 /* what .worktreeinclude copies. In the header the list opens as a small panel under the chip row. */
 .wt-include {
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
   position: relative;
 }
@@ -198,13 +198,13 @@
 }
 .ask-grants-list .ask-grant > span {
   color: var(--text);
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   overflow-wrap: anywhere;
 }
 .ask-grants-list .ask-grant .d {
   display: block;
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .ask-grants-list code {
   font-family: var(--font-mono);

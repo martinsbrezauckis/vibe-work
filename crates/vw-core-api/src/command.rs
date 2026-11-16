@@ -55,6 +55,10 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         text: Option<String>,
+        /// The chat `text` was sent in. A temporary chat's prompt, or one without its chat, is not appended.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        session_id: Option<String>,
     },
     /// Writes ordinary owner text to the native clipboard; no clipboard contents are read back.
     CopyText {
@@ -316,6 +320,13 @@ pub enum Command {
         /// What to do.
         request: InstructionsRequest,
     },
+    /// Bring the person's setup from other coding agents: scan (read only), apply the picked rows after the
+    /// native confirmation, undo a bring. Apply and undo are the person's own acts (they store keys). `request`:
+    /// what to do.
+    #[allow(missing_docs, reason = "the variant's own doc names its one field")]
+    ImportSetup {
+        request: crate::import_view::ImportRequest,
+    },
     /// User-managed instruction files in a saved project's main folder.
     ProjectInstructions {
         /// The operation.
@@ -456,6 +467,17 @@ pub enum Command {
     ChromeControl {
         /// What to do.
         request: crate::ChromeControlRequest,
+    },
+    /// The knowledge base: the user's named places (folders, drives, Mistral Libraries) the agent looks at first.
+    /// No dialog: a place is a pointer only and grants no permission.
+    Knowledge {
+        /// List, add, rename or remove.
+        request: crate::KnowledgeRequest,
+    },
+    /// The person's Pause / Resume of an agent tool in a chat (the browser).
+    PausedTools {
+        /// The operation.
+        request: crate::PausedToolsRequest,
     },
     /// Automatic idle-sleep preference and status.
     KeepAwake {

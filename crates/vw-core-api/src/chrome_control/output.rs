@@ -3,6 +3,11 @@
 use serde_json::{Value, json};
 
 pub(super) const LIMIT: usize = 4000;
+/// The app's own page.read defaults, sent on every inline read that omits them (cursor reads and exports excepted).
+/// The agent-facing action schema states these values; the helper's larger defaults apply only when it is called
+/// without them.
+pub(super) const READ_DEFAULT_LIMIT: u64 = 8;
+pub(super) const READ_DEFAULT_MAX_BYTES: u64 = 2000;
 const GROUP_LIMIT: usize = 9000;
 const CONTINUATION: &str = "Continue page.read with textOffset=nextTextOffset for text or offset=nextOffset and limit for refs; keep filters. If offsets are absent or do not advance, narrow with find/ref/frameId. Narrow other reads with their schema; do not replay writes.";
 
@@ -46,8 +51,10 @@ pub(super) fn clamp_request(tool: &str, args: &mut Value) -> bool {
         && let Some(fields) = args["args"].as_object_mut()
     {
         // A text-size request must not implicitly enlarge the helper's byte budget.
-        fields.entry("maxBytes").or_insert(json!(2000));
-        fields.entry("limit").or_insert(json!(8));
+        fields
+            .entry("maxBytes")
+            .or_insert(json!(READ_DEFAULT_MAX_BYTES));
+        fields.entry("limit").or_insert(json!(READ_DEFAULT_LIMIT));
     }
     let mut clamped = false;
     for key in ["maxChars", "maxBytes"] {
@@ -88,8 +95,42 @@ pub(super) fn guard(result: &mut Value) {
     guard_with_limit(result, limit);
 }
 
+/// The status's index tables: other fields hold positions into them (`{"list":n}`, capability, mode and row indexes),
+/// so a shortened table would make those positions point at nothing or at the wrong entry.
+const STATUS_TABLES: [&str; 4] = [
+    "/untrustedPageContent/featureLists",
+    "/untrustedPageContent/capabilities/capabilityNames",
+    "/untrustedPageContent/capabilities/actionRows",
+    "/untrustedPageContent/capabilities/modes",
+];
+
+/// Fits a discovery status into the group budget. Its index tables stay whole: they are set aside, the rest is
+/// trimmed within what they leave of the budget, and they are put back unchanged.
 pub(super) fn guard_status(result: &mut Value) {
-    guard_with_limit(result, GROUP_LIMIT);
+    let mut tables = Vec::new();
+    if let Some(body) = result.get_mut("structuredContent") {
+        for path in STATUS_TABLES {
+            if let Some(table) = body.pointer_mut(path) {
+                tables.push((path, table.take()));
+            }
+        }
+    }
+    let reserved: usize = tables
+        .iter()
+        .map(|(_, table)| table.to_string().len())
+        .sum();
+    guard_with_limit(result, GROUP_LIMIT.saturating_sub(reserved));
+    if tables.is_empty() {
+        return;
+    }
+    if let Some(body) = result.get_mut("structuredContent") {
+        for (path, table) in tables {
+            if let Some(slot) = body.pointer_mut(path) {
+                *slot = table;
+            }
+        }
+    }
+    sync_text(result);
 }
 
 fn guard_with_limit(result: &mut Value, limit: usize) {

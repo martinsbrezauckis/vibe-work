@@ -5,7 +5,9 @@
 //! ([`Baseline`]), the working tree diffed against it ([`refresh`]), [`keep`] (the baseline moves) and
 //! [`revert`] (the working tree moves back), a debounced file [`watch`]er. Git never reads or writes the
 //! working tree here: we read files, store them with `hash-object --no-filters`, diff lines in Rust and
-//! write reverted files ourselves, so a repository's filters, diff drivers and hooks never run. Folders without git: whether the
+//! write reverted files ourselves, so a repository's filters, diff drivers and hooks never run. A refresh still
+//! counts a file unchanged when only the line endings git converts on checkout differ (`eol`: git's own rule,
+//! repeated in Rust). Folders without git: whether the
 //! folder looks like code ([`looks_like_code`]) and the user-confirmed `git init` + first commit
 //! ([`init_repository`]).
 //!
@@ -20,6 +22,7 @@
 
 mod baseline;
 mod diff;
+mod eol;
 mod error;
 mod files;
 pub mod git;

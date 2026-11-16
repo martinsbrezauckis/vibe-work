@@ -6,7 +6,7 @@
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
 /* global REQ, formControl, nearbyLabel, labelledToggle, labelledSubmit, renderedLabelText -- Supplied by the Rust script assembler and its shared prelude. */
-/* exported authorizationPage, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, privateField, privateLabel, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
+/* exported authorizationPage, editingHost, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, privateField, privateLabel, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
@@ -355,7 +355,6 @@ const editable = (el) => {
   return !["button", "submit", "reset", "checkbox", "radio", "file", "hidden", "image"].includes(type)
     && enabled(el) && !el.readOnly;
 };
-
 // Words that mark one-time-code fields (only to keep vault logins out of them; their values are ordinary) and
 // payment-card fields (by name, id, label, placeholder, test id).
 const OTP_META = /\b(otp|totp|one[-_ ]?time|passcode|verification[-_ ]?code|2fa|mfa|sms[-_ ]?code|auth(entication)?[-_ ]?code)\b/;
@@ -395,12 +394,12 @@ const LOCAL_ONE_TIME = ["vienreizējā parole", "vienreizējo paroli", "vienkart
   "clave de un solo uso"].map(foldWords);
 // The same for Chinese, Japanese and Korean, removed wherever they occur.
 const LOCAL_ONE_TIME_GLUED = ["一次性密码", "一次性密碼", "动态密码", "動態密碼", "ワンタイムパスワード", "일회용 비밀번호", "일회용비밀번호"].map((phrase) => foldWords(phrase).trim());
-// The kind of secret a field holds (its value never leaves the page): "password" or "card". These, and values the
+// The kind of secret a field (input, textarea, select, editor) holds (its value never leaves the page): "password" or "card". These, and values the
 // vault filled, are the ONLY field values the agent never reads; every other value, also text the user typed and
 // one-time codes, is readable.
 const secretKind = (el) => {
   const tag = el.localName;
-  if (tag !== "input" && tag !== "textarea" && !el.isContentEditable) return null;
+  if (tag !== "input" && tag !== "textarea" && tag !== "select" && !el.isContentEditable) return null;
   const type = String(el.getAttribute("type") || "").toLowerCase();
   const auto = String(el.getAttribute("autocomplete") || "").toLowerCase();
   if (type === "password" || /\b(current|new)-password\b/.test(auto)) return "password";
@@ -448,6 +447,8 @@ const secretKind = (el) => {
   }
   return null;
 };
+// Editing host: own contenteditable, the topmost editable element, or a designMode body (its <html> is editable too).
+const editingHost = el => el.isContentEditable === true && (el.hasAttribute("contenteditable") || el.localName === "body" || !el.parentElement?.isContentEditable);
 // A protected editor also owns its descendants, including a subtree observed without its parent.
 // Values do not participate in ref hashes, selector predicates, labels or surrounding page text.
 const privateField = el => {
@@ -774,7 +775,6 @@ const consentSnapshot = (reference = "") => {
     targetActionLength: targetAction.length, targetActionHash: fnv(targetAction) });
   return { url, title, client, scopes, accountChooser: chooser && accountOption, oversized, snapshot };
 };
-
 const authorizationPage = () => {
     const u = new URL(location.href);
     if (

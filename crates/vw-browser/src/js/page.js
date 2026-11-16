@@ -2,12 +2,13 @@
 // lists, links and images as absolute URLs, code, quotes, tables), as plain visible text (ShellX Browser's
 // whole-page text), or as HTML without active content (the live DOM after its scripts ran, with
 // scripts, handlers, frames, plugins, `javascript:` URLs, `<base>` and refresh removed; the host adds a `<base>` and
-// a CSP that forbids scripts). Password, card and vault-filled fields never leave the
-// page. Large answers are handed over in chunks: `start` builds the text once and keeps it in the page environment
+// a CSP that forbids scripts). In every access mode every protected field (the shared privateField rule: password, PIN,
+// card, vault-filled, hidden input) is withheld in every format, the same rule as the page read: an editor's,
+// textarea's or select's content becomes "[withheld]" and an input loses its value. Large answers are handed over in chunks: `start` builds the text once and keeps it in the page environment
 // under a token, `chunk` answers a slice, `end` drops it.
-// REQ: { page, op: start|chunk|end, format: markdown|text|html, token, offset, maxChars, chunk }.
+// REQ: { page, op: start|chunk|end, format: markdown|text|html|single_html, token, offset, maxChars, chunk }.
 // Synchronous; the answer is untrusted page data.
-/* global ENV, REQ, clip, secretKind, singleHtml, vaultFilled, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
+/* global ENV, REQ, clip, editingHost, privateField, singleHtml, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   __VW_COMMON__
   const head = { url: String(location.href).slice(0, 2000), title: clip(document.title, 300) };
@@ -34,6 +35,20 @@
     const cs = viewOf(el).getComputedStyle(el);
     return cs.display === "none" || cs.visibility === "hidden";
   };
+  // The protected fields this export withholds, and the elements whose text holds one: those
+  // are read child by child, every other element keeps the engine's own text. Candidates are the form fields and
+  // the editing hosts, however they became editable (attribute or designMode).
+  const candidate = (el) => ["input", "textarea", "select"].includes(el.localName) || el.hasAttribute("contenteditable") ||
+    editingHost(el);
+  const withheld = new Set(Array.from(document.querySelectorAll("*"))
+    .filter((el) => candidate(el) && privateField(el)?.element === el));
+  // A withheld <html> (a designMode document labelled like a protected field) withholds its body too.
+  if (document.body && Array.from(withheld).some((el) => el !== document.body && el.contains(document.body))) withheld.add(document.body);
+  const holders = new Set();
+  for (const el of withheld) {
+    if (el.localName === "input") continue; // An input's value is never part of the page's text.
+    for (let up = el.parentElement; up && !holders.has(up); up = up.parentElement) holders.add(up);
+  }
 
   const markdown = () => {
     const SKIP = new Set(["script", "style", "noscript", "template", "head", "svg", "canvas", "iframe", "frame", "object", "embed", "input", "textarea", "select", "button", "option"]);
@@ -48,6 +63,7 @@
       const el = node;
       const tag = el.localName;
       if (SKIP.has(tag) || isHidden(el)) return "";
+      if (withheld.has(el)) return " [withheld] ";
       if (tag === "br") return "  \n";
       if (tag === "img") {
         const src = absUrl(el.currentSrc || el.getAttribute("src"));
@@ -69,7 +85,7 @@
       }
       if ((tag === "strong" || tag === "b") && inner.trim()) return `**${inner.trim()}**`;
       if ((tag === "em" || tag === "i") && inner.trim()) return `_${inner.trim()}_`;
-      if (tag === "code") return "`" + String(el.textContent || "").replace(/`/g, "'") + "`";
+      if (tag === "code" && !holders.has(el)) return "`" + String(el.textContent || "").replace(/`/g, "'") + "`";
       return inner;
     };
     const blocks = [];
@@ -108,11 +124,12 @@
       const el = node;
       const tag = el.localName;
       if (SKIP.has(tag) || isHidden(el)) return;
+      if (withheld.has(el)) return push("[withheld]");
       const h = /^h([1-6])$/.exec(tag);
       if (h) return push(`${"#".repeat(Number(h[1]))} ${inline(el).trim()}`);
       if (tag === "p") return push(inline(el));
       if (tag === "ul" || tag === "ol") return push(list(el, 0));
-      if (tag === "pre") return push("```\n" + String(el.textContent || "").replace(/```/g, "'''").replace(/\n+$/, "") + "\n```");
+      if (tag === "pre" && !holders.has(el)) return push("```\n" + String(el.textContent || "").replace(/```/g, "'''").replace(/\n+$/, "") + "\n```");
       if (tag === "blockquote") return push(inline(el).trim().split("\n").map((l) => `> ${l}`).join("\n"));
       if (tag === "table") return table(el);
       if (tag === "hr") return push("---");
@@ -126,10 +143,22 @@
     return `# ${esc(clip(document.title, 300)) || "Untitled page"}\n\n${blocks.join("\n\n")}\n`;
   };
 
+  // Visible text of `el` with each withheld field as "[withheld]"; children without one keep their own innerText.
+  const textWithout = (el) => Array.from(el.childNodes).map((node) => {
+    if (node.nodeType === 3) return String(node.textContent || "").replace(/\s+/g, " ");
+    if (node.nodeType !== 1 || viewOf(node).getComputedStyle(node).display === "none") return "";
+    if (node.localName === "br") return "\n";
+    const text = withheld.has(node) ? "[withheld]" : holders.has(node) ? textWithout(node) : String(node.innerText || "");
+    return viewOf(node).getComputedStyle(node).display.startsWith("inline") ? text : `\n${text}\n`;
+  }).join("");
   const plainText = () => {
     let text;
     try {
-      text = String((document.body && document.body.innerText) || "");
+      const body = document.body;
+      // A protected designMode body is itself the withheld editor.
+      text = !body ? "" : withheld.has(body) ? "[withheld]" : holders.has(body)
+        ? textWithout(body).replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+        : String(body.innerText || "");
     } catch {
       text = "";
     }
@@ -150,20 +179,29 @@
     const a = document.createTreeWalker(root, 1);
     const b = document.createTreeWalker(copy, 1);
     let x = a.currentNode, y = b.currentNode;
+    const blank = []; // Changed after the walk, which needs both trees in the same shape.
     for (let steps = 0; x && y && steps < 200000; steps += 1) {
       if (oneFile) y.setAttribute("data-vw-pack-index", String(steps));
       // Native content-filter styles are absent from document.styleSheets. Preserve their visible effect
       // in the passive copy so reopening a save cannot reveal an advert that the live page hid.
       if (isHidden(x)) y.style.setProperty("display", "none", "important");
-      const tag = x.localName;
-      if (tag === "input" || tag === "textarea") {
-        if (secretKind(x) || vaultFilled(x)) {
-          y.removeAttribute("value");
-          if (tag === "textarea") y.textContent = "";
-        }
-      }
+      if (withheld.has(x)) blank.push(y);
       x = a.nextNode();
       y = b.nextNode();
+    }
+    // Past the walk's bound the copy is no longer matched to the page: every field there is withheld.
+    for (; y; y = b.nextNode()) if (candidate(y)) blank.push(y);
+    for (const el of blank) {
+      el.removeAttribute("value");
+      if (el.localName === "select") {
+        // One option remains, so the copy keeps its layout; its text, value and choice are gone.
+        const first = el.querySelector("option");
+        el.replaceChildren(...(first ? [first] : []));
+        if (first) {
+          for (const name of ["value", "label", "selected"]) first.removeAttribute(name);
+          first.textContent = "[withheld]";
+        }
+      } else if (el.localName !== "input") el.textContent = "[withheld]";
     }
     const DROP = "script,noscript,iframe,frame,frameset,object,embed,applet,base,portal,meta[http-equiv],link[rel~=preload],link[rel~=modulepreload],link[rel~=prefetch],link[rel~=import],link[rel~=manifest],link[rel~=serviceworker]";
     for (const el of Array.from(copy.querySelectorAll(DROP))) {

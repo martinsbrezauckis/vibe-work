@@ -17,6 +17,9 @@ import type {
   SessionExportView,
 } from "../core";
 
+/** What a natively picked folder is for; Rust titles the picker by it (a project folder by default). */
+export type FolderPurpose = "work" | "knowledge";
+
 /** What the native document picker added (`vw_host::DocumentsPicked`). Never a path. */
 export interface DocumentsPicked {
   added: DocumentView[];
@@ -64,7 +67,9 @@ export type HostEvent =
   | { type: "openSession"; sessionId: string; notificationId?: number }
   | { type: "openUpdates" }
   | { type: "browserSaveContext"; sessionId: string }
-  | { type: "browserPointContext"; sessionId: string };
+  | { type: "browserPointContext"; sessionId: string }
+  /** The Linux tray host came or went; the close-to-tray setting reads its row again. */
+  | { type: "trayHost"; available: boolean };
 
 /** Where the update flow is (mirrors `vw_host::update_flow::Phase`). */
 export type UpdatePhase =
@@ -177,10 +182,11 @@ export interface CoreClient {
   /** The `ui/*` request transport. */
   readonly uiControl: UiControlTransport;
   /**
-   * Opens the native folder picker (Rust owns it, no path comes from the webview), registers the
-   * choice with the gate and returns it; `null` when cancelled. Unsupported in browser dev mode.
+   * Opens the native folder picker (Rust owns it and its title, no path comes from the webview), registers the
+   * choice with the gate and returns it; `null` when cancelled. `purpose` picks the title: a project folder
+   * (`"work"`, the default) or a Knowledge base place (`"knowledge"`). Unsupported in browser dev mode.
    */
-  pickFolder(): Promise<string | null>;
+  pickFolder(purpose?: FolderPurpose): Promise<string | null>;
   /**
    * Opens the native file picker for documents (Rust owns it; no path comes from or goes to the
    * webview) and adds the chosen files to the core. Unsupported in browser dev mode.

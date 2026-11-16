@@ -8,12 +8,10 @@ only the app-server cleanup boundary reads pins strictly, before work and again 
 def install_skill_cleanup_guard():
     import asyncio
     from functools import wraps
-    import importlib.metadata
     from pathlib import Path
     import tomllib
 
-    if importlib.metadata.version("mistral-vibe") != "3.1.2":
-        return
+    require_guarded_vibe("skill cleanup guard")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     from vibe.app_server import _skill_store_cleanup as cleanup
     from vibe.core.skills.registry import _known_manifests, _manifest, _resolved, _service, _store
     from vibe.observability.logging import logger

@@ -6,7 +6,7 @@ mod faults;
 mod frame_load;
 mod pointer;
 mod readiness;
-mod screenshot;
+pub mod screenshot;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -75,6 +75,7 @@ pub struct PageEngine {
     pub hold_pin: AtomicBool,
     pub fail_pin: AtomicBool,
     pub navigate_during_shot: AtomicBool,
+    pub after_shot: Mutex<std::collections::VecDeque<screenshot::AfterShot>>,
     pub pinned: Notify,
     pub release: Semaphore,
     pub on_pin: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -172,6 +173,7 @@ impl PageEngine {
             hold_pin: AtomicBool::new(false),
             fail_pin: AtomicBool::new(false),
             navigate_during_shot: AtomicBool::new(false),
+            after_shot: Mutex::default(),
             pinned: Notify::new(),
             release: Semaphore::new(0),
             on_pin: Mutex::new(None),
@@ -244,6 +246,11 @@ impl PageEngine {
         self.rpc(json!({"op":"evaluate", "script":script}))
             .await
             .unwrap()
+    }
+
+    /// From now on the page's own policy applies to `eval` inside fixture evaluations too, as in `WebKit`.
+    pub async fn strict_eval(&self) {
+        self.rpc(json!({"op":"strictEval"})).await.unwrap();
     }
 
     /// Opt-in public-page benchmarks remove the offline fixture route in this disposable browser.
@@ -600,12 +607,7 @@ impl PreviewEngine for PageEngine {
         let id = id.clone();
         Box::pin(async move {
             let value = self.rpc(json!({"op":"screenshot"})).await?;
-            if self.navigate_during_shot.swap(false, Ordering::Relaxed) {
-                self.hooks
-                    .get()
-                    .unwrap()
-                    .page_event(&id.label, PageEvent::Started(URL.parse().unwrap()));
-            }
+            self.during_shot(&id).await;
             STANDARD
                 .decode(value.as_str().unwrap())
                 .map_err(|e| EngineError::Platform(e.to_string()))

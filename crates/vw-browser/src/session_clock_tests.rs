@@ -48,3 +48,34 @@ async fn activity_window_ignores_wall_clock_steps() {
         "clock steps must neither shorten nor extend agent activity"
     );
 }
+
+/// The agent holds a page from its first action until a question or the turn's end releases it, also after the
+/// activity window: the built-in browser's input block keeps a turn's page blocked between two browser steps only
+/// while this holds, so a question always hands the page to the person.
+#[tokio::test(start_paused = true)]
+async fn control_is_held_until_a_question_or_the_turns_end_releases_it() {
+    let sessions = Sessions::default();
+    assert!(!sessions.controlled("s"), "no agent action yet");
+    let flight = sessions.begin("s", Actor::Agent);
+    sessions.end("s", Actor::Agent, "click", "Save", Outcome::Done, "done");
+    drop(flight);
+    tokio::time::advance(Duration::from_millis(ACTIVE_FOR_MS * 2)).await;
+    assert!(
+        !sessions.state("s").agent_active,
+        "the activity window ended"
+    );
+    assert!(
+        sessions.controlled("s"),
+        "still held between two browser steps"
+    );
+    sessions.cancel_confirmations("s");
+    assert!(
+        !sessions.controlled("s"),
+        "released by a question or the turn's end"
+    );
+    drop(sessions.begin("s", Actor::Agent));
+    assert!(
+        sessions.controlled("s"),
+        "the next agent action takes it again"
+    );
+}

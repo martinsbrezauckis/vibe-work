@@ -52,7 +52,7 @@ pub(crate) struct Row {
 }
 
 /// Typed check for method marker `M`: params must deserialize into `M::Params` and must not carry
-/// top-level fields that type does not know (serde would silently drop them, but the original
+/// fields that type does not know, at any depth (serde would silently drop them, but the original
 /// value is what gets forwarded, so an unknown field would reach Vibe).
 ///
 /// Two validation rules:
@@ -70,16 +70,40 @@ where
     let parsed: M::Params = serde_json::from_value(params.clone()).map_err(|e| value_free(&e))?;
     let echoed =
         serde_json::to_value(&parsed).map_err(|_| "params cannot be re-encoded".to_owned())?;
-    match (params.as_object(), echoed.as_object()) {
-        (Some(given), Some(known)) => {
-            if let Some(extra) = given.keys().find(|k| !known.contains_key(*k)) {
-                return Err(format!("unknown field `{extra}`"));
-            }
-        }
-        (None, Some(_)) => return Err("params must be an object".to_owned()),
-        _ => {}
+    if echoed.is_object() && !params.is_object() {
+        return Err("params must be an object".to_owned());
     }
-    Ok(())
+    match first_unknown(params, &echoed, true) {
+        Some(extra) => Err(format!("unknown field `{extra}`")),
+        None => Ok(()),
+    }
+}
+
+/// The first key of `given` that the re-encoded typed value `known` does not carry, as a dotted path
+/// (array items by index), or `None`. Below the top level a key whose value is null counts as known:
+/// an optional field set to null is dropped when re-encoded, and a null carries nothing to Vibe.
+fn first_unknown(given: &Value, known: &Value, top: bool) -> Option<String> {
+    match (given, known) {
+        (Value::Object(given), Value::Object(known)) => {
+            given.iter().find_map(|(key, value)| match known.get(key) {
+                Some(inner) => {
+                    first_unknown(value, inner, false).map(|rest| format!("{key}.{rest}"))
+                }
+                None if !top && value.is_null() => None,
+                None => Some(key.clone()),
+            })
+        }
+        (Value::Array(given), Value::Array(known)) => {
+            given
+                .iter()
+                .zip(known)
+                .enumerate()
+                .find_map(|(i, (given, known))| {
+                    first_unknown(given, known, false).map(|rest| format!("{i}.{rest}"))
+                })
+        }
+        _ => None,
+    }
 }
 
 /// A description of a serde error that cannot contain a params value.

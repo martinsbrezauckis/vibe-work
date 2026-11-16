@@ -16,7 +16,8 @@
 //! guard), `git_cmd` (`answerIdentity`).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use tokio::sync::watch;
 use vw_git::identity::{self, CommitIdentity, Global};
@@ -92,7 +93,7 @@ impl IdentityAsks {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Pending>> {
-        self.pending.lock().unwrap_or_else(PoisonError::into_inner)
+        self.pending.lock_or_recover()
     }
 }
 

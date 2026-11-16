@@ -2,6 +2,7 @@
 let holds = 0;
 const outputs = new Set<GainNode>();
 
+/** Gain node an audio player connects to; it starts muted while a capture holds playback quiet. */
 export function playbackOutput(context: AudioContext): { node: GainNode; release: () => void } {
   const node = context.createGain();
   node.gain.value = holds > 0 ? 0 : 1;

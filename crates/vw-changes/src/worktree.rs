@@ -14,6 +14,8 @@
 //! - On a case-insensitive file system a name must exist exactly as listed (`ExactNames`), so a case-only
 //!   rename shows as a rename.
 //! - Submodules (gitlinks) keep their baseline entry: they are reviewed in their own repository.
+//! - A refresh ([`Compare::AsGit`]) counts a file unchanged when git would (line endings it converts,
+//!   `eol`); the cache then holds the baseline's id for it until the file changes.
 
 use std::path::{Path, PathBuf};
 
@@ -374,6 +376,56 @@ fn link_entry(
     })
 }
 
+/// How [`scan`] compares a tracked file with its baseline blob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Compare {
+    /// Byte for byte: taking a baseline records the bytes as they are.
+    Bytes,
+    /// As git does: a file whose bytes differ only by the line endings git converts on checkout
+    /// (`.gitattributes` `text` / `eol`, `core.autocrlf`) keeps its baseline entry (`eol`).
+    AsGit,
+}
+
+/// Replaces the id of every tracked file git would call unchanged against its baseline blob by that blob's
+/// id. When git cannot answer, nothing is replaced (every such file stays listed).
+fn same_as_git(
+    repo: &Repo,
+    list_index: &Path,
+    base: &Entries,
+    hashed: &[(Vec<u8>, PathBuf, Stat, &'static str)],
+    ids: &mut [String],
+) {
+    let mut at = Vec::new();
+    let mut candidates = Vec::new();
+    for (i, (rel, full, _, _)) in hashed.iter().enumerate() {
+        if let Some(entry) = base.get(rel)
+            && entry.mode != "120000"
+            && entry.id != ids[i]
+        {
+            at.push(i);
+            candidates.push(crate::eol::Candidate {
+                rel: rel.clone(),
+                full: full.clone(),
+                base_id: entry.id.clone(),
+            });
+        }
+    }
+    match crate::eol::git_equal(repo, list_index, &candidates) {
+        Ok(equal) => {
+            for (i, candidate) in at.into_iter().zip(candidates) {
+                if equal.contains(&candidate.rel) {
+                    ids[i] = candidate.base_id;
+                }
+            }
+        }
+        // Listed is the safe direction (a removal asks about every listed file): no note, which the
+        // inspection would turn into a blocker.
+        Err(error) => {
+            tracing::warn!(%error, "changes: line endings compared byte for byte");
+        }
+    }
+}
+
 /// Reads the working tree: `base` gives the tracked paths (and keeps everything outside the scope and
 /// every submodule as it is), `list_index` holds the same entries for `ls-files --others`. With `trust`
 /// false (and on platforms where the cache is not trusted) every file is read and hashed again.
@@ -384,6 +436,7 @@ pub(crate) fn scan(
     cache: &mut StatCache,
     trust: bool,
     rules: Option<&IgnoreSnapshot>,
+    compare: Compare,
 ) -> Result<Scan, ChangesError> {
     let trust = trust && crate::statcache::trusted();
     let (mut scan, mut candidates) = gather(repo, base, list_index, rules)?;
@@ -457,7 +510,10 @@ pub(crate) fn scan(
     }
     if !to_hash.is_empty() {
         let paths: Vec<PathBuf> = to_hash.iter().map(|t| t.1.clone()).collect();
-        let ids = hash_files(repo, list_index, &paths)?;
+        let mut ids = hash_files(repo, list_index, &paths)?;
+        if compare == Compare::AsGit {
+            same_as_git(repo, list_index, base, &to_hash, &mut ids);
+        }
         for ((rel, _, stat, mode), id) in to_hash.into_iter().zip(ids) {
             cache.put(paths::display(&rel), stat, mode.into(), id.clone());
             scan.entries.insert(

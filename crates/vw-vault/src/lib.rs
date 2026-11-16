@@ -40,6 +40,7 @@ pub mod mistral_key;
 pub mod private_location;
 pub mod project_secret;
 pub mod remember;
+mod remember_rename;
 pub mod repo;
 mod secret;
 pub mod shellx_profile;

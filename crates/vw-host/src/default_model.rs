@@ -1,13 +1,13 @@
 //! Seeds the product's model choice in its own `VIBE_HOME` on first start.
 //!
-//! Depends on the filesystem and TOML parser. Called by [`crate::launch::ProductLaunch`] before the
-//! other config defaults. Existing Large 4 entries gain the missing published prices, the
-//! missing output-token cap, the missing thinking levels, the missing default level (High) and the
-//! missing compaction point (800,000 tokens);
+//! Depends on the TOML parser; written by [`crate::startup_config`]. Runs in [`crate::launch::ProductLaunch`] before
+//! the other config defaults, and is the one startup step whose failed write fails the launch. Existing Large 4
+//! entries gain the missing published prices, the missing output-token cap, the missing thinking levels, the missing
+//! default level (High) and the missing compaction point (800,000 tokens);
 //! a window or price that still holds the value an earlier version seeded takes the published one.
 //! Every other configured value and the user's model choice remain unchanged.
 
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 use toml_edit::{DocumentMut, value};
 
@@ -57,45 +57,46 @@ cached_input_price = 0.07\n\
 output_price = 2.1\n\
 auto_compact_threshold = 800000\n";
 
-/// Writes the initial model config, or fills missing Large 4 defaults in an existing one.
-///
-/// Returns `true` when this call created the file, or `false` when one already exists.
-/// The caller creates `vibe_home` first. Values the user set (prices, output cap) are preserved.
-///
-/// # Errors
-/// Returns the filesystem error when the file cannot be created or written.
-pub fn ensure(vibe_home: &Path) -> io::Result<bool> {
-    let path = vibe_home.join("config.toml");
-    let mut file = match vw_platform::create_private_new(&path) {
-        Ok(file) => file,
-        Err(vw_platform::PrivateFileError::Io { source, .. })
-            if source.kind() == io::ErrorKind::AlreadyExists =>
-        {
-            fill_missing_defaults(&path)?;
-            return Ok(false);
-        }
-        Err(error) => return Err(io::Error::other(error)),
-    };
-    file.write_all(FIRST_CONFIG.as_bytes())?;
-    Ok(true)
+/// What the Large 4 step did to the config text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelDefaults {
+    /// There was no file: the first config was seeded.
+    Created,
+    /// Missing Large 4 defaults were filled.
+    Filled,
+    /// Nothing to change (also a file that is not a config with a `[[models]]` array).
+    Unchanged,
 }
 
-/// Rewrites `path` with [`with_missing_defaults`] when that changes it. Leaves alone a symlink,
-/// a non-file, a file over 1 MiB, unparsable TOML, and a file that changed while it was read.
-fn fill_missing_defaults(path: &Path) -> io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_file() || metadata.len() > 1024 * 1024 {
-        return Ok(());
+/// Writes the initial model config, or fills missing Large 4 defaults in an existing one, through the guarded
+/// startup write ([`crate::startup_config`]): a link, a non-file, a file over 1 MiB, unparsable TOML and a file that
+/// changed while it was read are left alone.
+///
+/// Returns `true` when this call created the file, or `false` when one already exists.
+/// Values the user set (prices, output cap) are preserved.
+///
+/// # Errors
+/// Returns the filesystem error when the file cannot be read, created or written.
+pub fn ensure(vibe_home: &Path) -> io::Result<bool> {
+    let mut draft = crate::startup_config::Draft::open(vibe_home)?;
+    let staged = draft.apply(edit, |_| ModelDefaults::Unchanged);
+    let written = draft.commit();
+    let outcome = written
+        .settle(staged, |_| ModelDefaults::Unchanged)
+        .map_err(io::Error::other)?;
+    Ok(outcome == ModelDefaults::Created && written == crate::startup_config::Written::Saved)
+}
+
+/// This step's edit for [`crate::startup_config`]: the first config when `missing` (no file, no text yet), else
+/// [`with_missing_defaults`].
+pub(crate) fn edit(existing: &str, missing: bool) -> (Option<String>, ModelDefaults) {
+    if missing {
+        return (Some(FIRST_CONFIG.to_owned()), ModelDefaults::Created);
     }
-    let original = std::fs::read_to_string(path)?;
-    let Some(updated) = with_missing_defaults(&original) else {
-        return Ok(());
-    };
-    // A settings writer may have changed the file while this launch prepared it.
-    if std::fs::read_to_string(path)? != original {
-        return Ok(());
+    match with_missing_defaults(existing) {
+        Some(text) => (Some(text), ModelDefaults::Filled),
+        None => (None, ModelDefaults::Unchanged),
     }
-    vw_platform::replace_private(path, updated.as_bytes()).map_err(io::Error::other)
 }
 
 /// The config text with the missing prices, output cap, thinking levels, default level and

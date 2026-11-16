@@ -574,14 +574,12 @@ fn mutate(
     })
 }
 
-#[cfg(feature = "agent-vault")]
 mod checked;
 
 /// Atomically checks the current item list and commits the returned replacements.
 /// `None` refuses without changing the head.
 /// # Errors
 /// Locked, corrupt or conflicting storage.
-#[cfg(feature = "agent-vault")]
 pub fn update_items_checked(
     repo: &LocalRepo,
     master: &MasterKey,

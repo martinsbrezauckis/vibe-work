@@ -32,7 +32,8 @@
 //! - A card the core cannot answer is shown to the user (`pump`): a second ask is better than a stuck turn.
 
 use std::collections::VecDeque;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 
@@ -149,7 +150,7 @@ fn approval_parts(callback: &Value) -> Option<(&str, &str, &Value)> {
 
 impl Ledger {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_or_recover()
     }
 
     /// The user approved `command` in a guard's native dialog for the bash call `call_id` (the hook's

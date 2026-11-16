@@ -9,6 +9,7 @@
 //! Depends on: `serde_json`, `pr`, `forge`, `error`. Called by: vw-core-api.
 //! Invariant: the only writing call is [`create`], made after the user's confirmation in the core.
 
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,7 +23,7 @@ use crate::names;
 use crate::pr::{self, PrCard, ReviewComment};
 
 /// The JSON fields the card reads.
-pub const VIEW_FIELDS: &str = "number,url,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup,headRefName,baseRefName";
+pub const VIEW_FIELDS: &str = "number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefName,baseRefName";
 
 const OUTPUT_CAP: usize = 8 << 20;
 const READ_TIMEOUT: Duration = Duration::from_secs(45);
@@ -35,14 +36,13 @@ pub struct Gh {
     workdir: PathBuf,
 }
 
-/// The installed gh: `explicit` when given (tests), else the first `gh` on `PATH` or in the usual install
-/// folders (a desktop app on macOS starts with a short `PATH`). `workdir` must be a private, existing
+/// The installed gh: `explicit` when given (tests), else [`locate`]. `workdir` must be a private, existing
 /// folder of ours.
 #[must_use]
 pub fn find(explicit: Option<&Path>, workdir: &Path) -> Option<Gh> {
     let program = match explicit {
         Some(p) => p.is_file().then(|| p.to_path_buf())?,
-        None => candidates().into_iter().find(|p| p.is_file())?,
+        None => locate()?,
     };
     Some(Gh {
         program,
@@ -50,34 +50,118 @@ pub fn find(explicit: Option<&Path>, workdir: &Path) -> Option<Gh> {
     })
 }
 
-fn candidates() -> Vec<PathBuf> {
-    let name = if cfg!(windows) { "gh.exe" } else { "gh" };
-    let mut list: Vec<PathBuf> = std::env::var_os("PATH")
+/// The one gh lookup every part of the app uses (pull request cards, GitHub reads): the first `gh` on `PATH` or
+/// in the usual install folders of this system. A desktop app started from Finder, the Dock or a Start menu
+/// often gets a short `PATH` without the package manager's folder.
+#[must_use]
+pub fn locate() -> Option<PathBuf> {
+    locate_with(InstallLayout::current(), |key| std::env::var_os(key))
+}
+
+/// [`locate`] for a given layout and environment (tests). Only absolute paths count: a relative `PATH` entry
+/// would name a program in whatever folder the app runs in.
+#[must_use]
+pub fn locate_with(
+    layout: InstallLayout,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Option<PathBuf> {
+    candidates_for(layout, env)
+        .into_iter()
+        .find(|p| p.is_absolute() && p.is_file())
+}
+
+/// Whose install folders [`candidates_for`] lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallLayout {
+    /// The GitHub CLI installer and winget (Program Files, the user's Programs, winget's links), Scoop.
+    Windows,
+    /// Homebrew (Apple silicon and Intel), Mac ports (`/opt/local`), the user's `~/.local/bin`.
+    MacOs,
+    /// The distribution, Snap, Homebrew on Linux, the user's `~/.local/bin`.
+    Linux,
+}
+
+impl InstallLayout {
+    /// This system's layout.
+    #[must_use]
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else {
+            Self::Linux
+        }
+    }
+}
+
+/// Where gh may be, in order: every `PATH` folder first, then the layout's usual install folders, the user's own
+/// before the system's (as a login shell's `PATH` orders them).
+#[must_use]
+pub fn candidates_for(
+    layout: InstallLayout,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Vec<PathBuf> {
+    let name = if layout == InstallLayout::Windows {
+        "gh.exe"
+    } else {
+        "gh"
+    };
+    let mut list: Vec<PathBuf> = env("PATH")
         .map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect())
         .unwrap_or_default();
-    if cfg!(windows) {
-        for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-            if let Some(base) = std::env::var_os(var) {
-                list.push(PathBuf::from(&base).join("GitHub CLI").join(name));
+    let home = |parts: &[&str]| {
+        env(if layout == InstallLayout::Windows {
+            "USERPROFILE"
+        } else {
+            "HOME"
+        })
+        .map(|h| parts.iter().fold(PathBuf::from(h), |p, part| p.join(part)))
+    };
+    match layout {
+        InstallLayout::Windows => {
+            for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+                if let Some(base) = env(var) {
+                    list.push(PathBuf::from(&base).join("GitHub CLI").join(name));
+                    list.push(
+                        PathBuf::from(base)
+                            .join("Programs")
+                            .join("GitHub CLI")
+                            .join(name),
+                    );
+                }
+            }
+            if let Some(base) = env("LOCALAPPDATA") {
                 list.push(
                     PathBuf::from(base)
-                        .join("Programs")
-                        .join("GitHub CLI")
+                        .join("Microsoft")
+                        .join("WinGet")
+                        .join("Links")
                         .join(name),
                 );
             }
+            if let Some(scoop) = env("SCOOP") {
+                list.push(PathBuf::from(scoop).join("shims").join(name));
+            }
+            list.extend(home(&["scoop", "shims", name]));
         }
-    } else {
-        for dir in [
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/snap/bin",
-        ] {
-            list.push(PathBuf::from(dir).join(name));
+        InstallLayout::MacOs => {
+            list.extend(home(&[".local", "bin", name]));
+            for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"] {
+                list.push(PathBuf::from(dir).join(name));
+            }
         }
-        if let Some(home) = std::env::var_os("HOME") {
-            list.push(PathBuf::from(home).join(".local").join("bin").join(name));
+        InstallLayout::Linux => {
+            list.extend(home(&[".local", "bin", name]));
+            list.extend(home(&[".linuxbrew", "bin", name]));
+            for dir in [
+                "/home/linuxbrew/.linuxbrew/bin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/snap/bin",
+            ] {
+                list.push(PathBuf::from(dir).join(name));
+            }
         }
     }
     list
@@ -258,6 +342,85 @@ impl Gh {
         Ok(pr::from_gh(&value))
     }
 
+    /// Every pull request (any state, newest first, at most 30) whose head is `head`.
+    ///
+    /// # Errors
+    /// gh failures, or a branch name gh cannot be given.
+    pub fn list(&self, forge: &Forge, head: &str) -> Result<Vec<PrCard>, GitError> {
+        if !names::valid_ref_name(head) {
+            return Err(GitError::Blocked(
+                "The branch name cannot be used with gh.".to_owned(),
+            ));
+        }
+        let repo = format!("--repo={}", forge.gh_repo());
+        let fields = format!("--json={VIEW_FIELDS}");
+        let head = format!("--head={head}");
+        let out = self.run(
+            &[
+                "pr",
+                "list",
+                &repo,
+                &head,
+                "--state=all",
+                "--limit=30",
+                &fields,
+            ],
+            None,
+            READ_TIMEOUT,
+        )?;
+        if !out.ok {
+            return Err(GitError::Gh(clip(&out.stderr, 300)));
+        }
+        let value: Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| GitError::Gh(format!("unreadable answer: {e}")))?;
+        Ok(value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(pr::from_gh)
+            .collect())
+    }
+
+    /// The names of pull request `number`'s required checks (`gh pr checks --required`). gh ends with a non-zero
+    /// status while checks fail or run, so the answer is read whatever the status; "no required checks" is an
+    /// empty list.
+    ///
+    /// # Errors
+    /// gh failures without a readable answer.
+    pub fn required_checks(&self, forge: &Forge, number: u64) -> Result<Vec<String>, GitError> {
+        let repo = format!("--repo={}", forge.gh_repo());
+        let number = number.to_string();
+        let out = self.run(
+            &[
+                "pr",
+                "checks",
+                &repo,
+                "--required",
+                "--json=name",
+                "--",
+                &number,
+            ],
+            None,
+            READ_TIMEOUT,
+        )?;
+        if let Ok(value) = serde_json::from_slice::<Value>(&out.stdout) {
+            return Ok(value
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c.get("name").and_then(Value::as_str).map(str::to_owned))
+                .collect());
+        }
+        if out
+            .stderr
+            .to_ascii_lowercase()
+            .contains("no required checks")
+        {
+            return Ok(Vec::new());
+        }
+        Err(GitError::Gh(clip(&out.stderr, 300)))
+    }
+
     /// The raw `gh run view --job <job> --log-failed` output of one GitHub Actions job; the
     /// caller keeps its tail (`checklog::tail_of_gh_log`).
     ///
@@ -318,6 +481,10 @@ impl Gh {
         Ok((pr::comments_from(Some(&top), lines.as_ref()), unread))
     }
 }
+
+#[cfg(test)]
+#[path = "gh_tests.rs"]
+mod tests;
 
 fn reader(mut pipe: impl Read + Send + 'static, cap: usize) -> std::thread::JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {

@@ -13,8 +13,9 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use tokio::task::JoinHandle;
 
@@ -77,7 +78,7 @@ pub struct ProcMon {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.lock_or_recover()
 }
 
 impl ProcMon {

@@ -26,6 +26,17 @@
   --orange: #ff651f;
   --orange-2: #ff8205;
   --orange-3: #ffaf00;
+  /* The agent control frame palette (a chat's colour index; the helper browsers use the same eight) and its paused
+     grey. Index 0 is every chat's default. */
+  --agent-frame-0: #ed5b1b;
+  --agent-frame-1: #1a73e8;
+  --agent-frame-2: #d93025;
+  --agent-frame-3: #f9ab00;
+  --agent-frame-4: #1e8e3e;
+  --agent-frame-5: #d01884;
+  --agent-frame-6: #9334e6;
+  --agent-frame-7: #007b83;
+  --agent-frame-paused: #8c8985;
   --red: #f66c60;
   --green: #44ba82;
   --blue: #55b3fb;
@@ -45,23 +56,15 @@
   /* Shared typography and control geometry used by Settings and Vault. */
   --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
   --font-mono: "Space Mono", ui-monospace, Menlo, monospace;
-  --text-10-5: 10.5px;
-  --text-11: 11px;
-  --text-11-5: 11.5px;
-  --text-12: 12px;
-  --text-12-5: 12.5px;
-  --text-13: 13px;
-  --text-13-5: 13.5px;
-  --text-14: 14px;
-  --text-16: 16px;
-  --text-17: 17px;
-  --text-22: 22px;
-  --text-24: 24px;
-  --text-28: 28px;
-  --text-14-5: 14.5px;
-  --text-15: 15px;
-  --text-18: 18px;
-  --text-34: 34px;
+  /* Type scale: whole pixels, one role per step (DESIGN.md, Typography). */
+  --text-xs: 11px; /* badges, keycaps, counts, dense metadata */
+  --text-sm: 12px; /* captions, help lines, the status bar and data in Space Mono */
+  --text-base: 13px; /* button and field labels, selector, section titles */
+  --text-md: 14px; /* body text in Settings and panels, headings */
+  --text-reading: 15px; /* the chat: answers, your messages, the composer */
+  --text-lg: 16px; /* column, dialog and setup-step titles */
+  --text-xl: 22px; /* page titles */
+  --text-display: 28px; /* first-run and New chat headline */
   --weight-bold: 700;
   --leading-tight: 1;
   --leading-copy: 1.55;
@@ -71,23 +74,16 @@
   --weight-heading: 650;
   --leading-ui: 1.5;
   --leading-helper: 1.45;
-  /* Shared corners and stacking levels retain existing geometry. */
-  --radius-lg: 10px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-14: 14px;
-  --radius-5: 5px;
-  --radius-7: 7px;
+  /* Corner scale (DESIGN.md, Shapes). */
+  --radius-mark: 2px; /* drawn marks: glyph parts, drop lines, progress bars */
+  --radius-xs: 4px; /* keycaps, inline code, thumbnails */
+  --radius-sm: 6px; /* menu items, small chips */
+  --radius-md: 8px; /* controls: buttons, selector, inputs, banners */
+  --radius-lg: 12px; /* cards and panels */
+  --radius-xl: 16px; /* dialogs and the composer */
   --radius-pill: 999px;
-  --radius-2: 2px;
   --radius-round: 50%;
-  --radius-3: 3px;
-  --radius-9: 9px;
-  --radius-xs: 4px;
-  --radius-xl: 12px;
-  --radius-2-5: 2.5px;
-  --radius-1: 1px;
-  --radius-dialog: 16px;
+  /* Stacking levels. */
   --z-sticky: 5;
   --z-overlay: 3;
   --z-toolbar: 4;
@@ -120,25 +116,14 @@
   /* The chat header and the side panel's tab bar share one height, so their bottom lines meet. */
   --header-height: 54px;
   /* Motion (styles/feel.css): one vocabulary for every response. Exits run about 0.7x their entries. */
-  --t-press: 80ms; /* a press going down (release: 160 ms) */
-  --t-hover: 140ms; /* hover in and out, colour changes */
-  --t-ui: 200ms; /* tabs, segmented thumbs, switches, chevrons, the theme cross-fade */
+  --t-press: 80ms; /* a press going down; short follow-up delays */
+  --t-hover: 140ms; /* hover in and out, colour changes, a press coming back, quick fades and exits */
+  --t-ui: 200ms; /* tabs, switches, chevrons, the theme cross-fade, columns resizing */
   --t-panel: 240ms; /* the side panel, toasts, list rows moving */
   --t-arrive: 320ms; /* cards that arrive (approval, question) */
-  --t-hover-fast: 120ms;
-  --t-fade: 150ms;
-  --t-release: 160ms;
-  --t-layout: 220ms;
-  --t-toast: 250ms;
-  --t-follow-delay: 60ms;
-  --t-attention-delay: 260ms;
-  --t-feedback: 900ms;
-  --t-highlight: 1500ms;
-  --t-busy-slow: 1600ms;
-  --t-busy: 1400ms;
-  --t-busy-fast: 1200ms;
-  --ease-native: ease; /* existing short disclosures and switches */
-  --ease-native-out: ease-out; /* existing toast arrival */
+  --t-feedback: 900ms; /* a one-time confirmation or attention pulse */
+  --t-highlight: 1500ms; /* a found Settings row flashing */
+  --t-loop: 1400ms; /* one cycle of a running-work loop (dots, pulses, shimmer) */
   --ease-pulse: ease-in-out; /* smooth working indicators */
   --ease-std: cubic-bezier(0.4, 0, 0.2, 1); /* colour changes: the curve Mistral's sites use */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* anything that arrives or follows the hand */
@@ -199,6 +184,15 @@
   --orange: #ac3500;
   --orange-2: #b13b00;
   --orange-3: #8f5300;
+  --agent-frame-0: #ed5b1b;
+  --agent-frame-1: #1a73e8;
+  --agent-frame-2: #d93025;
+  --agent-frame-3: #f9ab00;
+  --agent-frame-4: #1e8e3e;
+  --agent-frame-5: #d01884;
+  --agent-frame-6: #9334e6;
+  --agent-frame-7: #007b83;
+  --agent-frame-paused: #77756c;
   --on-accent: #ffffff;
   --control-line: #77756c;
   --accent-ink: #ffffff;
@@ -254,7 +248,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: var(--text-14);
+  font-size: var(--text-md);
   line-height: var(--leading-ui);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;

@@ -16,6 +16,7 @@ import {
   replaceAll,
 } from "@codemirror/search";
 
+/** A search in the editor: the query, an optional replacement, and the same options as the built-in search panel. */
 export interface EditorSearch {
   query: string;
   replace?: string;

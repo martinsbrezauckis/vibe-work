@@ -75,6 +75,17 @@ impl ReadExclusions {
                 && !self.own.as_ref().is_some_and(|c| under(path, c))
     }
 
+    /// True when `folder` is inside a protected root or holds one (the vault's container, the folder above the app
+    /// data, a home folder): a place handed to the agent as a whole must not contain the vault or app state.
+    pub(crate) fn overlaps(&self, folder: &Path) -> bool {
+        self.excludes(folder)
+            || self
+                .vaults
+                .iter()
+                .chain(self.data.iter())
+                .any(|root| under(root, folder))
+    }
+
     /// Validate the opened object, not just the spelling checked before opening it. Refuse a replacement
     /// between resolution and open; the same handle supplies all bytes after this check.
     pub(crate) fn check_opened(

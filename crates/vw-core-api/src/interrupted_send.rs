@@ -4,8 +4,9 @@
 //! Depends on: gated resume, interrupt and read calls.
 //! Called by: dispatch and saved-schedule recovery.
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 
@@ -26,11 +27,7 @@ pub(crate) struct State(Mutex<HashMap<String, Interrupted>>);
 impl State {
     /// Only actual turn events count, never a detached read's Interrupted projection.
     pub(crate) fn turn_event(&self, id: &str, turn: &Value) {
-        if let Some(old) = self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_mut(id)
+        if let Some(old) = self.0.lock_or_recover().get_mut(id)
             && old.pending
             && old.turn["id"] == turn["id"]
         {
@@ -43,36 +40,31 @@ impl State {
 
     fn terminal_event(&self, id: &str) -> bool {
         self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(id)
             .is_some_and(|old| old.terminal_event)
     }
 
     pub(crate) fn model_hold(&self, id: &str) -> Option<(String, Vec<String>)> {
-        let old = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let old = self.0.lock_or_recover();
         let old = old.get(id).filter(|old| old.pending)?;
         Some((old.turn["id"].as_str()?.to_owned(), old.inputs.clone()))
     }
 
     pub(crate) fn pending(&self, id: &str) -> Option<String> {
         self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(id)
             .filter(|old| old.pending)
             .and_then(|old| old.turn["id"].as_str().map(str::to_owned))
     }
 
     pub(crate) fn forget(&self, id: &str) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id);
+        self.0.lock_or_recover().remove(id);
     }
 
     pub(crate) fn project(&self, id: &str, state: &mut Value) {
-        let old = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let old = self.0.lock_or_recover();
         let Some(old) = old.get(id) else { return };
         if let Some(turns) = state["turns"].as_array_mut() {
             for turn in turns {
@@ -92,7 +84,7 @@ impl State {
                 self.project(&snapshot.session_id, &mut snapshot.state);
             }
             CoreEvent::Change { change } => {
-                let old = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                let old = self.0.lock_or_recover();
                 match change {
                     SessionChange::TurnUpserted { session_id, turn } => {
                         if let Some(old) = old
@@ -155,14 +147,7 @@ pub(crate) async fn prepare(core: &Core, id: &str) -> Result<(), CoreError> {
         .and_then(|turns| turns.last())
         .filter(|turn| matches!(turn["status"].as_str(), Some("interrupted" | "in_progress")))
     else {
-        if let Some(old) = core
-            .shared
-            .interrupted_send
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_mut(id)
-        {
+        if let Some(old) = core.shared.interrupted_send.0.lock_or_recover().get_mut(id) {
             old.pending = false;
         }
         return Ok(());
@@ -182,20 +167,15 @@ pub(crate) async fn prepare(core: &Core, id: &str) -> Result<(), CoreError> {
         .map(str::to_owned)
         .collect();
     turn["status"] = json!("interrupted");
-    core.shared
-        .interrupted_send
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(
-            id.to_owned(),
-            Interrupted {
-                turn,
-                inputs,
-                pending: true,
-                terminal_event: false,
-            },
-        );
+    core.shared.interrupted_send.0.lock_or_recover().insert(
+        id.to_owned(),
+        Interrupted {
+            turn,
+            inputs,
+            pending: true,
+            terminal_event: false,
+        },
+    );
     Ok(())
 }
 
@@ -251,13 +231,7 @@ pub(crate) async fn stop_recovered(
         if idle {
             crate::stops::finished(shared, &[id.to_owned()]);
             *resumed = reply.result;
-            if let Some(old) = shared
-                .interrupted_send
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get_mut(id)
-            {
+            if let Some(old) = shared.interrupted_send.0.lock_or_recover().get_mut(id) {
                 old.pending = false;
             }
             return Ok(());

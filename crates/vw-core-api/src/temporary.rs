@@ -41,8 +41,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tracing::{error, info, warn};
@@ -208,7 +209,7 @@ impl TemporarySessions {
                 file = ?aside, damage, kept,
                 "temporary sessions: the record was damaged and has been moved aside unchanged; the session ids still whole in it were kept"
             );
-            let ids = self.ids.lock().unwrap_or_else(PoisonError::into_inner);
+            let ids = self.ids.lock_or_recover();
             if !ids.is_empty()
                 && let Err(error) = self.write(&ids)
             {
@@ -228,12 +229,7 @@ impl TemporarySessions {
 
     /// The ids now, sorted.
     pub(crate) fn ids(&self) -> Vec<String> {
-        self.ids
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .cloned()
-            .collect()
+        self.ids.lock_or_recover().iter().cloned().collect()
     }
 
     /// Fails at once when the record is known to be unusable (damaged and not movable, see the module header), so a
@@ -256,12 +252,7 @@ impl TemporarySessions {
 
     /// Notices retained for a UI that subscribes after the startup sweep finished.
     pub(crate) fn notices(&self) -> Vec<CoreEvent> {
-        self.notices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .cloned()
-            .collect()
+        self.notices.lock_or_recover().values().cloned().collect()
     }
 
     /// Keeps the latest cleanup result for this session and publishes it to current subscribers.
@@ -281,8 +272,7 @@ impl TemporarySessions {
             message,
         };
         self.notices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .insert(id.to_owned(), event.clone());
         shared.emit(event);
     }
@@ -293,7 +283,7 @@ impl TemporarySessions {
     /// [`NotRecorded`] when the record cannot be written (or must not be, see the module header). The id is then not
     /// on the list either, so the caller must not treat the session as temporary: it has to end it.
     pub(crate) fn add(&self, id: &str) -> Result<(), NotRecorded> {
-        let mut ids = self.ids.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut ids = self.ids.lock_or_recover();
         let fresh = ids.insert(id.to_owned());
         if let Err(error) = self.write(&ids) {
             if fresh {
@@ -324,7 +314,7 @@ impl TemporarySessions {
     /// Removes a session (it was deleted). A record that cannot be updated only means a stale id: the next start
     /// finds no such session, drops it and goes on.
     pub(crate) fn remove(&self, id: &str) {
-        let mut ids = self.ids.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut ids = self.ids.lock_or_recover();
         if ids.remove(id)
             && let Err(error) = self.write(&ids)
         {
@@ -376,28 +366,17 @@ impl TemporarySessions {
 
     /// Notes that chat `id` works in scratch folder `dir` (it goes with the chat).
     pub(crate) fn bind_scratch(&self, id: &str, dir: PathBuf) {
-        self.scratch
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_owned(), dir);
+        self.scratch.lock_or_recover().insert(id.to_owned(), dir);
     }
 
     /// The scratch folder chat `id` works in, if it has one.
     fn scratch_of(&self, id: &str) -> Option<PathBuf> {
-        self.scratch
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(id)
-            .cloned()
+        self.scratch.lock_or_recover().get(id).cloned()
     }
 
     /// Removes chat `id`'s scratch folder, if it has one; returns it. Blocking (disk).
     fn drop_scratch(&self, id: &str) -> Option<PathBuf> {
-        let dir = self
-            .scratch
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id)?;
+        let dir = self.scratch.lock_or_recover().remove(id)?;
         self.remove_scratch(&dir);
         Some(dir)
     }
@@ -410,12 +389,7 @@ impl TemporarySessions {
     /// Removes every scratch folder whose chat is gone: all of them once no temporary chat is left (a chat the sweep
     /// could not delete keeps the folders until a later sweep). Returns the folders it removed. Blocking (disk).
     fn sweep_scratch(&self) -> Vec<PathBuf> {
-        if !self
-            .ids
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty()
-        {
+        if !self.ids.lock_or_recover().is_empty() {
             return Vec::new();
         }
         let mut found = sweep_root(&self.scratch_root);
@@ -426,10 +400,7 @@ impl TemporarySessions {
                 let _ = std::fs::remove_dir(old);
             }
         }
-        self.scratch
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.scratch.lock_or_recover().clear();
         found
     }
 

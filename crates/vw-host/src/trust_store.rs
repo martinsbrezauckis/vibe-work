@@ -18,7 +18,8 @@
 //! Depends on: `toml` (parsing only; the file is edited as text so the user's comments and layout stay).
 //! Called by: `launch` (product and development launches, before the server starts), tests.
 //! Invariants: only Vibe Work's own `VIBE_HOME` (never `~/.vibe`); a file that is not valid TOML is left byte-identical;
-//! the edit is verified (the new file parses and equals the old data plus this one key) before a temp-file rename.
+//! the edit is verified (the new file parses and equals the old data plus this one key) before a temp-file rename, together with the other startup fixes
+//! ([`crate::startup_config`]).
 
 use std::path::Path;
 
@@ -92,26 +93,29 @@ pub fn with_default_on(existing: &str) -> Result<String, TrustStore> {
 }
 
 /// Makes `vibe_home/config.toml` set `enable_system_trust_store` (true unless already set). A missing file is created.
+/// Goes through the guarded startup write ([`crate::startup_config`]): never through a link, never a file over 1 MiB
+/// or one that changed meanwhile.
 ///
 /// # Errors
 /// The I/O error text when the file cannot be read or written.
 pub fn ensure(vibe_home: &Path) -> Result<TrustStore, String> {
-    let path = vibe_home.join("config.toml");
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    let updated = match with_default_on(&existing) {
-        Ok(text) => text,
+    let mut draft = crate::startup_config::Draft::open(vibe_home)
+        .map_err(|e| format!("{}: {e}", vibe_home.join("config.toml").display()))?;
+    let staged = draft.apply(|text, _| edit(text), TrustStore::Skipped);
+    draft.commit().settle(staged, TrustStore::Skipped)
+}
+
+/// This step's edit for [`crate::startup_config`]: [`with_default_on`], or our missing notes restored beside our own value.
+pub(crate) fn edit(existing: &str) -> (Option<String>, TrustStore) {
+    match with_default_on(existing) {
+        Ok(text) => (Some(text), TrustStore::Added),
         Err(outcome) => {
-            if matches!(outcome, TrustStore::Kept(true)) {
-                crate::config_comments::restore(&path, &existing, None, KEY, &NOTE)?;
-            }
-            return Ok(outcome);
+            let notes = if matches!(outcome, TrustStore::Kept(true)) {
+                crate::config_comments::restored(existing, None, KEY, &NOTE)
+            } else {
+                None
+            };
+            (notes, outcome)
         }
-    };
-    std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
-    vw_platform::replace_private(&path, updated.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(TrustStore::Added)
+    }
 }

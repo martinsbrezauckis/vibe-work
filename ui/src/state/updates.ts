@@ -96,6 +96,14 @@ function osTooOldText(phase: Extract<UpdateView["phase"], { type: "osTooOld" }>)
   }
 }
 
+/** True while a Vibe Work update is on its way: offered, downloading, ready or installing (not a failure). */
+export function offersUpdate(view: UpdateView | null): boolean {
+  return (
+    view !== null &&
+    ["available", "downloading", "ready", "installing", "restarting"].includes(view.phase.type)
+  );
+}
+
 /** The notice for `view`; plain words. `null` for idle, checking, a failed check, and the install in progress. */
 export function noticeFor(view: UpdateView): NoticeModel | null {
   const phase = view.phase;

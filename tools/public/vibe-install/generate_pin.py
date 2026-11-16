@@ -59,15 +59,34 @@ TARGETS = {
 # Security overrides: package -> (fixed version, the advisories it fixes). Generation fails when an entry is stale
 # (the tag's lock already has that version or a later one) or names a package the lock does not have: remove it then.
 # The fixed release must be a pure-Python wheel (`py3-none-any`, not yanked), so one file serves every target.
+# The OpenTelemetry packages pin each other exactly (sdk==api, proto-http==proto-common==proto, ...), so the
+# advisory in opentelemetry-api moves the whole set Vibe locks to the matching fixed release.
 SECURITY_OVERRIDES = {
     "soupsieve": ("4.0", "GHSA-mmhr-3c5m-f64f, GHSA-4j63-6c4x-wfg4"),
+    "opentelemetry-api": ("1.45.2", "GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-exporter-http-transport": ("0.66b2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-exporter-otlp-common": ("0.66b2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-exporter-otlp-proto-common": ("1.45.2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-exporter-otlp-proto-http": ("1.45.2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-proto": ("1.45.2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-sdk": ("1.45.2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
+    "opentelemetry-semantic-conventions": ("0.66b2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
 }
 
 
-def version_key(version: str) -> tuple[int, ...]:
-    if not re.fullmatch(r"\d+(\.\d+)*", version):
-        raise SystemExit(f"review version {version!r}: only plain dotted releases are compared")
-    return tuple(map(int, version.split(".")))
+# A pre-release sorts below its release: a < b < rc < final (PEP 440 order for this subset).
+PRE_RELEASE = {"a": 0, "b": 1, "rc": 2}
+
+
+def version_key(version: str) -> tuple[tuple[int, ...], tuple[int, int]]:
+    """(release, phase) for plain dotted releases and their `aN`/`bN`/`rcN` pre-releases; anything else (dev, post,
+    local) fails closed. The release stays its own tuple so releases of different lengths compare as before."""
+    match = re.fullmatch(r"(\d+(?:\.\d+)*)(?:(a|b|rc)(\d+))?", version)
+    if not match:
+        raise SystemExit(f"review version {version!r}: only dotted releases and a/b/rc pre-releases are compared")
+    release = tuple(map(int, match.group(1).split(".")))
+    phase = (PRE_RELEASE[match.group(2)], int(match.group(3))) if match.group(2) else (len(PRE_RELEASE), 0)
+    return release, phase
 
 
 def apply_overrides(export: str, overrides: dict, pypi_files: dict) -> str:

@@ -15,6 +15,8 @@ pub(crate) use service::{Service, allowed, refused};
 #[cfg(test)]
 mod callback_tests;
 #[cfg(test)]
+mod person_only_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) mod tool_calls;

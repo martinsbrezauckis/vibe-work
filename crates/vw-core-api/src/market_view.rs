@@ -178,7 +178,7 @@ pub struct MarketEntryView {
     pub foreign: bool,
     /// The installed plugin folder (including the off folder), absent for uninstalled entries.
     pub folder: Option<String>,
-    /// This catalog install is kept outside Vibe's discovery roots.
+    /// This catalog install is turned off: by Vibe's own switch, or kept outside Vibe's discovery roots.
     pub off: bool,
     /// Packs and plugins: false when this computer's platform has no runtime for it.
     pub installable: bool,
@@ -287,6 +287,10 @@ pub struct InstallProgress {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "a flat view the window reads flag by flag; each flag is its own fact about the plugin"
+)]
 pub struct LocalPluginView {
     /// Vibe's plugin name.
     pub name: String,
@@ -302,8 +306,13 @@ pub struct LocalPluginView {
     pub scope: String,
     /// Only direct folders in the app's Vibe home or opened project may be changed.
     pub managed: bool,
-    /// Kept in the app's off folder, outside Vibe discovery.
+    /// Turned off: by Vibe's own switch (`disabled_plugins`, or off by default and not in `enabled_plugins`), or
+    /// kept in the app's off folder outside Vibe discovery.
     pub off: bool,
+    /// Off by a Vibe setting the Tools page does not write (another config layer or the environment): Turn on
+    /// is not offered.
+    #[serde(default)]
+    pub locked: bool,
     /// Native Vibe switch state, separate from the app-owned off folder; absent for unreadable/old inventories.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]

@@ -35,12 +35,12 @@ export function AgentDefaultsSettings(): ReactElement | null {
     <>
       <section aria-labelledby="agent-defaults-title">
         <h3 id="agent-defaults-title">New chats and the agent</h3>
-        {via === null && (
-          <p className="key-line">Needs a chat: Vibe reads and saves these settings through one.</p>
+        {via === null && view !== null && (
+          <p className="key-line">
+            Changing these settings needs a chat: Vibe saves them through one.
+          </p>
         )}
-        {via !== null && view === null && error === null && (
-          <p className="key-line">Reading the settings…</p>
-        )}
+        {view === null && error === null && <p className="key-line">Reading the settings…</p>}
         {view !== null && (
           <>
             <SelectRow

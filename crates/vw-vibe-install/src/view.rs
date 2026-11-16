@@ -74,8 +74,24 @@ pub enum FailKind {
     Step,
     /// Installed, but Vibe did not start.
     Start,
+    /// Installed, but this Vibe version is not one Vibe Work supports yet (a hand-updated Vibe): its guards refused
+    /// the start. Try again starts it again, like [`FailKind::Start`].
+    Unsupported,
     /// The disk or the install folder (permissions, space).
     Disk,
+}
+
+impl FailKind {
+    /// The kind of a failed start: [`FailKind::Unsupported`] when the reason is the launcher's refusal of a Vibe
+    /// version outside its guarded list (`vw_supervisor::GUARD_REFUSAL`), else [`FailKind::Start`].
+    #[must_use]
+    pub fn for_start(error: &str) -> Self {
+        if error.starts_with(vw_supervisor::GUARD_REFUSAL) {
+            Self::Unsupported
+        } else {
+            Self::Start
+        }
+    }
 }
 
 /// Where the installed server comes from.

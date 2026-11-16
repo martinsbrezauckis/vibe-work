@@ -29,6 +29,10 @@ export function chatProfile(
   if (owner === null) return null;
   return view?.chatProfiles?.find((row) => row.sessionId === owner)?.profileId ?? null;
 }
+/**
+ * Opens the tab picker for `sessionId` on `browser` and fills it with that browser's open tabs; on no answer the
+ * picker shows an error instead.
+ */
 export async function openChromeTabs(
   app: App,
   sessionId: string,
@@ -73,6 +77,10 @@ export async function openChromeTabs(
       });
   }
 }
+/**
+ * Reads the picked tab's context for the chat (starting the New chat first when needed), adds it as a context chip and
+ * closes the picker; on failure the picker stays open with an error. Does nothing while the picker is loading.
+ */
 export async function pickChromeTab(
   app: App,
   sessionId: string,

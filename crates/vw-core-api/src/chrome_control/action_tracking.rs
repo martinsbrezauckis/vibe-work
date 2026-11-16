@@ -2,7 +2,7 @@
 //! Called only by the input output boundary. Identity comes from the admitted lease; no page text is retained.
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 use vw_preview::action_tracking::{
     ActionGeometry, ActionKind, ActionPoint, ActionSource, ActionTracker, SourceBrowser,
 };
@@ -49,19 +49,11 @@ pub(super) fn record(shared: &Shared, chat: &str, request: &Value, result: &Valu
     if receipt["sessionId"].as_str() != Some(lease) {
         return;
     }
-    let tasks = shared
-        .chrome_control
-        .tasks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let tasks = shared.chrome_control.tasks.lock_or_recover();
     if tasks.get(lease).map(String::as_str) != Some(chat) {
         return;
     }
-    let work = shared
-        .chrome_control
-        .work
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let work = shared.chrome_control.work.lock_or_recover();
     if work.chat_of(lease) != Some(chat) || work.state_of(lease, chat) != Some("active") {
         return;
     }

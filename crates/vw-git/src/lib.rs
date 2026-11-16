@@ -32,6 +32,7 @@ pub mod merge;
 pub mod message;
 pub mod names;
 pub mod pr;
+pub mod pr_status;
 pub mod programs;
 pub mod push;
 mod quoted;

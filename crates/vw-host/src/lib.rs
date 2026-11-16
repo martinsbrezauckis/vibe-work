@@ -73,6 +73,8 @@ pub mod powershell_shell;
 pub mod product;
 pub mod send_to;
 pub mod settings;
+mod startup_config;
+mod startup_config_log;
 mod terminal;
 pub mod title_model;
 pub mod tray;
@@ -118,5 +120,3 @@ pub fn version() -> &'static str {
 }
 
 pub mod uninstall;
-
-mod vault_plugin;

@@ -3,7 +3,7 @@
 use super::{agent_browser::Browser, profile_bindings, profiles};
 use crate::core::Shared;
 use serde_json::{Value, json};
-use std::sync::PoisonError;
+use vw_platform::sync::LockRecover;
 
 pub(super) fn unavailable(shared: &Shared, id: &str) -> String {
     format!(
@@ -62,8 +62,7 @@ pub(super) fn check(shared: &Shared, chat: &str, tool: &str, args: &Value) -> Re
 fn agent_row(chrome: &super::ChromeControl, row: &super::BrowserProfile) -> Value {
     let name = chrome
         .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .agent_name(&row.profile_id);
     let mut row = json!(row);
     if let Some(row) = row.as_object_mut() {
@@ -76,14 +75,14 @@ fn agent_row(chrome: &super::ChromeControl, row: &super::BrowserProfile) -> Valu
 /// Kept outside page content so selected identity and its recovery instruction survive page compaction.
 pub(super) fn status(shared: &Shared, chat: &str, result: &mut Value) {
     let chrome = &shared.chrome_control;
-    let choices = profiles::view(shared);
+    let choices = profiles::agent_inventory(shared);
     let selected = profile_bindings::selected(chrome, chat);
     if choices.is_empty() && selected.is_none() {
         return;
     }
     let mut selected_row = selected.as_ref().map(|id| {
         choices.iter().find(|row| super::profile_ids::same(&row.profile_id, id)).map_or_else(|| {
-            json!({"profileId":id,"name":chrome.profiles.lock().unwrap_or_else(PoisonError::into_inner).agent_name(id),"browser":Browser::from_profile(id).id(),"state":"unavailable","eligible":false,"reason":"Removed"})
+            json!({"profileId":id,"name":chrome.profiles.lock_or_recover().agent_name(id),"browser":Browser::from_profile(id).id(),"state":"unavailable","eligible":false,"reason":"Removed"})
         }, |row| agent_row(chrome, row))
     });
     if let (Some(id), Some(row)) = (selected.as_deref(), selected_row.as_mut()) {
@@ -130,15 +129,10 @@ fn choice(shared: &Shared, chat: &str, profile: &str) -> Option<String> {
     {
         return None;
     }
-    let name = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .agent_name(profile);
+    let name = chrome.profiles.lock_or_recover().agent_name(profile);
     let picked = chrome
         .picked_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .get(chat)
         .is_some_and(|picked| super::profile_ids::same(picked, profile));
     if picked {
@@ -175,10 +169,7 @@ pub(super) fn names(chrome: &super::ChromeControl, result: &mut Value) {
     let Some(rows) = result["structuredContent"]["profiles"].as_array_mut() else {
         return;
     };
-    let saved = chrome
-        .profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let saved = chrome.profiles.lock_or_recover();
     for row in rows {
         if let Some(id) = row["profileId"].as_str() {
             row["name"] = json!(saved.agent_name(id));

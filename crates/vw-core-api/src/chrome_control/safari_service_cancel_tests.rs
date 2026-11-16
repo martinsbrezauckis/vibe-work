@@ -55,10 +55,46 @@ async fn native_paste_wait_is_cancelled_when_a_person_question_opens() {
     )
     .await;
 }
+/// PREDICT: a failed assertion in the shared body unwinds while the release guard is still alive. The clipboard
+/// service is dropped before it and joins its worker, which waits for that release, so the test hangs instead of
+/// failing. This probe gives the body a reason it can never match and must see the panic within the limit.
+#[test]
+fn a_failed_assertion_fails_instead_of_hanging() {
+    let (done, finished) = mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.block_on(blocked_clipboard_expecting(
+                "native",
+                "page.key",
+                json!({"key":"v","modifiers":["Meta"]}),
+                true,
+                Some("a reason that never appears"),
+            ));
+        }));
+        let _ = done.send(outcome.is_err());
+    });
+    assert_eq!(
+        finished.recv_timeout(std::time::Duration::from_secs(120)),
+        Ok(true),
+        "a failed assertion must end the test instead of waiting on the blocked clipboard"
+    );
+}
 async fn blocked_clipboard(kind: &str, action: &str, args: Value, question: bool) {
+    blocked_clipboard_expecting(kind, action, args, question, None).await;
+}
+async fn blocked_clipboard_expecting(
+    kind: &str,
+    action: &str,
+    args: Value,
+    question: bool,
+    expected: Option<&str>,
+) {
     let (entered, waiting) = tokio::sync::oneshot::channel();
     let (release, blocked) = mpsc::channel();
-    let release = Release(Some(release));
     let writes = Arc::new(AtomicUsize::new(0));
     let service = Arc::new(
         ClipboardService::with_backend(
@@ -115,22 +151,28 @@ async fn blocked_clipboard(kind: &str, action: &str, args: Value, question: bool
     let cloned = shared.clone();
     let claim = json!({"kind":kind,"stage":"dispatch","action":action,"args":args,"requestId":"r","sessionId":"task","clientSessionId":"chat","profileId":"safari:p"});
     let work = tokio::spawn(async move { run(&cloned, &claim).await });
-    tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+    // Declared after the service and the core: a failed assertion unwinds this first, which releases the blocked
+    // backend before the service is dropped and joins its worker.
+    let release = Release(Some(release));
+    // Only bounds the wait for the backend to block; a loaded test run can take more than a second to get there.
+    tokio::time::timeout(std::time::Duration::from_secs(10), waiting)
         .await
         .unwrap()
         .unwrap();
     interrupt_service(shared, &live, question);
-    let result = tokio::time::timeout(std::time::Duration::from_millis(500), work)
+    // The backend stays blocked until `release` drops below, so only the interruption can end the work: this
+    // timeout is a hang bound, not a speed requirement, and stays generous for loaded test machines.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), work)
         .await
         .unwrap()
         .unwrap();
     let reason = result.unwrap_err().message;
     assert!(
-        reason.contains(if question {
+        reason.contains(expected.unwrap_or(if question {
             "user's answer"
         } else {
             "operation, connection or permission ended"
-        }),
+        })),
         "{reason}"
     );
     if question {

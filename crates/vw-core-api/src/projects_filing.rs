@@ -14,8 +14,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::task::JoinHandle;
@@ -59,12 +60,7 @@ pub(crate) struct ProjectsState {
 
 impl Drop for ProjectsState {
     fn drop(&mut self) {
-        if let Some(task) = self
-            .task
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(task) = self.task.lock_or_recover().take() {
             task.abort();
         }
     }
@@ -423,11 +419,7 @@ pub(crate) fn sweep_once(shared: &Arc<Shared>) {
             tracing::warn!(%error, "projects: the first sweep failed; the next refresh tries again");
         }
     });
-    *shared
-        .projects
-        .task
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(task);
+    *shared.projects.task.lock_or_recover() = Some(task);
 }
 
 /// True when `folder` is Vibe's server working folder (`<data>/work`), where the app's helper chats run.

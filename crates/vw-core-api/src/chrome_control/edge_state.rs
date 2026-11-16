@@ -2,7 +2,8 @@
 use super::PairingState;
 use crate::core::Shared;
 use serde_json::Value;
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
+use vw_platform::sync::LockRecover;
 
 /// Remembers a live Edge connection for display and reopening; an owner conflict or new pairing request revokes it.
 pub(super) fn remember_pairing(chrome: &super::ChromeControl, paired: bool) {
@@ -88,7 +89,7 @@ pub(super) fn update(shared: &Arc<Shared>, data: &Value) {
         let Some(state) = state(data, browser) else {
             continue;
         };
-        let mut current = pairing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut current = pairing.lock_or_recover();
         if (browser == "edge:"
             && super::remove::is_removed(shared, super::agent_browser::Browser::Edge))
             || (browser == "firefox:"

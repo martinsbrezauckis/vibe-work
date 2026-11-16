@@ -42,7 +42,7 @@
     border-color var(--t-hover) var(--ease-std),
     box-shadow var(--t-hover) var(--ease-std),
     opacity var(--t-hover) var(--ease-std),
-    transform var(--t-release) var(--ease-out);
+    transform var(--t-hover) var(--ease-out);
 }
 .srow,
 .srow-main,
@@ -133,19 +133,19 @@
 
 /* Panel content settles after a tab change. */
 .pbody > * {
-  animation: vw-fade-in var(--t-fade) var(--ease-std);
+  animation: vw-fade-in var(--t-hover) var(--ease-std);
 }
 
 /* 6. The side panel: its content fades in just after the panel starts to open. */
 .body.has-panel .panel .pbody {
-  animation: vw-fade-in var(--t-release) var(--ease-std) var(--t-follow-delay) both;
+  animation: vw-fade-in var(--t-hover) var(--ease-std) var(--t-press) both;
 }
 
 /* 7. Approval and question cards: rise in and send one pulse, the first time they are on screen. */
 .approval.arrive {
   animation:
     vw-arrive var(--t-arrive) var(--ease-out),
-    vw-attention var(--t-feedback) var(--ease-std) var(--t-attention-delay) 1;
+    vw-attention var(--t-feedback) var(--ease-std) var(--t-panel) 1;
 }
 @keyframes vw-arrive {
   from {
@@ -249,7 +249,7 @@
   animation: vw-toast-in var(--t-panel) var(--ease-out);
 }
 .toast.out {
-  animation: vw-toast-out var(--t-release) var(--ease-in) forwards;
+  animation: vw-toast-out var(--t-hover) var(--ease-in) forwards;
 }
 .toast-timer {
   position: absolute;
@@ -345,7 +345,7 @@
 .sk-row {
   display: flex;
   align-items: center;
-  height: calc(var(--text-13-5) * var(--leading-ui) + 12px);
+  height: calc(var(--text-md) * var(--leading-ui) + 12px);
   padding-left: 30px;
 }
 .sk {
@@ -371,7 +371,7 @@
     transparent
   );
   transform: translateX(-100%);
-  animation: vw-shimmer var(--t-busy-slow) var(--ease-std) infinite;
+  animation: vw-shimmer var(--t-loop) var(--ease-std) infinite;
 }
 @keyframes vw-shimmer {
   to {
@@ -379,7 +379,7 @@
   }
 }
 .pj-skeleton + * {
-  animation: vw-fade-in var(--t-layout) var(--ease-out);
+  animation: vw-fade-in var(--t-ui) var(--ease-out);
 }
 
 /* 14. Small confirmations: the copy icon turns into a check. */
@@ -400,9 +400,9 @@
   content: "";
   position: absolute;
   border: 1.5px solid currentColor;
-  border-radius: var(--radius-2-5);
+  border-radius: var(--radius-mark);
   transition:
-    opacity var(--t-fade) var(--ease-std),
+    opacity var(--t-hover) var(--ease-std),
     transform var(--t-ui) var(--ease-out);
 }
 .copy-ic::before {
@@ -428,7 +428,7 @@
   width: 6px;
   height: 10px;
   border-width: 0 1.75px 1.75px 0;
-  border-radius: 0 0 var(--radius-1) 0;
+  border-radius: 0 0 var(--radius-mark) 0;
   transform: rotate(45deg);
 }
 .copy-btn.copied {
@@ -458,7 +458,7 @@
 mark {
   background: var(--mark);
   color: inherit;
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-mark);
   padding: 0 1px;
 }
 
@@ -483,7 +483,7 @@ mark {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
   background: var(--bg);
-  animation: vw-fade-in var(--t-fade) var(--ease-std);
+  animation: vw-fade-in var(--t-hover) var(--ease-std);
 }
 
 @keyframes vw-fade-in {

@@ -11,7 +11,8 @@
 //! - A shell whose identity cannot be read (already gone) is not registered.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use tracing::debug;
 use vw_procmon::{
@@ -102,6 +103,6 @@ impl ShellRegistrar {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, (u32, RegistrationId)>> {
-        self.held.lock().unwrap_or_else(PoisonError::into_inner)
+        self.held.lock_or_recover()
     }
 }

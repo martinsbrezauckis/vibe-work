@@ -28,6 +28,7 @@ export type OfferNotice = "changed" | "ranOut";
  * `OFFER_EXPIRED`).
  */
 export const STALE_OFFER = "staleOffer";
+/** The core's `serverCode` for an offer refused as expired. */
 export const OFFER_EXPIRED = "offerExpired";
 /** The fact lines of the offer block, in display order. */
 export type FactKey = "name" | "version" | "publisher" | "from" | "licence" | "runs";
@@ -64,6 +65,7 @@ export interface OffersState {
   focus: OfferFocus | null;
 }
 
+/** No open offers, problems or focus request. */
 export const OFFERS_INITIAL: OffersState = { open: {}, problems: {}, focus: null };
 
 /** One fact line as the offer block renders it. */

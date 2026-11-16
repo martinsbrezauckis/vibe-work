@@ -1,16 +1,7 @@
 /** Session location words. Depends on Git and copy facts; called by the header chip and its tests. */
 import type { GitStatusView, WorktreeInfo } from "../../protocol/core";
 import { chipText } from "./model";
-
-/** A display name only; full paths remain in the chip's tooltip and expansion. */
-function folderName(path: string): string {
-  return (
-    path
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .at(-1) || path
-  );
-}
+import { folderName } from "../../state/pathText";
 
 /** Name the project, actual copy, current branch and original base without Git shorthand. */
 export function locationText(

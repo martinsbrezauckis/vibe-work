@@ -13,7 +13,8 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use crate::error::ChangesError;
 use crate::git::{Call, Index};
@@ -104,7 +105,15 @@ impl Baseline {
         let seeded = read_index(&repo, &base)?;
         let mut cache = StatCache::default();
         let (entries, large) = if with_worktree {
-            let scan = worktree::scan(&repo, &seeded, &base, &mut cache, false, None)?;
+            let scan = worktree::scan(
+                &repo,
+                &seeded,
+                &base,
+                &mut cache,
+                false,
+                None,
+                worktree::Compare::Bytes,
+            )?;
             write_index(&repo, &base, &scan.entries)?;
             if scan.tracked_only {
                 repo.tracked_only = true;
@@ -243,17 +252,14 @@ impl Baseline {
     /// when the last full pass is older than [`FULL_PASS`], every file is read and hashed again.
     pub(crate) fn scan(&self, base: &Entries, trust: bool) -> Result<Scan, ChangesError> {
         let full = {
-            let mut last = self
-                .last_full
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let mut last = self.last_full.lock_or_recover();
             let due = !trust || last.elapsed() >= FULL_PASS;
             if due {
                 *last = std::time::Instant::now();
             }
             due
         };
-        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = self.cache.lock_or_recover();
         let rules = IgnoreSnapshot::load(&self.dir);
         let scan = worktree::scan(
             &self.repo,
@@ -262,6 +268,7 @@ impl Baseline {
             &mut cache,
             !full,
             rules.as_ref(),
+            worktree::Compare::AsGit,
         )?;
         cache.save(&self.dir.path().join("stat.json"));
         Ok(scan)
@@ -269,7 +276,7 @@ impl Baseline {
 
     /// Drops the stat cache (after a forced gc its ids may name pruned blobs): every file is stored again.
     pub(crate) fn forget_stat_cache(&self) {
-        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = self.cache.lock_or_recover();
         *cache = StatCache::default();
         let _ = std::fs::remove_file(self.dir.path().join("stat.json"));
     }

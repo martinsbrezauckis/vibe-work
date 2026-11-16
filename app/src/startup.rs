@@ -166,11 +166,12 @@ fn dev_server_args(value: Option<&str>) -> Vec<std::ffi::OsString> {
 }
 
 /// The remembered-device store of a dev run: the OS credential store with `VW_DEV_KEYS_STORE=os`
-/// (falls back to memory, with a warning, when the platform has none), else memory.
-fn dev_device_store() -> Arc<dyn vw_vault::remember::DeviceSecretStore> {
+/// (falls back to memory, with a warning, when the platform has none), else memory. `shared` is the run's
+/// shared-vault folder, whose remembered device keeps ShellX's entry name.
+fn dev_device_store(shared: &std::path::Path) -> Arc<dyn vw_vault::remember::DeviceSecretStore> {
     if std::env::var_os("VW_DEV_KEYS_STORE").is_some_and(|v| v == "os") {
         match vw_vault::remember::OsDeviceStore::new() {
-            Ok(store) => return Arc::new(store),
+            Ok(store) => return Arc::new(store.sharing_with_shellx(shared)),
             Err(error) => {
                 tracing::warn!(%error, "VW_DEV_KEYS_STORE=os: no OS credential store, using memory");
             }
@@ -237,14 +238,15 @@ fn dev_keys(data: &std::path::Path) -> Option<vw_keys::KeyServiceConfig> {
             chat: base.clone(),
         };
     }
+    let location = vw_vault::location::VaultLocation::explicit(
+        std::env::var_os("VW_DEV_VAULT_PROFILE_DIR")
+            .filter(|path| !path.is_empty())
+            .map_or_else(|| run.join("vault-profile"), PathBuf::from),
+    );
     Some(vw_keys::KeyServiceConfig {
         vault: vw_vault::VaultConfig {
-            location: vw_vault::location::VaultLocation::explicit(
-                std::env::var_os("VW_DEV_VAULT_PROFILE_DIR")
-                    .filter(|path| !path.is_empty())
-                    .map_or_else(|| run.join("vault-profile"), PathBuf::from),
-            ),
-            device_store: dev_device_store(),
+            device_store: dev_device_store(&location.profile_dir),
+            location,
             kdf: vw_vault::KdfParams::default(),
             device_name: "vibe-work-dev".to_owned(),
         },
@@ -277,9 +279,15 @@ pub(crate) fn cli_home(app: &AppHandle) -> Option<PathBuf> {
 
 /// The OS credential store for the vault's kept key; memory (nothing kept across starts, so the
 /// vault starts locked; logged) when the platform has none, e.g. Linux without a Secret Service.
-fn os_device_store() -> Arc<dyn vw_vault::remember::DeviceSecretStore> {
+/// `shared` is ShellX's shared vault folder, whose remembered device keeps ShellX's entry name.
+fn os_device_store(
+    shared: Option<&std::path::Path>,
+) -> Arc<dyn vw_vault::remember::DeviceSecretStore> {
     match vw_vault::remember::OsDeviceStore::new() {
-        Ok(store) => Arc::new(store),
+        Ok(store) => Arc::new(match shared {
+            Some(dir) => store.sharing_with_shellx(dir),
+            None => store,
+        }),
         Err(error) => {
             tracing::warn!(%error, "no OS credential store: the vault cannot stay unlocked across a restart");
             Arc::new(vw_vault::remember::MemoryDeviceStore::temporary())
@@ -336,8 +344,8 @@ fn product_launch(
         exe: std::env::current_exe().ok(),
         data_dir: data.to_path_buf(),
         cli_home: cli_home(app),
+        device_store: os_device_store(vault.as_ref().ok().map(|l| l.profile_dir.as_path())),
         vault,
-        device_store: os_device_store(),
         vibe_keyring,
         test_api_base: vw_mistral::DEFAULT_API_BASE.to_owned(),
         proxy: vw_keyproxy::ProxyConfig::default(),
@@ -366,6 +374,15 @@ fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::Previe
             .filter(|origin| {
                 origin.scheme() == "http"
                     && matches!(origin.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+                    && origin.port().is_some()
+            });
+        // A local test server whose pages count as pages from the web for Local Network Access.
+        config.test_public_origin = std::env::var("VW_E2E_PUBLIC_ORIGIN")
+            .ok()
+            .and_then(|origin| tauri::Url::parse(&origin).ok())
+            .filter(|origin| {
+                origin.scheme() == "http"
+                    && matches!(origin.host_str(), Some("127.0.0.1" | "localhost"))
                     && origin.port().is_some()
             });
         config.test_pool_origins = std::env::var("VW_E2E_BROWSER_POOL_ORIGINS")
@@ -416,6 +433,12 @@ fn preview_setup(app: &AppHandle, data: &std::path::Path) -> vw_core_api::Previe
     let guard = vw_netguard::NetGuard::bind(resolver)
         .inspect_err(|error| tracing::warn!(%error, "the browser's network guard did not start"))
         .ok();
+    // The single-instance listener is a port of Vibe Work itself: never reachable from a browser page.
+    if let (Some(guard), Some(instance)) =
+        (&guard, app.try_state::<vw_host::instance::InstanceGuard>())
+    {
+        guard.add_internal_port(instance.port());
+    }
     // Mark the previews as requiring the guard even when bind failed: the engine then gives a plain refusal.
     let mut engine = vw_webview::TauriEngine::new(app.clone(), "main").require_network_guard();
     let host = app.state::<vw_host::HostHandle>().inner().clone();

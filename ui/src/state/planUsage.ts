@@ -6,6 +6,10 @@ import type { JsonValue } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 
+/**
+ * The plan usage Settings shows: loading, not reported, unavailable for a non-plan key, a read error with its message,
+ * or the used and left percentages with the pay-as-you-go flag and reset time.
+ */
 export type PlanUsage =
   | { kind: "loading" }
   | { kind: "notReported" }

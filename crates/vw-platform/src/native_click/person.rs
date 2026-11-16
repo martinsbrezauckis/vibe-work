@@ -38,30 +38,69 @@ mod linux {
         OWN_INPUT.with(|own| own.set(false));
     }
 
-    /// Calls `observed` for every press or release (mouse, pen or touch) that reaches this webview from the
-    /// window system, never for input sent by [`super::super::linux_click`].
-    pub fn watch(view: &webkit2gtk::WebView, observed: impl Fn(bool) + 'static) {
+    /// Calls `observed` for every press or release (mouse, pen or touch) or key that reaches this webview from the
+    /// window system, never for input sent by [`super::super::linux_click`]. While `blocked` answers true, the
+    /// person's input that [`super::block::swallow`] names is stopped before `WebKitGTK` sees it (and is not
+    /// observed: the page never received it); each swallowed press is reported to `refused`.
+    pub fn watch(
+        view: &webkit2gtk::WebView,
+        observed: impl Fn(bool) + 'static,
+        blocked: super::block::Blocked,
+        refused: super::block::Refused,
+    ) {
+        let held = Cell::new(super::block::Held::default());
         view.connect_event(move |_, event| {
-            let press = matches!(
-                event.event_type(),
-                gdk::EventType::ButtonPress
-                    | gdk::EventType::DoubleButtonPress
-                    | gdk::EventType::TripleButtonPress
-                    | gdk::EventType::TouchBegin
-                    | gdk::EventType::KeyPress
-            );
-            let release = matches!(
-                event.event_type(),
-                gdk::EventType::ButtonRelease
-                    | gdk::EventType::TouchEnd
-                    | gdk::EventType::TouchCancel
-                    | gdk::EventType::KeyRelease
-            );
-            if (press || release) && !OWN_INPUT.with(Cell::get) {
-                observed(press);
+            if OWN_INPUT.with(Cell::get) {
+                return glib::Propagation::Proceed;
+            }
+            let input = classify(event);
+            let mut state = held.get();
+            let swallowed = super::block::swallow(blocked(), input, &mut state);
+            held.set(state);
+            if super::block::refused_press(swallowed, input) {
+                refused();
+            }
+            if swallowed {
+                return glib::Propagation::Stop;
+            }
+            match input {
+                super::block::Input::Press | super::block::Input::Key { press: true, .. } => {
+                    observed(true);
+                }
+                super::block::Input::Release | super::block::Input::Key { press: false, .. } => {
+                    observed(false);
+                }
+                _ => {}
             }
             glib::Propagation::Proceed
         });
+    }
+
+    /// Maps a GDK event to the block rule's input kind.
+    fn classify(event: &gdk::Event) -> super::block::Input {
+        use super::block::Input;
+        match event.event_type() {
+            gdk::EventType::ButtonPress
+            | gdk::EventType::DoubleButtonPress
+            | gdk::EventType::TripleButtonPress
+            | gdk::EventType::TouchBegin => Input::Press,
+            gdk::EventType::ButtonRelease
+            | gdk::EventType::TouchEnd
+            | gdk::EventType::TouchCancel => Input::Release,
+            gdk::EventType::MotionNotify | gdk::EventType::TouchUpdate => Input::Motion,
+            gdk::EventType::Scroll
+            | gdk::EventType::TouchpadSwipe
+            | gdk::EventType::TouchpadPinch => Input::Wheel,
+            // GTK handles the window's accelerators before the view sees a key, so no key here is a shortcut.
+            kind @ (gdk::EventType::KeyPress | gdk::EventType::KeyRelease) => Input::Key {
+                tab: event.keyval().is_some_and(|key| {
+                    key == *gdk::keys::constants::Tab || key == *gdk::keys::constants::ISO_Left_Tab
+                }),
+                shortcut: false,
+                press: kind == gdk::EventType::KeyPress,
+            },
+            _ => Input::Other,
+        }
     }
 
     /// Whether a pointer button is down right now with the pointer over this webview (window-system state).
@@ -119,12 +158,18 @@ mod macos {
         view: Weak<NSView>,
         observed: Box<dyn Fn(bool)>,
         pressed_inside: Cell<bool>,
+        blocked: super::block::Blocked,
+        refused: super::block::Refused,
+        held: Cell<super::block::Held>,
     }
 
     thread_local! {
         static WATCHED: RefCell<Vec<Watched>> = const { RefCell::new(Vec::new()) };
         static MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     }
+
+    /// The virtual key code of Tab (`kVK_Tab`); Shift+Tab has the same code.
+    const TAB_KEY: u16 = 48;
 
     fn inside(view: &NSView, window_point: objc2_foundation::NSPoint) -> bool {
         !view.isHiddenOrHasHiddenAncestor()
@@ -134,7 +179,35 @@ mod macos {
             )
     }
 
-    fn dispatched(event: &NSEvent, main: MainThreadMarker) {
+    /// Maps an `AppKit` event to the block rule's input kind.
+    fn input_of(event: &NSEvent, kind: NSEventType) -> super::block::Input {
+        use super::block::Input;
+        match kind {
+            NSEventType::LeftMouseDown
+            | NSEventType::RightMouseDown
+            | NSEventType::OtherMouseDown => Input::Press,
+            NSEventType::LeftMouseUp | NSEventType::RightMouseUp | NSEventType::OtherMouseUp => {
+                Input::Release
+            }
+            NSEventType::MouseMoved
+            | NSEventType::LeftMouseDragged
+            | NSEventType::RightMouseDragged
+            | NSEventType::OtherMouseDragged => Input::Motion,
+            NSEventType::ScrollWheel => Input::Wheel,
+            NSEventType::KeyDown | NSEventType::KeyUp => Input::Key {
+                tab: event.keyCode() == TAB_KEY,
+                shortcut: event
+                    .modifierFlags()
+                    .contains(objc2_app_kit::NSEventModifierFlags::Command),
+                press: kind == NSEventType::KeyDown,
+            },
+            _ => Input::Other,
+        }
+    }
+
+    /// Observes one dispatched event; answers whether a blocked view swallows it.
+    fn dispatched(event: &NSEvent, main: MainThreadMarker) -> bool {
+        use super::block::Input;
         let kind = event.r#type();
         let keyboard = matches!(
             kind,
@@ -148,9 +221,18 @@ mod macos {
                 | NSEventType::RightMouseDown
                 | NSEventType::OtherMouseDown
         );
+        let release = matches!(
+            kind,
+            NSEventType::KeyUp
+                | NSEventType::LeftMouseUp
+                | NSEventType::RightMouseUp
+                | NSEventType::OtherMouseUp
+        );
+        let input = input_of(event, kind);
         let Some(window) = event.window(main) else {
-            return;
+            return false;
         };
+        let mut swallowed = false;
         WATCHED.with(|watched| {
             let mut watched = watched.borrow_mut();
             watched.retain(|entry| entry.view.load().is_some());
@@ -170,22 +252,45 @@ mod macos {
                 } else {
                     inside(&view, event.locationInWindow())
                 };
+                // A release (and a drag) follows its press wherever it happens; other input counts in the view.
+                let follows = matches!(
+                    input,
+                    Input::Release | Input::Motion | Input::Key { press: false, .. }
+                );
+                if within || follows {
+                    let mut held = entry.held.get();
+                    let blocked = within && (entry.blocked)();
+                    if super::block::swallow(blocked, input, &mut held) {
+                        entry.held.set(held);
+                        swallowed = true;
+                        if super::block::refused_press(true, input) {
+                            (entry.refused)();
+                        }
+                        continue;
+                    }
+                    entry.held.set(held);
+                }
                 // A release counts where it happens, or wherever it ends a press that began in the view.
-                if within || (!press && entry.pressed_inside.get()) {
+                if (press || release) && (within || (!press && entry.pressed_inside.get())) {
                     entry.pressed_inside.set(press && within);
                     (entry.observed)(press);
                 }
             }
         });
+        swallowed
     }
 
-    /// Calls `observed` for every mouse press or release the application dispatches inside this `WKWebView`.
+    /// Calls `observed` for every mouse press or release the application dispatches inside this `WKWebView`;
+    /// drops the person's input the block rule swallows while `blocked` answers true, and reports each dropped press to
+    /// `refused`.
     ///
     /// # Errors
     /// Off the main thread, without a view, or when `AppKit` refuses the monitor.
     pub fn watch(
         webview: *mut std::ffi::c_void,
         observed: Box<dyn Fn(bool)>,
+        blocked: super::block::Blocked,
+        refused: super::block::Refused,
     ) -> Result<(), String> {
         let main = MainThreadMarker::new().ok_or("pointer watch requires the main thread")?;
         // SAFETY: Tauri hands over the live WKWebView on the main thread; only a weak reference is kept.
@@ -197,8 +302,12 @@ mod macos {
             }
             let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
                 // SAFETY: AppKit passes a live event for the duration of this main-thread callback.
-                dispatched(unsafe { event.as_ref() }, main);
-                event.as_ptr()
+                if dispatched(unsafe { event.as_ref() }, main) {
+                    // A local monitor drops the event by answering nil.
+                    std::ptr::null_mut()
+                } else {
+                    event.as_ptr()
+                }
             });
             let mask = NSEventMask::LeftMouseDown
                 | NSEventMask::LeftMouseUp
@@ -206,10 +315,15 @@ mod macos {
                 | NSEventMask::RightMouseUp
                 | NSEventMask::OtherMouseDown
                 | NSEventMask::OtherMouseUp
+                | NSEventMask::LeftMouseDragged
+                | NSEventMask::RightMouseDragged
+                | NSEventMask::OtherMouseDragged
+                | NSEventMask::MouseMoved
+                | NSEventMask::ScrollWheel
                 | NSEventMask::KeyDown
                 | NSEventMask::KeyUp
                 | NSEventMask::FlagsChanged;
-            // SAFETY: the handler returns the event it was given (never null), as AppKit requires.
+            // SAFETY: the handler returns the event it was given or nil (drop), as AppKit allows.
             let added =
                 unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) }
                     .ok_or("AppKit refused the pointer monitor")?;
@@ -223,6 +337,9 @@ mod macos {
                 view: Weak::from_retained(&view),
                 observed,
                 pressed_inside: Cell::new(false),
+                blocked,
+                refused,
+                held: Cell::new(super::block::Held::default()),
             });
         });
         Ok(())
@@ -257,6 +374,8 @@ mod macos {
 
 #[cfg(target_os = "macos")]
 pub use macos::{holding, recent, watch};
+
+pub mod block;
 
 #[cfg(windows)]
 mod windows;

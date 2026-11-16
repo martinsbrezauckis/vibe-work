@@ -657,9 +657,27 @@ async fn same_named_profiles_show_when_they_were_paired_not_a_bare_number() {
     let rows = names(&core);
     let labels: Vec<_> = rows.iter().map(|row| row.1.clone()).collect();
     assert_ne!(labels[0], labels[1], "{labels:?}");
+    // PREDICT (bracket form): red before the change, which wrote "Work — paired 12 Nov 23:25"; UI text has no em dash.
     for label in &labels {
-        assert!(label.starts_with("Work — paired "), "{labels:?}");
-        assert!(!label.contains('('), "{labels:?}");
+        assert!(label.starts_with("Work (paired "), "{labels:?}");
+        assert!(
+            label.ends_with(')') && !label.contains(['—', ',']),
+            "{labels:?}"
+        );
+    }
+    // Identical pairing times fall back to their order inside the same brackets.
+    for id in [WORK, HOME] {
+        let mut saved = core.shared.chrome_control.profiles.lock().unwrap();
+        saved.records.get_mut(id).unwrap().paired_at = Some(1_762_000_000_000);
+    }
+    let same: Vec<_> = names(&core).into_iter().map(|row| row.1).collect();
+    assert_ne!(same[0], same[1], "{same:?}");
+    for label in &same {
+        assert!(label.starts_with("Work (paired "), "{same:?}");
+        assert!(
+            (label.ends_with(", 1)") || label.ends_with(", 2)")) && !label.contains('—'),
+            "{same:?}"
+        );
     }
     // Agent text carries the same name (it has no email), never the account.
     let agent = super::profiles::label(&core.shared.chrome_control, WORK);
@@ -734,12 +752,12 @@ async fn same_named_profiles_with_different_accounts_are_told_apart_by_the_accou
     }
     assert_eq!(agent(WORK), "Work (one.example)");
     assert!(
-        agent(HOME).starts_with("Work (two.example) — paired "),
+        agent(HOME).starts_with("Work (two.example) (paired "),
         "{}",
         agent(HOME)
     );
     assert!(
-        agent(THIRD).starts_with("Work (two.example) — paired "),
+        agent(THIRD).starts_with("Work (two.example) (paired "),
         "{}",
         agent(THIRD)
     );
@@ -747,12 +765,12 @@ async fn same_named_profiles_with_different_accounts_are_told_apart_by_the_accou
     // Same account (or none on both): only the pairing time differs, so it stays.
     set([Some("a@one.example"), Some("a@one.example"), None]);
     assert!(
-        screen(WORK).starts_with("Work — paired "),
+        screen(WORK).starts_with("Work (paired "),
         "{}",
         screen(WORK)
     );
     assert!(
-        screen(HOME).starts_with("Work — paired "),
+        screen(HOME).starts_with("Work (paired "),
         "{}",
         screen(HOME)
     );

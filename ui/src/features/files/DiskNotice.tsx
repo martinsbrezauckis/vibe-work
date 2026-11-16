@@ -9,6 +9,7 @@ import { Button } from "../../components/Controls";
 import type { FileEdit } from "../../state/fileEdits";
 import { applyChoice, noticeText, takeLabel, type DiskChoice } from "./model/diskNotice";
 
+/** The changed-on-disk notice for `draft` with the choices for its kind; renders nothing without a notice. */
 export function DiskNotice({
   draft,
   name,

@@ -2,6 +2,7 @@
 //! Exercises the real card and automatic adapters, registry, transport failure and grants; called by cargo test.
 use super::*;
 use crate::{Core, CoreConfig, Origin};
+use std::time::Duration;
 use vw_ask::AnsweredBy;
 use vw_gate::{CallbackFault, Confirmation, ConfirmationRequest, Confirmer, GateError};
 use vw_supervisor::{Discovery, NoSecret, SupervisorConfig};
@@ -100,7 +101,7 @@ async fn core() -> (Core, std::path::PathBuf) {
     let supervisor =
         SupervisorConfig::new(root.join("absent-server"), root.join("vibe"), root.clone());
     (
-        Core::start(supervisor, Arc::new(NoSecret), Decline, config)
+        Box::pin(Core::start(supervisor, Arc::new(NoSecret), Decline, config))
             .await
             .unwrap(),
         root,

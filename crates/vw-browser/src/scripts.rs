@@ -23,6 +23,7 @@ const STRUCTURE: &str = include_str!("js/structure.js");
 const MEDIA: &str = include_str!("js/media.js");
 const PAGE: &str = include_str!("js/page.js");
 const FULLPAGE: &str = include_str!("js/fullpage.js");
+const PROTECTED_SHOWN: &str = include_str!("js/protected_shown.js");
 
 fn assemble(body: &str, request: &Value) -> String {
     let labels = include_str!("js/control_labels.js");
@@ -206,12 +207,19 @@ pub fn media(page: &str, max_items: usize) -> String {
     assemble(MEDIA, &json!({"page": page, "maxItems": max_items}))
 }
 
-/// The whole-page text script: `request` = `{op, format, token, offset, maxChars, chunk}`.
+/// The whole-page text script: `request` = `{op, format, token, offset, maxChars, chunk}`. Protected field
+/// content is withheld in every access mode, the same rule as the page read.
 #[must_use]
 pub fn page_text(page: &str, request: &Value) -> String {
     let mut request = request.clone();
     request["page"] = json!(page);
     assemble(PAGE, &request).replace("__VW_SINGLE_HTML__", include_str!("js/single_html.js"))
+}
+
+/// The visual-capture admission script: answers `{"shown": true}` while the document shows a protected field's value.
+#[must_use]
+pub fn protected_shown() -> String {
+    assemble(PROTECTED_SHOWN, &json!({}))
 }
 
 /// The full-page screenshot helper script: `op` = metrics, scroll (to `y`), eager, pin, unpin.
@@ -288,7 +296,6 @@ pub fn point_receipt(page: &str, token: &str, clear: bool) -> String {
 }
 
 /// Direct native capture of a retained ref; the returned value is never a tool result.
-#[cfg(feature = "agent-vault")]
 #[must_use]
 pub fn agent_secret(request: &Value) -> String {
     assemble(include_str!("js/agent_secret.js"), request)

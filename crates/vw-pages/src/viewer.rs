@@ -13,7 +13,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
@@ -158,7 +159,7 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     pub(crate) fn changed(&self, session: Option<&str>) {

@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -84,6 +85,9 @@ pub(crate) struct Claim {
     /// so work that starts after the generation ended (the deadline passed before its thread ran) does
     /// nothing on Windows.
     pub(crate) generation: u64,
+    /// Set once the baseline is written (or loaded), before the file watcher starts: a deadline that passes
+    /// later names the watcher's start, not the recording, as the late part.
+    pub(crate) written: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Hub {
@@ -93,7 +97,7 @@ impl Hub {
     }
 
     pub(crate) fn slots(&self) -> MutexGuard<'_, Slots> {
-        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+        self.slots.lock_or_recover()
     }
 
     /// The current tracker of `session_id`, if one exists.
@@ -161,6 +165,7 @@ impl Hub {
         Ok(Claim {
             _held: sender,
             generation: slots.generation(session_id),
+            written: std::sync::Arc::default(),
         })
     }
 

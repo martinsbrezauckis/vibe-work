@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 
 const TYPING_MS = 1000;
+/** Milliseconds after a permission card shows before its keyboard answers count. */
 export const KEY_GRACE_MS = 500;
 let lastKey = -Infinity;
 

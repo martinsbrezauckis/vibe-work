@@ -3,16 +3,16 @@
  * with Update, "Vibe Y is out; support arrives in an upcoming update", a version notice for a user's own install,
  * the update's progress and "starts next time"), and the consent dialog Update opens: what will be downloaded
  * (sources with checksums, the commands, sizes) with "Update Vibe" and Cancel.
- * Depends on: AppContext, state/vibeUpdates (wording), state/vibeInstall (actions), hooks/useModalFocus,
+ * Depends on: AppContext, state/vibeUpdates (wording), state/vibeInstall (actions), components/Modal,
  * setup/VibeOfferDetails. Called by: UpdateNotice (the card), Shell (the dialog).
  * Invariants: Update only asks the core for an offer; only the dialog's "Update Vibe" (the user's click) confirms
  * that exact offer. The dialog is modal (`aria-modal`: native views hide while it shows) and shows exactly while
  * the core holds an update offer.
  */
 import { Button } from "../../components/Controls";
-import { type ReactElement, useRef } from "react";
+import type { ReactElement } from "react";
 
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { type VibeNoticeAction, vibeNoticeFor } from "../../state/vibeUpdates";
 import { useVibeUi } from "../setup/VibeInstallStep";
 import { OfferDetails } from "../setup/VibeOfferDetails";
@@ -21,14 +21,18 @@ import { TEXT } from "../../vocabulary";
 
 const LABELS: Record<VibeNoticeAction, string> = { update: "Update", later: TEXT.later };
 
-/** The Vibe card of the update area, or nothing. */
-export function VibeUpdateCard(): ReactElement | null {
+/** The Vibe card of the update area, or nothing; `appUpdateOffered`: a Vibe Work update shows beside it. */
+export function VibeUpdateCard({
+  appUpdateOffered,
+}: {
+  appUpdateOffered: boolean;
+}): ReactElement | null {
   const { vibe } = useApp();
   const view = useVibeUi((s) => s.view);
   const dismissed = useVibeUi((s) => s.dismissed);
   const busy = useVibeUi((s) => s.busy);
   if (vibe === null || view === null) return null;
-  const notice = vibeNoticeFor(view);
+  const notice = vibeNoticeFor(view, appUpdateOffered);
   if (notice === null || dismissed === notice.key) return null;
   return (
     <div
@@ -49,7 +53,9 @@ export function VibeUpdateCard(): ReactElement | null {
         <div className="update-notice-actions">
           {notice.actions.map((action) => (
             <Button
-              data-testid="updates.vibe-update-prepare-update"
+              data-testid={
+                action === "update" ? "updates.vibe-update-update" : "updates.vibe-update-later"
+              }
               data-item-id={action}
               key={action}
               type="button"
@@ -77,59 +83,51 @@ export function VibeUpdateDialog(): ReactElement | null {
     s.view?.phase.state === "installed" ? s.view.phase.version : null,
   );
   const busy = useVibeUi((s) => s.busy);
-  const dialog = useRef<HTMLDivElement>(null);
-  const open = phase?.state === "offered";
   const cancel = () => {
     void vibe?.cancelUpdate();
   };
-  useModalFocus(open, dialog, cancel);
   if (vibe === null || phase?.state !== "offered") return null;
   const offer = phase.offer;
   return (
-    <>
-      <div data-testid="updates.vibe-update-scrim" className="scrim" onClick={cancel} />
-      <div
-        className="modal vibe-update-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="vibe-update-title"
-        data-testid="updates.vibe-update-dialog"
-        ref={dialog}
-        tabIndex={-1}
-      >
-        <header>
-          <h2 id="vibe-update-title">Update Vibe to {offer.vibeVersion}</h2>
-        </header>
-        <section className="vibe-offer">
-          <p>
-            Vibe Work has tested Vibe {offer.vibeVersion}. It installs from Mistral&apos;s official
-            package on PyPI into Vibe Work&apos;s own folder, next to your current Vibe
-            {current === null ? "" : ` ${current}`}, which keeps running your chats. The new version
-            starts the next time you open Vibe Work.
-          </p>
-          <OfferDetails offer={offer} />
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="updates.vibe-update-tb-btn"
-            type="button"
+    <Modal
+      onClose={cancel}
+      scrimTestId="updates.vibe-update-scrim"
+      className="modal vibe-update-dialog"
+      aria-labelledby="vibe-update-title"
+      data-testid="updates.vibe-update-dialog"
+    >
+      <header>
+        <h2 id="vibe-update-title">Update Vibe to {offer.vibeVersion}</h2>
+      </header>
+      <section className="vibe-offer">
+        <p>
+          Vibe Work has tested Vibe {offer.vibeVersion}. It installs from Mistral&apos;s official
+          package on PyPI into Vibe Work&apos;s own folder, next to your current Vibe
+          {current === null ? "" : ` ${current}`}, which keeps running your chats. The new version
+          starts the next time you open Vibe Work.
+        </p>
+        <OfferDetails offer={offer} />
+      </section>
+      <footer className="modal-actions">
+        <Button
+          data-testid="updates.vibe-update-tb-btn"
+          type="button"
 
-            data-dialog-initial-focus="true"
-            onClick={cancel}
-          >
-            Cancel
-          </Button>
-          <Button
-            data-testid="updates.vibe-update-confirm-update"
-            type="button"
-            variant="primary"
-            disabled={busy}
-            onClick={() => void vibe.confirmUpdate(offer.offerId)}
-          >
-            Update Vibe
-          </Button>
-        </footer>
-      </div>
-    </>
+          data-dialog-initial-focus="true"
+          onClick={cancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          data-testid="updates.vibe-update-confirm-update"
+          type="button"
+          variant="primary"
+          disabled={busy}
+          onClick={() => void vibe.confirmUpdate(offer.offerId)}
+        >
+          Update Vibe
+        </Button>
+      </footer>
+    </Modal>
   );
 }

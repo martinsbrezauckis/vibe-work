@@ -14,7 +14,8 @@
 //!   missing ones are dropped.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use crate::error::ChangesError;
 
@@ -49,7 +50,7 @@ pub(crate) fn register(folder: &Path) -> Result<(), ChangesError> {
         #[cfg(unix)]
         uid: std::os::unix::fs::MetadataExt::uid(&meta),
     };
-    let mut registered = REGISTERED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut registered = REGISTERED.lock_or_recover();
     registered.retain(|r| r.path != entry.path);
     registered.push(entry);
     Ok(())
@@ -60,7 +61,7 @@ pub(crate) fn register(folder: &Path) -> Result<(), ChangesError> {
 /// # Errors
 /// `Refused` when no registered folder is still valid (never prepared, deleted, changed).
 pub(crate) fn current() -> Result<PathBuf, ChangesError> {
-    let mut registered = REGISTERED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut registered = REGISTERED.lock_or_recover();
     registered.retain(|r| r.path.exists());
     registered
         .iter()

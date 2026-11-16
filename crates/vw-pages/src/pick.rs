@@ -61,7 +61,7 @@ pub fn accessor_name() -> String {
     if getrandom::fill(&mut bytes).is_err() {
         return "__vw_pick_fallback".to_owned();
     }
-    format!("__vw_pick_{}", crate::comments::hex(&bytes))
+    format!("__vw_pick_{}", hex::encode(bytes))
 }
 
 fn quoted(name: &str) -> String {

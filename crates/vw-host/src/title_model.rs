@@ -26,7 +26,8 @@
 //! - A file that is not valid TOML, or that writes `utility_models` as dotted keys or an inline table, is left
 //!   byte-identical (Skipped).
 //! - The edit is checked before it is written: the new file must parse, name our title model, and equal the old
-//!   file's data plus that one key. The write goes through a temporary file and a rename.
+//!   file's data plus that one key. The write goes through a temporary file and a rename, together with the other
+//!   startup fixes ([`crate::startup_config`]).
 
 use std::path::Path;
 
@@ -65,36 +66,35 @@ impl TitleModel {
     }
 }
 
-/// Makes `vibe_home/config.toml` name a title model (see the module docs). A missing file is created with only our
-/// table (Vibe 2.26.1 writes no `config.toml` on its own; a later `config/write` keeps our lines).
+/// Makes `vibe_home/config.toml` name a title model (see the module docs), through the guarded startup write
+/// ([`crate::startup_config`]: never through a link, never a file over 1 MiB or one that changed meanwhile). A missing
+/// file is created with only our table (Vibe 2.26.1 writes no `config.toml` on its own; a later `config/write` keeps
+/// our lines).
 ///
 /// # Errors
 /// The I/O error text when the file cannot be read or written.
 pub fn ensure(vibe_home: &Path) -> Result<TitleModel, String> {
-    let path = vibe_home.join("config.toml");
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    let updated = match with_title_model(&existing) {
-        Ok(text) => text,
+    let mut draft = crate::startup_config::Draft::open(vibe_home)
+        .map_err(|e| format!("{}: {e}", vibe_home.join("config.toml").display()))?;
+    let staged = draft.apply(|text, _| edit(text), TitleModel::Skipped);
+    draft.commit().settle(staged, TitleModel::Skipped)
+}
+
+/// This step's edit for [`crate::startup_config`]: [`with_title_model`], or our missing notes restored beside our
+/// own title model.
+pub(crate) fn edit(existing: &str) -> (Option<String>, TitleModel) {
+    match with_title_model(existing) {
+        Ok(text) => (Some(text), TitleModel::Added),
         Err(outcome) => {
-            if matches!(&outcome, TitleModel::Kept(alias) if alias == TITLE_MODEL_ALIAS) {
-                crate::config_comments::restore(
-                    &path,
-                    &existing,
-                    Some("[utility_models]"),
-                    "title",
-                    &NOTE,
-                )?;
-            }
-            return Ok(outcome);
+            let notes = if matches!(&outcome, TitleModel::Kept(alias) if alias == TITLE_MODEL_ALIAS)
+            {
+                crate::config_comments::restored(existing, Some("[utility_models]"), "title", &NOTE)
+            } else {
+                None
+            };
+            (notes, outcome)
         }
-    };
-    std::fs::create_dir_all(vibe_home).map_err(|e| format!("{}: {e}", vibe_home.display()))?;
-    vw_platform::replace_private(&path, updated.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(TitleModel::Added)
+    }
 }
 
 /// The config text with our title model added, or the outcome when nothing is to be written. Pure (the tests and

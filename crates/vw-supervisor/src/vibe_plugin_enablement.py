@@ -3,10 +3,11 @@
 Embedded by the launcher and read-only inventory. The trusted root comes from app launch
 arguments, never a plugin name or user config. A shadow/collision is refused with recovery steps.
 """
+
+
 def install_bundled_plugin_guard(roots=None, *, refuse_missing=True):
-    import importlib.metadata
-    if importlib.metadata.version("mistral-vibe") != "3.1.2":
-        return
+    # Checked against the plugin switch internals (`_enablement.is_required_plugin`, `PluginResolver.resolve`).
+    require_guarded_vibe("bundled plugin guard")  # noqa: F821 - prepended vibe_guard_versions.py
     from functools import wraps
     from pathlib import Path
     import sys

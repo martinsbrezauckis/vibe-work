@@ -12,7 +12,7 @@ import { Switch, SettingsRow } from "../../components/Controls";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 
 import { Selector } from "../../components/Selector";
-import { sessionForPick } from "../../state/modelChoice";
+import { sessionForPick, settingsReadKey } from "../../state/modelChoice";
 import { type SubagentsSaved, type VibeSettings, readVibeSettings } from "../../state/vibeSettings";
 import { TEXT } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
@@ -29,23 +29,35 @@ const SETTERS: Record<string, string> = {
 const NEW_CHATS_NOTE =
   "Saved for new chats. Chats you already have open keep the setting they started with.";
 
+/** Warning notification shown when a change was saved but the helper chat used for it could not be deleted. */
 export const LEFTOVER_TEXT =
   "The change was saved, but a helper chat that Vibe Work used for it could not be deleted. " +
   "It is in your chat list as a temporary chat and is deleted when Vibe Work quits; you can also delete it yourself.";
 
-/** Reads the settings through a session and keeps them; `apply` writes and reads again. */
+/** Shown when the settings were read without a chat: Vibe saves them only through one (as the card's line says). */
+const SAVE_NEEDS_CHAT = "Changing these settings needs a chat: Vibe saves them through one.";
+
+/**
+ * Reads the settings through a session (without one when there is no chat at all) and keeps them; `apply` writes
+ * through a chat and reads again.
+ */
 export function useVibeSettings() {
   const { core, toasts, sessionTools } = useApp();
   const running = useCoreState((s) => s.server.phase === "running");
   const selected = useShellState((s) => s.selected);
   const via = core === null ? null : sessionForPick(core, selected);
+  const readKey = core === null ? null : settingsReadKey(core, selected);
   const [view, setView] = useState<VibeSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // With no chat the read goes without one; the core's helper chat it lists meanwhile reads as "latest", so the
+  // read does not start again when that chat appears.
+  const readFor = readKey ?? "latest";
   useEffect(() => {
-    if (core === null || !running || via === null) return;
+    if (core === null || !running) return;
+    const at = sessionForPick(core, selected);
     let live = true;
-    readVibeSettings(core, via)
+    readVibeSettings(core, at)
       .then((v) => {
         if (live) setView(v);
       })
@@ -56,10 +68,14 @@ export function useVibeSettings() {
     return () => {
       live = false;
     };
-  }, [core, running, via]);
+  }, [core, running, readFor, selected]);
   const apply = useCallback(
     (work: (sessionId: string) => Promise<void>) => {
-      if (core === null || via === null) return;
+      if (core === null) return;
+      if (via === null) {
+        setError(SAVE_NEEDS_CHAT);
+        return;
+      }
       setBusy(true);
       setError(null);
       work(via)
@@ -85,7 +101,7 @@ export function useVibeSettings() {
    */
   const applyToNewChats = useCallback(
     (work: () => Promise<SubagentsSaved>) => {
-      if (core === null || via === null) return;
+      if (core === null) return;
       setBusy(true);
       setError(null);
       setSavedForNewChats(false);

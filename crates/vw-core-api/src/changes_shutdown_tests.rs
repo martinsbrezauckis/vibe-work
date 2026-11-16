@@ -52,7 +52,7 @@ async fn shutdown_joins_a_refresh_before_its_folder_can_be_removed() {
     std::fs::write(repo.join("file.txt"), "content\n").unwrap();
     let (entered, ready) = mpsc::channel();
     let (release, held) = mpsc::channel();
-    let core = crate::Core::start(
+    let core = Box::pin(crate::Core::start(
         vw_supervisor::SupervisorConfig::new(
             base.join("no-server"),
             base.join("home"),
@@ -69,7 +69,7 @@ async fn shutdown_joins_a_refresh_before_its_folder_can_be_removed() {
             })),
             ..crate::CoreConfig::default()
         },
-    )
+    ))
     .await
     .unwrap();
     let _ = core

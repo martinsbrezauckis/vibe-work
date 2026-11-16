@@ -162,6 +162,18 @@ repo?: string,
 /**
  * Ask the forge now.
  */
+refresh: boolean, } | { "op": "prList",
+/**
+ * Session id.
+ */
+sessionId: string,
+/**
+ * Repository root relative to the session folder (default: session repository).
+ */
+repo?: string,
+/**
+ * Ask the forge now.
+ */
 refresh: boolean, } | { "op": "prepareMessage",
 /**
  * Session id.

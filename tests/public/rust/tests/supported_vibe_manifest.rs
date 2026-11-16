@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::processes::scratch;
 use common::support_rig::{
-    Channel, entry, install_marker, manifest, running_rig, sign_as, support, upload_requirements,
+    Channel, entry, install_marker, manifest, running_rig, sign_as, support, support_guarding,
+    upload_requirements,
 };
 use common::update_rig::Key;
 use vw_vibe_install::{InstallError, SupportError, VibeUpdateView};
@@ -51,6 +52,46 @@ async fn a_signed_manifest_offers_the_newer_tested_vibe_and_names_the_untested_o
         0,
         "no install data before consent"
     );
+}
+
+// PREDICT: before the offer used the app's guard list, the newest signed entry (2.26.4) was offered although this
+// app's guards were never checked with it, and that Vibe would refuse to start after the install.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_signed_vibe_the_guards_were_not_checked_with_is_named_never_offered() {
+    let channel = Channel::start().await;
+    let key = Key::new();
+    let rig = running_rig(&scratch("support-guarded"), &channel);
+    let entries = || {
+        vec![
+            entry("2.26.2", "0.1.0", None),
+            entry("2.26.4", "0.1.0", None),
+        ]
+    };
+    channel.publish(&key, &manifest(5, Some("2.26.3"), entries()));
+    upload_requirements(&channel, &["2.26.2", "2.26.4"]);
+    let config = support_guarding(&channel, &key, &["2.26.2"]);
+    rig.installer.check_support(&config).await.unwrap();
+    let view = update(&rig);
+    assert_eq!(view.available.as_deref(), Some("2.26.2"));
+    assert_eq!(
+        view.upcoming.as_deref(),
+        Some("2.26.4"),
+        "the unguarded signed version reads as not supported yet"
+    );
+    assert_eq!(view.check_error, None);
+
+    // Only unguarded entries: nothing to install, the newest one is named.
+    channel.publish(&key, &manifest(6, None, entries()));
+    let none = support_guarding(&channel, &key, &[]);
+    rig.installer.check_support(&none).await.unwrap();
+    let view = update(&rig);
+    assert_eq!(view.available, None);
+    assert_eq!(view.upcoming.as_deref(), Some("2.26.4"));
+    assert!(matches!(
+        rig.installer.prepare_update(),
+        Err(InstallError::NoUpdate(_))
+    ));
+    assert_eq!(channel.hits("vibe-2.26.4.requirements.txt"), 0);
 }
 
 async fn refused(
@@ -452,5 +493,49 @@ async fn a_planted_temporary_symlink_is_never_written_through() {
         std::fs::read_to_string(root.join("support-seen.json"))
             .unwrap()
             .contains("20")
+    );
+}
+
+/// PREDICT (before the change): a user's own Vibe that is not a supported version gets "Some features may not work as
+/// expected", but since the guards fail closed such a Vibe does not start at all; and the "now supported" notice says
+/// "update it yourself" without naming the version, which can send the person past the supported one. After: the
+/// notice says Vibe Work does not support that version yet and names the version to use; the newer-supported notice
+/// names the exact version and says a newer Vibe waits for a Vibe Work update.
+#[test]
+fn the_own_install_notice_names_the_version_vibe_work_supports() {
+    use vw_vibe_install::support::{Manifest, Running, evaluate};
+    let bytes = manifest(5, Some("2.27.0"), vec![entry("2.26.2", "0.1.0", None)]);
+    let signed: Manifest = serde_json::from_slice(&bytes).unwrap();
+    let guarded = vec!["2.26.2".to_owned()];
+    let target = vw_vibe_install::this_target();
+    let unsupported = evaluate(
+        &signed,
+        "0.1.12",
+        &target,
+        &Running::Existing("2.27.0".into()),
+        "2.26.2",
+        &guarded,
+    );
+    assert_eq!(
+        unsupported.mismatch.as_deref(),
+        Some(
+            "Vibe Work does not support your own Vibe 2.27.0 yet: it works with Vibe 2.26.2. Use Vibe 2.26.2 in \
+             your own install, or let Vibe Work use its own copy."
+        )
+    );
+    let older = evaluate(
+        &signed,
+        "0.1.12",
+        &target,
+        &Running::Existing("2.26.0".into()),
+        "2.26.0",
+        &guarded,
+    );
+    assert_eq!(
+        older.mismatch.as_deref(),
+        Some(
+            "Vibe 2.26.2 is now supported; your own Vibe is version 2.26.0. Vibe Work does not change your own \
+             install: update it to Vibe 2.26.2 yourself when you are ready. A newer Vibe waits for a Vibe Work update."
+        )
     );
 }

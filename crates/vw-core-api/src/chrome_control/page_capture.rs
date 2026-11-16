@@ -64,6 +64,7 @@ pub(super) async fn send(
 async fn save_page(resource: &Resources<'_>) -> Result<Value, String> {
     let format: Format = serde_json::from_value(resource.request["args"]["format"].clone())
         .map_err(|_| "Capture needs format markdown, text, html or single_html; choose one.")?;
+    // Protected field content is withheld in every mode (page.js), the same rule as the page read.
     let script = vw_browser::scripts::page_text(
         resource.key,
         &json!({"op":"start","format":resource.request["args"]["format"],"token":resource.key,"maxChars":MAX_CHARS,"chunk":MAX_CHARS}),

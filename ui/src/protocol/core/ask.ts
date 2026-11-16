@@ -268,7 +268,15 @@ profileId: string, } | { "op": "takeSelection",
 /**
  * The pending selection identity.
  */
-selectionId: string, } | { "op": "tabs", } | { "op": "tabContext",
+selectionId: string, } | { "op": "setFrameColour",
+/**
+ * The chat.
+ */
+sessionId: string,
+/**
+ * Palette index 0-7.
+ */
+colour: number, } | { "op": "tabs", } | { "op": "tabContext",
 /**
  * Connected profile identity.
  */
@@ -378,7 +386,11 @@ firefoxSharing?: ChromeAddonView,
 /**
  * Safari is omitted while its optional module is off.
  */
-safari?: SafariView, };
+safari?: SafariView,
+/**
+ * Chats whose agent control frame has a colour other than the default (chat id -> palette index 0-7).
+ */
+frameColours?: { [key in string]: number }, };
 
 export type BrowserProfile = {
 /**
@@ -636,6 +648,6 @@ instruction: string,
  */
 step?: string, };
 
-export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "otherHelperRunning" | "helperNotRunning" | "ownerCredentialMissing" | "helperSetupRequired" | "accessBlocked" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
+export type ChromeAddonState = "unavailable" | "notSetUp" | "chromeMissing" | "chromeSandboxed" | "otherBrowser" | "switchedOff" | "inReview" | "otherOwner" | "connecting" | "notPaired" | "otherHelperRunning" | "helperNotRunning" | "ownerCredentialMissing" | "ownerKeyringUnavailable" | "helperSetupRequired" | "accessBlocked" | "turnedOffInChrome" | "restartChrome" | "updateNeeded" | "chromeClosed" | "enableInChrome" | "extensionNotInstalled" | "notConnected" | "connected";
 
 export type ChromeAddonAction = "connect" | "setupAgain" | "remove" | "openPairingPage" | "turnOn";

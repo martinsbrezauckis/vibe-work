@@ -5,6 +5,10 @@ import type { Shell } from "./shellStore";
 import type { MarketState } from "./market";
 import type { Store } from "./createStore";
 
+/**
+ * Schedules tools inventory reloads while the connectors page is open: on server, file and change events, when the
+ * session context changes, and once a minute. Returns the function that stops watching.
+ */
 export function watchMarket(
   core: CoreController,
   shell: Shell,

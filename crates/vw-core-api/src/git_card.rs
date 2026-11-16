@@ -17,6 +17,7 @@ use vw_git::forge::{self, ForgeKind};
 use vw_git::merge;
 use vw_git::pr::{self, PrCard};
 use vw_git::state;
+use vw_platform::sync::LockRecover;
 
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
@@ -92,7 +93,18 @@ impl Core {
                 } =>
             {
                 let (on, branch) = (forge.clone(), head.clone());
-                match blocking(move || gh.view(&on, &branch)).await? {
+                match blocking(move || {
+                    let mut card = gh.view(&on, &branch)?;
+                    // Which checks are required: a failed read leaves every check counted as required.
+                    if let Some(card) = card.as_mut()
+                        && let Ok(names) = gh.required_checks(&on, card.number)
+                    {
+                        vw_git::pr_status::mark_required(card, &names);
+                    }
+                    Ok::<_, vw_git::GitError>(card)
+                })
+                .await?
+                {
                     Ok(card) => CardCache {
                         card,
                         source: Some(PrSource::Gh),
@@ -110,15 +122,10 @@ impl Core {
             }
             _ => crate::git_api::fetch(&self.shared, &forge, &head, cached.clone(), now).await,
         };
-        self.shared
-            .git
-            .cards
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(
-                format!("{session_id}:{}", place.root.display()),
-                fresh.clone(),
-            );
+        self.shared.git.cards.lock_or_recover().insert(
+            format!("{session_id}:{}", place.root.display()),
+            fresh.clone(),
+        );
         Ok(view(&fresh))
     }
 

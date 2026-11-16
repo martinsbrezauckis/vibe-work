@@ -130,6 +130,8 @@ impl PreviewService {
             let last_area = state.last_area;
             let label = session_storage.key.label(state.generation);
             state.by_label.insert(label.clone(), session_id.to_owned());
+            // A view the agent controls reads its chat's input block from its first event; the person's own never.
+            crate::service_person_block::scope_view(&state, session_id, &label);
             let entry = state.entry(session_id);
             // An explicit LAN host selects its storage class; otherwise the URL selects it.
             let class = if entry.lan_host.is_some() {
@@ -162,15 +164,7 @@ impl PreviewService {
             let parked = state.entry(session_id).parked(last_area);
             (label, parked, rules, class)
         };
-        #[cfg(feature = "e2e-script")]
-        let fixture_web = self
-            .config
-            .test_browser_origin
-            .as_ref()
-            .is_some_and(|origin| origin.origin() == url.origin());
-        #[cfg(not(feature = "e2e-script"))]
-        let fixture_web = false;
-        let storage = if class == crate::policy::PageClass::Web || fixture_web {
+        let storage = if class == crate::policy::PageClass::Web || self.fixture_web(&url) {
             self.shared_web_storage()
         } else {
             self.own_store(session_storage)
@@ -220,6 +214,23 @@ impl PreviewService {
             mount.state = MountState::Ready;
         }
         Ok(())
+    }
+
+    /// Test builds: a loopback fixture page that uses the shared public-web store (the exact consent test origin,
+    /// or the stand-in public site for Local Network Access, which lives where public pages live).
+    #[cfg(feature = "e2e-script")]
+    fn fixture_web(&self, url: &Url) -> bool {
+        self.config
+            .test_browser_origin
+            .as_ref()
+            .is_some_and(|origin| origin.origin() == url.origin())
+            || self.test_public_page(Some(url))
+    }
+
+    #[cfg(not(feature = "e2e-script"))]
+    #[allow(clippy::unused_self)]
+    fn fixture_web(&self, _url: &Url) -> bool {
+        false
     }
 
     /// Retires a refused target and its request authority before native close, which may fail.

@@ -135,7 +135,7 @@ async fn higher_modes_keep_the_same_write_approval_options_in_every_browser() {
                     json!({"sessionId":"t","action":action,"args":{"login":"approved-login"}});
                 let needs_card = mode != "auto-approve";
                 if let Some(browser) = browser {
-                    let consent = read_consent::Consent(Tier::FullAccess);
+                    let consent = read_consent::Consent(Tier::FullAccess, false);
                     let outcome = check::authorize_read(
                         &core.shared,
                         "s",
@@ -190,7 +190,7 @@ async fn secret_reads_never_dispatch_or_offer_a_card_even_in_a_write_batch() {
                 &core.shared,
                 "s",
                 args.clone(),
-                read_consent::Consent(Tier::FullAccess),
+                read_consent::Consent(Tier::FullAccess, false),
             )
             .await
             .unwrap_err();
@@ -315,7 +315,8 @@ async fn site_secret_reads_require_full_access_in_every_browser_and_mode() {
                 let args = json!({"sessionId":"t","action":action,"args":input});
                 for approved in [false, true] {
                     let outcome = if browser.is_some() {
-                        let consent = approved.then_some(read_consent::Consent(Tier::FullAccess));
+                        let consent =
+                            approved.then_some(read_consent::Consent(Tier::FullAccess, false));
                         check::authorize_read(
                             &core.shared,
                             "s",

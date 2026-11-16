@@ -3,52 +3,17 @@
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 use crate::policy::Destination;
 use crate::service::{OpenRequest, PreviewError, PreviewService};
 use crate::state::{BrowserMountState, PreviewView};
 
-pub(crate) fn review_fingerprint(
-    state: &crate::state::State,
-    owner: &str,
-    page_key: &str,
-) -> Result<String, PreviewError> {
-    let tabs = state
-        .tabs
-        .get(owner)
-        .ok_or_else(|| PreviewError::InvalidTab("unknown session tabs".to_owned()))?;
-    let kind = tabs
-        .owners
-        .get(page_key)
-        .ok_or_else(|| PreviewError::InvalidTab("unknown web page".to_owned()))?;
-    let entry = state.entries.get(page_key);
-    let canonical = serde_json::json!([
-        "vw-browser-tab-handoff-v1",
-        owner,
-        page_key,
-        kind,
-        entry.and_then(|e| e.url.as_ref().map(url::Url::as_str)),
-        entry.and_then(|e| e.mount.as_ref().map(|m| m.label.as_str())),
-        entry.map(|e| e.console_epoch),
-    ]);
-    Ok(format!(
-        "sha256:{:x}",
-        Sha256::digest(canonical.to_string().as_bytes())
-    ))
-}
-
-struct ClosingPage<'a> {
-    service: &'a PreviewService,
-    key: &'a str,
-}
-
-impl Drop for ClosingPage<'_> {
-    fn drop(&mut self) {
-        self.service.inner.lock().closing_pages.remove(self.key);
-    }
-}
+#[path = "tabs_close.rs"]
+mod close;
+#[path = "tabs_handoff.rs"]
+mod handoff;
+pub(crate) use handoff::review_fingerprint;
 
 /// A page in the Browser panel. The app page is always first and cannot close.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,6 +152,45 @@ impl PreviewService {
         self.layout_page_locked(page_key.to_owned(), area).await?;
         Ok(true)
     }
+    /// [`Self::front_tab_if_visible`] for the agent's own browser call: the selection is remembered as the agent's, so
+    /// the agent's App preview tools can select App preview again without overriding a tab the person chose.
+    ///
+    /// # Errors
+    /// As [`Self::front_tab_if_visible`].
+    pub async fn front_agent_tab_if_visible(
+        &self,
+        owner: &str,
+        page_key: &str,
+    ) -> Result<bool, PreviewError> {
+        let placed = self.front_tab_if_visible(owner, page_key).await?;
+        let mut state = self.inner.lock();
+        if let Some(tabs) = state.tabs.get_mut(owner)
+            && tabs.selected.as_deref() == Some(page_key)
+        {
+            tabs.agent_selected = true;
+        }
+        Ok(placed)
+    }
+
+    /// Selects App preview again when the web tab selected now was brought forward by the agent's own browser call.
+    /// `Ok(false)`: nothing changed (App preview is selected, or the person chose the selected tab: it stays).
+    ///
+    /// # Errors
+    /// As [`Self::front_tab_if_visible`].
+    pub async fn reselect_app_preview(&self, owner: &str) -> Result<bool, PreviewError> {
+        let agents = {
+            let state = self.inner.lock();
+            state.tabs.get(owner).is_some_and(|tabs| {
+                tabs.agent_selected && tabs.selected.as_deref().is_some_and(|key| key != owner)
+            })
+        };
+        if !agents {
+            return Ok(false);
+        }
+        self.front_tab_if_visible(owner, owner).await?;
+        Ok(true)
+    }
+
     /// Current native Browser area only while one of this session's pages is actually visible.
     #[must_use]
     pub fn visible_browser_area(&self, owner: &str) -> Option<crate::Rect> {
@@ -398,7 +402,9 @@ impl PreviewService {
                 "page does not belong to this session".to_owned(),
             ));
         }
-        state.tabs.entry(owner.to_owned()).or_default().selected = Some(page_key.to_owned());
+        let tabs = state.tabs.entry(owner.to_owned()).or_default();
+        tabs.selected = Some(page_key.to_owned());
+        tabs.agent_selected = false;
         if let Some(entry) = state.entries.get_mut(page_key)
             && entry.browser_mount == BrowserMountState::Released
         {
@@ -440,119 +446,6 @@ impl PreviewService {
         Ok(())
     }
 
-    /// Fingerprint of the current page and its ownership for native handoff review.
-    ///
-    /// # Errors
-    /// The session or web page is unknown.
-    pub fn handoff_review_fingerprint(
-        &self,
-        owner: &str,
-        page_key: &str,
-    ) -> Result<String, PreviewError> {
-        review_fingerprint(&self.inner.lock(), owner, page_key)
-    }
-
-    /// Atomically delegates a user page after core's user confirmation of its exact state.
-    ///
-    /// # Errors
-    /// The page, owner, or reviewed page state changed.
-    pub fn delegate_web_tab(
-        &self,
-        owner: &str,
-        page_key: &str,
-        expected_fingerprint: &str,
-    ) -> Result<(), PreviewError> {
-        self.change_owner(
-            owner,
-            page_key,
-            expected_fingerprint,
-            PageTabOwner::User,
-            PageTabOwner::DelegatedToAgent,
-        )
-    }
-
-    /// Takes a delegated page back after core's user confirmation of its exact state.
-    ///
-    /// # Errors
-    /// The page, owner, or reviewed page state changed.
-    pub fn take_back_web_tab(
-        &self,
-        owner: &str,
-        page_key: &str,
-        expected_fingerprint: &str,
-    ) -> Result<(), PreviewError> {
-        self.change_owner(
-            owner,
-            page_key,
-            expected_fingerprint,
-            PageTabOwner::DelegatedToAgent,
-            PageTabOwner::User,
-        )
-    }
-
-    fn change_owner(
-        &self,
-        owner: &str,
-        page_key: &str,
-        expected: &str,
-        from: PageTabOwner,
-        to: PageTabOwner,
-    ) -> Result<(), PreviewError> {
-        let mut state = self.inner.lock();
-        if state.closing_pages.contains(page_key) {
-            return Err(PreviewError::InvalidTab("page is closing".to_owned()));
-        }
-        let tabs = state
-            .tabs
-            .get(owner)
-            .ok_or_else(|| PreviewError::InvalidTab("unknown session tabs".to_owned()))?;
-        if tabs.owners.get(page_key) != Some(&from) {
-            return Err(PreviewError::InvalidTab(
-                "page ownership changed".to_owned(),
-            ));
-        }
-        let actual = review_fingerprint(&state, owner, page_key)?;
-        if actual != expected {
-            return Err(PreviewError::InvalidTab(
-                "page handoff review is stale".to_owned(),
-            ));
-        }
-        if let Some(id) = state
-            .entries
-            .get(page_key)
-            .and_then(|entry| entry.mount.as_ref())
-        {
-            self.engine.dialog_ownership(
-                &crate::MountId {
-                    session_id: page_key.into(),
-                    label: id.label.clone(),
-                },
-                to != PageTabOwner::User,
-            )?;
-        }
-        let Some(tabs) = state.tabs.get_mut(owner) else {
-            return Err(PreviewError::InvalidTab("unknown session tabs".to_owned()));
-        };
-        tabs.owners.insert(page_key.to_owned(), to);
-        if to == PageTabOwner::DelegatedToAgent {
-            tabs.agent = Some(page_key.to_owned());
-        }
-        if to == PageTabOwner::User && tabs.agent.as_deref() == Some(page_key) {
-            tabs.agent = tabs
-                .web
-                .iter()
-                .find(|key| {
-                    tabs.owners
-                        .get(*key)
-                        .is_some_and(|kind| *kind != PageTabOwner::User)
-                })
-                .cloned();
-        }
-        drop(state);
-        self.inner.changed(owner);
-        Ok(())
-    }
-
     /// Reorders all web pages; the app page remains pinned first.
     ///
     /// # Errors
@@ -577,166 +470,5 @@ impl PreviewService {
         drop(state);
         self.inner.changed(owner);
         Ok(())
-    }
-
-    async fn close_web_tab_expected(
-        &self,
-        owner: &str,
-        page_key: &str,
-        expected: Option<&str>,
-        admit: Option<&(dyn Fn() -> bool + Send + Sync)>,
-    ) -> Result<(), PreviewError> {
-        let _activity = self.session_lock(page_key).await;
-        {
-            let mut state = self.inner.lock();
-            if state
-                .page_owners
-                .get(page_key)
-                .is_none_or(|found| found != owner)
-            {
-                return Err(PreviewError::InvalidTab(
-                    "web page does not belong to this session".to_owned(),
-                ));
-            }
-            if let Some(expected) = expected
-                && review_fingerprint(&state, owner, page_key)? != expected
-            {
-                return Err(PreviewError::InvalidTab(
-                    "browser tab changed while closing".to_owned(),
-                ));
-            }
-            if admit.is_some_and(|check| !check()) {
-                return Err(PreviewError::InvalidTab(
-                    "browser tab close was canceled or its permission changed".to_owned(),
-                ));
-            }
-            if !state.closing_pages.insert(page_key.to_owned()) {
-                return Err(PreviewError::InvalidTab(
-                    "web page is already closing".to_owned(),
-                ));
-            }
-        }
-        let _closing = ClosingPage {
-            service: self,
-            key: page_key,
-        };
-        self.unmount(page_key).await?;
-        self.close_page_window(page_key).await?;
-        {
-            let mut state = self.inner.lock();
-            if let Some(entry) = state.entries.remove(page_key) {
-                for record in entry.downloads {
-                    state.entry(owner).push_download(record);
-                }
-            }
-            state.page_owners.remove(page_key);
-            let popup_return = crate::popups::closed(&mut state, owner, page_key);
-            if state.is_shown(page_key) {
-                state.shown = None;
-            }
-            if let Some(tabs) = state.tabs.get_mut(owner) {
-                let closed_at = tabs.web.iter().position(|key| key == page_key).unwrap_or(0);
-                tabs.web.retain(|key| key != page_key);
-                tabs.owners.remove(page_key);
-                tabs.snapshots.remove(page_key);
-                if tabs.selected.as_deref() == Some(page_key) {
-                    tabs.selected = Some(
-                        tabs.web
-                            .get(closed_at)
-                            .or_else(|| tabs.web.last())
-                            .cloned()
-                            .unwrap_or_else(|| owner.to_owned()),
-                    );
-                }
-                if tabs.agent.as_deref() == Some(page_key) {
-                    tabs.agent = if let Some(opener) = popup_return {
-                        match opener {
-                            crate::popups::Return::Available(page) => Some(page),
-                            crate::popups::Return::Unavailable => None,
-                        }
-                    } else {
-                        tabs.web[closed_at.min(tabs.web.len())..]
-                            .iter()
-                            .chain(tabs.web[..closed_at.min(tabs.web.len())].iter().rev())
-                            .find(|key| {
-                                tabs.owners
-                                    .get(*key)
-                                    .is_some_and(|kind| *kind != PageTabOwner::User)
-                            })
-                            .cloned()
-                    };
-                }
-            }
-        }
-        self.refresh_rules().await;
-        self.inner.changed(owner);
-        Ok(())
-    }
-
-    /// Closes a selected page and shows its adjacent tab only while this panel remains visible.
-    /// The close, visibility check and replacement share one layout ordering with modal hides.
-    ///
-    /// # Errors
-    /// The page cannot close or the replacement cannot be placed.
-    pub async fn close_web_tab_and_restore(
-        &self,
-        owner: &str,
-        page_key: &str,
-    ) -> Result<(), PreviewError> {
-        match self
-            .close_web_tab_and_restore_expected(owner, page_key, None, None)
-            .await?
-        {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
-    }
-
-    /// Closes only the exact owner, mount, document and URL previously reviewed.
-    /// The admission check runs after the page operation lock and before native teardown.
-    /// A successful close returns any error from showing the replacement page separately.
-    ///
-    /// # Errors
-    /// The reviewed page or permission changed, the page is foreign, or its native view cannot close.
-    pub async fn close_web_tab_and_restore_checked(
-        &self,
-        owner: &str,
-        page_key: &str,
-        fingerprint: &str,
-        admit: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<Option<PreviewError>, PreviewError> {
-        self.close_web_tab_and_restore_expected(owner, page_key, Some(fingerprint), Some(admit))
-            .await
-    }
-
-    async fn close_web_tab_and_restore_expected(
-        &self,
-        owner: &str,
-        page_key: &str,
-        expected: Option<&str>,
-        admit: Option<&(dyn Fn() -> bool + Send + Sync)>,
-    ) -> Result<Option<PreviewError>, PreviewError> {
-        let _layout = self.layout_op.lock().await;
-        let area = {
-            let state = self.inner.lock();
-            state
-                .shown
-                .as_ref()
-                .filter(|shown| shown.session_id == page_key)
-                .map(|shown| shown.area)
-        };
-        self.close_web_tab_expected(owner, page_key, expected, admit)
-            .await?;
-        let restore_error = if let Some(area) = area {
-            let selected = self
-                .tabs(owner)
-                .into_iter()
-                .find(|tab| tab.active)
-                .map_or_else(|| owner.to_owned(), |tab| tab.page_key);
-            self.layout_page_locked(selected, area).await.err()
-        } else {
-            None
-        };
-        Ok(restore_error)
     }
 }

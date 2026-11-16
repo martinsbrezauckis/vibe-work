@@ -48,11 +48,11 @@
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
 }
 .allow-sub > .allow-head .allow-title {
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   font-weight: var(--weight-medium);
 }
 .allow-title > .ui-disclosure {
@@ -65,7 +65,7 @@
   margin: 0 0 6px;
 }
 .allow-group .check {
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .allow-group .check > .allow-what {
   color: var(--text);

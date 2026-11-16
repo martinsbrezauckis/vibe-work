@@ -71,11 +71,16 @@ export function parseAccount(
  * Reads the account through `sessionId`; each half that fails leaves its fields empty, and a failed
  * `account/read` is reported with its reason (never swallowed).
  */
-export async function readAccount(core: CoreController, sessionId: string): Promise<AccountView> {
+export async function readAccount(
+  core: CoreController,
+  sessionId: string | null,
+): Promise<AccountView> {
   let problem: string | null = null;
   const call = async (method: string): Promise<JsonValue | undefined> => {
     try {
-      const result = await core.run({ type: "call", method, params: { sessionId } });
+      // No chat at all: the core reads the account through its own short-lived helper chat.
+      const params = sessionId === null ? {} : { sessionId };
+      const result = await core.run({ type: "call", method, params });
       return result.type === "reply" ? result.result : undefined;
     } catch (thrown) {
       if (method === "account/read") problem = toCallError(thrown).error.message;

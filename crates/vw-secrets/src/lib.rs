@@ -13,8 +13,9 @@
 //! anything lists it), a key or passphrase once `setupStoreKey`, `createVault` or `unlockVault` succeeded
 //! (`vw-core-api` `keys`), keys found in Vibe's own `.env` / keyring when the user asks to detect them
 //! (`vw-keys`), the key-proxy token (`vw-keyproxy`), the Debug API token at start (`vw-debug-api`), the
-//! environment key of a development run (`vw-supervisor`), and the credentials of MCP servers in Vibe Work's own
-//! config at core start (`vw-core-api` `connectors_config`: header values, environment values, URL user info).
+//! environment key of a development run (`vw-supervisor`), the credentials of MCP servers in Vibe Work's own
+//! config at core start (`vw-core-api` `connectors_config`: header values, environment values, URL user info), and
+//! the key the MCP forwarder inserts for a server (`vw-keyproxy`), whose answers it scrubs with [`StreamScrub`].
 //!
 //! What this is: a convenience that hides known values where it can, not a guarantee. A value the client
 //! transforms (reversed, hex-dumped in a terminal, re-encoded) is not recognised; with the Debug API on, the client
@@ -22,15 +23,17 @@
 //!
 //! Depends on: memchr, base64, zeroize. Called by: the crates above (register), vw-debug-api (find).
 //! Invariants:
-//! - A value shorter than [`MIN_LEN`] bytes is not registered (a short value would match ordinary text; every
-//!   secret above is longer). Nothing is ever removed during a run: a rotated-away key is still a secret, and a
-//!   full registry never evicts: past [`MAX_ENTRIES`] - [`PINNED_RESERVE`] entries only the
+//! - A value shorter than [`MIN_LEN`] bytes is not registered (a short value would match ordinary text in every
+//!   answer); a caller that knows the one value it handed to an answer's sender withholds it in that answer at any
+//!   length ([`StreamScrub::with_value`], [`holds`]). Nothing is ever removed during a run: a rotated-away key is
+//!   still a secret, and a full registry never evicts: past [`MAX_ENTRIES`] - [`PINNED_RESERVE`] entries only the
 //!   pinned kinds ([`SecretKind::pinned`]: the Mistral key, vault values, the Debug API and proxy tokens) are still
 //!   registered; past [`MAX_ENTRIES`] nothing is, and a warning names the kind (never the value).
 //! - Each value is searched in the forms it can take inside an answer: as it is, JSON-escaped, percent-encoded,
 //!   hex (lower and upper case), and inside standard or URL-safe base64 at each of the three byte
 //!   alignments ([`forms`]). Not covered (stated, not hidden): other encodings (gzip, a hex dump with line breaks or
-//!   spaces), a value split across two answers or lines, a reversed or otherwise transformed value, and pixels of a
+//!   spaces), a value split across two answers or lines (one answer that arrives in parts is
+//!   covered by [`StreamScrub`]), a reversed or otherwise transformed value, and pixels of a
 //!   screenshot.
 //! - [`scrub`] replaces each occurrence of any form with [`marker`] (plain ASCII without quotes or backslashes, so
 //!   a JSON text stays valid JSON) and reports the kinds it found; the answer stays usable (a session whose agent
@@ -40,6 +43,9 @@
 
 use std::fmt::Write as _;
 use std::sync::{OnceLock, PoisonError, RwLock};
+
+mod stream;
+pub use stream::StreamScrub;
 
 use base64::Engine as _;
 use zeroize::Zeroizing;
@@ -148,6 +154,15 @@ pub fn find(haystack: &[u8]) -> Option<SecretKind> {
         .map(|e| e.kind)
 }
 
+/// True when `haystack` holds `value` in any of its forms ([`forms`], at any length: [`exact_forms`]), whether or
+/// not `value` is registered (a check of one known value, for text that is refused rather than scrubbed).
+#[must_use]
+pub fn holds(haystack: &[u8], value: &str) -> bool {
+    exact_forms(value)
+        .iter()
+        .any(|form| memchr::memmem::find(haystack, form).is_some())
+}
+
 /// The text that replaces a value of `kind`: `[secret withheld: mistralKey]`.
 #[must_use]
 pub fn marker(kind: SecretKind) -> String {
@@ -167,25 +182,55 @@ pub fn scrub(haystack: &[u8]) -> Option<(Vec<u8>, Vec<SecretKind>)> {
             if memchr::memmem::find(text, form).is_none() {
                 continue;
             }
-            let replacement = marker(entry.kind);
-            let mut out = Vec::with_capacity(text.len());
-            let mut at = 0;
-            for found in memchr::memmem::find_iter(text, form.as_slice()) {
-                if found < at {
-                    continue;
-                }
-                out.extend_from_slice(&text[at..found]);
-                out.extend_from_slice(replacement.as_bytes());
-                at = found + form.len();
-            }
-            out.extend_from_slice(&text[at..]);
-            current = Some(out);
+            current = Some(replace(text, form, marker(entry.kind).as_bytes()));
             if !kinds.contains(&entry.kind) {
                 kinds.push(entry.kind);
             }
         }
     }
     current.map(|bytes| (bytes, kinds))
+}
+
+/// `text` with every occurrence of `form` replaced by `replacement`.
+pub(crate) fn replace(text: &[u8], form: &[u8], replacement: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut at = 0;
+    for found in memchr::memmem::find_iter(text, form) {
+        if found < at {
+            continue;
+        }
+        out.extend_from_slice(&text[at..found]);
+        out.extend_from_slice(replacement);
+        at = found + form.len();
+    }
+    out.extend_from_slice(&text[at..]);
+    out
+}
+
+/// The length of the longest end of `text` that is the start (never the whole) of a registered value's form: what a
+/// [`StreamScrub`] keeps until the next part arrives. 0 when no end of `text` can start one.
+pub(crate) fn pending_prefix(text: &[u8]) -> usize {
+    let entries = registry().read().unwrap_or_else(PoisonError::into_inner);
+    pending_in(text, entries.iter().flat_map(|e| e.forms.iter()))
+}
+
+/// [`pending_prefix`] for the given forms.
+pub(crate) fn pending_in<'a>(
+    text: &[u8],
+    forms: impl Iterator<Item = &'a Zeroizing<Vec<u8>>>,
+) -> usize {
+    let mut keep = 0;
+    for form in forms {
+        let longest = form.len().saturating_sub(1).min(text.len());
+        for n in (keep + 1..=longest).rev() {
+            let start = text.len() - n;
+            if text[start] == form[0] && text[start..] == form[..n] {
+                keep = n;
+                break;
+            }
+        }
+    }
+    keep
 }
 
 /// How many values are registered (tests and the startup log; never the values).
@@ -200,9 +245,20 @@ pub fn count() -> usize {
 /// Every form of `value` that is searched (module docs), without duplicates.
 #[must_use]
 pub fn forms(value: &str) -> Vec<Vec<u8>> {
+    forms_from(value, MIN_LEN)
+}
+
+/// [`forms`] without the registry's minimum length: the forms of one value a caller knows it handed out (the MCP
+/// forwarder's inserted key), searched in that one answer only, never in every answer like the registry's.
+#[must_use]
+pub fn exact_forms(value: &str) -> Vec<Vec<u8>> {
+    forms_from(value, 1)
+}
+
+fn forms_from(value: &str, min: usize) -> Vec<Vec<u8>> {
     let mut out: Vec<Vec<u8>> = vec![value.as_bytes().to_vec()];
     let mut add = |form: Vec<u8>| {
-        if form.len() >= MIN_LEN && !out.contains(&form) {
+        if form.len() >= min && !out.contains(&form) {
             out.push(form);
         }
     };

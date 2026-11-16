@@ -30,8 +30,9 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
@@ -91,7 +92,7 @@ impl Previews {
             return;
         };
         let kept = {
-            let items = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let items = self.0.lock_or_recover();
             items
                 .iter()
                 .find(|(s, c, _)| *s == session && *c == id)
@@ -110,7 +111,7 @@ impl Previews {
             }
             let effect = card.pointer("/detail/effect").cloned().unwrap_or_default();
             let preview = make(&session, &effect).unwrap_or(Value::Null);
-            let mut items = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut items = self.0.lock_or_recover();
             items.push_back((session, id, preview.clone()));
             while items.len() > MAX_KEPT {
                 items.pop_front();

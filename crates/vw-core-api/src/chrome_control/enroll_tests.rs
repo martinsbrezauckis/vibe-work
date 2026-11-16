@@ -16,6 +16,9 @@ mod fallbacks;
 #[path = "enroll_scoped_tests.rs"]
 mod scoped_profiles;
 
+#[path = "enroll_pairing_page_tests.rs"]
+mod pairing_page;
+
 #[path = "enroll_timing_tests.rs"]
 mod timing;
 

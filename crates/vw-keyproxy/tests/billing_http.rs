@@ -257,7 +257,8 @@ async fn installed_vibe_reads_billing_through_the_proxy() {
         (302, "both"),
     ] {
         rig.status.store(code, Ordering::SeqCst);
-        let output = tokio::process::Command::new(&python)
+        let mut command = tokio::process::Command::new(&python);
+        command
             .args(["-I", "-c", include_str!("support/billing_probe.py")])
             .arg(format!("{}/v1", rig.proxy.base_url()))
             .arg(&rig.token)
@@ -266,8 +267,17 @@ async fn installed_vibe_reads_billing_through_the_proxy() {
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", &home)
             .env("VIBE_HOME", &home)
-            .kill_on_drop(true)
-            .output();
+            .kill_on_drop(true);
+        // On Windows Python finds its home folder through USERPROFILE, not HOME, and its socket
+        // module cannot start without SystemRoot (WinError 10106).
+        #[cfg(windows)]
+        {
+            command.env("USERPROFILE", &home);
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                command.env("SystemRoot", system_root);
+            }
+        }
+        let output = command.output();
         let output = tokio::time::timeout(Duration::from_secs(30), output)
             .await
             .expect("Vibe billing probe timed out")

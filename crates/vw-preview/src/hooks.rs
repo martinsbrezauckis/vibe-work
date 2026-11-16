@@ -28,6 +28,8 @@ pub(crate) struct Inner {
     pub(crate) window_close: Mutex<Option<crate::windows::CloseListener>>,
     pub(crate) popup: Mutex<Option<PopupListener>>,
     pub(crate) shields: Mutex<crate::shields::Saved>,
+    /// The person's Local Network Access answers per site (`local_access`).
+    pub(crate) site_answers: Mutex<crate::local_access::SiteAnswers>,
     pub(crate) guard_refused: Mutex<Option<RefusalListener>>,
     pub(crate) state: Mutex<State>,
     pub(crate) policy: UrlPolicy,
@@ -124,12 +126,29 @@ impl Hooks {
     /// The policy part of a navigation decision of the page (`frame` false) or one of its frames, which may also load
     /// the page's own inline document ([`crate::policy::UrlPolicy::frame_navigation`]).
     fn pre_in(&self, label: &str, url: &Url, frame: bool) -> Pre {
+        let internal = self.0.internal_ports();
         let mut state = self.0.lock();
         let Some(session) = state.session_of(label).map(str::to_owned) else {
             return Pre::Done(Err(None));
         };
         let pinned_app =
             state.tabs.contains_key(&session) && !state.page_owners.contains_key(&session);
+        // The App preview's document and frame navigations to a port on this computer pass the same live admission
+        // as its subrequests, besides the open's port list below.
+        let refused_port = match self.0.policy.classify(url) {
+            Ok(Destination::Loopback { port })
+                if pinned_app
+                    && !requests::app_port_admitted(
+                        &state,
+                        &session,
+                        internal.as_deref(),
+                        port,
+                    ) =>
+            {
+                Some(port)
+            }
+            _ => None,
+        };
         let entry = state.entry(&session);
         if entry.canary.as_ref() == Some(url) {
             return Pre::Done(Ok(()));
@@ -163,12 +182,14 @@ impl Hooks {
             && !crate::policy::embedded_document(url)
             && !(frame && url.scheme() == "blob")
         {
-            self.0.policy.fetch_navigation(
-                url,
-                &entry.allowed,
-                crate::policy::PageClass::Local,
-                None,
-            )
+            self.0
+                .policy
+                .fetch_navigation(url, &entry.allowed, crate::policy::PageClass::Local, None)
+                .and_then(|()| {
+                    refused_port.map_or(Ok(()), |port| {
+                        Err(crate::policy::UrlRefusal::Unattributed(port))
+                    })
+                })
         } else if frame {
             self.0
                 .policy
@@ -313,6 +334,7 @@ impl PreviewHooks for Hooks {
                 let mut state = self.0.lock();
                 if let Some(session) = state.session_of(label).map(str::to_owned) {
                     let entry = state.entry(&session);
+                    entry.navigation_target = crate::local_access::navigation_target(url);
                     if entry.pending_open.as_ref() == Some(url) {
                         entry.pending_requested_admitted = Some(url.clone());
                     } else if entry.pending_requested_admitted.is_some()

@@ -125,14 +125,7 @@ pub(super) async fn execute(
             read(stdout),
         )
     };
-    let cancelled = async {
-        loop {
-            if !allowed() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    };
+    let cancelled = crate::stops::until_ended(shared, || !allowed());
     let result = tokio::select! {
         biased;
         () = cancelled => Err(STOPPED),

@@ -2,6 +2,7 @@
 import { Button } from "../../components/Controls";
 import { TEXT } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
+/** Browser settings row whose button opens Settings > Vault; renders nothing without a core. */
 export function BrowserDelegationSettings() {
   const { core, shell } = useApp();
   if (core === null) return null;

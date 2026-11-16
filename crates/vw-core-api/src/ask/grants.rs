@@ -28,7 +28,8 @@
 //! Depends on: `vw_ask` (grant types). Called by: `ask::cards` (offers, the user's answer), `pump` (matching,
 //! session end, hand-off), `session_end`, `ask::commands` (list, remove).
 use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use vw_ask::{AnsweredBy, CoversPart, GrantOffer, GrantPermission, SessionGrant};
@@ -363,7 +364,7 @@ pub(crate) struct Grants {
 
 impl Grants {
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// Remembers what "Allow for this session" would keep for the open approval `callback_id`.

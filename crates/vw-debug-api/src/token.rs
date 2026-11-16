@@ -8,9 +8,10 @@ use serde_json::json;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, PoisonError, RwLock},
+    sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
+use vw_platform::sync::RwLockRecover;
 use vw_platform::{ensure_private_dir, is_user_only, write_private_new};
 use vw_vault::SecretString;
 
@@ -92,7 +93,7 @@ impl TokenStore {
         self.test_path.as_deref().map(PathBuf::as_path)
     }
     pub(crate) fn matches(&self, given: &[u8]) -> bool {
-        let current = self.current.read().unwrap_or_else(PoisonError::into_inner);
+        let current = self.current.read_or_recover();
         constant_time_eq(given, current.expose().as_bytes())
     }
     pub(crate) async fn rotate(&self) -> Result<(), DebugApiError> {
@@ -105,13 +106,13 @@ impl TokenStore {
                 let dir = path.parent().ok_or(DebugApiError::VaultUnavailable)?;
                 crate::test_token::rotate_token_file(dir)?;
                 let fresh = crate::test_token::load_or_create(dir)?;
-                *self.current.write().unwrap_or_else(PoisonError::into_inner) = fresh;
+                *self.current.write_or_recover() = fresh;
                 return Ok(());
             }
             return Err(DebugApiError::VaultUnavailable);
         };
         fresh.register_as(vw_secrets::SecretKind::DebugApiToken);
-        *self.current.write().unwrap_or_else(PoisonError::into_inner) = fresh;
+        *self.current.write_or_recover() = fresh;
         Ok(())
     }
 }

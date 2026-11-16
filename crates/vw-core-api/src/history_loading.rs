@@ -2,8 +2,9 @@
 //! Called after store adoption by sessions/pump; Channels cancels on close. Two shared loader slots,
 //! bounded requests and generation-checked, byte-limited prepends preserve replacements and live events.
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
@@ -34,7 +35,7 @@ impl HistoryLoading {
     }
 
     pub(crate) fn start(&self, shared: &Arc<Shared>, id: &str) {
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock_or_recover();
         let request = self.store.history_request(id);
         if let Some(request) = &request
             && jobs
@@ -61,7 +62,7 @@ impl HistoryLoading {
     }
 
     pub(crate) fn stop(&self, id: &str) {
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock_or_recover();
         self.store.close_history(id);
         if let Some(job) = jobs.remove(id) {
             job.task.abort();
@@ -69,7 +70,7 @@ impl HistoryLoading {
     }
 
     pub(crate) fn stop_all(&self) {
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock_or_recover();
         for (id, job) in jobs.drain() {
             self.store.close_history(&id);
             job.task.abort();
@@ -104,6 +105,7 @@ async fn page(shared: &Shared, id: &str, request: &HistoryRequest) -> Result<Pag
     crate::video_projection::apply(shared, &mut reply);
     crate::edit_preview::project(shared, &mut reply);
     crate::chrome_control::approval::project(shared, &mut reply);
+    crate::paused_tools_gate::mark_held_calls(shared, &mut reply);
     let Value::Array(items) = reply["items"].take() else {
         return Err("history page has no items".into());
     };

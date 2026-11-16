@@ -20,6 +20,7 @@
  */
 import type { CoversPart, JsonValue } from "../../protocol/core";
 import { UiControlError } from "../../state/uiControl";
+import { requiredBodyObject } from "../../state/uiControlBody";
 import type { TranscriptUi } from "../../state/transcriptStore";
 import type { App } from "../shell/AppContext";
 import {
@@ -48,12 +49,6 @@ import {
 } from "./model/callbacks";
 import { type Obj, detailOf, entryId, messageText, obj, statusOf, str } from "./model/entries";
 import { gatherSources, isWebSearch, searchSources } from "./model/sources";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function text(value: unknown, name: string): string {
   if (typeof value === "string" && value !== "") return value;
@@ -352,7 +347,7 @@ export function registerTranscriptRoutes(app: App): () => void {
   };
 
   return app.uiControl.register("transcript", async (body) => {
-    const input = asObject(body);
+    const input = requiredBodyObject(body);
     const action = input["action"] ?? "read";
     switch (action) {
       case "read":

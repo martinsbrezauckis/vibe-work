@@ -3,7 +3,8 @@
 use super::ChromeControl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, path::Path, sync::PoisonError};
+use std::{collections::HashMap, path::Path};
+use vw_platform::sync::LockRecover;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Identity {
@@ -145,8 +146,7 @@ pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
         }
         let picked = chrome
             .picked_profiles
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .get(chat)
             .cloned();
         match picked {
@@ -156,8 +156,7 @@ pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
             {
                 let name = chrome
                     .profiles
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
+                    .lock_or_recover()
                     .agent_name(&picked);
                 format!(
                     "The user picked {name} for this chat; use it (profileId {picked}). No action ran."
@@ -170,20 +169,12 @@ pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
 
 pub(super) fn check(chrome: &ChromeControl, chat: &str, profile: &str) -> Result<(), String> {
     // Existing single-binding chats retain their exact choice, including legacy raw Chrome UUIDs.
-    if let Some(selected) = chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(chat)
+    if let Some(selected) = chrome.chat_profiles.lock_or_recover().get(chat)
         && !super::profile_ids::same(selected, profile)
     {
         return Err(OTHER_PROFILE.into());
     }
-    chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .check(chat, profile)
+    chrome.bindings.lock_or_recover().check(chat, profile)
 }
 
 pub(super) fn remember(
@@ -193,10 +184,7 @@ pub(super) fn remember(
     session: Option<&str>,
 ) -> Result<(), String> {
     check(chrome, chat, profile)?;
-    let mut saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.bindings.lock_or_recover();
     if let Some(session) = session {
         saved.check_session(chat, session, profile)?;
     }
@@ -221,17 +209,13 @@ pub(super) fn remember(
     *saved = next;
     chrome
         .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(chat.into(), profile.into());
     Ok(())
 }
 
 pub(super) fn forget(chrome: &ChromeControl, chat: &str) {
-    let mut saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.bindings.lock_or_recover();
     saved.chats.remove(chat);
     saved.pending.remove(chat);
     saved.ambiguous.remove(chat);
@@ -243,18 +227,21 @@ pub(super) fn forget(chrome: &ChromeControl, chat: &str) {
 
 /// Current selection, including a legacy single binding that has not yet opened a new task.
 pub(super) fn selected(chrome: &ChromeControl, chat: &str) -> Option<String> {
-    chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(chat)
-        .cloned()
+    chrome.chat_profiles.lock_or_recover().get(chat).cloned()
+}
+/// The refusal of a tab the Debug API picks outside this chat's profile: the person picks a chat's profile, so a chat
+/// without one yet is told so instead of being told it uses another.
+pub(super) fn tab_refusal(chrome: &ChromeControl, chat: &str) -> &'static str {
+    if selected(chrome, chat).is_some() {
+        "This chat uses another browser profile; nothing was added. Use a tab from this chat's profile, or ask the user to start a new chat for the other profile."
+    } else {
+        "This chat has no browser profile yet, and only the user picks it; nothing was added. Ask the user to add the tab from the composer, or open a browser session so the user can pick a profile."
+    }
 }
 pub(super) fn generation(chrome: &ChromeControl, chat: &str) -> u64 {
     chrome
         .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .generations
         .get(chat)
         .copied()
@@ -265,10 +252,7 @@ pub(super) fn begin_change(
     chat: &str,
     change: super::profile_selection::Change,
 ) -> Result<(), String> {
-    let mut saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.bindings.lock_or_recover();
     let mut next = saved.clone();
     if !next.pending.contains_key(chat) {
         *next.generations.entry(chat.into()).or_default() += 1;
@@ -283,10 +267,7 @@ pub(super) fn complete_change(
     chat: &str,
     profile: &str,
 ) -> Result<(), String> {
-    let mut saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.bindings.lock_or_recover();
     let mut next = saved.clone();
     next.chats.insert(
         chat.into(),
@@ -303,8 +284,7 @@ pub(super) fn complete_change(
     *saved = next;
     chrome
         .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert(chat.into(), profile.into());
     Ok(())
 }
@@ -316,11 +296,7 @@ pub(super) fn adopt(chrome: &ChromeControl, old: &str, new: &str) -> Result<(), 
     check(chrome, old, &profile)?;
     remember(chrome, new, &profile, None)?;
     forget(chrome, old);
-    chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .remove(old);
+    chrome.chat_profiles.lock_or_recover().remove(old);
     Ok(())
 }
 
@@ -363,10 +339,7 @@ pub(super) fn migrate(chrome: &ChromeControl, chat: &str, status: &Value) -> Res
             remember(chrome, chat, &profile, Some(&lease.id))?;
         }
     } else if by_profile.len() > 1 {
-        let mut saved = chrome
-            .bindings
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut saved = chrome.bindings.lock_or_recover();
         let mut next = saved.clone();
         next.ambiguous
             .insert(chat.into(), by_profile.keys().cloned().collect());
@@ -378,20 +351,13 @@ pub(super) fn migrate(chrome: &ChromeControl, chat: &str, status: &Value) -> Res
     if let Some(profile) = selected(chrome, chat) {
         check(chrome, chat, &profile)
     } else {
-        chrome
-            .bindings
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .check(chat, "")
+        chrome.bindings.lock_or_recover().check(chat, "")
     }
 }
 
 /// Read-back stopped receipts retire durable release obligations; mere disconnection cannot.
 pub(super) fn acknowledge(chrome: &ChromeControl, rows: &[Value]) {
-    let mut saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut saved = chrome.bindings.lock_or_recover();
     let mut next = saved.clone();
     let mut changed = false;
     for (chat, leases) in &mut next.leases {
@@ -420,20 +386,13 @@ pub(super) fn acknowledge(chrome: &ChromeControl, rows: &[Value]) {
 
 /// One owner observation updates the durable identity namespace and its readable profile inventory.
 pub(super) fn observe(chrome: &ChromeControl, data: &Value) {
-    chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .observe_owner(data);
+    chrome.bindings.lock_or_recover().observe_owner(data);
     super::profiles::observe(chrome, data);
 }
 
 /// Receipt identity outlives the bounded work display; only authenticated admitted sessions enter this map.
 pub(super) fn session_profile(chrome: &ChromeControl, session: &str) -> Option<String> {
-    let saved = chrome
-        .bindings
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let saved = chrome.bindings.lock_or_recover();
     if saved.storage_unavailable {
         return None;
     }

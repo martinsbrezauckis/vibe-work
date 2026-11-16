@@ -2,8 +2,8 @@
  * The last setup step: the test call's outcome in plain words. "Key works. N models available" or
  * what 401 / 403 / a network failure means and what to do; for a refused key the user can paste
  * another one right here. Also offers to remove Vibe's own copy after an import (never silently) and
- * shows why the credential store could not keep the vault's key, if it could not.
- * Depends on: AppContext, useKeys, KeyStep, fields. Called by: SetupScreen.
+ * shows why the credential store could not keep the vault's key, if it could not, with the way to the unlock choice.
+ * Depends on: AppContext, useKeys, KeyStep, fields, the unlock choice's label. Called by: SetupScreen.
  */
 import { Button } from "../../components/Controls";
 import { useState } from "react";
@@ -11,6 +11,7 @@ import { useState } from "react";
 import { placeOf } from "./VibeKeyOffer";
 import { useApp } from "../shell/AppContext";
 import { KeyStep } from "./KeyStep";
+import { systemUnlockLabel } from "./VaultUnlockChoice";
 import { useKeyUi } from "./useKeys";
 
 /** The step. */
@@ -47,7 +48,9 @@ export function ResultStep() {
       {status?.rememberNote != null && (
         <p className="key-field-hint">
           This computer&apos;s credential store could not keep the vault&apos;s key (
-          {status.rememberNote}). You will type the password at the next start.
+          {status.rememberNote}). You will type the password at the next start. To unlock without it
+          later, set up or unlock the system keyring, then choose “{systemUnlockLabel()}” in
+          Settings › Account.
         </p>
       )}
       {removable !== null && (

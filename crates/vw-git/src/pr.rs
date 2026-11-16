@@ -65,6 +65,9 @@ pub struct CheckItem {
     pub outcome: String,
     /// Its page, when the forge gave one.
     pub url: Option<String>,
+    /// A required check (branch protection); `None` when not known, which counts as required.
+    #[serde(default)]
+    pub required: Option<bool>,
 }
 
 /// The checks of the PR's head commit.
@@ -80,6 +83,9 @@ pub struct Checks {
     pub pending: u32,
     /// The failed ones first, then the pending ones (at most 30).
     pub items: Vec<CheckItem>,
+    /// Which checks are required is known (signed-in gh); otherwise every check counts as required.
+    #[serde(default)]
+    pub required_known: bool,
 }
 
 /// One pull request as the card shows it.
@@ -108,6 +114,12 @@ pub struct PrCard {
     pub head: String,
     /// The base branch.
     pub base: String,
+    /// The forge's merge rules hold it (gh `mergeStateStatus` BLOCKED, REST `mergeable_state` "blocked").
+    #[serde(default)]
+    pub merge_blocked: bool,
+    /// The status line and its cause (`pr_status`).
+    #[serde(default)]
+    pub status: crate::pr_status::PrStatusLine,
 }
 
 /// A review comment (top-level or on a line).
@@ -183,7 +195,7 @@ pub fn from_gh(v: &Value) -> Option<PrCard> {
         }
     }
     finish(&mut checks);
-    Some(PrCard {
+    Some(with_status(PrCard {
         number,
         url: text(v, "url"),
         title: text(v, "title"),
@@ -194,7 +206,16 @@ pub fn from_gh(v: &Value) -> Option<PrCard> {
         checks,
         head: text(v, "headRefName"),
         base: text(v, "baseRefName"),
-    })
+        merge_blocked: text(v, "mergeStateStatus") == "BLOCKED",
+        status: crate::pr_status::PrStatusLine::default(),
+    }))
+}
+
+/// `card` with its status line computed.
+#[must_use]
+pub fn with_status(mut card: PrCard) -> PrCard {
+    card.status = crate::pr_status::status_line(&card);
+    card
 }
 
 fn add_run(checks: &mut Checks, name: &str, outcome: &str, url: Option<&Value>) {
@@ -203,6 +224,7 @@ fn add_run(checks: &mut Checks, name: &str, outcome: &str, url: Option<&Value>) 
         name: name.to_owned(),
         outcome: outcome.clone(),
         url: url.and_then(Value::as_str).map(str::to_owned),
+        required: None,
     };
     match outcome.as_str() {
         "success" | "neutral" | "skipped" => checks.passed += 1,
@@ -296,7 +318,7 @@ pub fn from_rest(
         );
     }
     finish(&mut checks);
-    Some(PrCard {
+    Some(with_status(PrCard {
         number,
         url: text(pull, "html_url"),
         title: text(pull, "title"),
@@ -315,7 +337,9 @@ pub fn from_rest(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned(),
-    })
+        merge_blocked: text(pull, "mergeable_state") == "blocked",
+        status: crate::pr_status::PrStatusLine::default(),
+    }))
 }
 
 /// The latest decisive review per reviewer: any "changes requested" wins, else any approval.

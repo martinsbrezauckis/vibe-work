@@ -93,12 +93,18 @@ impl Core {
                 )
                 .await
                 .map_err(|e| CoreError::from_gate("session/history/list", &e))?;
-            let items = reply
+            let mut items = reply
                 .result
                 .get("items")
-                .and_then(Value::as_array)
+                .filter(|items| items.is_array())
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_else(|| json!([]));
+            // The export names a call the person stopped while the browser was paused as the chat does.
+            crate::paused_tools_gate::mark_held_calls(&self.shared, &mut items);
+            let items = match items {
+                Value::Array(items) => items,
+                _ => Vec::new(),
+            };
             let empty = items.is_empty();
             pages.push(items);
             cursor = reply
@@ -121,7 +127,8 @@ impl Core {
     ) -> Result<(String, SessionExportView), CoreError> {
         let state = self.export_state(session_id).await?;
         let (entries, cut) = self.full_history(session_id).await?;
-        let title = text_at(&state, "/session/title").map(str::to_owned);
+        let title = text_at(&state, "/session/title")
+            .map(|title| crate::title_guard::withhold_text(&self.shared, title));
         let head = ExportHead {
             title: title.clone(),
             cwd: text_at(&state, "/session/cwd").map(str::to_owned),
@@ -199,11 +206,10 @@ impl Core {
 
     /// The suggested file name for a session's export (the save dialog's default).
     pub async fn export_session_name(&self, session_id: &str) -> String {
-        let title = self
-            .export_state(session_id)
-            .await
-            .ok()
-            .and_then(|state| text_at(&state, "/session/title").map(str::to_owned));
+        let title = self.export_state(session_id).await.ok().and_then(|state| {
+            text_at(&state, "/session/title")
+                .map(|title| crate::title_guard::withhold_text(&self.shared, title))
+        });
         file_name_for(title.as_deref(), session_id)
     }
 }

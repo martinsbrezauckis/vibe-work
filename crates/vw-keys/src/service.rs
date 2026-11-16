@@ -16,7 +16,8 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Arc, PoisonError, Weak};
+use std::sync::{Arc, Weak};
+use vw_platform::sync::LockRecover;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -260,7 +261,7 @@ impl KeyService {
     /// or `None` when none has carried one yet.
     #[must_use]
     pub fn rate_limits(&self) -> Option<RateLimits> {
-        *self.limits.lock().unwrap_or_else(PoisonError::into_inner)
+        *self.limits.lock_or_recover()
     }
 
     /// The supervisor's secret provider: a new placeholder token per server start.
@@ -299,19 +300,14 @@ impl KeyService {
     /// Unconfirmed remote deletions from this run, newest last (at most 100); no key or file contents.
     #[must_use]
     pub fn remote_cleanup_notices(&self) -> Vec<String> {
-        self.cleanup_notices
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.cleanup_notices.lock_or_recover().clone()
     }
 
     pub(crate) fn cleanup_notice_handler(&self) -> vw_mistral::work::CleanupNotice {
         let events = self.events.clone();
         let notices = self.cleanup_notices.clone();
         Arc::new(move |message| {
-            let mut saved = notices
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut saved = notices.lock_or_recover();
             if saved.len() == 100 {
                 saved.remove(0);
             }
@@ -345,10 +341,7 @@ impl KeyService {
             }
         })
         .await;
-        let mut latest = self
-            .last_key_test
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut latest = self.last_key_test.lock_or_recover();
         *latest = None;
         match read {
             Ok(Ok((key, failure))) => {
@@ -369,7 +362,7 @@ impl KeyService {
 
     /// A different credential starts without the previous credential's headroom.
     pub(super) fn key_changed(&self) {
-        *self.limits.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.limits.lock_or_recover() = None;
         let _ = self.events.send(KeyEvent::RateLimits(None));
         let _ = self.events.send(KeyEvent::KeyChanged);
     }
@@ -445,10 +438,7 @@ impl KeyService {
     /// Locks the vault and deletes its kept key; model requests wait for the next unlock, also
     /// after a restart.
     pub fn lock(&self) {
-        let _transition = self
-            .network_use
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _transition = self.network_use.lock_or_recover();
         self.stop_authenticated_network();
         self.vault.lock();
         self.network_locked();
@@ -519,10 +509,7 @@ impl KeyService {
             vw_mistral::list_models(&self.api().0, &self.test_api_base, key.as_str()).await;
         self.record_model_test(item_id, key.as_str().to_owned(), &result)
             .await?;
-        let mut latest = self
-            .last_key_test
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut latest = self.last_key_test.lock_or_recover();
         // A test that finishes after rotation must not overwrite the new key's result.
         if matches!(self.key.current(), KeyState::Ready(current) if Arc::ptr_eq(&current, &key)) {
             *latest = Some(KeyTest {
@@ -537,10 +524,7 @@ impl KeyService {
     /// Untested keys and other failures still need replacement confirmation.
     #[must_use]
     pub fn key_was_rejected(&self) -> bool {
-        let latest = self
-            .last_key_test
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let latest = self.last_key_test.lock_or_recover();
         let (Some(test), KeyState::Ready(current)) = (latest.as_ref(), self.key.current()) else {
             return false;
         };
@@ -664,10 +648,7 @@ impl KeyService {
     /// kept key stays for the next start.
     pub async fn shutdown(&self) {
         {
-            let _transition = self
-                .network_use
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let _transition = self.network_use.lock_or_recover();
             self.stop_authenticated_network();
             self.network_locked();
         }

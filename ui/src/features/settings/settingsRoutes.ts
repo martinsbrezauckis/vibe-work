@@ -44,6 +44,7 @@ import {
 import { chromeAvailable } from "./chrome/chromeRows";
 import { chromeAction } from "./chrome/chromeRoute";
 import { UiControlError } from "../../state/uiControl";
+import { bodyObject } from "../../state/uiControlBody";
 import {
   ABOUT_AUTHOR,
   CONTACT_URL,
@@ -56,13 +57,6 @@ import { SEARCH_INDEX, searchSettings, settingPath } from "./catalog";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { allowedAction } from "./allowed/routes";
 import type { App } from "../shell/AppContext";
-
-function asObject(body: unknown): Record<string, unknown> {
-  if (typeof body === "object" && body !== null && !Array.isArray(body))
-    return body as Record<string, unknown>;
-  if (body === undefined || body === null) return {};
-  throw new UiControlError("invalidParams", "the body must be a JSON object");
-}
 
 function scopeOf(value: unknown): "personal" {
   if (value === "personal") return value;
@@ -200,7 +194,7 @@ function offeredIds(app: App): string[] {
 /** Registers the route; returns the function that removes it. */
 export function registerSettingsRoutes(app: App): () => void {
   return app.uiControl.register("settings", async (body) => {
-    const input = asObject(body);
+    const input = bodyObject(body);
     const instructions = app.core === null ? null : instructionsFor(app.core);
     switch (input["action"] ?? "read") {
       case "read":

@@ -13,6 +13,10 @@ import {
 } from "./model";
 import { treeRows, type BrowserRow } from "./tree";
 
+/**
+ * Props of {@link GitBrowser}: the repositories to list, the row action and file callbacks, and the loading, error
+ * and note states.
+ */
 export type GitBrowserProps = {
   repos: BrowserRepo[];
   inHistory?: boolean;
@@ -26,6 +30,10 @@ export type GitBrowserProps = {
   onRetry?: () => void;
 };
 
+/**
+ * The project's repositories, their copies and changed files as a virtualized, keyboard-navigable tree with each
+ * row's actions. Shows loading, an error with optional Retry, or a line when no repository was found.
+ */
 export function GitBrowser({
   repos,
   inHistory = false,

@@ -75,7 +75,7 @@ export function profileAuditLine(
     const picked = str(approvalEffect(entry)["picked"]);
     const name = profileChoices(entry).find((choice) => choice.profileId === picked)?.name;
     return name === undefined
-      ? { square: "ok", text: `Picked the ${browser} profile for this chat · ${who}` }
+      ? { square: "ok", text: `Using a ${browser} profile for this chat · ${who}` }
       : {
           square: "ok",
           text: `${wording(TEXT.browserProfilePicked, { browser, profile: visibleText(name) })} · ${who}`,

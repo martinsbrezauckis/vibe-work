@@ -34,8 +34,11 @@ export function YourChromeSettings({
   // browser is set up; before Connect and after Remove it has nowhere to look, so no "not installed" is claimed then,
   // except that after Remove it may report the extension still in a profile.
   const addon = firefox || view?.setup.browserIssue !== undefined ? undefined : view?.setup.addon;
+  // While the system keyring blocks the helper, the browser's extension was not checked: the card names the keyring.
   const extensionLine =
-    addon === undefined || (browser === "Safari" && !addon.extensionVersion)
+    addon === undefined ||
+    addon.state === "ownerKeyringUnavailable" ||
+    (browser === "Safari" && !addon.extensionVersion)
       ? null
       : addon.extensionVersion
         ? `Extension ${addon.extensionVersion}`
@@ -45,7 +48,7 @@ export function YourChromeSettings({
             ? wording(TEXT.browserExtensionStillThere, { browser })
             : view?.setup.state === "notSetUp" || view?.setup.state === "absent"
               ? null
-              : "Extension not installed";
+              : `Extension not found in ${browser}`;
   return (
     <section aria-labelledby={`${prefix}-title`} data-setting={`${prefix}-control`}>
       <h3 id={`${prefix}-title`}>
@@ -109,6 +112,7 @@ export function YourChromeSettings({
           <span>Remove from Vibe Work</span>
           <Button
             data-testid={`settings.${prefix}-remove-open`}
+            aria-label={`Remove ${browserTitle(browser)} from Vibe Work`}
             shape="outlined"
             variant="danger"
             onClick={() => {
@@ -129,4 +133,12 @@ export function YourChromeSettings({
       />
     </section>
   );
+}
+
+/** The card's title, for the whole-browser Remove button's own name (each card's button names its browser). */
+function browserTitle(browser: string): string {
+  if (browser === "Firefox") return TEXT.firefoxName;
+  if (browser === "Safari") return TEXT.safariName;
+  if (browser === "Edge") return TEXT.edgeName;
+  return TEXT.chromeName;
 }

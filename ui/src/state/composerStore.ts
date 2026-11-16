@@ -50,7 +50,6 @@ import { NEW_CHAT } from "./newChatKey";
 import { createStore } from "./createStore";
 import { loadDefaultReasoning, saveDefaultReasoning } from "./defaultReasoning";
 
-/** Keys of a send that failed in transport, reused when the same content is sent again. */
 /** The plain note when Vibe refuses to load changed plugins into an open chat. */
 export const PLUGIN_RELOAD_REFUSED =
   "This chat could not refresh its plugins and still has its previous plugins.";
@@ -59,6 +58,7 @@ export const PLUGIN_RELOAD_REFUSED =
 export const isPluginReloadFailure = (error: CoreError): boolean =>
   error.serverCode === "pluginReloadRejected" || error.serverCode === "pluginReloadUncertain";
 
+/** Message keys kept from a send that may have reached the core, reused when the same content is sent again. */
 export interface ResendKeys {
   /** The content they belong to (`contentKey`). */
   content: string;

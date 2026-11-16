@@ -5,9 +5,10 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::{Duration, Instant};
 use vw_ask::{AnsweredBy, Ask, Choice, Surface};
+use vw_platform::sync::LockRecover;
 
 #[derive(Default)]
 pub(crate) struct Prompts(Mutex<State>);
@@ -33,7 +34,7 @@ struct Challenge {
 }
 impl Prompts {
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_or_recover()
     }
 }
 fn refused() -> CoreError {

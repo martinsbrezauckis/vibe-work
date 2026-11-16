@@ -2,6 +2,25 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.12 (2026-11-17)
+
+Built for Vibe 3.1.2 on Python 3.14.8.
+
+- **Knowledge base**: name your folders, drives and Mistral libraries; the agent looks there first.
+- **The agent saves keys and passwords to your vault** without the value entering the chat.
+- **A clear frame** while the agent controls your browser, with **Pause** to take it over and hand it back.
+- **Search your past prompts** with Ctrl+R in the composer.
+- **Settings search** finds a setting by the words you already know.
+- **Bring your setup** from Claude Code, Codex, OpenCode or Cursor.
+- **Pull requests with their CI status**, requested changes and conflicts.
+- **The agent can make its own copy** of a project to work in.
+- **Plugin switches shared with Vibe**: turn a plugin off or on in Vibe or in Vibe Work.
+- **Local network question**: the built-in browser asks before a public page reaches this computer or your network.
+- **Firefox page sharing**: send a page to the chat with Ask Vibe Work.
+- **Your Firefox** works with Ubuntu's Snap Firefox.
+- **Vibe updates** offer only versions Vibe Work supports.
+- Many smaller fixes.
+
 ## 0.1.11 (2026-11-13)
 
 Built for Vibe 3.1.2 on Python 3.14.8.

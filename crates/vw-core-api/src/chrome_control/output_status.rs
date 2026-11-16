@@ -4,6 +4,7 @@
 mod profiles;
 use crate::core::Shared;
 use serde_json::{Value, json};
+use vw_platform::sync::LockRecover;
 
 /// Invalid discovery arguments need no connection or helper status: only the app's executable action names.
 pub(super) fn unknown_action(action: &str) -> Option<Value> {
@@ -278,8 +279,7 @@ fn action_details(shared: &Shared, chat: &str, action: &str, body: &mut Value) {
     let selected = shared
         .chrome_control
         .chat_profiles
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_or_recover()
         .get(chat)
         .cloned();
     let profiles = status["profiles"].as_array();

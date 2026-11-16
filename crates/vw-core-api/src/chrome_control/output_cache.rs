@@ -4,9 +4,9 @@ use crate::core::Shared;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
-    sync::PoisonError,
     time::{Duration, Instant},
 };
+use vw_platform::sync::LockRecover;
 
 const PREFIX: &str = "vw-output:";
 const MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -131,11 +131,7 @@ pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut V
         is_error: result.get("isError").cloned().unwrap_or(json!(false)),
     };
     result["structuredContent"] = page(&entry, 0);
-    let mut cache = shared
-        .chrome_control
-        .output_cache
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut cache = shared.chrome_control.output_cache.lock_or_recover();
     cache.expire();
     while cache.entries.len() >= 64
         || cache.entries.iter().map(|e| e.encoded.len()).sum::<usize>() + entry.encoded.len()
@@ -165,11 +161,7 @@ pub(super) fn resume(
         }
         let (id, offset) = suffix.rsplit_once(':').ok_or(invalid)?;
         let offset: usize = offset.parse().map_err(|_| invalid)?;
-        let mut cache = shared
-            .chrome_control
-            .output_cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut cache = shared.chrome_control.output_cache.lock_or_recover();
         cache.expire();
         let entry = cache
             .entries

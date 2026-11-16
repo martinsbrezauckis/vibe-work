@@ -3,9 +3,10 @@
 //! Never writes settings or waits for audio; tools share one reading per real user turn in their session.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -39,10 +40,7 @@ struct Reservation<'a> {
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         if !self.accepted {
-            self.turns
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .remove(&self.key);
+            self.turns.lock_or_recover().remove(&self.key);
         }
     }
 }
@@ -51,8 +49,7 @@ impl Pending {
     fn reserve(&self, session: &str, turn: &str) -> Option<Reservation<'_>> {
         let key = (session.to_owned(), turn.to_owned());
         self.turns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .insert(key.clone())
             .then(|| Reservation {
                 turns: &self.turns,
@@ -64,18 +61,12 @@ impl Pending {
     fn begin(&self) -> (String, oneshot::Receiver<Receipt>) {
         let id = format!("reading-{}", self.next.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = oneshot::channel();
-        self.replies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.clone(), sender);
+        self.replies.lock_or_recover().insert(id.clone(), sender);
         (id, receiver)
     }
 
     fn take(&self, id: &str) -> Option<oneshot::Sender<Receipt>> {
-        self.replies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(id)
+        self.replies.lock_or_recover().remove(id)
     }
 }
 

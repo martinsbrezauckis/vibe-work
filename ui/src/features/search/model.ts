@@ -11,12 +11,9 @@ import { TEXT } from "../../vocabulary";
 import type { FileHit, MessageHit } from "../../protocol/core";
 import type { App } from "../shell/AppContext";
 
-/** The last folder name of a path (`/work/shop` -> `shop`, `C:\work\shop` -> `shop`). */
-export function folderName(path: string | null): string {
-  if (path === null || path === "") return "";
-  const parts = path.split(/[\\/]+/).filter((p) => p !== "");
-  return parts[parts.length - 1] ?? path;
-}
+import { folderName } from "../../state/pathText";
+
+export { folderName };
 
 /** The path shown under a message result. */
 export function messagePath(hit: MessageHit): string[] {

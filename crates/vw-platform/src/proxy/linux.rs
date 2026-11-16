@@ -1,5 +1,6 @@
 //! libproxy 0.5.5+ stable C API. Loads the installed library, whose backends read env/GNOME/KDE/PAC.
 //! No process execution or JS evaluation here. Missing library/backend errors fail closed; use Settings manually.
+use crate::sync::LockRecover;
 use std::ffi::{CStr, CString, c_char, c_void};
 
 static LIBRARY: std::sync::OnceLock<Result<libloading::Library, &'static str>> =
@@ -8,9 +9,7 @@ static CALL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(super) fn resolve(url: &str) -> Result<Vec<String>, &'static str> {
     let url = CString::new(url).map_err(|_| "Invalid proxy lookup URL.")?;
-    let _call = CALL
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _call = CALL.lock_or_recover();
     // SAFETY: symbols and signatures are the stable libproxy C API. Library stays loaded until the returned
     // array and factory are freed with their own allocator. Every native string is copied before free.
     unsafe {

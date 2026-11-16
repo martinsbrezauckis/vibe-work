@@ -24,7 +24,8 @@
 //!   other folder or none. It never makes the folder trusted or picked for anything else.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 use vw_gate::{Confirmation, ConfirmationRequest, Requester};
 
@@ -197,7 +198,7 @@ impl Draft {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, DraftState> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
 
     /// Whether `id` is the current owner id.

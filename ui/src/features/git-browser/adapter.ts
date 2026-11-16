@@ -20,6 +20,10 @@ function targetOf(node: GitBrowserNode): BrowserTarget {
   };
 }
 
+/**
+ * The git browser's repositories from a core snapshot, each with its copies nested under it; a copy whose parent is
+ * not in the snapshot is listed on its own. Empty for no snapshot.
+ */
 export function reposOf(snapshot: GitBrowserSnapshot | null): BrowserRepo[] {
   if (snapshot === null) return [];
   const repos: BrowserRepo[] = [];

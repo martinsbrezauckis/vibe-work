@@ -1,5 +1,6 @@
 // Explicitly authorized main-world expression, evaluated once with a bounded asynchronous completion record.
 // Polling reads this record; it never re-evaluates the expression or exposes the trusted agent world.
+// A page whose policy refuses eval answers {evalRefused:true} with nothing run and no record left.
 (() => {
   // eslint-disable-next-line no-undef -- JSON request token supplied by the Rust assembler.
   const req = __REQUEST__;
@@ -8,7 +9,19 @@
   Object.defineProperty(window,req.key,{value:result,configurable:true});
   const finish = data => { if (!result.done) Object.assign(result,data,{done:true}); };
   const timer = setTimeout(() => finish({error:"The expression exceeded its completion deadline; it may still have pending effects"}),req.timeoutMs);
-  Promise.resolve().then(() => (0,eval)(req.expression)).then(value => {
+  let started;
+  try { started = Promise.resolve((0,eval)(req.expression)); }
+  catch (error) {
+    // The page's Content-Security-Policy refuses eval before any of the expression ran: the caller sends it again
+    // as code of its own evaluation (page_script_inline.js), which that policy does not cover.
+    if (error instanceof EvalError && /unsafe-eval/.test(String(error.message))) {
+      clearTimeout(timer);
+      delete window[req.key];
+      return JSON.stringify({evalRefused:true});
+    }
+    started = Promise.reject(error);
+  }
+  started.then(value => {
     try {
       const encoded=JSON.stringify(value === undefined ? null : value);
       if (encoded.length > 1800) finish({value:encoded.slice(0,1800),truncated:true,encoding:"jsonPrefix"});

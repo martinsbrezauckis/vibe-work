@@ -5,7 +5,8 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
+use vw_platform::sync::LockRecover;
 
 use serde_json::json;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -150,25 +151,16 @@ impl Deletes {
     }
 
     pub(crate) fn ids(&self) -> Vec<String> {
-        self.pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .cloned()
-            .collect()
+        self.pending.lock_or_recover().keys().cloned().collect()
     }
 
     fn targets(&self, id: &str) -> Option<Targets> {
-        self.pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(id)
-            .cloned()
+        self.pending.lock_or_recover().get(id).cloned()
     }
 
     pub(crate) async fn lock(&self, id: &str) -> OwnedMutexGuard<()> {
         let lock = {
-            let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut locks = self.locks.lock_or_recover();
             locks.retain(|_, lock| lock.strong_count() > 0);
             if let Some(lock) = locks.get(id).and_then(Weak::upgrade) {
                 lock
@@ -184,7 +176,7 @@ impl Deletes {
     async fn remember(self: &Arc<Self>, id: &str, targets: Targets) -> io::Result<()> {
         let (this, id) = (self.clone(), id.to_owned());
         tokio::task::spawn_blocking(move || {
-            let mut pending = this.pending.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut pending = this.pending.lock_or_recover();
             pending.insert(id, targets);
             this.write(&pending)
         })
@@ -209,7 +201,7 @@ impl Deletes {
     pub(crate) async fn forget(self: &Arc<Self>, id: &str) {
         let (this, id) = (self.clone(), id.to_owned());
         let _ = tokio::task::spawn_blocking(move || {
-            let mut pending = this.pending.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut pending = this.pending.lock_or_recover();
             if pending.remove(&id).is_some()
                 && let Err(error) = this.write(&pending)
             {

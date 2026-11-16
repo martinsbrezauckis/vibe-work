@@ -83,6 +83,9 @@ pub(super) fn executable() -> Option<std::path::PathBuf> {
     }
     paths.into_iter().find(|p| p.is_file())
 }
+use super::agent_browser::Browser::Firefox as FIREFOX;
+use super::setup::{owner_read_text, owner_store_text};
+
 impl Core {
     pub(super) async fn firefox_window(&self, open: bool) -> Result<CommandResult, CoreError> {
         if !cfg!(feature = "your-firefox") {
@@ -109,12 +112,12 @@ impl Core {
             if keys
                 .chrome_owner()
                 .await
-                .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_READ_FAILED))?
+                .map_err(|e| invalid(&owner_read_text(FIREFOX, &e)))?
                 .is_none()
             {
                 keys.create_chrome_owner()
                     .await
-                    .map_err(|_| invalid(vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED))?;
+                    .map_err(|e| invalid(&owner_store_text(FIREFOX, &e)))?;
             }
             std::fs::create_dir_all(state)
                 .map_err(|_| invalid("The Firefox connection could not be saved."))?;

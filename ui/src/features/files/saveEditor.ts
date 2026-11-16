@@ -6,6 +6,10 @@ import type { FileReader } from "../../state/files";
 import type { App } from "../shell/AppContext";
 import { saveEdit, type SaveOutcome } from "./saveEdit";
 
+/**
+ * Saves the session's open editor draft and resolves with the outcome. A save that finds the file changed on disk
+ * marks the draft as conflicting and reloads it; other failures keep the draft with the problem shown.
+ */
 export async function saveEditor(
   app: App,
   sessionId: string,

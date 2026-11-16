@@ -1,8 +1,8 @@
 //! Carries saved model choices across a conversation's new session id.
 //! Called by the shared handoff path for replies and notifications; the original saved chat keeps its records.
-use std::sync::PoisonError;
 
 use super::Choices;
+use vw_platform::sync::LockRecover;
 
 /// Replies and notifications may announce the same move; copy its choices once.
 pub(crate) fn handed_off(choices: &Choices, old: &str, new: &str) {
@@ -10,8 +10,7 @@ pub(crate) fn handed_off(choices: &Choices, old: &str, new: &str) {
     // must survive that duplicate even though the original saved chat retains its own records.
     if !choices
         .handed_off
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .insert((old.into(), new.into()))
     {
         return;

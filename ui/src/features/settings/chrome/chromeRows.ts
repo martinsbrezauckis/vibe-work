@@ -2,6 +2,7 @@
 import type { ChromeAddonAction, ChromeControlView } from "../../../protocol/core";
 import type { SettingEntry } from "../catalog";
 import { term, TEXT, wording } from "../../../vocabulary";
+/** True when the core reports a Chrome connection at all (a view whose setup is not `absent`). */
 export function chromeAvailable(view: ChromeControlView | null | undefined): boolean {
   return view != null && view.setup.state !== "absent";
 }
@@ -21,6 +22,7 @@ export function chromeUsable(view: ChromeControlView | null | undefined): boolea
     (view.setup.addon === undefined || view.setup.addon.state === "connected")
   );
 }
+/** Short status line of a Chrome, Edge or Safari card ("Connected", "Off", "Pair in Chrome", …). */
 export function setupLine(
   view: ChromeControlView | null,
   browser: "Chrome" | "Edge" | "Safari" = "Chrome",
@@ -51,10 +53,12 @@ export function setupLine(
   if (view.setup.state === "waitingForExtension") return `Add to ${browser}`;
   return "Connecting";
 }
+/** "On" or "Off" for the Chrome row of the Allowed levels; null when Chrome is unavailable or not set up. */
 export function safetyLine(view: ChromeControlView | null): string | null {
   if (!chromeAvailable(view) || view === null || view.setup.state === "notSetUp") return null;
   return view.enabled ? "On" : "Off";
 }
+/** Settings search entries for the Chrome card and its on/off switch. */
 export function chromeCatalog(): SettingEntry[] {
   return [
     {

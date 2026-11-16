@@ -4,14 +4,14 @@ use super::{Browser, Profiles, canonical, paired_label, usable_metadata};
 
 impl Profiles {
     /// The shown name. Profiles shown with the same name and the same signed-in account (or none) carry when each
-    /// was paired ("Safari — paired 12 Nov 23:25"), with seconds when the minute is shared; only identical pairing
-    /// times fall back to their order. Different accounts tell same-named profiles apart: the screen shows the
+    /// was paired in brackets ("Safari (paired 12 Nov 23:25)"), with seconds when the minute is shared; only identical
+    /// pairing times fall back to their order ("Safari (paired 12 Nov 23:25:07, 2)"). Different accounts tell same-named profiles apart: the screen shows the
     /// account next to the name.
     pub(in crate::chrome_control) fn name(&self, id: &str) -> String {
         self.shown_name(id, false)
     }
     /// The profile's name in agent text: the shown name with the signed-in account's domain after the browser's name,
-    /// "Alex (company.example)" or "Work (company.example) — paired 12 Nov 23:25". No domain without an account, and
+    /// "Alex (company.example)" or "Work (company.example) (paired 12 Nov 23:25)". No domain without an account, and
     /// none when the name already holds it (a managed profile the browser named "company.example", or a name typed as
     /// an email, which is what the browser shows). The account itself never reaches agent text.
     pub(in crate::chrome_control) fn agent_name(&self, id: &str) -> String {
@@ -53,7 +53,7 @@ impl Profiles {
             let mine = paired_label(at(&id), seconds);
             twins.retain(|other| paired_label(at(other), seconds) == mine);
             if twins.is_empty() {
-                return format!("{head} — {mine}");
+                return format!("{head} ({mine})");
             }
         }
         let mine = paired_label(at(&id), true);
@@ -68,7 +68,7 @@ impl Profiles {
             .filter(|other| order(other) < order(&id))
             .count()
             .saturating_add(1);
-        format!("{head} — {mine} ({position})")
+        format!("{head} ({mine}, {position})")
     }
     /// `name` followed by the account's domain in brackets, unless there is none or `name` already holds it.
     fn with_domain(&self, id: &str, name: &str) -> String {

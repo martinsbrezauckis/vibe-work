@@ -1,8 +1,10 @@
 """Vibe Work data-analysis helper: one sheet of an .xlsx workbook to CSV, with the Python standard library only.
 
-Usage: python3 xlsx_to_csv.py BOOK.xlsx [SHEET_NAME_OR_NUMBER] > out.csv
+Usage: python3 xlsx_to_csv.py BOOK.xlsx [--sheet NAME_OR_NUMBER] [--csv OUT.csv]
        python3 xlsx_to_csv.py BOOK.xlsx --list          (sheet names, one per line)
-       python3 xlsx_to_csv.py BOOK.xlsx [--sheet NAME] [--csv OUT.csv]   (the flags profile.py takes; writes OUT.csv)
+
+--sheet picks the sheet (default the first); --csv writes it to OUT.csv and prints one line, without --csv the CSV goes
+to stdout. These are the same flags profile.py takes.
 
 Reads cell values as stored (numbers, shared and inline strings, booleans); formulas give their cached value; dates
 stay Excel serial numbers (convert with: datetime(1899, 12, 30) + timedelta(days=value)). No macros run; no network.
@@ -82,46 +84,43 @@ def rows(book, path, strings):
 def main(argv):
     if len(argv) < 2:
         sys.exit(__doc__)
-    # The flags profile.py takes (models mix the two helpers up): --sheet NAME, --csv OUT.
-    out_path = None
-    rest = [argv[0], argv[1]]
+    if argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return
+    book, sheet, out_path, listing = argv[1], "1", None, False
     i = 2
     while i < len(argv):
         if argv[i] in ("--sheet", "--csv") and i + 1 < len(argv):
             if argv[i] == "--sheet":
-                rest.append(argv[i + 1])
+                sheet = argv[i + 1]
             else:
                 out_path = argv[i + 1]
             i += 2
-        else:
-            rest.append(argv[i])
+        elif argv[i] == "--list":
+            listing = True
             i += 1
-    argv = rest
+        else:
+            sys.exit(f"unknown argument {argv[i]!r}: name the sheet with --sheet NAME_OR_NUMBER (see --help)")
     if out_path:
         with open(out_path, "w", newline="", encoding="utf-8") as out:
-            stdout, sys.stdout = sys.stdout, out
-            try:
-                convert(argv)
-            finally:
-                sys.stdout = stdout
+            convert(book, sheet, listing, out)
         print(f"wrote {out_path}")
         return
-    convert(argv)
+    convert(book, sheet, listing, sys.stdout)
 
 
-def convert(argv):
-    with zipfile.ZipFile(argv[1]) as book:
+def convert(path, pick, listing, out):
+    with zipfile.ZipFile(path) as book:
         found = sheets(book)
-        if len(argv) > 2 and argv[2] == "--list":
-            print("\n".join(name for name, _ in found))
+        if listing:
+            out.write("".join(name + "\n" for name, _ in found))
             return
-        pick = argv[2] if len(argv) > 2 else "1"
         chosen = next((p for n, p in found if n == pick), None)
         if chosen is None and pick.isdigit() and 0 < int(pick) <= len(found):
             chosen = found[int(pick) - 1][1]
         if chosen is None:
             sys.exit(f"no sheet {pick!r}; sheets: {', '.join(n for n, _ in found)}")
-        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer = csv.writer(out, lineterminator="\n")
         for row in rows(book, chosen, shared_strings(book)):
             writer.writerow(row)
 

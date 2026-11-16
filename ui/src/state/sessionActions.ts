@@ -180,8 +180,10 @@ export function createSessionActions(deps: {
       const clean = title.trim();
       if (clean === "") return;
       try {
-        await call("session/rename", { sessionId: id, title: clean });
-        core.patchSession(id, { title: clean });
+        const result = await call("session/rename", { sessionId: id, title: clean });
+        // The row shows the title the core answered with (guarded), never the typed text.
+        const named = (result as { result?: Record<string, JsonValue> }).result?.["title"];
+        if (typeof named === "string") core.patchSession(id, { title: named });
       } catch (thrown) {
         fail(thrown);
       }

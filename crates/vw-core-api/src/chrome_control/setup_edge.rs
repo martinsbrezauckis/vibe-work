@@ -56,7 +56,6 @@ pub(super) fn register_browser(
                 config,
                 &path,
                 &manifest_for(&helper, config, browser),
-                false,
             )?;
             made.written
                 .push((path.clone(), manifest_for(&helper, config, browser)));
@@ -65,7 +64,7 @@ pub(super) fn register_browser(
             let file = manifest_path(state, browser);
             let manifest = manifest_for(&helper, config, browser);
             let owned = receipt.files.contains(&file);
-            super::registration::ensure_manifest(config, &file, &manifest, owned)?;
+            super::registration::ensure_manifest(config, &file, &manifest)?;
             if !owned {
                 made.written.push((file.clone(), manifest));
                 made.files.push(file.clone());

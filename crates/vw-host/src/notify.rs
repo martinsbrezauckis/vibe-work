@@ -8,8 +8,9 @@
 //!   not plain text is refused, and more than [`BURST`] notifications within [`WINDOW`] are dropped.
 
 use std::collections::VecDeque;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde::{Deserialize, Serialize};
 use vw_platform::NotificationRequest;
@@ -100,7 +101,7 @@ pub(crate) struct RateLimit {
 
 impl RateLimit {
     pub(crate) fn allow(&self, now: Instant) -> bool {
-        let mut times = self.times.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut times = self.times.lock_or_recover();
         while times
             .front()
             .is_some_and(|t| now.duration_since(*t) >= WINDOW)

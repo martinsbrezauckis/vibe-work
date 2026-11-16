@@ -18,7 +18,7 @@
   transform: translateX(-50%);
   width: min(620px, 92vw);
   background: var(--raised);
-  border-radius: var(--radius-14);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   z-index: var(--z-dialog);
   overflow: hidden;
@@ -29,7 +29,7 @@
   width: 100%;
   box-sizing: border-box;
   padding: 16px 18px;
-  font-size: var(--text-16);
+  font-size: var(--text-lg);
   border-bottom: 1px solid var(--line);
   color: var(--text);
 }
@@ -58,18 +58,18 @@
 }
 .plist .k {
   margin-left: auto;
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   font-family: var(--font-mono);
 }
 .plist .secl {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   padding: 8px 12px 2px;
   cursor: default;
 }
 .palette-hint {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   padding: 8px 14px;
   border-top: 1px solid var(--line);
@@ -83,13 +83,13 @@
   max-height: 86vh;
   overflow: auto;
   background: var(--raised);
-  border-radius: var(--radius-dialog);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow);
   z-index: var(--z-dialog);
   /* a dialog opened from the status bar (Processes) inherited its small monospace, no-wrap text, so the
      whole dialog was in the data font and its lines ran past the edge. Every dialog starts from the body text. */
   font-family: var(--font-ui);
-  font-size: var(--text-14);
+  font-size: var(--text-md);
   line-height: var(--leading-ui);
   white-space: normal;
   color: var(--text);
@@ -103,7 +103,7 @@
 .modal header h2 {
   font-weight: var(--weight-semibold);
   margin: 0;
-  font-size: var(--text-16);
+  font-size: var(--text-lg);
 }
 .modal header .ibtn {
   margin-left: auto;
@@ -116,7 +116,7 @@
   border-bottom: 0;
 }
 .modal h3 {
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   margin: 0 0 10px;
 }
 .check {
@@ -125,7 +125,7 @@
   gap: 10px;
   align-items: center;
   padding: 8px 0;
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
 }
 .check > span {
   /* The text column may shrink and wrap so the control column keeps its natural width. */
@@ -133,14 +133,14 @@
 }
 .check .d {
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   display: block;
 }
 .check input[type="checkbox"] {
   accent-color: var(--orange);
 }
 .legal {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 
@@ -194,7 +194,7 @@
   flex: 1 1 0;
   min-width: 0;
   padding: 2px 5px;
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   line-height: 18px;
   border-radius: var(--radius-xs);
   box-shadow: none;
@@ -206,6 +206,7 @@
 }
 .toast-text {
   display: block;
+  margin: 0;
   min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -255,7 +256,7 @@
   box-sizing: border-box;
   padding: var(--space-card-inline);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   background: var(--panel);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -292,10 +293,10 @@
   box-shadow: var(--shadow);
   border-radius: var(--radius-lg);
   padding: 10px 14px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text);
   font-family: var(--font-ui);
-  animation: tin var(--t-toast) var(--ease-native-out);
+  animation: tin var(--t-panel) var(--ease-out);
 }
 .toast > .ibtn {
   flex: none;
@@ -321,7 +322,7 @@
   background: var(--raised);
   color: var(--text);
   box-shadow: var(--shadow);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;

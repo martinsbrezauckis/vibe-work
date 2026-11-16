@@ -23,6 +23,8 @@ import { useCoreState, useShellState } from "../shell/hooks";
 import { VoiceChatTag } from "../voice/VoiceChatTag";
 import { ActivityMark } from "./ActivityMark";
 import { LoopsTag } from "./LoopsTag";
+import { PausedTag } from "./PausedTag";
+import { UsingBrowserTag } from "./UsingBrowserTag";
 import { dragSessions } from "./dnd";
 import { beginSessionDrag } from "./listDrop";
 import { childChatLabel, type RowNode } from "./listModel";
@@ -242,6 +244,8 @@ export function SessionRow({
             )}
             <VoiceChatTag sessionId={s.id} />
             <LoopsTag sessionId={s.id} />
+            <UsingBrowserTag sessionId={s.id} />
+            <PausedTag sessionId={s.id} />
             {s.localOnly && (
               <Badge presentation="session" title="local">
                 local

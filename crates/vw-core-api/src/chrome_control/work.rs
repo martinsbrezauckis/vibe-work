@@ -1,5 +1,6 @@
 //! Bounded display state for chat-owned Chrome sessions. It never grants tool authority.
 use std::collections::{HashMap, VecDeque};
+use vw_platform::sync::LockRecover;
 
 use super::agent_browser::Browser;
 
@@ -23,15 +24,8 @@ pub struct ChromeWorkView {
 
 /// Display the bounded work rows with their existing profile binding, without granting browser authority.
 pub(super) fn view(chrome: &super::ChromeControl) -> Vec<ChromeWorkView> {
-    let mut rows = chrome
-        .work
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .view();
-    let profiles = chrome
-        .chat_profiles
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut rows = chrome.work.lock_or_recover().view();
+    let profiles = chrome.chat_profiles.lock_or_recover();
     for row in &mut rows {
         row.browser = profiles.get(&row.session_id).map(|profile| {
             if cfg!(feature = "your-safari") && profile.starts_with("safari:") {
@@ -207,6 +201,7 @@ impl Work {
                     && rows.iter().any(|row| {
                         row["sessionId"] == session.id
                             && matches!(row["state"].as_str(), Some("stopping" | "stopped"))
+                            && !super::person_stop::helper_fence(row)
                     })
             })
             .map(|session| super::person_stop::Stopped {
@@ -216,6 +211,19 @@ impl Work {
                 connection_ended: rows.iter().any(|row| {
                     row["sessionId"] == session.id && super::person_stop::connection_ended(row)
                 }),
+            })
+            .collect()
+    }
+    /// Every helper session as (helper id, owning chat, shown state), for the agent control frame.
+    pub(super) fn sessions(&self) -> Vec<(String, String, String)> {
+        self.0
+            .iter()
+            .map(|session| {
+                (
+                    session.id.clone(),
+                    session.row.session_id.clone(),
+                    session.row.state.clone(),
+                )
             })
             .collect()
     }
@@ -399,6 +407,28 @@ mod tests {
             assert_eq!(stopped[0].connection_ended, ended, "{reason}");
             let words = super::super::person_stop::notice(&stopped[0]);
             assert_eq!(words.ends_with(" by you"), !ended, "{reason}: {words}");
+        }
+    }
+
+    /// PREDICT: the helper fences an open the browser never confirmed with `suspensionReason`
+    /// `START_UNCONFIRMED`; the agent's open already returned `SESSION_NOT_READY`. That reason was unknown here,
+    /// so the stop kept the person attribution: "Stopped in Your Firefox by you" and the turn was interrupted
+    /// although nobody touched the browser. Such a fence is not a stop of the agent's work and is not reported.
+    #[test]
+    fn a_helper_fence_for_an_unconfirmed_open_is_not_a_person_stop() {
+        let mut work = Work::default();
+        work.open("task", "chat", "connecting", "firefox:p", Some("one"));
+        for state in ["stopping", "stopped"] {
+            assert_eq!(
+                work.stopped_unasked(
+                    &[
+                        json!({"sessionId":"task","state":state,"suspensionReason":"START_UNCONFIRMED"})
+                    ],
+                    Instant::now(),
+                ),
+                Vec::<super::super::person_stop::Stopped>::new(),
+                "{state}"
+            );
         }
     }
 

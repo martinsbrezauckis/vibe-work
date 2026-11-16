@@ -83,6 +83,45 @@ pub(crate) fn ask_required(args: &Value) -> Option<Tier> {
         })
 }
 
+/// Built-in actions whose checked input can activate a form submitter (activation, choice or key). In Ask they run
+/// inside the pre-tool hook, so a send the driver detects before input opens the send card ("Submit with …") and
+/// the action is retried only after that answer.
+pub(crate) fn activates_send(args: &Value) -> bool {
+    matches!(
+        args["action"].as_str(),
+        Some(
+            "click"
+                | "check"
+                | "uncheck"
+                | "press"
+                | "page.click"
+                | "page.double_click"
+                | "page.right_click"
+                | "page.middle_click"
+                | "page.triple_click"
+        )
+    )
+}
+
+/// Whether an approved built-in action may send a form it activates. Outside Ask, yes. In Ask only an action whose
+/// own card names the send ("Type … and submit it", accepting a dialog) carries that authority, the same rule as
+/// the connected browsers. A drag, key, typing or form-fill card approves that input only; a send it would cause
+/// is stopped before input and asks again with the send's own card.
+pub(crate) fn may_send(mode: Option<&str>, args: &Value) -> bool {
+    mode != Some("ask")
+        || super::read_consent::names_send(&json!({"action":action(args),"args":args}))
+}
+
+/// A form fill without send authority stops at a field that would submit the form. The driver's internal send signal
+/// becomes the agent's next step: submission is a separate action with its own card.
+pub(crate) fn explain_form_send(receipt: &mut Value) {
+    if receipt["error"] == vw_browser::SEND_REQUIRED {
+        receipt["error"] = json!(
+            "Not run: this field would submit the form. Submission is a separate action: click the form's submit button, which asks before sending."
+        );
+    }
+}
+
 pub(crate) fn check_full(mode: Option<&str>, args: &Value) -> Result<(), String> {
     if let Some(steps) = args["steps"].as_array() {
         for step in steps {

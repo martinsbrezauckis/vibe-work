@@ -78,6 +78,7 @@ const NATIVE: &[&str] = &[
     "newChat/restoreFolder",
     "chrome/control/fill",
     "chrome/control/pair",
+    "vibe-work/localNetworkAccess",
 ];
 const VAULT: &[&str] = &[
     "vibe-work/secretRun",
@@ -96,16 +97,13 @@ pub fn always_settings() -> impl Iterator<Item = (&'static str, &'static str)> {
 }
 /// Every known policy key; unknown runtime methods still fail closed as native asks.
 pub fn policies() -> impl Iterator<Item = &'static str> {
-    NATIVE
-        .iter()
-        .copied()
-        .chain(cfg!(feature = "agent-vault").then_some("vault_save"))
-        .chain([
-            "approval",
-            "user_input",
-            "connector_auth",
-            "protected_change",
-        ])
+    NATIVE.iter().copied().chain([
+        "vault_save",
+        "approval",
+        "user_input",
+        "connector_auth",
+        "protected_change",
+    ])
 }
 /// Resolve a method's fixed presentation policy. None means the method needs an explicit policy row.
 #[must_use]
@@ -125,6 +123,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
         "vibe-work/fillLogin" => "this saved login",
         "vibe-work/providerConsent" => "this account access",
         "chrome/control/pair" => "this browser connection",
+        "vibe-work/localNetworkAccess" => "this site's access to your local network",
         // The canonical "New chat" name lives in the shared vocabulary.
         "newChat/restoreFolder" => {
             vw_vocabulary::text("askRestoreFolderSubject").unwrap_or("the saved folder")
@@ -135,7 +134,12 @@ pub fn policy(kind: &str) -> Option<Policy> {
         kind: key,
         title,
         surface: if card { Surface::Card } else { Surface::Native },
-        person_only: VAULT.contains(&key) || matches!(key, "vault_save" | "chrome/control/pair"),
+        // The built-in browser's Local Network Access question grants a site lasting access: the person only.
+        person_only: VAULT.contains(&key)
+            || matches!(
+                key,
+                "vault_save" | "chrome/control/pair" | "vibe-work/localNetworkAccess"
+            ),
         always_setting: ALWAYS_SETTINGS
             .iter()
             .find(|(kind, _)| *kind == key)

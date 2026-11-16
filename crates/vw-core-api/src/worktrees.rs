@@ -390,7 +390,14 @@ impl Core {
             .view(session_id)
             .and_then(|v| facts(&v.state).cwd);
         let id = session_id.to_owned();
-        blocking(move || info_of(&records, &id, cwd.as_deref())).await
+        let vibe_root = self.shared.worktrees.vibe_root().to_path_buf();
+        blocking(move || {
+            if let Some(cwd) = cwd.as_deref() {
+                crate::worktrees_adopt::adopt(&records, &id, cwd, &vibe_root);
+            }
+            info_of(&records, &id, cwd.as_deref())
+        })
+        .await
     }
 
     async fn worktree_count(&self) -> Result<WorktreesResult, CoreError> {

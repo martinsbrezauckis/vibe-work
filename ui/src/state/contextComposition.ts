@@ -8,6 +8,7 @@ import type { JsonValue } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import { createStore } from "./createStore";
 
+/** The row label of each context category in the breakdown table. */
 export const CONTEXT_LABELS: Record<ContextCategoryId, string> = {
   system: "System",
   tools: "Tools",

@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::Duration;
+use vw_platform::sync::LockRecover;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -49,25 +50,17 @@ fn changes_tree(event: &notify::Event) -> bool {
 
 impl BrowserWatches {
     pub(crate) fn contains(&self, project_id: &str) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(project_id)
+        self.0.lock_or_recover().contains_key(project_id)
     }
 
     pub(crate) fn stop(&self, project_id: &str) {
-        if let Some(active) = self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(project_id)
-        {
+        if let Some(active) = self.0.lock_or_recover().remove(project_id) {
             active.task.abort();
         }
     }
 
     pub(crate) fn stop_all(&self) {
-        let mut watches = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut watches = self.0.lock_or_recover();
         for (_, active) in std::mem::take(&mut *watches) {
             active.task.abort();
         }
@@ -123,16 +116,13 @@ impl BrowserWatches {
                 });
             }
         });
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                project_id.into(),
-                ActiveWatch {
-                    _watcher: watcher,
-                    task,
-                },
-            );
+        self.0.lock_or_recover().insert(
+            project_id.into(),
+            ActiveWatch {
+                _watcher: watcher,
+                task,
+            },
+        );
         (failed > 0).then(|| {
             format!("File watching missed {failed} folders; the tree still refreshes periodically.")
         })

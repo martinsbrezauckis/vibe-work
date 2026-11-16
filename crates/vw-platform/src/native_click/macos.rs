@@ -12,8 +12,10 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AnyThread, MainThreadMarker, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSTrackingAreaOptions, NSView,
+    NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSScreen, NSTrackingAreaOptions,
+    NSView,
 };
+use objc2_core_graphics::{CGEvent, CGEventField};
 use objc2_foundation::{
     NSError, NSJSONSerialization, NSJSONWritingOptions, NSPoint, NSPointInRect, NSProcessInfo,
     NSString, NSTimer, NSUTF8StringEncoding,
@@ -66,17 +68,12 @@ fn click_view(
     wheel: Option<(i32, i32)>,
 ) -> Result<(), String> {
     let main = MainThreadMarker::new().ok_or("native click requires the main thread")?;
-    if !NSApplication::sharedApplication(main).isActive() {
-        return Err("native preview application is not active".to_owned());
-    }
     let base: &NSView = view;
-    if base.isHiddenOrHasHiddenAncestor() {
-        return Err("native preview is hidden".to_owned());
-    }
     let window = base.window().ok_or("native preview has no window")?;
-    if !window.isVisible() || !window.isKeyWindow() {
-        return Err("native preview window is not key".to_owned());
-    }
+    super::require_front(
+        window.isVisible() && !base.isHiddenOrHasHiddenAncestor(),
+        NSApplication::sharedApplication(main).isActive() && window.isKeyWindow(),
+    )?;
     let bounds = base.bounds();
     let (x, y) = super::map_point(point, (bounds.size.width, bounds.size.height))?;
     let local = NSPoint::new(
@@ -157,9 +154,17 @@ fn send_events(
         2 => (NSEventType::RightMouseDown, NSEventType::RightMouseUp),
         _ => (NSEventType::LeftMouseDown, NSEventType::LeftMouseUp),
     };
+    let button = super::macos_click_plan::explicit_button_number(options.0);
     for count in 1..=options.1 {
         let down=NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(down_type,window_point,flags,time,number,None,0,isize::from(count),1.0).ok_or("AppKit could not create mouse press")?;
         let up=NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(up_type,window_point,flags,time,number,None,0,isize::from(count),0.0).ok_or("AppKit could not create mouse release")?;
+        let (down, up) = match button {
+            Some(button) => (
+                numbered(&down, window_point, button)?,
+                numbered(&up, window_point, button)?,
+            ),
+            None => (down, up),
+        };
         sent.store(true, Ordering::Release);
         match options.0 {
             1 => {
@@ -177,6 +182,51 @@ fn send_events(
         }
     }
     Ok(())
+}
+
+/// `event` with Quartz button number `button` (`macos_click_plan`), set on its Quartz copy. The copy keeps the event's
+/// window and screen location; when `AppKit` converts it back without a window, the location is placed (as for the
+/// wheel) so that it still names the checked window point. The result is verified before it is delivered.
+fn numbered(event: &NSEvent, point: NSPoint, button: i64) -> Result<Retained<NSEvent>, String> {
+    let main = MainThreadMarker::new().ok_or("native mouse input needs the main thread")?;
+    let copy = event
+        .CGEvent()
+        .ok_or("AppKit could not copy the mouse event")?;
+    CGEvent::set_integer_value_field(Some(&copy), CGEventField::MouseEventButtonNumber, button);
+    let mut numbered =
+        NSEvent::eventWithCGEvent(&copy).ok_or("AppKit could not convert the mouse event")?;
+    if numbered.window(main).is_none() {
+        let screens = NSScreen::screens(main);
+        let screen = screens
+            .firstObject()
+            .ok_or("native mouse input found no screen")?;
+        let (x, y) =
+            super::macos_wheel_plan::location((point.x, point.y), screen.frame().size.height)
+                .map_err(|_| "native mouse input has invalid screen geometry".to_owned())?;
+        CGEvent::set_location(Some(&copy), NSPoint::new(x, y));
+        numbered =
+            NSEvent::eventWithCGEvent(&copy).ok_or("AppKit could not convert the mouse event")?;
+    }
+    let actual = numbered.locationInWindow();
+    if numbered.r#type() != event.r#type()
+        || numbered.buttonNumber() != isize::try_from(button).unwrap_or(-1)
+        || numbered.clickCount() != event.clickCount()
+        || (actual.x - point.x).abs() > 0.5
+        || (actual.y - point.y).abs() > 0.5
+    {
+        return Err(format!(
+            "the native mouse event did not keep its button, count or location (button {}, count {} of {}, at {:.1},{:.1} for {:.1},{:.1}, window {})",
+            numbered.buttonNumber(),
+            numbered.clickCount(),
+            event.clickCount(),
+            actual.x,
+            actual.y,
+            point.x,
+            point.y,
+            numbered.windowNumber()
+        ));
+    }
+    Ok(numbered)
 }
 
 /// Hands the motion to the owners of the view's mouse-moved tracking areas at `local`, as `AppKit` does for a real

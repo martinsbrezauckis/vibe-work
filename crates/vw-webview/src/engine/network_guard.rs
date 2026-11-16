@@ -117,14 +117,18 @@ impl TauriEngine {
         } else {
             let token = vw_netguard::NetGuard::new_token();
             let port = Url::parse(proxy).ok().and_then(|u| u.port()).unwrap_or(0);
-            web && load(&vw_netguard::NetGuard::loopback_canary_url(proxy, &token))
-                && guard
-                    .wait_seen_loopback(
-                        &token,
-                        port,
-                        deadline.saturating_duration_since(tokio::time::Instant::now()),
-                    )
-                    .await
+            // The guard answers its own port only for an announced probe; the wait ends the announcement, also
+            // when the load did not start.
+            web && {
+                guard.announce_loopback(&token, port);
+                let loaded = load(&vw_netguard::NetGuard::loopback_canary_url(proxy, &token));
+                let limit = if loaded {
+                    deadline.saturating_duration_since(tokio::time::Instant::now())
+                } else {
+                    Duration::ZERO
+                };
+                guard.wait_seen_loopback(&token, port, limit).await && loaded
+            }
         };
         if !loopback {
             tracing::warn!(

@@ -22,7 +22,7 @@ export function ChromeConnection({
   const needsPair = pairingStep(view);
   const step =
     browser === "Safari" && needsPair
-      ? `Toolbar: ${TEXT.safariName} → Pair`
+      ? `Toolbar: ${TEXT.safariName} → Pair Vibe Work`
       : view?.setup.addon?.step;
   const prefix = browser.toLowerCase();
   return (

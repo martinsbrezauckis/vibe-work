@@ -3,7 +3,8 @@
 //! Values are never logged; the newest 200 uses are retained.
 use crate::secrets_view::SecretUseView;
 use std::collections::VecDeque;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use vw_platform::sync::LockRecover;
 
 pub(crate) const MAX_LOG: usize = 200;
 #[derive(Default)]
@@ -14,18 +15,13 @@ pub(crate) struct SecretUses {
 impl SecretUses {
     /// Appends one log entry (newest first; the oldest past [`MAX_LOG`] is dropped).
     pub(crate) fn log(&self, entry: SecretUseView) {
-        let mut log = self.log.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut log = self.log.lock_or_recover();
         log.push_front(entry);
         log.truncate(MAX_LOG);
     }
 
     /// The log of this run, newest first.
     pub(crate) fn log_entries(&self) -> Vec<SecretUseView> {
-        self.log
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .cloned()
-            .collect()
+        self.log.lock_or_recover().iter().cloned().collect()
     }
 }

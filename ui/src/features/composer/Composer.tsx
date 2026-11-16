@@ -21,7 +21,7 @@
 import { TEXT, term, wording } from "../../vocabulary";
 import { formatKeys } from "../../state/shortcuts";
 import { GO_TO_PROMPT_KEYS, goToWaitingPrompt, promptsOf, waitingPrompts } from "../ask/waiting";
-import { type ReactElement, useEffect, useMemo, useRef } from "react";
+import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/Controls";
 import { droppedItems, runDrop } from "../files/drop";
@@ -42,6 +42,7 @@ import { DocumentChips } from "./DocumentChips";
 import { PasteChips, usePasteFold } from "./PasteChips";
 import { SlashMenu } from "./ComposerMenus";
 import { FileMentionMenu } from "./FileMentionMenu";
+import { HistorySearch, isHistorySearchKey } from "./HistorySearch";
 import { usePromptHistory } from "./usePromptHistory";
 import { useFileMention } from "./useFileMention";
 import { ChromeTabPicker } from "./ChromeTabPicker";
@@ -112,6 +113,8 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
   const held = useComposerState((s) => s.newChat);
   const box = useRef<HTMLTextAreaElement>(null);
   const history = usePromptHistory(sessionId, draft, box);
+  // The draft when prompt search (Ctrl+R) opened; null while it is closed.
+  const [searchFrom, setSearchFrom] = useState<string | null>(null);
   const reportCaret = useDictationCaret(sessionId, box);
   const cwd = entry?.session["cwd"];
   const project = isNew ? newFolder : typeof cwd === "string" ? cwd : null;
@@ -266,6 +269,21 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           void runDrop(app, sessionId, items, "ui");
         }}
       >
+        {searchFrom !== null ? (
+          <HistorySearch
+            menuId={menuId}
+            entries={history.entries}
+            onLoad={(text) => {
+              setSearchFrom(null);
+              history.load(text);
+            }}
+            onCancel={(refocus) => {
+              setSearchFrom(null);
+              if (draft !== searchFrom) composer.setDraft(sessionId, searchFrom);
+              if (refocus) box.current?.focus();
+            }}
+          />
+        ) : null}
         {mention.mention !== null ? (
           <FileMentionMenu
             menuId={menuId}
@@ -331,6 +349,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
         <textarea
           data-testid="composer.composer-set-draft"
           ref={box}
+          data-keeps-ctrl-r=""
           onSelect={() => {
             reportCaret();
             mention.reportCaret();
@@ -388,6 +407,12 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
               })
             ) {
               e.preventDefault();
+              return;
+            }
+            if (items === null && mention.mention === null && isHistorySearchKey(e)) {
+              e.preventDefault();
+              history.refresh();
+              setSearchFrom(draft);
               return;
             }
             if (items === null && history.key(e)) return;
@@ -516,7 +541,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           )}
         </p>
       ) : (
-        <p className="hint composer-note" role="status">
+        <div className="hint composer-note" role="status">
           {note}
           {reloadFailed ? (
             <span className="composer-plugin-reload">
@@ -537,7 +562,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
               </Button>
             </span>
           ) : null}
-        </p>
+        </div>
       )}
       <RewindDialog />
       <DocPreview />

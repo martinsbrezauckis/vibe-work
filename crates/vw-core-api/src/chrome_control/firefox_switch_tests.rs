@@ -126,3 +126,55 @@ async fn pending_firefox_call_tracks_its_own_switch_generation() {
     );
     core.shutdown().await;
 }
+
+/// PREDICT (red before the change): "Use my Firefox" off only told the shared helper that Firefox is off; with Chrome
+/// still on the helper kept running, so the agent's own Firefox window and its temporary profile stayed until Vibe
+/// Work quit. Expected red: no `chrome_status` close call is made. After: the switch closes the owned window first
+/// (the same close as Settings' Close window), then delivers the switch, and the helper stays for Chrome.
+#[tokio::test]
+async fn turning_firefox_off_closes_the_owned_window_while_chrome_stays() {
+    let core = crate::offline_core::start_with("firefox-off-closes", |config, dir| {
+        config.chrome_control.package = Some(dir.join("package"));
+    })
+    .await;
+    let chrome = &core.shared.chrome_control;
+    let calls = chrome.owner.answering(|name, _| match name {
+        "chrome_status" => {
+            serde_json::json!({"structuredContent":{"firefoxWindow":"Window closed"}})
+        }
+        _ => serde_json::json!({"applied":true}),
+    });
+    *chrome
+        .owner
+        .firefox_pairing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        (super::PairingState::WindowOpen, None);
+    let _ = core.browser_enabled(Browser::Firefox, false).await;
+    let names: Vec<(String, serde_json::Value)> = calls
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let close = names.iter().position(|(name, args)| {
+        name == "chrome_status" && *args == serde_json::json!({"_firefoxWindow":"close"})
+    });
+    let availability = names
+        .iter()
+        .position(|(name, _)| name == "owner.browserAvailability");
+    assert!(close.is_some(), "the owned window is closed: {names:?}");
+    assert!(
+        availability.is_none_or(|delivered| close < Some(delivered)),
+        "the window closes before the helper hears that Firefox is off: {names:?}"
+    );
+    assert_eq!(
+        chrome
+            .owner
+            .firefox_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0,
+        super::PairingState::WindowClosed
+    );
+    assert!(Browser::Chrome.enabled(&core.shared));
+    core.shutdown().await;
+}

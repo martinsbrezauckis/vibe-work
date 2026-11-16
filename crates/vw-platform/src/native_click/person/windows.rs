@@ -4,25 +4,32 @@
 //! as not ours). Our own checked click is posted straight to the browser window (`PostMessageW`) and never
 //! passes this hook, so it is never taken for the person's. Page script cannot reach any of this.
 //!
+//! While the view is blocked (the agent control frame's input block, rule in `block`), the hooks swallow the person's
+//! presses and wheel over the view, the releases of swallowed presses, and keys (not Tab, Alt or Windows-key
+//! shortcuts) while the keyboard focus is a window inside the view; pointer motion is never swallowed (a low-level hook that drops motion freezes the
+//! cursor). Our own posted input never reaches the hooks, so the agent's input always passes.
+//!
 //! Depends on: Win32 hooks and window queries, the `WebView2` controller (bounds, host window). Called by
 //! vw-webview on the UI thread (watch at mount, refresh and query at the click); the hook runs on its thread.
 
-use std::sync::{Mutex, OnceLock, PoisonError};
+use crate::sync::LockRecover;
+use std::sync::{Mutex, OnceLock};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
-    VK_XBUTTON1, VK_XBUTTON2,
+    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_RBUTTON,
+    VK_RWIN, VK_TAB, VK_XBUTTON1, VK_XBUTTON2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow,
-    GetMessageW, HC_ACTION, IsChild, IsWindowVisible, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW,
+    CallNextHookEx, DispatchMessageW, GA_ROOT, GUITHREADINFO, GetAncestor, GetCursorPos,
+    GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowRect, GetWindowThreadProcessId,
+    HC_ACTION, IsChild, IsWindowVisible, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW,
     TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, WindowFromPoint,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, WindowFromPoint,
 };
 use windows::core::Interface;
 
@@ -37,6 +44,9 @@ struct Watched {
     bounds: RECT,
     pressed_inside: bool,
     observed: Observed,
+    blocked: super::block::Blocked,
+    refused: super::block::Refused,
+    held: super::block::Held,
 }
 
 static WATCHED: Mutex<Vec<Watched>> = Mutex::new(Vec::new());
@@ -76,10 +86,59 @@ fn over(host: isize, bounds: &RECT, at: POINT) -> bool {
     }
 }
 
-fn observe(at: POINT, press: bool) {
-    let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+/// Whether the keyboard focus of the foreground thread is a window inside this view's bounds (the browser's own
+/// window, not the app's interface around it).
+fn focus_inside(host: isize, bounds: &RECT) -> bool {
+    let host = HWND(host as *mut _);
+    let mut info = GUITHREADINFO {
+        cbSize: u32::try_from(std::mem::size_of::<GUITHREADINFO>()).unwrap_or_default(),
+        ..GUITHREADINFO::default()
+    };
+    let (mut origin, mut rect) = (POINT::default(), RECT::default());
+    // SAFETY: window queries by handle into locals; stale handles fail the queries.
+    unsafe {
+        let thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        if thread == 0
+            || GetGUIThreadInfo(thread, &raw mut info).is_err()
+            || info.hwndFocus.is_invalid()
+            || !(info.hwndFocus == host || IsChild(host, info.hwndFocus).as_bool())
+            || !ClientToScreen(host, &raw mut origin).as_bool()
+            || GetWindowRect(info.hwndFocus, &raw mut rect).is_err()
+        {
+            return false;
+        }
+    }
+    let slack = 2;
+    rect.left >= origin.x + bounds.left - slack
+        && rect.top >= origin.y + bounds.top - slack
+        && rect.right <= origin.x + bounds.right + slack
+        && rect.bottom <= origin.y + bounds.bottom + slack
+}
+
+/// Observes one pointer event; answers whether a blocked view swallows it.
+fn observe(at: POINT, input: super::block::Input) -> bool {
+    use super::block::Input;
+    let press = input == Input::Press;
+    let mut swallowed = false;
+    let mut watched = WATCHED.lock_or_recover();
     watched.retain_mut(|entry| {
         let within = over(entry.host, &entry.bounds, at);
+        if within || input == Input::Release {
+            let blocked = within && (entry.blocked)();
+            if super::block::swallow(blocked, input, &mut entry.held) {
+                swallowed = true;
+                if super::block::refused_press(true, input) {
+                    (entry.refused)();
+                }
+                if input == Input::Release {
+                    entry.pressed_inside = false;
+                }
+                return true;
+            }
+        }
+        if input == Input::Wheel {
+            return true;
+        }
         // A release counts where it happens, or wherever it ends a press that began in the view.
         if within || (!press && entry.pressed_inside) {
             entry.pressed_inside = press && within;
@@ -87,27 +146,29 @@ fn observe(at: POINT, press: bool) {
         }
         true
     });
+    swallowed
 }
 
 unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use super::block::Input;
     if code == HC_ACTION.cast_signed() {
         let message = u32::try_from(wparam.0).unwrap_or_default();
-        let press = matches!(
-            message,
-            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
-        );
-        if press
-            || matches!(
-                message,
-                WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP
-            )
-        {
+        let input = match message {
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN => Input::Press,
+            WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP => Input::Release,
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => Input::Wheel,
+            _ => Input::Other,
+        };
+        if input != Input::Other {
             // SAFETY: for HC_ACTION, Windows passes a valid MSLLHOOKSTRUCT for the duration of this call.
             let at = unsafe { (*(lparam.0 as *const MSLLHOOKSTRUCT)).pt };
-            observe(at, press);
+            if observe(at, input) {
+                // Swallowed: the event goes no further (the person's input while the agent controls the view).
+                return LRESULT(1);
+            }
         }
     }
-    // SAFETY: passes the event on unchanged; the hook never swallows input.
+    // SAFETY: passes the event on unchanged.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
@@ -116,14 +177,40 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         let message = u32::try_from(wparam.0).unwrap_or_default();
         let press = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
         if press || matches!(message, WM_KEYUP | WM_SYSKEYUP) {
-            // SAFETY: reads only the foreground window; no keyboard content is collected.
+            // SAFETY: for HC_ACTION, Windows passes a valid KBDLLHOOKSTRUCT; only the key code is read, to let Tab and
+            // shortcuts pass the block. No keyboard content is collected.
+            let code = unsafe { (*(lparam.0 as *const KBDLLHOOKSTRUCT)).vkCode };
+            // Alt (system keys) and the Windows key keep switching windows and opening the system's own shortcuts.
+            let shortcut = matches!(message, WM_SYSKEYDOWN | WM_SYSKEYUP)
+                || code == u32::from(VK_LWIN.0)
+                || code == u32::from(VK_RWIN.0)
+                || down(VK_LWIN)
+                || down(VK_RWIN);
+            let input = super::block::Input::Key {
+                tab: code == u32::from(VK_TAB.0),
+                shortcut,
+                press,
+            };
+            // SAFETY: reads only the foreground window.
             let active = unsafe { GetForegroundWindow() };
-            let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
-            watched.retain(|entry| {
+            let mut swallowed = false;
+            let mut watched = WATCHED.lock_or_recover();
+            watched.retain_mut(|entry| {
                 // SAFETY: queries the owning top-level window; a stale handle yields no matching window.
                 let host = unsafe { GetAncestor(HWND(entry.host as *mut _), GA_ROOT) };
-                host != active || (entry.observed)(press)
+                if host != active {
+                    return true;
+                }
+                let blocked = (entry.blocked)() && focus_inside(entry.host, &entry.bounds);
+                if super::block::swallow(blocked, input, &mut entry.held) {
+                    swallowed = true;
+                    return true;
+                }
+                (entry.observed)(press)
             });
+            if swallowed {
+                return LRESULT(1);
+            }
         }
     }
     // SAFETY: passes the keyboard event on unchanged; only its occurrence was observed.
@@ -165,15 +252,21 @@ fn start() -> Result<(), String> {
     .clone()
 }
 
-/// Calls `observed` for every press or release of the person's over this webview from now on.
+/// Calls `observed` for every press or release of the person's over this webview from now on; swallows the person's
+/// input the block rule names while `blocked` answers true, and reports each swallowed press to `refused`.
 ///
 /// # Errors
 /// The hook or the webview's placement is unavailable.
-pub fn watch(controller: &ICoreWebView2Controller, observed: Observed) -> Result<(), String> {
+pub fn watch(
+    controller: &ICoreWebView2Controller,
+    observed: Observed,
+    blocked: super::block::Blocked,
+    refused: super::block::Refused,
+) -> Result<(), String> {
     start().map_err(|e| format!("pointer watch: {e}"))?;
     let (host, bounds) = place(controller)?;
     let key = controller.as_raw() as usize;
-    let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut watched = WATCHED.lock_or_recover();
     watched.retain(|entry| entry.key != key);
     watched.push(Watched {
         key,
@@ -181,6 +274,9 @@ pub fn watch(controller: &ICoreWebView2Controller, observed: Observed) -> Result
         bounds,
         pressed_inside: false,
         observed,
+        blocked,
+        refused,
+        held: super::block::Held::default(),
     });
     Ok(())
 }
@@ -189,7 +285,7 @@ pub fn watch(controller: &ICoreWebView2Controller, observed: Observed) -> Result
 pub fn refresh(controller: &ICoreWebView2Controller) {
     let key = controller.as_raw() as usize;
     if let Ok((host, bounds)) = place(controller) {
-        let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut watched = WATCHED.lock_or_recover();
         for entry in watched.iter_mut().filter(|entry| entry.key == key) {
             (entry.host, entry.bounds) = (host, bounds);
         }

@@ -24,6 +24,7 @@ pub(super) async fn produce(
                 .await?;
             #[cfg(target_os = "linux")]
             browser.check_answer(session, &page_id, &links.url)?;
+            browser.admit_capture(session).await?;
             let bytes = browser
                 .service()
                 .print_pdf_on_mount(&mount)
@@ -32,6 +33,7 @@ pub(super) async fn produce(
             if !bytes.starts_with(b"%PDF-") {
                 return Err("the engine did not produce a PDF".into());
             }
+            browser.admit_capture(session).await?;
             #[cfg(target_os = "linux")]
             let bytes = if links.links.is_empty() {
                 bytes

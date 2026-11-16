@@ -3,7 +3,8 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock};
+use vw_platform::sync::LockRecover;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Key {
@@ -33,15 +34,12 @@ pub(super) fn key(folder: &Path) -> Option<Key> {
 }
 
 pub(super) fn known(key: &Key) -> bool {
-    cache()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .contains(key)
+    cache().lock_or_recover().contains(key)
 }
 
 pub(super) fn remember(key: Option<Key>) {
     if let Some(key) = key {
-        let mut cache = cache().lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = cache().lock_or_recover();
         // Session churn must not accumulate every folder ever opened. Eviction merely costs a new Git query.
         if cache.len() >= 256 {
             cache.clear();

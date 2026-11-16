@@ -27,14 +27,14 @@
   flex: 1;
   min-width: 60px;
   font-family: var(--font-mono);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pages-sandbox {
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-pill);
@@ -49,7 +49,7 @@
 
 .pages-note {
   margin: 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .pages-external,
@@ -60,7 +60,7 @@
   flex-wrap: wrap;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   background: color-mix(in srgb, var(--orange-3) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--orange-3) 40%, transparent);
 }
@@ -80,7 +80,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .pages-planhead-title {
   font-weight: var(--weight-semibold);
@@ -90,12 +90,12 @@
 }
 .pages-planhead-sub {
   color: var(--text-3);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
 }
 .pages-planhead-live {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--orange-2);
 }
 .pages-pbar {
@@ -106,7 +106,7 @@
 .pages-pbar i {
   flex: 1;
   height: 5px;
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-mark);
   background: var(--line-2);
 }
 .pages-pbar i[data-status="done"] {
@@ -134,7 +134,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 24px 8px;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .pages-empty p {
@@ -159,7 +159,7 @@
 }
 .pages-hub-top h3 {
   margin: 0;
-  font-size: var(--text-15);
+  font-size: var(--text-reading);
 }
 .pages-hub-group {
   margin: 12px 0 0;
@@ -168,7 +168,7 @@
   display: flex;
   justify-content: space-between;
   margin: 0 0 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-3);
 }
@@ -191,7 +191,7 @@
   color: var(--text);
   padding: 8px 12px;
   font: inherit;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 li:first-child > .pages-hub-row {
   border-top: 0;
@@ -204,14 +204,14 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
 }
 .pages-hub-meta,
 .pages-hub-path {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .pages-hub-path {
   font-family: var(--font-mono);
 }
 .pages-flag {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--red);
 }
 .pages-flag[data-severity="warning"] {
@@ -223,7 +223,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
 /* the handbook's manifest, notices, findings and tags. */
 .pages-summary {
   margin: 4px 0 0;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .pages-health {
@@ -232,7 +232,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   align-items: center;
   gap: 8px;
   margin: 10px 0 0;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .pages-health > span {
@@ -248,17 +248,17 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
 .pages-findings li {
   display: flex;
   gap: 8px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
   padding: 5px 8px;
-  border-radius: var(--radius-7);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--orange-3) 9%, transparent);
 }
 .pages-findings li[data-severity="error"] {
   background: var(--red-soft);
 }
 .pages-findings code {
-  font: var(--text-11) var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
   color: var(--text-3);
   white-space: nowrap;
   padding-top: 1px;
@@ -267,14 +267,14 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   margin-left: 6px;
 }
 .pages-hub-desc {
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .pages-hub-group details > summary {
   display: flex;
   justify-content: space-between;
   margin: 0 0 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   cursor: pointer;
 }
@@ -292,12 +292,12 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   flex: none;
   max-height: 40%;
   overflow: auto;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .pages-comments summary {
   cursor: pointer;
   color: var(--text-2);
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
 }
 .pages-cbox {
   display: grid;
@@ -313,7 +313,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   color: var(--text);
   padding: 8px 10px;
   font: inherit;
-  font-size: var(--text-13);
+  font-size: var(--text-base);
 }
 .pages-cbox-row {
   display: flex;
@@ -338,7 +338,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
   padding: 2px 0 2px 10px;
 }
 .pages-comment-where {
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .pages-comment-acts {
@@ -348,7 +348,7 @@ button.pages-hub-row:hover:where(:not(:disabled)) {
 }
 .pages-detached {
   margin-top: 10px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
   border: 1px dashed var(--line-2);
   border-radius: var(--radius-md);

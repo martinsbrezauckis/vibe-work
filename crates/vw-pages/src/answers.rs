@@ -317,7 +317,7 @@ impl AnswerStore {
         if let Ok(file) = serde_json::from_str::<File>(&text) {
             return Ok(file);
         }
-        let aside = vw_platform::set_aside(&path, now_ms()).ok_or_else(|| {
+        let aside = vw_platform::set_aside(&path, crate::now_ms()).ok_or_else(|| {
             AnswerError::Io("the unreadable answers file could not be moved aside".to_owned())
         })?;
         tracing::warn!(file = ?aside, "page answers file did not parse: moved aside");
@@ -381,7 +381,7 @@ impl AnswerStore {
             input: input.id.clone(),
             question: input.question.clone(),
             value,
-            updated_ms: now_ms(),
+            updated_ms: crate::now_ms(),
             sent_ms: None,
         };
         file.version = 1;
@@ -419,7 +419,7 @@ impl AnswerStore {
     pub fn mark_sent(&self, project: &Path, page: &PagePath) -> Result<u32, AnswerError> {
         let _guard = self.lock.lock();
         let mut file = self.load(project)?;
-        let now = now_ms();
+        let now = crate::now_ms();
         let mut marked = 0u32;
         for answer in file.answers.iter_mut().filter(|a| a.page == page.as_str()) {
             answer.sent_ms = Some(now);
@@ -496,12 +496,4 @@ pub fn page_answers(
         inputs: items,
         detached,
     }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
 }

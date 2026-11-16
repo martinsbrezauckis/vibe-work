@@ -2,6 +2,7 @@
  * Depends on the transcript viewport and ResizeObserver. Called by AskCard; directed focus reveals the whole card.
  */
 import { useLayoutEffect, useState, type RefObject } from "react";
+import { armCardKeys } from "./cardKeys";
 
 /** Constrains a card to the transcript's current free height, including its outer spacing. */
 export function useCardLayout(frame: RefObject<HTMLDivElement | null>): number | undefined {
@@ -84,6 +85,8 @@ export function focusCard(
  * carry the card away afterwards. A smooth scroll to the revealed position replaces it without moving the list.
  */
 export function jumpToCard(card: HTMLDivElement | null): void {
+  // The person asked for this card: its keys answer again, also when the focus is already on it.
+  if (card) armCardKeys();
   focusCard(card);
   const list = card?.closest<HTMLElement>(".tx-list");
   list?.scrollTo({ top: list.scrollTop, behavior: "smooth" });

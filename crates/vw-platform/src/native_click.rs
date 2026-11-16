@@ -11,6 +11,8 @@ use std::sync::atomic::AtomicBool;
 use tokio::sync::oneshot;
 
 #[cfg(any(target_os = "macos", test))]
+mod macos_click_plan;
+#[cfg(any(target_os = "macos", test))]
 mod macos_wheel_plan;
 #[cfg(any(windows, test))]
 mod windows_sequence_plan;
@@ -20,6 +22,26 @@ pub type ClickReply = oneshot::Sender<Result<(), String>>;
 
 /// A host-owned permission recheck, run on the UI thread immediately before native input.
 pub type ClickPermission = Option<Arc<dyn Fn() -> bool + Send + Sync>>;
+
+/// Every native input adapter's one refusal for a window that is not in front: the app is not the active or
+/// foreground one, its window is not key, or the window or the browser view is hidden (minimized, hidden to the
+/// tray, pane not shown). The engine maps exactly this outcome to its "bring the window forward" answer; every other
+/// adapter refusal keeps its own text. Vibe Work never brings its window forward for native input.
+pub const NOT_IN_FRONT: &str = "the browser window is not in front";
+
+/// The in-front check shared by the click, wheel and keyboard adapters of every OS. `shown`: the browser view and
+/// its window are visible (not hidden, minimized or in the tray). `front`: that window is the active, foreground or
+/// key window.
+///
+/// # Errors
+/// [`NOT_IN_FRONT`] when either is false.
+pub fn require_front(shown: bool, front: bool) -> Result<(), String> {
+    if shown && front {
+        Ok(())
+    } else {
+        Err(NOT_IN_FRONT.to_owned())
+    }
+}
 
 /// Shared guard: only an actual JavaScript boolean `true` admits native input.
 #[must_use]
@@ -80,7 +102,7 @@ mod linux {
     /// Sends a press and release into the mapped `WebKitGTK` widget via GTK's event path.
     ///
     /// # Errors
-    /// Refuses inactive windows, hidden widgets and invalid native geometry.
+    /// [`super::NOT_IN_FRONT`] for an inactive or hidden window or widget; refuses invalid native geometry.
     pub fn click(
         view: &webkit2gtk::WebView,
         point: (f64, f64),
@@ -115,25 +137,21 @@ mod linux {
             return Err("invalid native click options".into());
         }
         let widget: &gtk::Widget = view.upcast_ref();
-        if !widget.is_mapped()
-            || !widget.is_visible()
-            || !widget.is_child_visible()
-            || !widget.has_window()
-        {
-            return Err("native preview is not visible".to_owned());
-        }
         let top = widget
             .toplevel()
             .ok_or("native preview has no app window")?
             .downcast::<gtk::Window>()
             .map_err(|_| "native preview has no app window")?;
-        if !top.is_active() {
-            return Err("native preview window is not active".to_owned());
-        }
+        super::require_front(
+            widget.is_mapped()
+                && widget.is_visible()
+                && widget.is_child_visible()
+                && widget.has_window(),
+            top.is_active(),
+        )?;
         let window = widget.window().ok_or("native preview has no GDK window")?;
-        if !window.is_viewable() {
-            return Err("native preview GDK window is not viewable".to_owned());
-        }
+        // Not viewable: an ancestor is unmapped (the window is hidden or minimized).
+        super::require_front(window.is_viewable(), true)?;
         let allocation = widget.allocation();
         if window.width() != allocation.width() || window.height() != allocation.height() {
             return Err("native preview allocation is stale".to_owned());

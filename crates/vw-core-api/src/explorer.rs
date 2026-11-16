@@ -6,9 +6,10 @@ use crate::explorer_view::{ExplorerRequest, ExplorerResult};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex, PoisonError,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use vw_platform::sync::LockRecover;
 
 /// Prefix for file and Git actions before a session exists.
 pub(crate) const WORKSPACE: &str = "files-workspace:";
@@ -19,7 +20,7 @@ pub(crate) struct Searches(Mutex<HashMap<PathBuf, Arc<AtomicBool>>>);
 impl Searches {
     pub(crate) fn replace(&self, root: &Path) -> Arc<AtomicBool> {
         let token = Arc::new(AtomicBool::new(false));
-        let mut searches = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut searches = self.0.lock_or_recover();
         searches.retain(|_, token| Arc::strong_count(token) > 1);
         if let Some(old) = searches.insert(root.to_owned(), token.clone()) {
             old.store(true, Ordering::Relaxed);

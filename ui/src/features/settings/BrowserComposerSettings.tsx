@@ -15,6 +15,10 @@ const cardNames: Record<ComposerBrowser, string> = {
   Firefox: TEXT.firefoxName,
 };
 
+/**
+ * Switches on a browser's Settings card: "Show in composer", plus "Use Vibe Work browser" on the built-in card.
+ * Each click sends the change to the core and shows an error line when saving fails.
+ */
 export function BrowserComposerSettings({ browser }: { browser: ComposerBrowser }) {
   const app = useApp();
   const view = useCoreState((s) => s.chromeControl);
@@ -54,7 +58,7 @@ export function BrowserComposerSettings({ browser }: { browser: ComposerBrowser 
         <span>Show in composer</span>
         <Switch
           data-testid={`settings.${prefix}-composer`}
-          aria-label={`Show in composer: ${cardNames[browser]}`}
+          aria-label={`Show in composer for ${cardNames[browser]}`}
           aria-checked={prefs?.shown.includes(browser) ?? true}
           disabled={busy || view == null}
           onClick={() => {

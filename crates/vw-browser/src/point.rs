@@ -280,7 +280,7 @@ impl Browser {
                     &self.service,
                     &seen.mount,
                     (&page, &receipt),
-                    native_error(&error, &sent, keyboard.is_some()),
+                    native_error(&error, &sent, keyboard.is_some(), options),
                 )
                 .await);
             }
@@ -353,7 +353,15 @@ fn top_point(
     Ok((x.round() as u32, y.round() as u32))
 }
 
-fn native_error(error: &vw_preview::PreviewError, sent: &AtomicBool, keyboard: bool) -> ActError {
+/// The answer for native input that failed. Nothing sent and the window not in front: keyboard input and hover get
+/// [`NOT_IN_FRONT`], one text on every OS; a press gets `native_focus::FOCUS_REQUEST`, which an authorized click
+/// turns into its one wait for focus.
+fn native_error(
+    error: &vw_preview::PreviewError,
+    sent: &AtomicBool,
+    keyboard: bool,
+    options: vw_preview::ClickOptions,
+) -> ActError {
     if sent.load(std::sync::atomic::Ordering::Acquire) {
         failed(format!(
             "Native input was sent but completion failed: {error}; read the page before another action"
@@ -362,8 +370,8 @@ fn native_error(error: &vw_preview::PreviewError, sent: &AtomicBool, keyboard: b
         error,
         vw_preview::PreviewError::Engine(vw_preview::EngineError::FocusRequired)
     ) {
-        refused(if keyboard {
-            "No keyboard input was sent because the browser window is not in front. Ask the user to bring the pane forward, then read the page before trying again."
+        refused(if keyboard || options == vw_preview::ClickOptions::HOVER {
+            NOT_IN_FRONT
         } else {
             crate::native_focus::FOCUS_REQUEST
         })
@@ -371,6 +379,9 @@ fn native_error(error: &vw_preview::PreviewError, sent: &AtomicBool, keyboard: b
         refused(error.to_string())
     }
 }
+
+/// Native keyboard input or hover refused because the window is not in front (nothing was sent).
+const NOT_IN_FRONT: &str = "No input was sent because the browser window is not in front. Ask the user to bring the pane forward, then read the page before trying again.";
 
 fn frame_checks(
     item: &crate::model::RefItem,

@@ -6,6 +6,7 @@ import type { Obj } from "../model/entries";
 import { modelChangeText } from "../model/modelChange";
 import { DividerRow } from "./SmallRows";
 
+/** Divider row for a model change, named from the session's current runtime. */
 export function ModelChangeRow({ entry, sessionId }: { entry: Obj; sessionId: string }) {
   const runtime = useCoreState((state) => state.sessions[sessionId]?.runtime);
   return <DividerRow entry={entry} text={modelChangeText(entry, runtime)} />;

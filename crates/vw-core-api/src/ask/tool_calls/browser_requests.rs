@@ -4,8 +4,9 @@ use super::{Shared, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
+use vw_platform::sync::LockRecover;
 
 type Answer = Result<Value, String>;
 pub(super) type Key = (String, String, String);
@@ -111,7 +112,7 @@ impl Ledger {
         let encoded = serde_json::to_vec(&(tool, args))
             .map_err(|_| "Browser request could not be encoded. Supply valid action fields.")?;
         let digest: [u8; 32] = Sha256::digest(encoded).into();
-        let mut records = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut records = self.0.lock_or_recover();
         if let Some(entry) = records.entries.get(&key) {
             if entry.digest != digest {
                 return Err("This browser call id was already used with different input. Keep the original request unchanged; a deliberate new action needs a new call id.".into());
@@ -149,7 +150,7 @@ impl Ledger {
         key: Key,
         receipt: &str,
     ) -> Result<Option<Reservation>, String> {
-        let mut records = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut records = self.0.lock_or_recover();
         let Some(entry) = records.entries.get_mut(&key) else {
             return Ok(None);
         };
@@ -163,27 +164,20 @@ impl Ledger {
         }
     }
     pub(crate) fn forget(&self, owner: &str) {
-        let mut records = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut records = self.0.lock_or_recover();
         records.entries.retain(|(chat, _, _), _| chat != owner);
         records.results.retain(|(chat, _, _)| chat != owner);
     }
 }
 impl Reservation {
     pub(super) fn issued(mut self, receipt: String) {
-        if let Some(entry) = self
-            .ledger
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entries
-            .get_mut(&self.key)
-        {
+        if let Some(entry) = self.ledger.0.lock_or_recover().entries.get_mut(&self.key) {
             entry.state = State::Issued(receipt);
         }
         self.active = false;
     }
     pub(super) fn finish(mut self, answer: &Answer) {
-        let mut records = self.ledger.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut records = self.ledger.0.lock_or_recover();
         let retain = serde_json::to_vec(answer).is_ok_and(|v| v.len() <= RESULT_BYTES);
         if let Some(entry) = records.entries.get_mut(&self.key) {
             entry.state = State::Finished(retain.then(|| answer.clone()));
@@ -204,13 +198,7 @@ impl Reservation {
 impl Drop for Reservation {
     fn drop(&mut self) {
         if self.active
-            && let Some(entry) = self
-                .ledger
-                .0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .entries
-                .get_mut(&self.key)
+            && let Some(entry) = self.ledger.0.lock_or_recover().entries.get_mut(&self.key)
         {
             entry.state = State::Interrupted;
         }

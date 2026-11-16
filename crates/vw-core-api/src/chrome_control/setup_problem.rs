@@ -3,8 +3,9 @@
 use super::{ChromeControlConfig, Path};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
+use vw_platform::sync::LockRecover;
 
 const BLOCKED: &str = "macOS blocked access";
 
@@ -49,8 +50,7 @@ fn observed(config: &ChromeControlConfig, state: Option<&Path>, browser: &str) -
     let cached = config
         .setup_problems
         .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .lock_or_recover()
         .get(browser)
         .copied();
     cached.unwrap_or_else(|| {
@@ -88,8 +88,7 @@ pub(super) fn finish<T>(
         config
             .setup_problems
             .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .insert(browser.into(), problem);
         if let Some(problem) = problem {
             // This is our own state directory, never a browser directory. Retain the diagnosis even after rollback.
@@ -125,10 +124,5 @@ pub(in crate::chrome_control) fn message(browser: &str) -> String {
 }
 
 pub(super) fn clear(config: &ChromeControlConfig) {
-    config
-        .setup_problems
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
+    config.setup_problems.0.lock_or_recover().clear();
 }

@@ -3,10 +3,10 @@
  * Depends on AppContext, the draft store, shared controls and modal focus. Called by NewChatPanel.
  * Terminals ask before closing; the composer's text and folder stay.
  */
-import { type ReactElement, useRef, useState } from "react";
+import { type ReactElement, useState } from "react";
 
 import { Button, LinkButton } from "../../components/Controls";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import { useStore } from "../../state/createStore";
 import { requestComposerFocus } from "../../state/composerFocus";
 import { NEW_CHAT } from "../../state/newChatKey";
@@ -28,47 +28,39 @@ function CloseAllDialog({
   onConfirm: () => void;
   busy: boolean;
 }): ReactElement {
-  const ref = useRef<HTMLDivElement>(null);
-  useModalFocus(true, ref, onCancel);
   return (
-    <>
-      <div data-testid="sessions.new-chat-close-all-scrim" className="scrim" onClick={onCancel} />
-      <div
-        data-testid="sessions.new-chat-close-all-dialog"
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-chat-close-all-title"
-        ref={ref}
-        tabIndex={-1}
-      >
-        <header>
-          <h2 id="new-chat-close-all-title">Close everything open in this new chat?</h2>
-        </header>
-        <section>
-          <p>{closeAllBody(open, files)}</p>
-        </section>
-        <footer className="modal-actions">
-          <Button
-            data-testid="sessions.new-chat-close-all-cancel"
-            data-dialog-initial-focus="true"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Cancel
-          </Button>
-          <Button
-            data-testid="sessions.new-chat-close-all-confirm"
-            shape="outlined"
-            variant="danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            Close all
-          </Button>
-        </footer>
-      </div>
-    </>
+    <Modal
+      onClose={onCancel}
+      scrimTestId="sessions.new-chat-close-all-scrim"
+      data-testid="sessions.new-chat-close-all-dialog"
+      aria-labelledby="new-chat-close-all-title"
+    >
+      <header>
+        <h2 id="new-chat-close-all-title">Close everything open in this new chat?</h2>
+      </header>
+      <section>
+        <p>{closeAllBody(open, files)}</p>
+      </section>
+      <footer className="modal-actions">
+        <Button
+          data-testid="sessions.new-chat-close-all-cancel"
+          data-dialog-initial-focus="true"
+          disabled={busy}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          data-testid="sessions.new-chat-close-all-confirm"
+          shape="outlined"
+          variant="danger"
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          Close all
+        </Button>
+      </footer>
+    </Modal>
   );
 }
 

@@ -23,7 +23,8 @@
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use vw_platform::sync::LockRecover;
 
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
@@ -56,8 +57,7 @@ pub(crate) struct ConnectorsState {
 impl ConnectorsState {
     pub(crate) fn removed_tool(&self, tool: &str) -> bool {
         self.removed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_or_recover()
             .iter()
             // Marketplace names allow dashes; Vibe normalizes them in MCP tool groups.
             .any(|name| tool.starts_with(&format!("mcp_{}.", name.replace('-', "_"))))
@@ -95,7 +95,7 @@ impl ConnectorsState {
     }
 
     pub(crate) fn mark_removed(&self, name: &str, removed: bool) {
-        let mut names = self.removed.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut names = self.removed.lock_or_recover();
         if removed {
             names.insert(name.to_owned());
         } else {
@@ -104,9 +104,7 @@ impl ConnectorsState {
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Option<(String, JoinHandle<()>)>> {
-        self.signing_in
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.signing_in.lock_or_recover()
     }
 
     /// The server whose sign-in is running.
@@ -625,7 +623,8 @@ async fn converge_shared(shared: &Shared, what: Converge) {
     }
 }
 
-/// Lets every open session re-read its MCP servers (after a key grant was revoked elsewhere).
+/// Lets every open session re-read its MCP servers (after a key grant was revoked elsewhere, or given at a key
+/// server's first use).
 pub(crate) async fn refresh_servers(shared: &Shared) {
     converge_shared(shared, Converge::Servers).await;
 }

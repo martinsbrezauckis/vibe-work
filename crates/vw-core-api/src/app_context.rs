@@ -1,4 +1,4 @@
-//! Measured machine facts for chats running inside Vibe Work.
+//! Measured machine facts for chats running inside Vibe Work, and the user's knowledge base places (`knowledge`).
 //! Uses the process tool's filtered environment; dispatch adds bounded context before each model turn.
 //! Version probes run once per app run, without a provider key or a package install.
 
@@ -126,9 +126,19 @@ pub(crate) async fn append(shared: &std::sync::Arc<Shared>, method: &str, params
     let _ = shared.procmon.lease(id);
     let ports = shared.procmon.leases().of(id);
     let network = crate::network_facts::read(shared).await;
-    let text = format!(
+    let mut text = format!(
         "Vibe Work session facts. {facts}\nNetwork settings for commands: {network}\nSession preview ports: {ports:?}. preview_list reports current canOpen/leasedFree ports."
     );
+    // A key server Vibe dropped because its key is not allowed: the agent learns which one and the person's step.
+    if let Some(keys) = crate::mcp_keys::facts::for_turn(shared).await {
+        text.push('\n');
+        text.push_str(&keys);
+    }
+    // The knowledge base is read at every turn, so a place added or removed applies from the next message on.
+    if let Some(knowledge) = crate::knowledge::for_turn(shared) {
+        text.push('\n');
+        text.push_str(&knowledge);
+    }
     if method.starts_with("session/") {
         if let Some(entries) = params.get_mut("entries").and_then(Value::as_array_mut) {
             entries.insert(
@@ -142,7 +152,8 @@ pub(crate) async fn append(shared: &std::sync::Arc<Shared>, method: &str, params
 }
 
 impl crate::Core {
-    /// Validates input before saving attachment bytes or adding measured host context.
+    /// Validates input before saving attachment bytes or adding measured host context; a rename's typed title
+    /// holds no vault value from here on.
     pub(crate) async fn prepare_model_input(
         &self,
         method: &str,
@@ -154,6 +165,7 @@ impl crate::Core {
             .check(method, params, token)
             .map_err(|e| crate::CoreError::from_gate(method, &e))?;
         crate::attachment_save::prepare(&self.shared, method, params).await?;
+        crate::title_guard::withhold_rename(&self.shared, method, params);
         append(&self.shared, method, params).await;
         Ok(())
     }

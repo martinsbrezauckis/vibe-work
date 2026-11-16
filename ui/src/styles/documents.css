@@ -21,7 +21,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--radius-lg);
   background: var(--panel);
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .docchip.failed {
@@ -67,13 +67,13 @@
   width: auto;
 }
 .doc-preview .d {
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-3);
   margin: 0 0 8px;
 }
 .doc-kept {
   margin: 0 0 8px;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--orange-3);
 }
 .doc-text {
@@ -87,7 +87,7 @@
 .search-q {
   margin: 0 0 6px;
   padding: 8px 8px 0;
-  font-size: var(--text-12-5);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .sources {
@@ -119,14 +119,14 @@
   background: var(--hover);
 }
 .source-title {
-  font-size: var(--text-13);
+  font-size: var(--text-base);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .source-host {
-  font-size: var(--text-11);
+  font-size: var(--text-xs);
   color: var(--text-3);
   max-width: 100%;
   overflow: hidden;
@@ -142,7 +142,7 @@
   display: flex;
   flex-direction: column;
   background: var(--raised);
-  border-radius: var(--radius-14);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   z-index: var(--z-panel);
   overflow: hidden;
@@ -156,14 +156,14 @@
 }
 .sources-panel h2 {
   margin: 0;
-  font-size: var(--text-14);
+  font-size: var(--text-md);
 }
 .sources-panel .sources-close {
   margin-left: auto;
 }
 .sources-panel .d {
   margin: 10px 14px 6px;
-  font-size: var(--text-12);
+  font-size: var(--text-sm);
   color: var(--text-3);
 }
 .sources-panel .sources {

@@ -22,6 +22,23 @@ fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
+/// The folder lies in a `plugins-off` folder (moved aside by the approval sweep or an earlier version's Turn off).
+pub(crate) fn in_off_folder(path: &Path) -> bool {
+    path.parent()
+        .is_some_and(|p| p.file_name().is_some_and(|n| n == "plugins-off"))
+}
+
+/// The folders Vibe's own switch turns off, from a discovery result.
+pub(crate) fn switched_off(discovery: Option<&Value>) -> Vec<std::path::PathBuf> {
+    discovery
+        .and_then(|d| d["plugins"].as_array())
+        .into_iter()
+        .flatten()
+        .filter(|row| row["off"] != true && row["nativeEnabled"] == false)
+        .filter_map(|row| row["path"].as_str().map(std::path::PathBuf::from))
+        .collect()
+}
+
 /// An app receipt identifies a catalog install even while its folder is off.
 pub(crate) fn receipt(folder: &Path) -> Option<vw_market::Receipt> {
     vw_market::Receipt::read_from(folder)
@@ -161,7 +178,8 @@ pub(crate) fn project(
                 path: path.to_owned(),
                 scope: text(row, "scope").to_owned(),
                 managed: managed(Path::new(path), home, cwd, off),
-                off,
+                off: off || row["nativeEnabled"] == false,
+                locked: row["locked"] == true,
                 native_enabled: row["nativeEnabled"].as_bool(),
                 available: row["available"].as_bool().unwrap_or(false),
                 components,

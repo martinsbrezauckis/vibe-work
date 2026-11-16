@@ -10,6 +10,7 @@
 
 use std::ffi::OsString;
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use vw_protocol::ServerInfo;
 use vw_rpc::{Connection, Multiplexer, MultiplexerBuilder};
@@ -74,9 +75,7 @@ pub(crate) async fn launch(
         program: program.into(),
         source,
     })?;
-    *pid_slot
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = child.pid();
+    *pid_slot.lock_or_recover() = child.pid();
     let mut connection = config.connection.clone();
     if let Some(key) = &key {
         connection.stderr_redactions = connection
@@ -148,8 +147,11 @@ pub(crate) async fn open_channel(
     }
 }
 
-/// The Stop, configuration-switch and plugin-hook guards, delivered through a private adapter file.
+/// The Stop, configuration-switch, plugin-hook and remote-cache guards, delivered through a private adapter file. The shared
+/// guarded-version list comes first: a Vibe outside it stops the start with [`GUARD_REFUSAL`]'s message.
 pub const CHILD_STOP_ADAPTER: &str = concat!(
+    include_str!("vibe_guard_versions.py"),
+    "\n",
     include_str!("vibe_process_identity.py"),
     "\n",
     include_str!("vibe_process_tracking.py"),
@@ -166,8 +168,86 @@ pub const CHILD_STOP_ADAPTER: &str = concat!(
     "\n",
     include_str!("vibe_keychain_guard.py"),
     "\n",
+    include_str!("vibe_remote_cache_guard.py"),
+    "\n",
     include_str!("vibe_child_stop.py")
 );
+
+/// The Vibe releases the launcher guards were checked against, read from the same `vibe_guard_versions.py` line the
+/// guards use (`GUARDED_VIBE_VERSIONS = frozenset({"3.1.2", ...})`), so the update offer and the launcher share one
+/// list. A line that does not read as plain quoted versions gives an empty list: nothing is offered (fail closed).
+#[must_use]
+pub fn guarded_vibe_versions() -> Vec<String> {
+    parse_guarded(include_str!("vibe_guard_versions.py"))
+}
+
+fn parse_guarded(source: &str) -> Vec<String> {
+    let Some(items) = source.lines().find_map(|line| {
+        line.strip_prefix("GUARDED_VIBE_VERSIONS = frozenset({")
+            .and_then(|rest| rest.strip_suffix("})"))
+    }) else {
+        return Vec::new();
+    };
+    let plain = |v: &str| {
+        !v.is_empty()
+            && v.split('.')
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let versions: Option<Vec<String>> = items
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            item.strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .filter(|v| plain(v))
+                .map(str::to_owned)
+        })
+        .collect();
+    versions.unwrap_or_default()
+}
+
+/// The first words of the launcher's refusal of a Vibe outside the guarded-version list (`vibe_guard_versions.py`
+/// `GUARD_REFUSAL`; a test keeps the two equal).
+pub const GUARD_REFUSAL: &str = "Vibe Work does not support Vibe ";
+
+/// Why a start failed, for the person: the launcher's own refusal line when the installed Vibe is not one the guards
+/// were checked against (taken from the server output only by its fixed first words, at most 300 characters), else
+/// the error itself.
+#[must_use]
+pub fn start_failure(error: &SupervisorError) -> String {
+    if let SupervisorError::Handshake { stderr_tail, .. } = error
+        && let Some(line) = stderr_tail
+            .iter()
+            .rev()
+            .map(|line| line.trim())
+            .find(|line| line.starts_with(GUARD_REFUSAL))
+    {
+        return line.chars().take(300).collect();
+    }
+    error.to_string()
+}
+
+/// The server's last stderr lines a failed start kept (a handshake that failed), else none. Sensitive: never logged.
+#[must_use]
+pub fn start_failure_stderr(error: &SupervisorError) -> Vec<String> {
+    match error {
+        SupervisorError::Handshake { stderr_tail, .. } => stderr_tail.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// The reason a start failed, as the setup screen shows it: the refusal of an unsupported Vibe stands alone (it is
+/// already a whole sentence that says what to do), anything else reads "Vibe did not start: <why>".
+#[must_use]
+pub fn start_failure_message(error: &SupervisorError) -> String {
+    let reason = start_failure(error);
+    if reason.starts_with(GUARD_REFUSAL) {
+        reason
+    } else {
+        format!("Vibe did not start: {reason}")
+    }
+}
 
 /// The interpreter the server is started with when `program` (canonical) runs through [`CHILD_STOP_ADAPTER`]:
 /// the spawned command uses a fixed-size isolated loader and a verified adapter file, so the spawned process is that

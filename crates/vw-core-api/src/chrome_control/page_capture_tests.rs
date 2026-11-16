@@ -112,3 +112,67 @@ async fn fixed_capture_returns_the_saved_document_and_refuses_injected_source() 
     );
     core.shutdown().await;
 }
+
+// PREDICT: the export sent `full: true` in a Full access chat, and the page script then kept the protected fields
+// (a contenteditable password, a hidden input's value) in the saved capture while the page read of the same chat
+// withheld them. One rule now: no mode sends a `full` flag, and the page script withholds them in every mode.
+#[tokio::test]
+async fn capture_page_withholds_protected_fields_in_every_mode() {
+    let core = super::read_consent_tests::core("page-capture-full").await;
+    let folder = core
+        .shared
+        .instructions
+        .own_home
+        .parent()
+        .unwrap()
+        .join("chat");
+    std::fs::create_dir_all(&folder).unwrap();
+    let _ = core
+        .shared
+        .store
+        .load(
+            json!({"session":{"id":"s","cwd":folder},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    let calls = super::test_support::answering(&core.shared, |tool, args| match tool {
+        "chrome_status" => {
+            json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":true,"extensionCapabilities":["transport.contract.v1"]}],"sessions":[{"sessionId":"t","profileId":"chrome:p"}]}})
+        }
+        "owner.primitive" => {
+            let script = args["steps"][0]["params"]["expression"].as_str().unwrap();
+            let value = if script.contains("\"op\":\"start\"") {
+                json!({"chunk":"Article text","url":"https://example.test/","title":"Article","cut":false})
+            } else {
+                json!({"done":true})
+            };
+            json!({"status":"completed","data":{"results":{"page":{"result":{"value":value.to_string()}}}}})
+        }
+        _ => panic!("unexpected {tool}"),
+    });
+    let request =
+        json!({"sessionId":"t","action":"capture.page","args":{"tabId":7,"format":"html"}});
+    for mode in ["ask", "accept-edits", "smart-approve", "auto-approve"] {
+        core.shared
+            .access
+            .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        calls.lock().unwrap().clear();
+        super::read_consent::send(&core.shared, "s", "chrome_execute", request.clone(), None)
+            .await
+            .unwrap();
+        let starts: Vec<String> = calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, args)| args["steps"][0]["params"]["expression"].as_str())
+            .filter(|script| script.contains("\"op\":\"start\""))
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(starts.len(), 1, "{mode}");
+        assert!(
+            !starts[0].contains("\"full\":"),
+            "{mode}: the export must not send a full flag"
+        );
+    }
+    core.shutdown().await;
+}

@@ -67,6 +67,7 @@ export interface LibrariesState {
   viewer: LibraryViewer | null;
 }
 
+/** The closed Libraries page before its first read. */
 export const INITIAL_LIBRARIES: LibrariesState = {
   open: false,
   libraries: null,

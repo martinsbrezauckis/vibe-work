@@ -2,9 +2,10 @@
 //! Depends on the injected clock, broadcast events and watch replies; no request parameters are retained.
 use crate::CoreEvent;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::{broadcast, watch};
 use vw_ask::{AnsweredBy, Ask, AskRecord, Choice, Outcome, Scope, Surface};
+use vw_platform::sync::LockRecover;
 
 #[path = "delivery.rs"]
 mod delivery;
@@ -102,7 +103,7 @@ impl Service {
         })
     }
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_or_recover()
     }
     /// The ask clock's current time (Unix milliseconds), also used to stamp session grants.
     pub(crate) fn now_ms(&self) -> u64 {

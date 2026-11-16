@@ -13,7 +13,8 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, RwLock};
+use vw_platform::sync::RwLockRecover;
 
 use serde_json::Value;
 use vw_core_api::CoreError;
@@ -77,7 +78,7 @@ impl UiRoutes {
         if !valid_name(name) {
             return Err(RegistryError::InvalidName(name.chars().take(80).collect()));
         }
-        let mut routes = self.routes.write().unwrap_or_else(PoisonError::into_inner);
+        let mut routes = self.routes.write_or_recover();
         if routes.contains_key(name) {
             return Err(RegistryError::Duplicate(name.to_owned()));
         }
@@ -96,8 +97,7 @@ impl UiRoutes {
     #[must_use]
     pub fn list(&self) -> Vec<(String, String)> {
         self.routes
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
+            .read_or_recover()
             .iter()
             .map(|(name, route)| (name.clone(), route.description.clone()))
             .collect()
@@ -105,8 +105,7 @@ impl UiRoutes {
 
     pub(crate) fn get(&self, name: &str) -> Option<UiHandler> {
         self.routes
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
+            .read_or_recover()
             .get(name)
             .map(|route| route.handler.clone())
     }

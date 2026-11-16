@@ -1,10 +1,10 @@
 //! Keeps only absolute folders in the extension path settings of the app-owned config before launch: Vibe Work
-//! passes Vibe every extension folder as an absolute path. Depends on TOML and std; called by launch. Only
-//! relative string entries and their commas change; errors warn and never stop launch.
+//! passes Vibe every extension folder as an absolute path. Depends on TOML and std; written by
+//! [`crate::startup_config`] at launch. Only relative string entries and their commas change; errors warn and never
+//! stop launch.
 //! Vibe 3.0.4 removes `tool_paths` during migration; that half remains for older selected runtimes.
 //! `agent_paths` still needs this check.
 
-use std::io;
 use std::ops::Range;
 use std::path::Path;
 
@@ -12,42 +12,34 @@ use serde::Deserialize;
 
 const KEYS: [&str; 2] = ["tool_paths", "agent_paths"];
 
-pub(crate) fn prepare(config: &Path) {
-    if let Err(reason) = update(config) {
-        tracing::warn!(
+/// This step's edit for [`crate::startup_config`]: the text without relative entries (`None` when there are none) and
+/// how many were removed per key, or why the file is left as it is.
+pub(crate) fn edit(text: &str) -> (Option<String>, Result<[usize; 2], String>) {
+    match without_relative_paths(text) {
+        Ok((updated, removed)) => ((removed != [0, 0]).then_some(updated), Ok(removed)),
+        Err(reason) => (None, Err(reason.to_owned())),
+    }
+}
+
+/// Logs the step's outcome after the combined write: the removed entries per key, or why nothing changed.
+pub(crate) fn log(outcome: Result<[usize; 2], String>) {
+    match outcome {
+        Ok(removed) => {
+            for (key, count) in KEYS.into_iter().zip(removed) {
+                if count > 0 {
+                    tracing::warn!(
+                        key,
+                        count,
+                        "extension paths: relative entries are not used; only absolute folders are passed to Vibe"
+                    );
+                }
+            }
+        }
+        Err(reason) => tracing::warn!(
             %reason,
             "extension paths: config.toml left unchanged; continuing launch for Vibe to report config errors"
-        );
+        ),
     }
-}
-
-fn update(config: &Path) -> Result<(), String> {
-    let text = std::fs::read_to_string(config).map_err(|error| error.to_string())?;
-    let (updated, removed) = without_relative_paths(&text).map_err(str::to_owned)?;
-    if removed == [0, 0] {
-        return Ok(());
-    }
-    replace_config(config, &text, &updated).map_err(|error| error.to_string())?;
-    for (key, count) in KEYS.into_iter().zip(removed) {
-        if count > 0 {
-            tracing::warn!(
-                key,
-                count,
-                "extension paths: relative entries are not used; only absolute folders are passed to Vibe"
-            );
-        }
-    }
-    Ok(())
-}
-
-fn replace_config(config: &Path, original: &str, updated: &str) -> io::Result<()> {
-    // Keep an edit made while we were preparing the candidate. The launch can still proceed with it.
-    if std::fs::read_to_string(config)? != original {
-        return Err(io::Error::other(
-            "config changed during extension path preparation",
-        ));
-    }
-    vw_platform::replace_private(config, updated.as_bytes()).map_err(io::Error::other)
 }
 
 fn without_relative_paths(text: &str) -> Result<(String, [usize; 2]), &'static str> {

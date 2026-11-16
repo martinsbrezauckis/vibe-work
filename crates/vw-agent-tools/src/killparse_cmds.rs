@@ -227,3 +227,103 @@ pub(crate) fn stop_process(args: &[&str], out: &mut KillScan) {
         out.reason("Stop-Process has no literal target");
     }
 }
+
+/// An `osascript` that quits an app: an Apple script `quit app "Google Chrome"` or `tell application "Safari" to quit`
+/// (or the raw `«event aevtquit»`), and JavaScript `Application("Google Chrome").quit()`. Read from the whole command
+/// text when `osascript` starts a command, so a script given with `-e`, in a here-document or through a pipe counts
+/// alike. Each app named by a plain literal name becomes an exact process-name target (the core asks when it runs
+/// outside this chat); any other app reference (a path, a `.app` bundle, a bundle id, System Events, a variable, an
+/// expansion, none at all) asks.
+pub(crate) fn osascript_quit(command: &str, out: &mut KillScan) {
+    let starts = crate::gitparse::readings(command).iter().any(|reading| {
+        reading.iter().any(|segment| {
+            let words: Vec<&str> = segment.iter().map(String::as_str).collect();
+            crate::command_segments::command_words(&words)
+                .first()
+                .is_some_and(|program| crate::killparse::command_name(program) == "osascript")
+        })
+    });
+    let lower = command.to_ascii_lowercase();
+    if !starts || !(has_word(&lower, "quit") || lower.contains("aevtquit")) {
+        return;
+    }
+    out.mentions = true;
+    let apps = app_names(command);
+    if apps.is_empty() {
+        out.reason("osascript quits an app that is not named literally");
+    }
+    for app in apps {
+        let Some(app) = app else {
+            out.reason("osascript quits an app that is not named literally");
+            continue;
+        };
+        let bundle_id = !app.contains(' ') && app.matches('.').count() >= 2;
+        if app.contains(['$', '`', '%', '/', ':', '\\'])
+            || app.to_ascii_lowercase().ends_with(".app")
+        {
+            out.reason("osascript quits an app that is not named literally");
+        } else if bundle_id || app.eq_ignore_ascii_case("id") {
+            out.reason("osascript quits an app named by its bundle id");
+        } else if app.eq_ignore_ascii_case("System Events") {
+            out.reason("osascript quits apps through System Events");
+        } else {
+            out.target(KillTarget::Name {
+                name: app,
+                how: NameMatch::Exact,
+            });
+        }
+    }
+}
+
+/// Whether `word` stands alone in `text` (no letter, digit or underscore next to it).
+fn has_word(text: &str, word: &str) -> bool {
+    text.match_indices(word).any(|(at, _)| {
+        !joined(text[..at].chars().next_back()) && !joined(text[at + word.len()..].chars().next())
+    })
+}
+
+fn joined(next: Option<char>) -> bool {
+    next.is_some_and(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// What follows each `app`, `application` or `Application(` word in a script: the quoted name, "id" for
+/// `application id "…"`, or `None` when no quoted name follows or the name is joined to more text (a variable or a
+/// computed name).
+fn app_names(command: &str) -> Vec<Option<String>> {
+    let lower = command.to_ascii_lowercase();
+    let mut names = Vec::new();
+    for keyword in ["application", "app"] {
+        for (at, _) in lower.match_indices(keyword) {
+            let end = at + keyword.len();
+            if joined(lower[..at].chars().next_back()) || joined(lower[end..].chars().next()) {
+                continue;
+            }
+            let rest = command[end..].trim_start_matches([' ', '\t', '(']);
+            if rest
+                .get(..2)
+                .is_some_and(|id| id.eq_ignore_ascii_case("id"))
+                && rest[2..].starts_with([' ', '\t'])
+            {
+                names.push(Some("id".to_owned()));
+                continue;
+            }
+            let rest = rest.strip_prefix('\\').unwrap_or(rest);
+            let quoted = rest
+                .chars()
+                .next()
+                .filter(|c| matches!(c, '"' | '\''))
+                .and_then(|quote| {
+                    let end = rest[1..].find(quote)?;
+                    // A name joined to more text ("Google " & "Chrome") is not a literal name.
+                    let after = rest[end + 2..].trim_start_matches([' ', '\t', '\\', '"', '\'']);
+                    (!after.starts_with(['&', '+']))
+                        .then(|| rest[1..=end].trim_end_matches('\\').trim().to_owned())
+                })
+                .filter(|name| !name.is_empty());
+            if !names.contains(&quoted) {
+                names.push(quoted);
+            }
+        }
+    }
+    names
+}

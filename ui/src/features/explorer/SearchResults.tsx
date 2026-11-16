@@ -5,6 +5,10 @@ import { RowMenuButton, type RowMenuState } from "../../components/RowMenu";
 import type { ExplorerTarget } from "./explorerMenus";
 import { n, VersionRow } from "./History";
 import { NAME_LIMIT, shownResults, type Explorer, type ExplorerState } from "./store";
+/**
+ * The Files search results: a result count, then matching file names, text lines and commits, each opening on click.
+ * Says so when nothing matches.
+ */
 export function SearchResults({
   state,
   explorer,

@@ -36,8 +36,11 @@ pub fn default_initialize_params() -> InitializeParams {
             session_peers: None,
             session_peer_restore: Some(false),
             session_peer_mark_seen: None,
-            // Worktrees remain owned by the app's chat-copy flow.
-            agent_worktrees: None,
+            // The agent may move its chat into a working copy of its own (Vibe's `enter_worktree`). The launcher
+            // (`install_agent_worktree_policy`) puts that tool under the chat's access mode and keeps Vibe's
+            // "ask before editing this checkout" rule out of the prompt; the person still picks folder or copy
+            // at chat start.
+            agent_worktrees: Some(true),
             agent_plugins: None,
             client_tool_definitions: None,
             disabled_notifications: None,
@@ -79,12 +82,7 @@ mod tests {
     #[test]
     fn host_execution_capabilities_remain_unadvertised() {
         let raw = serde_json::to_value(super::default_initialize_params()).unwrap();
-        for key in [
-            "clientTools",
-            "clientToolDefinitions",
-            "agentPlugins",
-            "agentWorktrees",
-        ] {
+        for key in ["clientTools", "clientToolDefinitions", "agentPlugins"] {
             assert!(raw["capabilities"].get(key).is_none(), "{key}");
         }
     }

@@ -41,9 +41,14 @@ pub(super) async fn apply(
                     .is_some_and(|caps| caps.iter().any(|cap| cap == "session.title"))
         })
     {
-        args["_chatTitle"] = json!(shared.names.display_title(&shared.store, session));
+        args["_chatTitle"] = json!(chat_title(shared, session));
     }
     Ok(())
+}
+
+/// The chat name the browser shows for `session`.
+fn chat_title(shared: &Shared, session: &str) -> String {
+    crate::title_guard::withhold_text(shared, &shared.names.display_title(&shared.store, session))
 }
 
 #[cfg(test)]
@@ -268,5 +273,19 @@ mod tests {
                 .any(|(tool, args)| tool == "chrome_session" && args["action"] == "open")
         );
         core.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_browser_chat_name_is_guarded_like_a_title() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        let shared = &f.core.shared;
+        crate::title_guard::rename_tests::know(shared, crate::title_guard::rename_tests::VALUE);
+        shared.names.note_listing(&[
+            json!({"id":"a", "title":"zebrafish3c9e71a4b8d2 full"}),
+            json!({"id":"b", "title":"zebrafish notes"}),
+        ]);
+        assert_eq!(chat_title(shared, "a"), "[secret withheld] full");
+        assert_eq!(chat_title(shared, "b"), "zebrafish notes");
+        f.finish().await;
     }
 }

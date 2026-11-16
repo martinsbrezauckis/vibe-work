@@ -35,6 +35,10 @@ export function promptWords(core: CoreController, ask: Ask): string {
   );
 }
 
+/**
+ * Creates the sound and reading for newly opened prompts: plays the prompt tone by the prompt sound choice (`auto`:
+ * only with a screen reader active) and, with prompt reading set to always, speaks queued prompts one at a time.
+ */
 export function createPromptAudio(deps: {
   core: CoreController;
   accessibility: Accessibility;

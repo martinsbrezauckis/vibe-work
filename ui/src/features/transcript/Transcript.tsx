@@ -31,6 +31,7 @@ import { subagentRows } from "./model/subagentRows";
 import { latestTodos } from "./model/todos";
 import { RowView } from "./rows/RowView";
 import { TodoStrip } from "./TodoStrip";
+import { PausedLine } from "./PausedLine";
 import { onCardFocusRequest, pendingCardFocus } from "../ask/cardFocus";
 import { protectedChangeOf } from "./model/protectedChange";
 import { str } from "./model/entries";
@@ -128,6 +129,7 @@ export function Transcript({ sessionId }: { sessionId: string }): ReactElement {
         {/* find in this conversation (Ctrl F, or a message result of the global search). */}
         <FindBar sessionId={sessionId} rows={rows} listRef={listRef} />
         {todos !== null && todos.length > 0 ? <TodoStrip todos={todos} /> : null}
+        <PausedLine sessionId={sessionId} />
         {rows.length === 0 ? (
           <div className="tx-empty">
             <p>No messages yet. Vibe&apos;s answers, steps and approvals appear here.</p>

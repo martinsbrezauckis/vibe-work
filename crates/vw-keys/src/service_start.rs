@@ -2,9 +2,10 @@
 //! No client or Vibe child receives an unverified network record or a proxy sign-in.
 use super::{
     Arc, KeyCell, KeyError, KeyEvent, KeyNeed, KeyService, KeyServiceConfig, KeySettings, KeyState,
-    PathBuf, PoisonError, ProxyHandle, RateLimits, TokenSlot, Vault, VaultSettings, blocking,
-    broadcast, last_state,
+    PathBuf, ProxyHandle, RateLimits, TokenSlot, Vault, VaultSettings, blocking, broadcast,
+    last_state,
 };
+use vw_platform::sync::LockRecover;
 
 impl KeyService {
     /// Starts after verifying saved network settings with the existing vault, before any key-bearing client exists.
@@ -87,7 +88,7 @@ impl KeyService {
         let limits: Arc<std::sync::Mutex<Option<RateLimits>>> = Arc::default();
         let (limits_cell, limits_events) = (Arc::clone(&limits), events.clone());
         proxy_config.on_rate_limits = Arc::new(move |snapshot| {
-            *limits_cell.lock().unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
+            *limits_cell.lock_or_recover() = Some(snapshot);
             let _ = limits_events.send(KeyEvent::RateLimits(Some(snapshot)));
         });
         let proxy = ProxyHandle::start(proxy_config, Arc::clone(&tokens), key.clone())

@@ -4,7 +4,7 @@
 import { literalInputProps } from "../../components/inputProps";
 import { useRef, useState } from "react";
 import { Badge, Button, LinkButton } from "../../components/Controls";
-import { useModalFocus } from "../../hooks/useModalFocus";
+import { Modal } from "../../components/Modal";
 import type { MistralKeyView } from "../../protocol/core";
 import { savedTestText } from "../../state/mistralKeys";
 import { KeyStep } from "../setup/KeyStep";
@@ -33,10 +33,6 @@ export function MistralKeys() {
   const [removing, setRemoving] = useState<MistralKeyView | null>(null);
   const root = useRef<HTMLElement>(null);
   const add = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(removing !== null, dialog, () => {
-    if (!busy) setRemoving(null);
-  });
   if (keys === null || availability !== "ready" || status === null) return null;
   const unlocked = status.vaultState === "unlocked";
   const rowFocus = (id: string | undefined) => {
@@ -230,63 +226,53 @@ export function MistralKeys() {
         </>
       )}
       {removing !== null && (
-        <>
-          <div
-            className="scrim"
-            data-testid="settings.mistral-keys-remove-scrim"
-            onClick={() => {
-              if (!busy) setRemoving(null);
-            }}
-          />
-          <div
-            data-testid="settings.mistral-keys-remove-dialog"
-            className="modal"
-            ref={dialog}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mistral-key-remove-title"
-            tabIndex={-1}
-          >
-            <header>
-              <h2 id="mistral-key-remove-title">
-                Remove the key “{removing.label}” from your vault?
-              </h2>{" "}
-            </header>
-            <section>
-              <p>Vibe Work can no longer use it. The key itself stays valid at Mistral.</p>
-            </section>
-            <footer className="modal-actions">
-              <Button
-                data-testid="settings.mistral-keys-cancel-remove"
-                data-dialog-initial-focus="true"
-                disabled={busy}
-                onClick={() => {
-                  setRemoving(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                data-testid="settings.mistral-keys-confirm-remove"
-                variant="danger"
-                disabled={busy}
-                onClick={() => {
-                  const next =
-                    items[items.findIndex((item) => item.itemId === removing.itemId) + 1]?.itemId;
-                  void keys.removeMistralKey(removing.itemId).then((ok) => {
-                    if (ok) {
-                      setRemoving(null);
-                      rowFocus(next);
-                    }
-                  });
-                }}
-              >
-                Remove
-              </Button>
-            </footer>
-            <Problem text={ownProblem} />
-          </div>
-        </>
+        <Modal
+          onClose={() => {
+            if (!busy) setRemoving(null);
+          }}
+          scrimTestId="settings.mistral-keys-remove-scrim"
+          data-testid="settings.mistral-keys-remove-dialog"
+          aria-labelledby="mistral-key-remove-title"
+        >
+          <header>
+            <h2 id="mistral-key-remove-title">
+              Remove the key “{removing.label}” from your vault?
+            </h2>{" "}
+          </header>
+          <section>
+            <p>Vibe Work can no longer use it. The key itself stays valid at Mistral.</p>
+          </section>
+          <footer className="modal-actions">
+            <Button
+              data-testid="settings.mistral-keys-cancel-remove"
+              data-dialog-initial-focus="true"
+              disabled={busy}
+              onClick={() => {
+                setRemoving(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              data-testid="settings.mistral-keys-confirm-remove"
+              variant="danger"
+              disabled={busy}
+              onClick={() => {
+                const next =
+                  items[items.findIndex((item) => item.itemId === removing.itemId) + 1]?.itemId;
+                void keys.removeMistralKey(removing.itemId).then((ok) => {
+                  if (ok) {
+                    setRemoving(null);
+                    rowFocus(next);
+                  }
+                });
+              }}
+            >
+              Remove
+            </Button>
+          </footer>
+          <Problem text={ownProblem} />
+        </Modal>
       )}
     </section>
   );

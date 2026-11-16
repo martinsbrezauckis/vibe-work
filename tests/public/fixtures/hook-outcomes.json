@@ -75,6 +75,472 @@
     "effects": []
   },
   {
+    "name": "plain named denial",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Hook completed",
+        "detail": {
+          "kind": "hook_completed",
+          "hookName": "vibe-work safety reminder",
+          "status": "error",
+          "scope": "pre_tool",
+          "content": "Denied tool 'mcp_vw.chrome_execute'",
+          "toolCallId": "call"
+        }
+      },
+      {
+        "id": "call",
+        "type": "effect",
+        "detail": {
+          "toolName": "mcp_vw.chrome_execute",
+          "input": {
+            "action": "page.navigate"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+          "display": {
+            "message": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+            "success": false
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: you pressed Stop while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "vibe 3.1 refusal on its own named step",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Denied tool 'process_start'",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "toolName": null,
+          "toolCallId": "call5",
+          "hookName": "vibe-work safety reminder",
+          "status": "error",
+          "content": "Denied tool 'process_start'"
+        }
+      },
+      {
+        "id": "effect-2f539bfa-fd43-5751-8485-afd0c17a1fc0",
+        "type": "effect",
+        "detail": {
+          "toolName": "mcp_vw.process_start",
+          "kind": "tool",
+          "input": {
+            "command": "touch refused.txt"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Process guard: Not run: the user declined this. Explain why it is needed for the user's delegated task.",
+          "display": {
+            "success": false,
+            "message": "Process guard: Not run: the user declined this. Explain why it is needed for the user's delegated task."
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Process guard: Not run: the user declined this. Explain why it is needed for the user's delegated task."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call ended by the person's Stop",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Denied tool 'preview_open'",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "toolName": null,
+          "toolCallId": "call7",
+          "hookName": "vibe-work safety reminder",
+          "status": "error",
+          "content": "Denied tool 'preview_open'"
+        }
+      },
+      {
+        "id": "effect-6ae1e455-95a0-5b1a-bd3d-d37815b1b44a",
+        "type": "effect",
+        "detail": {
+          "toolName": "mcp_vw.preview_open",
+          "kind": "tool",
+          "input": {
+            "url": "http://127.0.0.1:8790/",
+            "width": "desktop"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+          "display": {
+            "success": false,
+            "message": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer."
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: you pressed Stop while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call ended with its turn",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Denied tool 'browser_act'",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "toolName": null,
+          "toolCallId": "call8",
+          "hookName": "vibe-work safety reminder",
+          "status": "error",
+          "content": "Denied tool 'browser_act'"
+        }
+      },
+      {
+        "id": "effect-1c2d3e4f-0000-5000-8000-000000000008",
+        "type": "effect",
+        "detail": {
+          "toolName": "mcp_vw.browser_act",
+          "kind": "tool",
+          "input": {
+            "action": "wait"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Tool receipt: Not run: this turn ended while the browser was paused. Finish the reply.",
+          "display": {
+            "success": false,
+            "message": "Tool receipt: Not run: this turn ended while the browser was paused. Finish the reply."
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: the turn ended while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call the person stopped, hook cancelled after its refusal notice",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "level": "info",
+        "message": "Running hooks",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_started",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        },
+        "vwHeldCall": "stopped"
+      },
+      {
+        "id": "hook",
+        "type": "notice",
+        "level": "error",
+        "message": "Denied tool 'preview_open'",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "status": "error",
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": "vibe-work safety reminder",
+          "content": "Denied tool 'preview_open'"
+        },
+        "vwHeldCall": "stopped"
+      },
+      {
+        "id": "end",
+        "type": "notice",
+        "level": "info",
+        "message": "Hooks completed",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_completed",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: you pressed Stop while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call the person stopped, hook cancelled before it answered",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "level": "info",
+        "message": "Running hooks",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_started",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        },
+        "vwHeldCall": "stopped"
+      }
+    ],
+    "lines": [
+      {
+        "id": "start",
+        "text": "Not run: you pressed Stop while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call the person stopped, answer arrived after the interrupt",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "level": "info",
+        "message": "Running hooks",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_started",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        },
+        "vwHeldCall": "stopped"
+      },
+      {
+        "id": "hook",
+        "type": "notice",
+        "level": "error",
+        "message": "Denied tool 'preview_open'",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "status": "error",
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": "vibe-work safety reminder",
+          "content": "Denied tool 'preview_open'"
+        },
+        "vwHeldCall": "stopped"
+      },
+      {
+        "id": "end",
+        "type": "notice",
+        "level": "info",
+        "message": "Hooks completed",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_completed",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:21:a:1:tool:3",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        }
+      },
+      {
+        "id": "effect-7d0c3a52-1b2e-5f40-9c11-3e5b7a9d0f21",
+        "type": "effect",
+        "sessionId": "s",
+        "detail": {
+          "toolName": "mcp_vw.preview_open",
+          "kind": "tool",
+          "input": {
+            "url": "http://127.0.0.1:8790/key.html"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer.",
+          "display": {
+            "success": false,
+            "message": "Tool receipt: Not run: the user pressed Stop while the browser was paused. Do not use the browser again in this turn; tell them what you were doing and wait for their answer."
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: you pressed Stop while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "paused browser call ended with its turn, hook cancelled after its refusal notice",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "level": "info",
+        "message": "Running hooks",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_started",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:22:b:0:tool:1",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        },
+        "vwHeldCall": "turnEnded"
+      },
+      {
+        "id": "hook",
+        "type": "notice",
+        "level": "error",
+        "message": "Denied tool 'browser_act'",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "status": "error",
+          "toolCallId": "typescript:22:b:0:tool:1",
+          "toolName": null,
+          "hookName": "vibe-work safety reminder",
+          "content": "Denied tool 'browser_act'"
+        },
+        "vwHeldCall": "turnEnded"
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: the turn ended while the browser was paused."
+      }
+    ],
+    "effects": []
+  },
+  {
+    "name": "an unmarked cancelled hook start stays out of the conversation",
+    "history": [
+      {
+        "id": "start",
+        "type": "notice",
+        "level": "info",
+        "message": "Running hooks",
+        "sessionId": "s",
+        "detail": {
+          "kind": "hook_run_started",
+          "scope": "pre_tool",
+          "status": null,
+          "toolCallId": "typescript:23:c:0:tool:0",
+          "toolName": null,
+          "hookName": null,
+          "content": null
+        }
+      }
+    ],
+    "lines": [],
+    "effects": []
+  },
+  {
+    "name": "vibe 3.1 skip of another tool is not the refusal's step",
+    "history": [
+      {
+        "id": "hook",
+        "type": "notice",
+        "message": "Denied tool 'preview_open'",
+        "detail": {
+          "kind": "hook_completed",
+          "scope": "pre_tool",
+          "toolName": null,
+          "toolCallId": "call9",
+          "hookName": "vibe-work safety reminder",
+          "status": "error",
+          "content": "Denied tool 'preview_open'"
+        }
+      },
+      {
+        "id": "effect-9a9a9a9a-0000-5000-8000-000000000009",
+        "type": "effect",
+        "detail": {
+          "toolName": "mcp_vw.browser_act",
+          "kind": "tool",
+          "input": {
+            "action": "wait"
+          }
+        },
+        "state": {
+          "status": "skipped",
+          "reason": "Not run: the user declined this.",
+          "display": {
+            "success": false,
+            "message": "Not run: the user declined this."
+          }
+        }
+      }
+    ],
+    "lines": [
+      {
+        "id": "hook",
+        "text": "Not run: vibe-work safety reminder refused the call."
+      }
+    ],
+    "effects": ["effect-9a9a9a9a-0000-5000-8000-000000000009"]
+  },
+  {
     "name": "ordered denials",
     "history": [
       {

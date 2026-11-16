@@ -425,6 +425,7 @@ fn computed_shell_word(source: &Word, expanded: &str) -> bool {
 }
 
 mod app_data;
+pub use app_data::{PRIVATE_VAULT_CONTAINER, private_vault_container};
 mod mentions;
 mod shown;
 use mentions::raw_mentions;

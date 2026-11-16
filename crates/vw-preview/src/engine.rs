@@ -241,7 +241,9 @@ pub trait PreviewHooks: Send + Sync {
     /// such as content rules. An engine without a guard never calls it.
     fn network_guard(&self, label: &str, check: GuardCheck);
     /// May mount `label`'s page send a sub-request (script, image, `fetch`, ...) to `url`? Asked by an engine
-    /// before the request is sent. The live mount and URL scheme are checked; local addresses are allowed.
+    /// before the request is sent. The live mount and URL scheme are checked; an address literal of this computer
+    /// or the local network follows Local Network Access (Vibe Work's own ports and a site the person blocked are
+    /// refused; an undecided site goes on to the network guard, which asks the person).
     /// Never records anything.
     fn request_allowed(&self, label: &str, url: &Url) -> bool;
     /// [`Self::navigation_allowed`] (`document`) or [`Self::request_allowed`] for an engine that can hold a request:

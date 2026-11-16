@@ -11,7 +11,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  font-size: var(--text-13-5);
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 .context-composition header,
@@ -58,7 +58,7 @@
 }
 .context-composition thead {
   color: var(--text-2);
-  font-size: var(--text-11-5);
+  font-size: var(--text-sm);
 }
 .context-composition tbody {
   border-block: 1px solid var(--line);

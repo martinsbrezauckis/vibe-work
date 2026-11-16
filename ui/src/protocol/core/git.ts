@@ -61,7 +61,11 @@ created: PrCreatedView, } | { "kind": "prStatus",
 /**
  * The card.
  */
-status: PrStatusView, } | { "kind": "prepared",
+status: PrStatusView, } | { "kind": "prList",
+/**
+ * The list.
+ */
+list: PrListView, } | { "kind": "prepared",
 /**
  * The composer text.
  */
@@ -314,6 +318,28 @@ note: string | null,
  * The forge page for this branch's pull requests.
  */
 openUrl: string | null, };
+
+export type PrListView = {
+/**
+ * Newest first, at most 30 per branch, each once.
+ */
+cards: Array<PrCard>,
+/**
+ * The branches asked about.
+ */
+branches: Array<string>,
+/**
+ * Where they came from.
+ */
+source: PrSource,
+/**
+ * When the forge was last asked (ms since the epoch; 0 = never).
+ */
+fetchedAtMs: number,
+/**
+ * Rate limit, private repository, no forge, checks not read (plain words).
+ */
+note: string | null, };
 
 export type BringPlanView = {
 /**
@@ -626,7 +652,15 @@ head: string,
 /**
  * The base branch.
  */
-base: string, };
+base: string,
+/**
+ * The forge's merge rules hold it (gh `mergeStateStatus` BLOCKED, REST `mergeable_state` "blocked").
+ */
+mergeBlocked: boolean,
+/**
+ * The status line and its cause (`pr_status`).
+ */
+status: PrStatusLine, };
 
 export type PrState = "open" | "closed" | "merged";
 
@@ -650,7 +684,11 @@ pending: number,
 /**
  * The failed ones first, then the pending ones (at most 30).
  */
-items: Array<CheckItem>, };
+items: Array<CheckItem>,
+/**
+ * Which checks are required is known (signed-in gh); otherwise every check counts as required.
+ */
+requiredKnown: boolean, };
 
 export type CheckItem = {
 /**
@@ -664,4 +702,20 @@ outcome: string,
 /**
  * Its page, when the forge gave one.
  */
-url: string | null, };
+url: string | null,
+/**
+ * A required check (branch protection); `None` when not known, which counts as required.
+ */
+required: boolean | null, };
+
+export type PrStatusLine = {
+/**
+ * The cause; `None` for a closed, merged or draft pull request, or an open one whose state is not known yet.
+ */
+reason: PrReason | null,
+/**
+ * An optional (not required) check failed.
+ */
+optionalFailing: boolean, };
+
+export type PrReason = "changesRequested" | "checksFailing" | "conflicts" | "checksPending" | "reviewRequired" | "mergeBlocked" | "ready";

@@ -219,6 +219,17 @@ fn safari_id() -> &'static objc2_foundation::NSString {
     objc2_foundation::ns_string!("com.apple.Safari")
 }
 
+/// Opens a local file in Safari (a new tab, Safari brought forward). `false` when `open` could not start or failed.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn open_in_safari(file: &Path) -> bool {
+    std::process::Command::new("/usr/bin/open")
+        .args(["-b", "com.apple.Safari"])
+        .arg(file)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// Whether Safari is running now; a launch in progress counts.
 #[cfg(target_os = "macos")]
 #[must_use]

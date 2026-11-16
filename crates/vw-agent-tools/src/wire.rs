@@ -128,11 +128,10 @@ pub mod tools {
     /// Capture a newly generated secret without exposing command output.
     pub const SECRET_CAPTURE_COMMAND: &str = "secret_capture_command";
     /// The secret broker's tools.
-    pub const SECRET_TOOLS: [&str; 3 + cfg!(feature = "agent-vault") as usize] = [
+    pub const SECRET_TOOLS: [&str; 4] = [
         SECRET_LIST,
         SECRET_RUN,
         SECRET_RUN_STATUS,
-        #[cfg(feature = "agent-vault")]
         SECRET_CAPTURE_COMMAND,
     ];
     /// The libraries this session's agent may search, with their file names.
@@ -189,8 +188,7 @@ pub mod tools {
     }
 
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str;
-        36 + cfg!(feature = "video") as usize + 1 + cfg!(feature = "agent-vault") as usize] = [
+    pub const SESSION_TOOLS: [&str; 36 + cfg!(feature = "video") as usize + 2] = [
         #[cfg(feature = "video")]
         "video_frames",
         SESSION_STATUS,
@@ -216,7 +214,6 @@ pub mod tools {
         SECRET_LIST,
         SECRET_RUN,
         SECRET_RUN_STATUS,
-        #[cfg(feature = "agent-vault")]
         SECRET_CAPTURE_COMMAND,
         LIBRARIES_LIST,
         LIBRARY_SEARCH,

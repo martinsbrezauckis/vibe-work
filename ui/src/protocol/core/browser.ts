@@ -24,7 +24,15 @@ enabled: boolean, } | { "op": "share",
 /**
  * Exact mounted page key from the Browser pane.
  */
-pageKey: string, } | { "op": "shields", } | { "op": "setShields",
+pageKey: string, } | { "op": "localNetworkSites", } | { "op": "setLocalNetworkSite",
+/**
+ * The site (`https://example.com`; a full address is reduced to its site).
+ */
+site: string,
+/**
+ * The new answer, or none to forget it.
+ */
+answer: SiteAnswer | null, } | { "op": "shields", } | { "op": "setShields",
 /**
  * Selected mode.
  */
@@ -294,11 +302,27 @@ mode: Mode,
  */
 supported: boolean, };
 
+export type SiteAnswer = "allow" | "block";
+
+export type LocalNetworkSite = {
+/**
+ * The site (`https://example.com`).
+ */
+site: string,
+/**
+ * Allow or Block.
+ */
+answer: SiteAnswer, };
+
 export type BrowserResult = { "type": "preferences",
 /**
  * Current saved settings and native availability.
  */
-preferences: BrowserPreferences, } | { "type": "shields",
+preferences: BrowserPreferences, } | { "type": "localNetworkSites",
+/**
+ * Every remembered site and its answer, sorted by site.
+ */
+sites: Array<LocalNetworkSite>, } | { "type": "shields",
 /**
  * Confirmed mode and platform availability.
  */
@@ -556,7 +580,13 @@ rect: ViewRect,
 /**
  * A PNG of that area (base64), when the screenshot worked.
  */
-cropPngBase64: string | null, };
+cropPngBase64: string | null,
+/**
+ * Why the picture was left out, when the page showed a protected value below Full access (the capture
+ * refusal's wording); the note and position are kept. Absent (not null) otherwise, matching the optional
+ * TypeScript field the UI checks with `!== undefined`.
+ */
+cropLeftOut?: string, };
 
 export type ViewRect = {
 /**

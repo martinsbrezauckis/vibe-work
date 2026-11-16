@@ -380,7 +380,7 @@ mod tests {
             start_vibe: false,
             ..crate::CoreConfig::default()
         };
-        let core = crate::Core::start(
+        let core = Box::pin(crate::Core::start(
             vw_supervisor::SupervisorConfig::new(
                 dir.join("no-server-requested"),
                 dir.join("vibe-home"),
@@ -389,7 +389,7 @@ mod tests {
             std::sync::Arc::new(vw_supervisor::NoSecret),
             Decline,
             config,
-        )
+        ))
         .await
         .unwrap();
         for (recorded, wanted) in [("plan", "ask"), ("auto-approve", "ask"), ("custom", "ask")] {

@@ -24,19 +24,46 @@ pub(crate) fn is_hook_notice(entry: &Value) -> bool {
     entry["type"] == "notice" && HOOK_KINDS.contains(&text(&entry["detail"], "kind"))
 }
 
+/// The person's line for a call that waited for the paused browser and ended without running, from the app's mark on
+/// the call's pre-tool hook notices (`paused_tools_gate::HELD_CALL_FIELD`), however the runtime then reported the call.
+fn held_line(entry: &Value) -> Option<&'static str> {
+    if entry["detail"]["scope"] != "pre_tool" {
+        return None;
+    }
+    match entry[crate::paused_tools_gate::HELD_CALL_FIELD].as_str() {
+        Some("stopped") => Some(vw_vocabulary::texts::PAUSED_BROWSER_STOPPED_CALL),
+        Some("turnEnded") => Some(vw_vocabulary::texts::PAUSED_BROWSER_TURN_ENDED_CALL),
+        _ => None,
+    }
+}
+
+/// A start notice of one call's hooks.
+fn hook_start(entry: &Value) -> bool {
+    is_hook_notice(entry)
+        && matches!(
+            text(&entry["detail"], "kind"),
+            "hook_run_started" | "hook_started"
+        )
+}
+
 /// The exact reason Vibe wraps around a skipped hook-denied call, without its internal markup.
-fn denial_reason<'a>(effect: Option<&'a Value>, hook: &str) -> Option<&'a str> {
+fn denial_reason<'a>(effect: Option<&'a Value>, hook: &str, refused: bool) -> Option<&'a str> {
     let effect = effect.filter(|e| e["type"] == "effect" && e["state"]["status"] == "skipped")?;
     let reason = text(&effect["state"], "reason");
     if refused_placeholder(effect) {
         return Some(reason);
     }
     let tool = text(&effect["detail"], "toolName");
-    reason
+    let wrapped = reason
         .strip_prefix(&format!(
             "<tool_error>Tool '{tool}' was denied by hook '{hook}': "
-        ))?
-        .strip_suffix("</tool_error>")
+        ))
+        .and_then(|rest| rest.strip_suffix("</tool_error>"));
+    // Vibe 3.1 sends the reason as is on the named call; it is the hook's only when the notice says it refused.
+    wrapped.or_else(|| {
+        (refused && !reason.trim().is_empty() && !reason.starts_with("<tool_error>"))
+            .then_some(reason)
+    })
 }
 
 /// `Rewrote tool_input for '<tool>'` with a tool name of `[a-z][a-z0-9_]*`.
@@ -60,14 +87,74 @@ fn refused_placeholder(entry: &Value) -> bool {
         && matches!(text(&entry["detail"], "toolName"), "" | "tool")
 }
 
-/// Pair explicit call ids first, then nameless placeholders in refusal order within a user-message boundary.
+/// The refusal names Vibe Work's combined pre-tool hook puts before each reason (`Guard::refusal_name` in
+/// vw-agent-tools); a skip without one (the person's own No) is not a refusal.
+const GUARD_REASONS: &[&str] = &[
+    "Safety reminder: ",
+    "Process guard: ",
+    "Folder guard: ",
+    "Git guard: ",
+    "Connector guard: ",
+    "Tool receipt: ",
+];
+
+/// The tool a refusal notice names (`Denied tool 'preview_open'`), or "" when it names none.
+fn denied_tool(detail: &Value) -> &str {
+    text(detail, "content")
+        .strip_prefix("Denied tool '")
+        .and_then(|rest| rest.strip_suffix('\''))
+        .filter(|tool| !tool.is_empty() && !tool.contains('\''))
+        .unwrap_or_default()
+}
+
+/// Vibe 3.1's refused step: the call itself, skipped with its input, full tool name and the guard's named reason,
+/// under an `effect-<action id>` id that is not the call id. `tool` is the name the refusal notice gave.
+fn refused_named_step(entry: &Value, tool: &str) -> bool {
+    let name = text(&entry["detail"], "toolName");
+    let reason = text(&entry["state"], "reason");
+    !tool.is_empty()
+        && entry["type"] == "effect"
+        && entry["state"]["status"] == "skipped"
+        && entry["detail"]["input"].is_object()
+        && (name == tool || name.strip_suffix(tool).is_some_and(|n| n.ends_with('.')))
+        && GUARD_REASONS
+            .iter()
+            .any(|prefix| reason.starts_with(prefix))
+}
+
+/// Pair explicit call ids first, then nameless placeholders in refusal order, then Vibe 3.1's skipped calls with
+/// the oldest refusal of the same tool, all within a user-message boundary. A step found by its call id is never
+/// paired again by order. A held call the app marked (`held_line`) whose hooks never completed maps the first start
+/// notice of its hooks to itself: that notice carries the call's line.
 fn refused_steps(entries: &[Value]) -> HashMap<&str, &Value> {
     let by_id: HashMap<_, _> = entries
         .iter()
         .map(|entry| (text(entry, "id"), entry))
         .collect();
     let mut steps = HashMap::new();
-    let mut waiting: VecDeque<(&str, Vec<&str>)> = VecDeque::new();
+    let completed: HashSet<&str> = entries
+        .iter()
+        .filter(|entry| {
+            is_hook_notice(entry)
+                && entry["detail"]["kind"] == "hook_completed"
+                && entry["detail"]["scope"] == "pre_tool"
+        })
+        .map(|entry| text(&entry["detail"], "toolCallId"))
+        .collect();
+    let mut held_starts: HashSet<&str> = HashSet::new();
+    for entry in entries {
+        let call = text(&entry["detail"], "toolCallId");
+        if hook_start(entry)
+            && held_line(entry).is_some()
+            && !completed.contains(call)
+            && held_starts.insert(call)
+        {
+            steps.insert(text(entry, "id"), entry);
+        }
+    }
+    // Call id, the tool its refusal names, its refusal notices; in the order the calls were refused.
+    let mut waiting: VecDeque<(&str, &str, Vec<&str>)> = VecDeque::new();
+    let mut named: HashSet<&str> = HashSet::new();
     for entry in entries {
         let detail = &entry["detail"];
         if entry["type"] == "message" && entry["role"] == "user" {
@@ -77,17 +164,27 @@ fn refused_steps(entries: &[Value]) -> HashMap<&str, &Value> {
             && detail["scope"] == "pre_tool"
         {
             let call = text(detail, "toolCallId");
-            if let Some(named) = by_id.get(call).filter(|entry| entry["type"] == "effect") {
-                steps.insert(text(entry, "id"), *named);
+            if let Some(step) = by_id.get(call).filter(|entry| entry["type"] == "effect") {
+                steps.insert(text(entry, "id"), *step);
+                named.insert(call);
             } else if !call.is_empty() && detail["status"] == "error" {
-                if let Some((_, notices)) = waiting.iter_mut().find(|(id, _)| *id == call) {
+                if let Some((_, _, notices)) = waiting.iter_mut().find(|(id, _, _)| *id == call) {
                     notices.push(text(entry, "id"));
                 } else {
-                    waiting.push_back((call, vec![text(entry, "id")]));
+                    waiting.push_back((call, denied_tool(detail), vec![text(entry, "id")]));
                 }
             }
-        } else if refused_placeholder(entry)
-            && let Some((_, notices)) = waiting.pop_front()
+        } else if refused_placeholder(entry) {
+            if let Some((_, _, notices)) = waiting.pop_front() {
+                for notice in notices {
+                    steps.insert(notice, entry);
+                }
+            }
+        } else if !named.contains(text(entry, "id"))
+            && let Some(at) = waiting
+                .iter()
+                .position(|(_, tool, _)| refused_named_step(entry, tool))
+            && let Some((_, _, notices)) = waiting.remove(at)
         {
             for notice in notices {
                 steps.insert(notice, entry);
@@ -95,6 +192,18 @@ fn refused_steps(entries: &[Value]) -> HashMap<&str, &Value> {
         }
     }
     steps
+}
+
+/// The person's own line for a browser call that waited while they paused the browser: the receipt's reason
+/// (prefixed by its guard's name) is the agent's instruction, the person sees what happened.
+fn person_reason(reason: &str) -> &str {
+    if reason.ends_with(vw_vocabulary::texts::AGENT_PAUSED_BROWSER_STOPPED) {
+        vw_vocabulary::texts::PAUSED_BROWSER_STOPPED_CALL
+    } else if reason.ends_with(vw_vocabulary::texts::AGENT_PAUSED_BROWSER_TURN_ENDED) {
+        vw_vocabulary::texts::PAUSED_BROWSER_TURN_ENDED_CALL
+    } else {
+        reason
+    }
 }
 
 /// One projection for the export's hook lines and suppressed steps; raw history stays unchanged.
@@ -113,7 +222,12 @@ pub(crate) fn project(entries: &[Value]) -> Projection<'_> {
     for entry in entries.iter().filter(|entry| is_hook_notice(entry)) {
         let id = text(entry, "id");
         if let Some(effect) = steps.get(id)
-            && denial_reason(Some(effect), text(&entry["detail"], "hookName")).is_some()
+            && denial_reason(
+                Some(effect),
+                text(&entry["detail"], "hookName"),
+                entry["detail"]["status"] == "error",
+            )
+            .is_some()
         {
             projected.refused.insert(text(effect, "id"));
         }
@@ -205,18 +319,33 @@ fn tool_permission(detail: &Value, content: &str) -> &'static str {
 /// The line a hook notice is written as, or `None` when the window leaves it out.
 pub(crate) fn line(entry: &Value, steps: &HashMap<&str, &Value>) -> Option<String> {
     let detail = &entry["detail"];
+    let held = held_line(entry);
+    // A held call whose hooks the runtime cancelled: its start notice is the only trace of the call.
+    if hook_start(entry) {
+        return held
+            .filter(|_| {
+                steps
+                    .get(text(entry, "id"))
+                    .is_some_and(|step| std::ptr::eq(*step, entry))
+            })
+            .map(str::to_owned);
+    }
     if detail["kind"] != "hook_completed" {
         return None;
     }
     let content = text(detail, "content");
     let status = text(detail, "status");
+    // The person's Stop (or the turn's end) ended the call while it waited: never shown as a hook refusal.
+    if let Some(held) = held.filter(|_| status == "error") {
+        return Some(held.to_owned());
+    }
     let name = Some(text(detail, "hookName"))
         .filter(|n| !n.is_empty())
         .unwrap_or("Hook");
     let effect = steps.get(text(entry, "id")).copied();
     let pre_tool = detail["scope"] == "pre_tool";
     let reason = if pre_tool {
-        denial_reason(effect, name)
+        denial_reason(effect, name, status == "error").map(person_reason)
     } else {
         None
     };

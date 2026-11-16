@@ -9,19 +9,17 @@ use webkit2gtk::WebViewExt;
 
 /// Sends one bounded keyboard operation to this native view.
 /// # Errors
-/// Refuses unavailable or unfocused native views before any input.
+/// [`super::super::NOT_IN_FRONT`] for an inactive or hidden window; refuses unavailable or unfocusable views.
 pub fn send(view: &webkit2gtk::WebView, input: &Keyboard, sent: &AtomicBool) -> Result<(), String> {
     let widget: &gtk::Widget = view.upcast_ref();
     let top = widget
         .toplevel()
         .and_then(|top| top.downcast::<gtk::Window>().ok())
         .ok_or("Native keyboard has no app window. Open the browser pane and try again.")?;
-    if !top.is_active() || !widget.is_mapped() || !widget.is_visible() || !widget.is_child_visible()
-    {
-        return Err(
-            "Native keyboard needs the visible active browser pane. Open it and try again.".into(),
-        );
-    }
+    super::super::require_front(
+        widget.is_mapped() && widget.is_visible() && widget.is_child_visible(),
+        top.is_active(),
+    )?;
     widget.grab_focus();
     if !widget.has_focus() {
         return Err(

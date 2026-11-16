@@ -4,19 +4,19 @@ use super::*;
 #[test]
 fn safari_requires_the_containing_apps_release_version() {
     assert_eq!(
-        diagnose(true, true, Some(crate::version().into())).state,
+        diagnose(true, true, Some(crate::version().into()), false).state,
         AddonState::Connected
     );
     assert_eq!(
-        diagnose(true, true, Some("0.1.8".into())).state,
+        diagnose(true, true, Some("0.1.8".into()), false).state,
         AddonState::UpdateNeeded
     );
     assert_eq!(
-        diagnose(true, true, Some("65535.0.0".into())).state,
+        diagnose(true, true, Some("65535.0.0".into()), false).state,
         AddonState::Connected
     );
     assert_eq!(
-        diagnose(true, true, Some("unknown".into())).state,
+        diagnose(true, true, Some("unknown".into()), false).state,
         AddonState::UpdateNeeded
     );
 }
@@ -76,7 +76,7 @@ fn safari_connection_labels_and_actions_match_the_shared_browser_model() {
         (true, Some("0.1.5")),
         (true, Some(crate::version())),
     ] {
-        let actual = diagnose(true, on, version.map(str::to_owned));
+        let actual = diagnose(true, on, version.map(str::to_owned), false);
         let expected = super::super::addon::view_for(
             actual.state,
             "",
@@ -100,14 +100,23 @@ fn safari_has_a_separate_remove_command() {
 
 #[test]
 fn missing_off_unpaired_outdated_and_paired_remain_distinct() {
-    assert_eq!(diagnose(false, true, None).state, AddonState::Unavailable);
-    assert_eq!(diagnose(true, false, None).state, AddonState::SwitchedOff);
-    assert_eq!(diagnose(true, true, None).state, AddonState::NotPaired);
     assert_eq!(
-        diagnose(true, true, Some("0.1.5".into())).state,
+        diagnose(false, true, None, false).state,
+        AddonState::Unavailable
+    );
+    assert_eq!(
+        diagnose(true, false, None, false).state,
+        AddonState::SwitchedOff
+    );
+    assert_eq!(
+        diagnose(true, true, None, false).state,
+        AddonState::NotPaired
+    );
+    assert_eq!(
+        diagnose(true, true, Some("0.1.5".into()), false).state,
         AddonState::UpdateNeeded
     );
-    let paired = diagnose(true, true, Some(crate::version().into()));
+    let paired = diagnose(true, true, Some(crate::version().into()), false);
     assert_eq!(paired.state, AddonState::Connected);
     assert!(paired.instruction.contains("website permission"));
     assert!(paired.instruction.contains("read the page"));

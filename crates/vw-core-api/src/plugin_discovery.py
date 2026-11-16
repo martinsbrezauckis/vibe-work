@@ -115,21 +115,21 @@ def project(result, off=False):
         native_enabled = entry.status != "disabled"
         issues = [issue.message for issue in result.issues if issue.file.is_relative_to(plugin.root)]
         issues.extend(item.reason for item in result.unsupported_components if item.plugin_name == plugin.name)
-        if not native_enabled:
-            if plugin.name in config.config.disabled_plugins:
-                from vibe.core.plugins import PluginToggles
-                own = config.get_layer(UserConfigLayer.NAME).cached_data
-                switches = PluginToggles(config.config, getattr(own, "disabled_plugins", []) or [])
-                if switches.locked(plugin):
-                    issues.append("Off in Vibe and fixed by another config layer. Remove this name from disabled_plugins in that layer to enable it.")
-                else:
-                    issues.append("Off in Vibe: disabled_plugins. Remove this name from your Vibe config to enable it.")
-            else:
-                issues.append("Off by default in Vibe. Add this name to enabled_plugins to enable it.")
+        # Vibe's config is the one record of on/off: Turn on writes it. Only a switch the Tools page cannot
+        # write (another config layer or the environment) is named, so the person knows where to change it.
+        locked = False
+        if not native_enabled and plugin.name in config.config.disabled_plugins:
+            from vibe.core.plugins import PluginToggles
+            own = config.get_layer(UserConfigLayer.NAME).cached_data
+            switches = PluginToggles(config.config, getattr(own, "disabled_plugins", []) or [])
+            locked = switches.locked(plugin)
+            if locked:
+                issues.append("Off: set outside Vibe Work's Tools page (another Vibe config layer or VIBE_DISABLED_PLUGINS). Change it there.")
         rows.append({"name": plugin.name, "description": plugin.description,
                      "version": plugin.version, "author": plugin.author,
                      "path": str(plugin.root), "scope": plugin.scope.value,
-                     "off": off, "nativeEnabled": native_enabled, "available": not off and entry.status == "loaded", "components": components, "issues": issues,
+                     "off": off, "nativeEnabled": native_enabled, "locked": locked,
+                     "defaultOff": not plugin.default_enabled, "available": not off and entry.status == "loaded", "components": components, "issues": issues,
                      "servers": [{"name": item.source_id, "group": plugin_mcp_group_name(plugin.namespace, item.source_id)}
                                  for item in entry.mcp_servers if item.plugin_name == plugin.name]})
     return rows

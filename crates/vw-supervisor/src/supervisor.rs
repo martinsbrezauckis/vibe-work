@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
+use vw_platform::sync::LockRecover;
 
 use serde_json::Value;
 use tokio::sync::watch;
@@ -62,6 +63,9 @@ pub struct Supervisor {
     monitor: Mutex<Option<JoinHandle<()>>>,
     /// Serializes `launch_installed` (one first launch at a time).
     launching: tokio::sync::Mutex<()>,
+    /// The last stderr lines of a first start that failed (`launch_installed`), until a start works. Sensitive server
+    /// output (configured secrets already replaced): read only through [`Supervisor::start_failure_stderr`].
+    start_stderr: Mutex<Vec<String>>,
 }
 
 impl Drop for Supervisor {
@@ -106,6 +110,7 @@ impl Supervisor {
             shutdown,
             monitor: Mutex::new(Some(monitor)),
             launching: tokio::sync::Mutex::new(()),
+            start_stderr: Mutex::new(Vec::new()),
         })
     }
 
@@ -132,6 +137,7 @@ impl Supervisor {
             shutdown,
             monitor: Mutex::new(None),
             launching: tokio::sync::Mutex::new(()),
+            start_stderr: Mutex::new(Vec::new()),
         }
     }
 
@@ -159,40 +165,44 @@ impl Supervisor {
         }
         let canonical = canonical_executable(program)
             .ok_or_else(|| SupervisorError::ProgramNotUsable(program.to_path_buf()))?;
-        *self
-            .inner
-            .program
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = canonical;
+        *self.inner.program.lock_or_recover() = canonical;
         self.inner.state.send_replace(SupervisorState::Starting);
         match self.inner.launch(true).await {
             Ok(running) => {
+                self.start_stderr.lock_or_recover().clear();
                 self.inner.publish_ready(&running, 1, Vec::new());
                 let shutdown_rx = self.shutdown.subscribe();
                 let monitor = tokio::spawn(monitor(self.inner.clone(), running, shutdown_rx));
-                *self.monitor.lock().unwrap_or_else(PoisonError::into_inner) = Some(monitor);
+                *self.monitor.lock_or_recover() = Some(monitor);
                 info!("first server started after the install");
                 Ok(())
             }
             Err(error) => {
+                *self.start_stderr.lock_or_recover() = crate::launch::start_failure_stderr(&error);
                 self.inner
                     .state
                     .send_replace(SupervisorState::NotInstalled {
-                        reason: format!("Vibe was installed but did not start: {error}"),
+                        reason: format!(
+                            "Vibe was installed but did not start: {}",
+                            crate::launch::start_failure(&error)
+                        ),
                     });
                 Err(error)
             }
         }
     }
 
+    /// The last stderr lines of the first start that failed (empty once a start worked, or when the failure had no
+    /// server output). Sensitive: shown to the person and on the Debug API's `/server`, never logged.
+    #[must_use]
+    pub fn start_failure_stderr(&self) -> Vec<String> {
+        self.start_stderr.lock_or_recover().clone()
+    }
+
     /// The executable the supervisor spawns (canonical), or the configured one before a deferred launch.
     #[must_use]
     pub fn program(&self) -> PathBuf {
-        self.inner
-            .program
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.inner.program.lock_or_recover().clone()
     }
 
     /// The private adapter path this supervisor supplies to Python, for exact process ownership checks.
@@ -326,11 +336,7 @@ impl Supervisor {
     /// OS process id of the current server leader (diagnostics and tests).
     #[must_use]
     pub fn server_pid(&self) -> Option<u32> {
-        *self
-            .inner
-            .pid
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        *self.inner.pid.lock_or_recover()
     }
 
     /// Resumes a session on its own channel, publishing progress until it answers.
@@ -378,11 +384,7 @@ impl Supervisor {
         // Held while a deferred first launch runs, so a stop never races `launch_installed`.
         let _one = self.launching.lock().await;
         self.shutdown.send_replace(true);
-        let has_monitor = self
-            .monitor
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some();
+        let has_monitor = self.monitor.lock_or_recover().is_some();
         if !has_monitor {
             self.inner
                 .state
@@ -452,7 +454,7 @@ impl Supervisor {
 
 impl Inner {
     fn tracked(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
-        self.tracked.lock().unwrap_or_else(PoisonError::into_inner)
+        self.tracked.lock_or_recover()
     }
 
     fn new(
@@ -476,11 +478,7 @@ impl Inner {
 
     /// `first`: the first server of this supervisor, which gets the longer first-start handshake bound.
     async fn launch(&self, first: bool) -> Result<Running, SupervisorError> {
-        let program = self
-            .program
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let program = self.program.lock_or_recover().clone();
         launch::launch(
             &self.config,
             &program,

@@ -258,31 +258,19 @@ fn sniff(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// Standard base64 (RFC 4648, padding optional); `None` on any other character or an impossible length.
-/// Hand-written to keep the gate free of a new dependency for 30 lines.
+/// Standard base64 (RFC 4648 alphabet; canonical padding or none); `None` on any other text.
 fn decode(text: &str) -> Option<Vec<u8>> {
-    let body = text.trim_end_matches('=');
-    if text.len() - body.len() > 2 || body.len() % 4 == 1 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
-    let (mut acc, mut bits) = (0_u32, 0_u32);
-    for c in body.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return None,
-        };
-        acc = (acc << 6) | u32::from(v);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((acc >> bits) & 0xff).ok()?);
-        }
-        acc &= (1 << bits) - 1;
-    }
-    Some(out)
+    use base64::Engine as _;
+    use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+    const STANDARD: GeneralPurpose = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        GeneralPurposeConfig::new()
+            .with_decode_padding_mode(DecodePaddingMode::Indifferent)
+            .with_decode_allow_trailing_bits(true),
+    );
+    STANDARD.decode(text).ok()
 }
+
+#[cfg(test)]
+#[path = "content_decode_tests.rs"]
+mod decode_tests;

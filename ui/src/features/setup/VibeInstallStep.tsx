@@ -6,11 +6,15 @@
  * app update that replaces an older app-owned Vibe the install runs by itself and says which version it replaces.
  * Depends on: AppContext, state/vibeInstall, protocol types. Called by: SetupScreen.
  * Invariants: reads state only; every change goes through the install controller; links open in the system
- * browser through the host's link opener.
+ * browser through the host's link opener; a failure is said once by the app's announcer and its details open from a
+ * disclosure button.
  */
+import { useEffect, useState } from "react";
+
 import { Button } from "../../components/Controls";
 
 import type { ExistingView, InstallOffer, InstallPhase } from "../../protocol/core";
+import { announce } from "../../state/announcer";
 import { type Store, createStore, useStore } from "../../state/createStore";
 import type { VibeInstall, VibeUi } from "../../state/vibeInstall";
 import { useApp } from "../shell/AppContext";
@@ -53,6 +57,9 @@ function failText(phase: Extract<InstallPhase, { state: "failed" }>): string {
       return "Vibe Work could not write its install folder (disk space or permissions).";
     case "start":
       return "Vibe was installed but did not start. Try again keeps the install and only starts Vibe again.";
+    case "unsupported":
+      // The core's sentence names the version and what to do (wait for a Vibe Work update, or use its own Vibe).
+      return phase.error;
     default:
       return `"${phase.step}" did not finish.`;
   }
@@ -131,8 +138,15 @@ export function VibeInstallStep() {
   const view = useVibeUi((s) => s.view);
   const busy = useVibeUi((s) => s.busy);
   const problem = useVibeUi((s) => s.problem);
-  if (view === null) return null;
-  const phase = view.phase;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const phase = view?.phase ?? null;
+  // A failure is said once, assertively, by the app's announcer; its line below is kept out of the step's polite
+  // region (aria-live="off"), so it is not read twice.
+  const failure = phase?.state === "failed" ? failText(phase) : null;
+  useEffect(() => {
+    if (failure !== null) announce(failure, { assertive: true });
+  }, [failure]);
+  if (view === null || phase === null) return null;
   return (
     <div className="setup-step vibe-install" data-vibe={phase.state} aria-live="polite">
       {phase.state === "notInstalled" && (
@@ -199,15 +213,27 @@ export function VibeInstallStep() {
       )}
       {phase.state === "failed" && (
         <>
-          <p className="key-problem" role="alert">
+          <p className="key-problem" aria-live="off">
             {failText(phase)}
           </p>
-          <details>
-            <summary data-testid="setup.vibe-install-step-summary">Details</summary>
-            <pre className="vibe-tail">
+          {/* A disclosure button (WebKitGTK gives a <summary> no role or expanded state). */}
+          <Button
+            data-testid="setup.vibe-install-step-summary"
+            type="button"
+            appearance="expander"
+            aria-expanded={detailsOpen}
+            aria-controls="vibe-install-details"
+            onClick={() => {
+              setDetailsOpen((open) => !open);
+            }}
+          >
+            Details
+          </Button>
+          {detailsOpen && (
+            <pre className="vibe-tail" id="vibe-install-details">
               {[phase.error, phase.outputTail].filter((t) => t !== "").join("\n")}
             </pre>
-          </details>
+          )}
           <Button
             data-testid="setup.vibe-install-step-prepare-2"
             type="button"
@@ -215,7 +241,7 @@ export function VibeInstallStep() {
             disabled={busy}
             onClick={() => {
               // After a failed start the install is complete: Try again only starts Vibe again (no new review).
-              if (phase.kind === "start") void retryStart(vibe);
+              if (phase.kind === "start" || phase.kind === "unsupported") void retryStart(vibe);
               else void vibe?.prepare();
             }}
           >

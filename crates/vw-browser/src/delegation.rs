@@ -61,6 +61,12 @@ pub trait DelegationAuthorizer: Send + Sync {
         true
     }
 
+    /// Whether the page's chat delegates protected field values (Full access). Below it a visual capture is refused
+    /// while the page shows one (`protected_capture`); without an authorizer nothing is delegated.
+    fn protected_values_delegated(&self, _page_key: &str) -> bool {
+        false
+    }
+
     /// Persists a completed attempt's metadata. Test-only authorizers may keep receipts in session memory.
     ///
     /// # Errors
