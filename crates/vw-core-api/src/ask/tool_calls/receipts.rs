@@ -3,6 +3,7 @@
 //! Vibe carry the receipt into a running call of the receipt's own chat (`announced`).
 use super::announced::{self, Announcement, Origin};
 use super::{Calls, Shared, Value, json, names};
+use crate::approval_notice::Observation;
 use crate::paused_tools_gate;
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,7 +132,7 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
     // A finished browser request replays its retained answer: no second card, no repeated input.
     let (prepared, shown) = if let Some(answer) = replay {
         let replayed = Box::pin(std::future::ready(super::browser_requests::replay(answer)));
-        (Ok(Some(replayed as Execution)), false)
+        (Ok(Some(replayed as Execution)), Observation::default())
     } else {
         crate::approval_notice::observe(async {
             super::permission(shared, owner, source, call, tool, &prepared_args).await?;
@@ -147,9 +148,9 @@ pub(crate) async fn issue(shared: &Arc<Shared>, payload: &Value) -> Result<Value
             }
             return Err(refusal);
         }
-        Err(refusal) => Some(Box::pin(std::future::ready(Err(refusal))) as Execution),
+        Err(refusal) => Some(Box::pin(std::future::ready(shown.refusal(refusal))) as Execution),
     };
-    if shown {
+    if shown.approved {
         tools.one_ask.note_allowed(&[source, owner], call);
     }
     if let Some(launch) = restart {
@@ -509,8 +510,70 @@ mod decline_tests {
             .execution
             .expect("held refusal")
             .await;
-        assert!(result.unwrap_err().contains("the user declined"));
+        let result =
+            result.expect("a refused call keeps its typed outcome in the ordinary MCP result");
+        assert_eq!(
+            result["vwMcpResult"]["_meta"]["vwAskOutcome"],
+            json!({"type":"refused","by":"person","note":null})
+        );
+        assert_eq!(result["vwMcpResult"]["isError"], false);
+        assert!(
+            result["vwMcpResult"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("the user declined")
+        );
         assert!(take(shared, "s", "search", &mut args).is_err());
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    async fn stopping_a_tool_card_records_cancellation_instead_of_no() {
+        let f = crate::feature_test_core::Fixture::new().await;
+        f.load("s", &f.root.join("project"), &[], false);
+        let shared = &f.core.shared;
+        shared
+            .agent_tools
+            .as_ref()
+            .unwrap()
+            .table
+            .for_session("s")
+            .unwrap();
+        let owner = shared.clone();
+        let task = tokio::spawn(async move {
+            issue(
+                &owner,
+                &json!({"session_id":"s","tool_call_id":"stop-1",
+                "tool_name":"mcp_vw.search","tool_input":{"query":"needle"}}),
+            )
+            .await
+        });
+        let ask = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Some(ask) = f.core.asks().into_iter().next() {
+                    break ask;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        super::super::answer_by(
+            shared,
+            crate::Origin::Ui,
+            "s",
+            ask.id.strip_prefix("callback:").unwrap(),
+            &json!({"decision":{"type":"cancel_turn"}}),
+            vw_ask::AnsweredBy::Person,
+        )
+        .unwrap();
+        task.await.unwrap().unwrap();
+        let mut state = json!({"history":[]});
+        super::super::overlay(shared, "s", &mut state);
+        let card = &state["history"][0];
+        assert_eq!(card["vwAskOutcome"]["type"], "cancelled");
+        assert_eq!(card["state"]["status"], "cancelled");
+        assert_eq!(card["state"]["reason"], "the turn was stopped");
         f.finish().await;
     }
 

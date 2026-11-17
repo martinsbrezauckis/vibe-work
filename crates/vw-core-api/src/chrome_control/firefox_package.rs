@@ -1,8 +1,12 @@
-//! What Connect opens for the optional Firefox sharing add-on: the signed add-on file shipped in a release bundle,
-//! Firefox's Add-ons page, or a Mozilla listing. Depends on the Chrome Control config; called by `firefox_setup`.
-//! Invariant: Firefox is only ever handed the bundled file whose bytes match the release pin, `about:addons`, or an
-//! `https://addons.mozilla.org/` address; anything else is refused before a process starts.
+//! What Connect opens for Firefox sharing: the pinned bundled add-on (copied into Snap Firefox's readable folder
+//! when needed), Firefox's Add-ons page, or a Mozilla listing. Depends on setup and is called by `firefox_setup`.
+//! Invariant: every file address comes from bytes matching the release pin; other addresses are refused.
+#[cfg(target_os = "linux")]
+use super::setup;
 use super::setup::ChromeControlConfig;
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 
 /// Firefox's own add-on manager; development builds without the signed file keep it.
 pub(super) const ADDONS_PAGE: &str = "about:addons";
@@ -11,8 +15,8 @@ const DAMAGED: &str = "The signed Firefox add-on in Vibe Work's folder is missin
 const INVALID: &str =
     "The Firefox add-on listing is invalid. Use the signed Vibe Work add-on in Firefox Add-ons.";
 
-/// The bundled signed add-on's `file:` address when this build ships it; an error when its bytes are not the pinned ones.
-fn bundled(config: &ChromeControlConfig) -> Result<Option<String>, &'static str> {
+/// The bundled signed add-on when this build ships it; an error when its bytes are not the pinned ones.
+fn bundled(config: &ChromeControlConfig) -> Result<Option<(&Path, Vec<u8>)>, &'static str> {
     use sha2::{Digest, Sha256};
     let Some(path) = &config.firefox_addon else {
         return Ok(None);
@@ -22,11 +26,61 @@ fn bundled(config: &ChromeControlConfig) -> Result<Option<String>, &'static str>
     if format!("{:x}", Sha256::digest(&bytes)) != pin {
         return Err(DAMAGED);
     }
-    file_url(path).map(Some).ok_or(DAMAGED)
+    Ok(Some((path, bytes)))
 }
 
-fn file_url(path: &std::path::Path) -> Option<String> {
+fn file_url(path: &Path) -> Option<String> {
     url::Url::from_file_path(path).ok().map(String::from)
+}
+
+#[cfg(target_os = "linux")]
+fn snap_firefox(binary: &Path) -> bool {
+    use std::io::Read;
+    let mut path = binary.to_owned();
+    for _ in 0..8 {
+        if path.starts_with("/snap")
+            || matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("snap" | "snapd")
+            )
+        {
+            return true;
+        }
+        match std::fs::read_link(&path) {
+            Ok(next) => path = path.parent().map_or(next.clone(), |dir| dir.join(&next)),
+            Err(_) => break,
+        }
+    }
+    let mut head = Vec::new();
+    std::fs::File::open(&path)
+        .and_then(|file| file.take(4096).read_to_end(&mut head))
+        .is_ok()
+        && head.starts_with(b"#!")
+        && head
+            .windows(b"/snap/bin/firefox".len())
+            .any(|part| part == b"/snap/bin/firefox")
+}
+
+#[cfg(target_os = "linux")]
+fn snap_copy(config: &ChromeControlConfig, bytes: &[u8]) -> Result<PathBuf, &'static str> {
+    let pin = config.firefox_addon_sha256.as_deref().ok_or(DAMAGED)?;
+    let home = setup::home_of(config).map_err(|_| DAMAGED)?;
+    let path = home
+        .join("snap/firefox/common/vibe-work")
+        .join(pin)
+        .join("vibe-work.xpi");
+    match setup::files::matches(config, &path, bytes) {
+        Ok(true) => return Ok(path),
+        Ok(false) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(_) => return Err(DAMAGED),
+    }
+    setup::files::write(config, &path, None, bytes).map_err(|_| DAMAGED)?;
+    if setup::files::matches(config, &path, bytes).map_err(|_| DAMAGED)? {
+        Ok(path)
+    } else {
+        Err(DAMAGED)
+    }
 }
 
 /// Whether Firefox may be handed `target`: the exact bundled file, the Add-ons page, or a Mozilla listing.
@@ -40,20 +94,36 @@ pub(super) fn allowed(config: &ChromeControlConfig, target: &str) -> bool {
             .is_some_and(|exact| exact == target)
 }
 
-/// What Connect opens. `installed`: the add-on is already in Firefox at a current version, so its management page is
-/// the next step; otherwise the bundled signed file, which makes Firefox show its own install prompt.
-pub(super) fn target(config: &ChromeControlConfig, installed: bool) -> Result<String, String> {
+/// What Connect opens. An installed add-on opens its management page; otherwise the pinned signed file is offered
+/// through a path the selected Firefox can read, which makes Firefox show its own install prompt.
+pub(super) fn target_for(
+    config: &ChromeControlConfig,
+    installed: bool,
+    executable: Option<&Path>,
+) -> Result<String, String> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = executable;
     let fallback = || {
         config
             .firefox_store_url
             .clone()
             .unwrap_or_else(|| ADDONS_PAGE.to_owned())
     };
-    let target = if installed {
-        fallback()
-    } else {
-        bundled(config)?.unwrap_or_else(fallback)
-    };
+    if !installed && let Some((path, bytes)) = bundled(config)? {
+        #[cfg(target_os = "linux")]
+        let path = if executable.is_some_and(snap_firefox) {
+            snap_copy(config, &bytes)?
+        } else {
+            path.to_owned()
+        };
+        #[cfg(not(target_os = "linux"))]
+        let path = {
+            let _ = bytes;
+            path.to_owned()
+        };
+        return file_url(&path).ok_or_else(|| DAMAGED.to_owned());
+    }
+    let target = fallback();
     if allowed(config, &target) {
         Ok(target)
     } else {
@@ -62,7 +132,14 @@ pub(super) fn target(config: &ChromeControlConfig, installed: bool) -> Result<St
 }
 
 #[cfg(test)]
+fn target(config: &ChromeControlConfig, installed: bool) -> Result<String, String> {
+    target_for(config, installed, None)
+}
+
+#[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    use super::target_for;
     use super::{ADDONS_PAGE, allowed, target};
     use crate::chrome_control::setup::ChromeControlConfig;
     use sha2::{Digest, Sha256};
@@ -88,6 +165,55 @@ mod tests {
         url::Url::from_file_path(config.firefox_addon.as_ref().unwrap())
             .unwrap()
             .to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snap_firefox_gets_the_pinned_add_on_inside_its_readable_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = shipped(dir.path());
+        let home = dir.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        config.user_home = Some(home.clone());
+        let wrapper = dir.path().join("firefox");
+        std::fs::write(&wrapper, b"#!/bin/sh\nexec /snap/bin/firefox \"$@\"\n").unwrap();
+        let target = target_for(&config, false, Some(&wrapper)).unwrap();
+        let staged = url::Url::parse(&target).unwrap().to_file_path().unwrap();
+        assert_eq!(staged.file_name().unwrap(), "vibe-work.xpi");
+        assert!(
+            staged.starts_with(home.join("snap/firefox/common")),
+            "{target}"
+        );
+        assert_eq!(std::fs::read(staged).unwrap(), SIGNED);
+        assert_eq!(
+            target_for(&config, true, Some(&wrapper)).unwrap(),
+            ADDONS_PAGE
+        );
+        let native = dir.path().join("firefox-native");
+        std::fs::write(&native, b"\x7fELF").unwrap();
+        assert_eq!(
+            target_for(&config, false, Some(&native)).unwrap(),
+            file_url(&config)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snap_staging_refuses_changed_or_linked_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = shipped(dir.path());
+        let home = dir.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        config.user_home = Some(home);
+        let wrapper = dir.path().join("firefox");
+        std::fs::write(&wrapper, b"#!/bin/sh\nexec /snap/bin/firefox \"$@\"\n").unwrap();
+        let target = target_for(&config, false, Some(&wrapper)).unwrap();
+        let staged = url::Url::parse(&target).unwrap().to_file_path().unwrap();
+        std::fs::write(&staged, b"changed").unwrap();
+        assert!(target_for(&config, false, Some(&wrapper)).is_err());
+        std::fs::remove_file(&staged).unwrap();
+        std::os::unix::fs::symlink(config.firefox_addon.as_ref().unwrap(), &staged).unwrap();
+        assert!(target_for(&config, false, Some(&wrapper)).is_err());
     }
 
     #[test]

@@ -46,10 +46,9 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
   view.verb = chromeStepLabel(entry, view.verb);
   view.target = chromeStepLabel(entry, view.target);
   const video = videoView(entry);
-  if (video !== null) {
+  if (video !== null) view.target = video.source;
+  if (video !== null && !["declined", "skipped", "cancelled"].includes(view.status))
     view.verb = view.live ? "Reading video…" : "Video";
-    view.target = video.source;
-  }
   const state = stateClass(view);
   const label = `${open ? "Hide" : "Show"} details for ${view.verb} ${view.target}`;
   const outcome = chromeOutcome(entry);
@@ -76,7 +75,13 @@ export const StepItem = memo(function StepItem({ entry }: { entry: Obj }): React
           ) : view.durationMs !== null && view.durationMs >= 1 ? (
             formatElapsed(view.durationMs)
           ) : null}
-          <span className="sr">{view.status === "declined" ? "declined" : STATE_TEXT[state]}</span>
+          <span className="sr">
+            {view.status === "declined"
+              ? "declined"
+              : view.status === "skipped"
+                ? "not run"
+                : STATE_TEXT[state]}
+          </span>
         </span>
       </button>
       {outcome === null ? null : (

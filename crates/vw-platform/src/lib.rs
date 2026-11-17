@@ -100,7 +100,7 @@ pub use event_target::keep_event_target_on_close;
 #[cfg(target_os = "linux")]
 pub use exec_inherit::stop_descriptor_inheritance;
 pub use harden::{Hardening, harden_process, is_not_dumpable};
-pub use in_front::own_app_in_front;
+pub use in_front::{allow_foreground_handover, own_app_in_front};
 pub use notify::{DesktopNotifier, NotificationRequest, Notifier, NotifyError};
 pub use open_file::{
     OpenClass, OpenFileError, file_open_class, looks_like_program, open_class, open_file,

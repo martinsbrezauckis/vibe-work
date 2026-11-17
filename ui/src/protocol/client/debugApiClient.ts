@@ -147,6 +147,8 @@ export function createDebugApiClient(): CoreClient {
     pickFolder: () => unsupported("the folder picker works in the app, not in browser dev mode"),
     pickDocuments: () =>
       unsupported("the document picker works in the app, not in browser dev mode"),
+    pickAttachments: () =>
+      unsupported("the attach dialog works in the app, not in browser dev mode"),
     pickCertificate: () =>
       unsupported("the certificate picker works in the app, not in browser dev mode"),
     pickLibraryFiles: () =>

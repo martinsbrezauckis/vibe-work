@@ -4,6 +4,7 @@
  * Depends on: the drop router's item type. Called by: ComposerTools, Composer and the drop router.
  * Invariant: picker, paste and drop share byte-based routing; filenames only describe a refused type.
  */
+import type { PickedFile } from "../../protocol/client/types";
 import type { DocumentRefusalKind } from "../../protocol/core";
 import type { DroppedItem } from "./drop";
 
@@ -40,4 +41,18 @@ export function attachmentRefusal(
   if (!unsupported && !archive) return reason;
   const extension = /\.([a-z0-9]{1,20})$/i.exec(name)?.[1]?.toUpperCase();
   return `This ${extension ?? "binary"} file is not supported.${archive ? ` ${reason}` : ""} Supported: ${SUPPORTED}.`;
+}
+
+/** Adapts native picks to the byte router, preserving read failures for its named refusals. */
+export function pickedItems(files: readonly PickedFile[]): DroppedItem[] {
+  return files.map((file) => ({
+    name: file.name,
+    size: file.size,
+    folder: false,
+    bytes: () => {
+      if (file.data === null)
+        return Promise.reject(new Error("Picked file content is unavailable"));
+      return Promise.resolve(Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0)));
+    },
+  }));
 }

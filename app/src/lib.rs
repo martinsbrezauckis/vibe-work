@@ -40,6 +40,7 @@ mod in_front;
 mod instance;
 mod live_profile;
 mod notifications;
+mod picked_files;
 #[cfg(target_os = "macos")]
 mod send_to;
 mod setup;
@@ -251,6 +252,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::host_subscribe,
         commands::pick_folder,
         commands::pick_documents,
+        commands::pick_attachments,
         commands::pick_certificate,
         commands::pick_library_files,
         commands::export_page,

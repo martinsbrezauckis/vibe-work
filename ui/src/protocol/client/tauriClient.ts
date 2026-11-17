@@ -14,6 +14,7 @@ import {
   type CliSharingView,
   type CoreClient,
   type DocumentsPicked,
+  type PickedFile,
   type HandOverView,
   type HostEvent,
   type SendToView,
@@ -92,6 +93,7 @@ export function createTauriClient(): CoreClient {
     },
     pickFolder: (purpose = "work") => call<string | null>("pick_folder", { purpose }),
     pickDocuments: () => call<DocumentsPicked>("pick_documents", {}),
+    pickAttachments: () => call<PickedFile[]>("pick_attachments", {}),
     pickCertificate: () => call<string | null>("pick_certificate", {}),
     pickLibraryFiles: (libraryId: string) =>
       call<CommandResult>("pick_library_files", { libraryId }),

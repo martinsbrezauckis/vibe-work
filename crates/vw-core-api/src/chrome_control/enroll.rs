@@ -350,6 +350,7 @@ fn open_plain(shared: &Shared, caller: &'static str, browser: Browser, page: Pai
 /// page in its own profile's window, in front (`owner.pairingPage.open`); no profile folder is guessed. Without such
 /// an extension (none connected, an older extension or helper) the page opens through the browser as before.
 async fn open_paired_elsewhere(shared: &Arc<Shared>, caller: &'static str, browser: Browser) {
+    vw_platform::allow_foreground_handover();
     let answer = shared
         .chrome_control
         .owner

@@ -114,7 +114,7 @@ pub(super) fn plain_file(config: &ChromeControlConfig, path: &Path) -> io::Resul
 }
 
 /// Compares binary payloads through the checked parent without the registration JSON size limit.
-pub(super) fn matches(
+pub(in crate::chrome_control) fn matches(
     config: &ChromeControlConfig,
     path: &Path,
     expected: &[u8],
@@ -154,7 +154,7 @@ pub(super) fn read(config: &ChromeControlConfig, path: &Path) -> io::Result<Opti
 }
 
 /// Rechecks inspected contents immediately before replacement; creation never replaces an existing entry.
-pub(super) fn write(
+pub(in crate::chrome_control) fn write(
     config: &ChromeControlConfig,
     path: &Path,
     before: Option<&[u8]>,

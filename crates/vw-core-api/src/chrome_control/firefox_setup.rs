@@ -104,12 +104,14 @@ impl Core {
         let sharing = super::firefox_sharing::view(&self.shared);
         let installed =
             sharing.extension_version.is_some() && sharing.state != super::AddonState::UpdateNeeded;
-        let target = super::firefox_package::target(config, installed).map_err(|e| invalid(&e))?;
+        let executable = super::firefox_commands::executable();
+        let target = super::firefox_package::target_for(config, installed, executable.as_deref())
+            .map_err(|e| invalid(&e))?;
         let url = target.as_str();
         if let Some(launch) = &config.firefox_launcher {
             launch(url).map_err(|e| invalid(&e))?;
         } else {
-            let executable = super::firefox_commands::executable().ok_or_else(|| {
+            let executable = executable.ok_or_else(|| {
                 invalid("Firefox is missing. Install Mozilla Firefox, then try Connect again.")
             })?;
             let (program, args) = connect_launch(&executable, url, cfg!(target_os = "macos"));

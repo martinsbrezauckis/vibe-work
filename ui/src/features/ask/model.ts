@@ -250,7 +250,7 @@ export interface AuditLine {
 
 const NOTE_MAX = 80;
 
-/** The note part of a "Said No" row, cut to one line. */
+/** The note part of a declined row, cut to one line. */
 function notePart(note: string | null | undefined): { text: string; title?: string } {
   if (note === null || note === undefined || note.trim() === "") return { text: "" };
   const clean = note.replace(/\s+/g, " ").trim();
@@ -328,7 +328,7 @@ export function auditLine(
       const note = notePart(outcome.note);
       return {
         square: "warn",
-        text: `Said No: ${summary} · ${who}${note.text}`,
+        text: `Declined ${summary} · ${who}${note.text}`,
         ...(note.title === undefined ? {} : { title: note.title }),
       };
     }

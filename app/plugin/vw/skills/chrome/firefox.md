@@ -4,6 +4,8 @@ Adds to [actions.md](actions.md) (support table, shared contracts) for Vibe Work
 
 Your Firefox is Vibe Work's own Firefox window: the user opens it with Settings > Browser > Your Firefox > Open window, and the agent works only in that window. If it is closed or not connected, ask the user to open it there. The window closes when Vibe Work quits. If Open window fails, ask the user to close the old Firefox window and open it again. Each Open window starts with an empty Firefox profile: no site stays signed in from an earlier window, so sign in again with a vault login or hand the step to the user.
 
+The user's Firefox add-on only sends pages, links, images or selected text they share with **Ask Vibe Work**; it never hands over their tabs. Agent actions use Vibe Work's own window.
+
 | Topic | Firefox behaviour |
 |---|---|
 | Frames | Frame refs and `frameId` reach ordinary web frames. Sandboxed, `data:` and other opaque frames are refused with a reason; open their content in an owned tab instead |

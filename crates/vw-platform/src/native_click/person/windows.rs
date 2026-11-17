@@ -26,10 +26,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GA_ROOT, GUITHREADINFO, GetAncestor, GetCursorPos,
     GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowRect, GetWindowThreadProcessId,
-    HC_ACTION, IsChild, IsWindowVisible, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW,
-    TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, WindowFromPoint,
+    HC_ACTION, IsChild, IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
+    SetWindowsHookExW, TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEWHEEL,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
+    WindowFromPoint,
 };
 use windows::core::Interface;
 
@@ -177,9 +178,10 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         let message = u32::try_from(wparam.0).unwrap_or_default();
         let press = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
         if press || matches!(message, WM_KEYUP | WM_SYSKEYUP) {
-            // SAFETY: for HC_ACTION, Windows passes a valid KBDLLHOOKSTRUCT; only the key code is read, to let Tab and
-            // shortcuts pass the block. No keyboard content is collected.
-            let code = unsafe { (*(lparam.0 as *const KBDLLHOOKSTRUCT)).vkCode };
+            // SAFETY: for HC_ACTION, Windows passes a valid KBDLLHOOKSTRUCT; only key identity and shortcut bits
+            // are read. No keyboard content is collected.
+            let key = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+            let code = key.vkCode;
             // Alt (system keys) and the Windows key keep switching windows and opening the system's own shortcuts.
             let shortcut = matches!(message, WM_SYSKEYDOWN | WM_SYSKEYUP)
                 || code == u32::from(VK_LWIN.0)
@@ -187,6 +189,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 || down(VK_LWIN)
                 || down(VK_RWIN);
             let input = super::block::Input::Key {
+                code: (code << 16)
+                    | key.scanCode
+                    | (u32::from(key.flags.contains(LLKHF_EXTENDED)) << 15),
                 tab: code == u32::from(VK_TAB.0),
                 shortcut,
                 press,

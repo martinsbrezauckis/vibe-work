@@ -119,15 +119,16 @@ impl DynConfirmer {
                     Confirmation::Declined => crate::ask::refused(vw_ask::AnsweredBy::Person, None),
                 };
                 handle.finish(outcome);
-                let answer = as_confirmation(&handle.closed().await);
+                let outcome = handle.closed().await;
+                if let Some(notice) = notice {
+                    notice.record(&outcome);
+                }
+                let answer = as_confirmation(&outcome);
                 if matches!(
                     answer,
                     Confirmation::Approved | Confirmation::ApprovedAlways
                 ) {
                     record_delete(&deletes, &request);
-                    if let Some(notice) = notice {
-                        notice.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
                 }
                 answer
             }) as Asking
@@ -301,7 +302,7 @@ mod tests {
                 tokio::spawn(presented).await.unwrap()
             })
             .await;
-            assert_eq!(observed, shown);
+            assert_eq!(observed.approved, shown);
         }
         assert!(crate::approval_notice::capture().is_none());
     }

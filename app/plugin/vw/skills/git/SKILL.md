@@ -17,6 +17,7 @@ In Vibe Work the user sends work out with buttons in the Changes tab (also in th
 7. Pushing files, creating or merging pull requests, branches, issues, comments or repositories through a connector (GitHub tools) is the same step as `git push`: such calls answer `Not run:`. Reading through the connector works.
 8. `git commit -F <file>` with a long message shows the user a short command to confirm.
 9. A new copy has no installed dependencies; its setup hint names the install command. A file whose header says GENERATED or "do not edit" comes from a generator.
+   Vibe's `enter_worktree` makes a chat copy that Vibe Work shows; ending the chat offers Keep or Throw away. The Git tab lists the chat's pull requests with check status.
 10. Agent Bash commands run with `pipefail` on Linux; on macOS and Windows it is not guaranteed, so `check | tail` can report `tail`'s exit code there. With `pipefail`, a `| head` that stops reading early fails the command (exit 141).
 
 The command guards check literal command starts after assignments and a few transparent wrappers. They do not inspect scripts, aliases, quotes or computed commands: they are a reminder against accidental actions, not a sandbox.

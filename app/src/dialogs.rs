@@ -199,6 +199,21 @@ const DOCUMENT_TYPES: &[&str] = &[
     "tiff", "bmp", "avif",
 ];
 
+/// What the attach dialog shows: one title and one filter name on every OS, whichever route opens it (the paperclip
+/// and the document picker both use this; a dialog the webview draws itself cannot carry either).
+pub(crate) struct PickerSpec {
+    pub title: &'static str,
+    pub filter: &'static str,
+    pub types: &'static [&'static str],
+}
+
+/// The document picker's dialog.
+pub(crate) const DOCUMENTS_PICKER: PickerSpec = PickerSpec {
+    title: "Choose documents to send with your message",
+    filter: "Documents and images",
+    types: DOCUMENT_TYPES,
+};
+
 /// Which one-path dialog [`choose_one`] shows.
 enum Chooser {
     File,
@@ -266,11 +281,9 @@ async fn choose_files<R: Runtime>(
 /// Opens the native file picker for documents (several files allowed) and returns the chosen
 /// files; empty when cancelled. The webview supplies nothing.
 pub async fn pick_documents<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
-    choose_files(
-        app,
-        "Choose documents to send with your message",
-        |dialog| dialog.add_filter("Documents and images", DOCUMENT_TYPES),
-    )
+    choose_files(app, DOCUMENTS_PICKER.title, |dialog| {
+        dialog.add_filter(DOCUMENTS_PICKER.filter, DOCUMENTS_PICKER.types)
+    })
     .await
 }
 
@@ -358,6 +371,26 @@ pub async fn save_page<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<Pat
         dialog.set_file_name(name).add_filter("Web page", &["html"])
     })
     .await
+}
+
+#[cfg(test)]
+mod picker_spec_tests {
+    //! The attachment picker offers the same title, filter and supported file types.
+    use super::DOCUMENTS_PICKER;
+
+    #[test]
+    fn the_attach_dialog_names_its_title_and_filter_and_offers_images_and_documents() {
+        assert_eq!(
+            DOCUMENTS_PICKER.title,
+            "Choose documents to send with your message"
+        );
+        assert_eq!(DOCUMENTS_PICKER.filter, "Documents and images");
+        for kind in [
+            "pdf", "docx", "pptx", "xlsx", "csv", "txt", "md", "png", "jpg",
+        ] {
+            assert!(DOCUMENTS_PICKER.types.contains(&kind), "{kind}");
+        }
+    }
 }
 
 #[cfg(test)]

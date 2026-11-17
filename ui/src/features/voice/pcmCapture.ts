@@ -117,7 +117,9 @@ async function tap(
 }
 
 /** The real capture: an AudioContext at 16 kHz with the tap, then `getUserMedia` on `open`. */
-export const prepareCapture: PrepareCapture = async () => {
+export const prepareCapture = async ({
+  processing = true,
+}: { processing?: boolean } = {}): Promise<PreparedCapture> => {
   const context = new AudioContext({ sampleRate: 16_000 });
   let deliver: (block: Float32Array) => void = () => undefined;
   let node: AudioNode;
@@ -140,8 +142,9 @@ export const prepareCapture: PrepareCapture = async () => {
           audio: {
             ...(deviceId === null ? {} : { deviceId: { exact: deviceId } }),
             channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
+            echoCancellation: processing,
+            noiseSuppression: processing,
+            ...(processing ? {} : { autoGainControl: false }),
           },
         })
         .catch((thrown: unknown) => {

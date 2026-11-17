@@ -19,6 +19,7 @@
     "allow-host-subscribe",
     "allow-pick-folder",
     "allow-pick-documents",
+    "allow-pick-attachments",
     "allow-pick-certificate",
     "allow-pick-library-files",
     "allow-export-page",

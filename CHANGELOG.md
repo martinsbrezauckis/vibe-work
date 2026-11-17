@@ -2,6 +2,18 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.13 (2026-11-17)
+
+Built for Vibe 3.1.2 on Python 3.14.8.
+
+- **Approval cards** always show.
+- **Mac dictation** hears you clearly.
+- **Firefox page sharing** works with Ubuntu's Snap Firefox.
+- **Saved PDFs** show only the page.
+- **Pull request cards** work for branches from a fork.
+- **Chrome and Edge extension 0.1.13**: record a page as a video, reopen a closed tab, date and colour fields, drag and hold.
+- Security and smaller fixes.
+
 ## 0.1.12 (2026-11-17)
 
 Built for Vibe 3.1.2 on Python 3.14.8.

@@ -27,7 +27,7 @@
 | `insert_text`, `focus`, `blur` | `{ref, text}` / `{ref}` | Insert: at the selection, no key events, keeps surrounding text, reads the value back; focus/blur verify focus. Password and other secret fields remain unavailable |
 | `select` | `{ref, value}` or `{ref, values}` | Multiple native options; `values: []` clears them |
 | `upload` | `{ref, paths}` | Files from this chat's folders; `paths: []` clears selected files; file pickers never open for you |
-| `form` | `{fields: [{action:"type",ref,text}, {action:"select",ref,value}, {action:"check",ref,checked}]}` | 1–16 fields, all checked first, each read back; a failure stops later fields. Submission is separate. The call uses the highest shared access requirement of its fields |
+| `form` | `{fields: [{action:"type",ref,text}, {action:"select",ref,value}, {action:"check",ref,checked}, {action:"uncheck",ref}]}` | 1–16 fields, all checked first, each read back; a failure stops later fields. Submission is separate. The call uses the highest shared access requirement of its fields |
 | `wait` | `selector` or `ref` + `state: attached\|detached\|visible\|hidden`, or `text`, exact `url`, `load: interactive\|complete`; `timeoutMs` 1–15000; `ms` 1–10000 = plain delay | Receipt says whether the condition was observed; selectors: main document; refs keep frame/node |
 | `scroll`, `scroll_position` | `x`/`y` deltas, or `direction` (incl. left/right) + `amount`; `{ref}` alone scrolls it into view | Ref = that pane, else document; `scroll_position` reads offsets only. Receipt: offsets, extents, edges, movement |
 | `move`, `resolve_point` | `{x,y}` of the latest observation or `{ref}` | `move`: native pointer, no button; `resolve_point`: target under a point (ref, bounds), no input. Node, frame, geometry and hit target must still match (canvas/SVG too) |
@@ -71,7 +71,7 @@ Ask: ordinary GET downloads need no approval; saving with `files.save_download` 
 | `window.focus`, `window.close` | `{windowId}` | Window actions run in Ask, retain Stop and ownership checks, and never target another chat. The engine limits live windows; close one to free a slot |
 | `window.list` | | Focus, visibility, size of this chat's windows |
 | `window.resize` | `{windowId, width, height}` | 400–4096 × 300–4096 content px; main app window ids refuse |
-| `capture.screenshot` | `{ref?}` or `{clip?: {x, y, width, height}}` (CSS px) | PNG of one visible element or rectangle; neither = viewport. Scroll offscreen elements into view first. The usual vault screenshot restrictions apply |
+| `capture.screenshot` | `{ref?}` or `{clip?: {x, y, width, height}}` (CSS px) | PNG of one visible element or rectangle; neither = viewport. Scroll offscreen elements into view first. The usual vault screenshot restrictions apply. Below Full access, a capture that would show a protected value is refused. |
 
 `file:` navigation: one PDF, HTML or image from the chat's first folder, ≤32 MiB. The built-in browser grants the selected document only; other local paths and linked local resources remain unavailable. `document_read` reads a saved PDF when the viewer shows no text.
 

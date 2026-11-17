@@ -18,7 +18,7 @@
 //!
 //! Depends on: std only. Called by: the platform watches in `person` (Linux, macOS, Windows).
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 /// Answers whether the view is blocked right now. Called on the view's input thread for every event, so it must
 /// be cheap and never block.
@@ -53,6 +53,8 @@ pub enum Input {
     Wheel,
     /// A key press or release.
     Key {
+        /// The platform's key code, unchanged between a press and its release.
+        code: u32,
         /// Tab or Shift+Tab.
         tab: bool,
         /// A system or app shortcut (Alt / Windows key on Windows, Command on macOS).
@@ -65,10 +67,10 @@ pub enum Input {
 }
 
 /// What one view remembers between events: whether the page saw the current pointer press and key presses.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Held {
     pointer_swallowed: bool,
-    key_swallowed: bool,
+    keys: HashMap<u32, bool>,
 }
 
 /// Whether to swallow `input` given whether the view is blocked now; updates `held` for the matching release.
@@ -82,12 +84,26 @@ pub fn swallow(blocked: bool, input: Input, held: &mut Held) -> bool {
         Input::Release => std::mem::take(&mut held.pointer_swallowed),
         Input::Motion => blocked || held.pointer_swallowed,
         Input::Wheel => blocked,
-        Input::Key { tab: true, .. } | Input::Key { shortcut: true, .. } | Input::Other => false,
-        Input::Key { press: true, .. } => {
-            held.key_swallowed |= blocked;
-            blocked
+        Input::Key {
+            code,
+            tab,
+            shortcut,
+            press: true,
+        } => {
+            let swallowed = blocked && !tab && !shortcut;
+            let original = held.keys.entry(code).or_insert(swallowed);
+            swallowed || *original
         }
-        Input::Key { press: false, .. } => blocked || std::mem::take(&mut held.key_swallowed),
+        Input::Key {
+            code,
+            tab,
+            shortcut,
+            press: false,
+        } => held
+            .keys
+            .remove(&code)
+            .unwrap_or(blocked && !tab && !shortcut),
+        Input::Other => false,
     }
 }
 
@@ -98,7 +114,12 @@ mod tests {
     use super::{Held, Input, refused_press, swallow};
 
     fn key(press: bool) -> Input {
+        key_code(1, press)
+    }
+
+    fn key_code(code: u32, press: bool) -> Input {
         Input::Key {
+            code,
             tab: false,
             shortcut: false,
             press,
@@ -146,6 +167,7 @@ mod tests {
                 assert!(!swallow(
                     true,
                     Input::Key {
+                        code: 1,
                         tab,
                         shortcut,
                         press
@@ -205,5 +227,52 @@ mod tests {
         assert!(swallow(true, key(true), &mut held));
         assert!(swallow(false, key(false), &mut held));
         assert!(!swallow(false, key(false), &mut held));
+    }
+
+    #[test]
+    fn a_key_pressed_before_the_block_keeps_its_release() {
+        let mut held = Held::default();
+        assert!(!swallow(false, key(true), &mut held));
+        assert!(
+            !swallow(true, key(false), &mut held),
+            "the page must see the release of a press it saw before Working"
+        );
+    }
+
+    #[test]
+    fn simultaneous_keys_keep_their_own_release_dispositions() {
+        let mut held = Held::default();
+        assert!(!swallow(false, key(true), &mut held));
+        assert!(swallow(true, key_code(2, true), &mut held));
+        assert!(swallow(false, key_code(2, false), &mut held));
+        assert!(!swallow(true, key(false), &mut held));
+    }
+
+    #[test]
+    fn repeated_keydown_does_not_change_where_the_release_goes() {
+        let mut held = Held::default();
+        assert!(!swallow(false, key(true), &mut held));
+        assert!(swallow(true, key(true), &mut held));
+        assert!(!swallow(true, key(false), &mut held));
+
+        assert!(swallow(true, key(true), &mut held));
+        assert!(swallow(false, key(true), &mut held));
+        assert!(swallow(false, key(false), &mut held));
+    }
+
+    #[test]
+    fn a_release_without_a_recorded_press_uses_the_current_block() {
+        let mut held = Held::default();
+        assert!(!swallow(false, key(false), &mut held));
+        assert!(swallow(true, key(false), &mut held));
+    }
+
+    #[test]
+    fn two_views_keep_their_key_releases_independent() {
+        let (mut first, mut second) = (Held::default(), Held::default());
+        assert!(!swallow(false, key(true), &mut first));
+        assert!(swallow(true, key(true), &mut second));
+        assert!(swallow(false, key(false), &mut second));
+        assert!(!swallow(true, key(false), &mut first));
     }
 }

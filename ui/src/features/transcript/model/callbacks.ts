@@ -14,7 +14,7 @@
 import { toolFallback, toolText } from "./toolLabels";
 import type { JsonValue } from "../../../protocol/core";
 import { term } from "../../../vocabulary";
-import { type Obj, arr, detailOf, obj, stateOf, str } from "./entries";
+import { type Obj, arr, detailOf, obj, stateOf, str, personRefusal } from "./entries";
 
 /** Vibe's approval decisions plus the app-owned vault duplicate choice. */
 const DECISIONS = [
@@ -34,8 +34,8 @@ const DECISION_DONE: Record<Decision, string> = {
   approve: "Allowed once",
   approve_for_session: "Allowed for this chat",
   approve_permanently: "Always allowed",
-  deny: "Said No",
-  cancel_turn: "Stopped",
+  deny: "Not allowed",
+  cancel_turn: "Declined",
   keep_both: "Kept both",
 };
 
@@ -215,6 +215,11 @@ export function auditText(
   if (status === "cancelled" || status === "expired") {
     const word = status === "cancelled" ? "Closed" : "No answer in time";
     const reason = str(state["reason"]);
+    if (
+      status === "cancelled" &&
+      ["Turn interrupted", "client interrupt", "the turn was stopped"].includes(reason ?? "")
+    )
+      return `Stopped ${summary}`;
     return `${word}: ${summary}${reason !== null && reason !== "" ? ` (${reason})` : ""}`;
   }
   if (status !== "answered") return `${summary}: ${status || "unknown state"}`;
@@ -230,11 +235,12 @@ export function auditText(
   const decision = obj(output["decision"])?.["type"];
   if (allowed?.scope === "session" && allowed.by === "grant")
     return `${DECISION_DONE.approve_for_session} (your earlier answer): ${summary}`;
-  const done =
-    allowed?.scope === "session"
+  const done = personRefusal(entry["vwAskOutcome"])
+    ? "Declined"
+    : allowed?.scope === "session"
       ? DECISION_DONE.approve_for_session
       : isDecision(decision)
         ? DECISION_DONE[decision]
         : "Answered";
-  return `${done}: ${summary} · ${answeredBy(related, via, origin)}`;
+  return `${done}${done === "Declined" ? " " : ": "}${summary} · ${answeredBy(related, via, origin)}`;
 }

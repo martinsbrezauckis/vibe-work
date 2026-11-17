@@ -10,10 +10,10 @@ const made = await tools.mcp_vw.image_generate({ prompt: "A flat icon of an oran
 // made.path is like "images/boat-icon.png" (in the chat folder)
 ```
 
-An edit of that image, in a later call:
+An edit in a later program uses the path returned by the first call:
 
 ```ts
-const changed = await tools.mcp_vw.image_generate({ prompt: "Make the boat green, keep everything else", edit: made.path });
+const changed = await tools.mcp_vw.image_generate({ prompt: "Make the boat green, keep everything else", edit: "images/boat-icon.png" });
 ```
 
 1. Each image is billed on the user's Mistral key. Vibe Work's tool card may ask before use, depending on the chat's access mode; there is no second image-specific cost dialog.

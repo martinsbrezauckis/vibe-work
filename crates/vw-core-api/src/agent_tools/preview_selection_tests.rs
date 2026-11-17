@@ -107,9 +107,12 @@ async fn core(name: &str) -> (crate::Core, String, std::net::TcpListener) {
     let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = server.local_addr().unwrap().port();
     let core = crate::offline_core::start_with(name, |config, dir| {
+        let mut preview = vw_preview::PreviewConfig::new(dir.join("preview"));
+        // Needs two slots even on the 7 GiB macOS CI host.
+        preview.memory_probe = Some(Arc::new(|| (Some(8), Some(4000))));
         config.preview = Some(crate::PreviewSetup {
             engine: Arc::new(Engine),
-            config: vw_preview::PreviewConfig::new(dir.join("preview")),
+            config: preview,
             guard: None,
         });
     })

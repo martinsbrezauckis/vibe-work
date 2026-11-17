@@ -92,14 +92,17 @@ impl Core {
                         .unwrap_or(false)
                 } =>
             {
-                let (on, branch) = (forge.clone(), head.clone());
+                let (on, branch, root) = (forge.clone(), head.clone(), place.root.clone());
                 match blocking(move || {
-                    let mut card = gh.view(&on, &branch)?;
-                    // Which checks are required: a failed read leaves every check counted as required.
-                    if let Some(card) = card.as_mut()
-                        && let Ok(names) = gh.required_checks(&on, card.number)
-                    {
-                        vw_git::pr_status::mark_required(card, &names);
+                    let selector = vw_git::gh::head_for_branch(&root, &on, &branch)?;
+                    let mut card = gh.view(&on, &selector)?;
+                    if let Some(card) = card.as_mut() {
+                        // The standalone card belongs to this local checkout, even when gh renamed its branch.
+                        card.head.clone_from(&branch);
+                        // A failed read leaves every check counted as required.
+                        if let Ok(names) = gh.required_checks(&on, card.number) {
+                            vw_git::pr_status::mark_required(card, &names);
+                        }
                     }
                     Ok::<_, vw_git::GitError>(card)
                 })

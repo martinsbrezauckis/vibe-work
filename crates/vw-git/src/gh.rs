@@ -22,6 +22,10 @@ use crate::forge::Forge;
 use crate::names;
 use crate::pr::{self, PrCard, ReviewComment};
 
+#[path = "gh_head.rs"]
+mod head;
+pub use head::head_for_branch;
+
 /// The JSON fields the card reads.
 pub const VIEW_FIELDS: &str = "number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefName,baseRefName";
 
@@ -313,12 +317,16 @@ impl Gh {
             .ok_or_else(|| GitError::Gh(format!("unexpected answer: {}", clip(&stdout, 200))))
     }
 
-    /// The card of the newest pull request whose head is `head` (`None` when there is none).
+    /// The card for a head (`owner:branch` for a fork), or a pull request number (`None` when absent).
     ///
     /// # Errors
     /// gh failures other than "no pull requests found".
     pub fn view(&self, forge: &Forge, head: &str) -> Result<Option<PrCard>, GitError> {
-        if !names::valid_ref_name(head) {
+        let valid = head.split_once(':').map_or_else(
+            || names::valid_ref_name(head),
+            |(owner, branch)| names::valid_ref_name(owner) && names::valid_ref_name(branch),
+        );
+        if !valid {
             return Err(GitError::Blocked(
                 "The branch name cannot be used with gh.".to_owned(),
             ));

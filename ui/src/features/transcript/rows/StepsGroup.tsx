@@ -124,7 +124,9 @@ function Audit({ entry, related }: { entry: Obj; related: Obj | null }): ReactEl
   const receiptOrigin = by === "debugApi" ? "debug-api" : by === "person" ? "ui" : undefined;
   const text = auditText(entry, related, via, receiptOrigin ?? origin);
   const line = fromRecord ?? {
-    square: /^(Said No|Closed|No answer|Stopped|Question skipped)/.test(text) ? "warn" : "ok",
+    square: /^(Declined|Not allowed|Closed|No answer|Stopped|Question skipped)/.test(text)
+      ? "warn"
+      : "ok",
     text,
   };
   return <AuditText line={line} callbackId={callbackId} entryId={entryId(entry)} />;

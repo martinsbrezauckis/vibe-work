@@ -6,9 +6,9 @@ Safari's embedded extension follows the app release version. Pairing: the user c
 
 | Topic | Safari behaviour |
 |---|---|
-| Limits | Frame ids are unusable: read and act in the top document. Popups the page opens are not adopted; open the popup's address in an owned tab or ask the user. New tabs open inactive (`tabs.create` gives `active:false`). Captures, screenshots and recordings work only on the active tab |
+| Limits | Use `frameId` from `page.read` for a permitted HTTP(S) child frame; read it before using its refs. Popups opened from the agent's own tab are adopted when the opener is verified; other popups: open the address in an owned tab or ask the user. New tabs open inactive (`tabs.create` gives `active:false`). Captures, screenshots and recordings work only on the active tab |
 | Table export | A long table export can stop early (17 of 41 rows in testing): compare the receipt's row count with the page and report missing rows |
-| Media | Autoplay policy refuses `media.play`; pause, seek, mute and `media.read` work |
+| Media | `media.play` may refuse sound without a user gesture. A native `page.click` on Play or `media.mute` then `media.play` can work; read back the state |
 | Leave page | A "Leave page?" sheet blocks the session and cannot be answered by the agent: ask the user to choose Leave Page in Safari |
 | Native input | Native keys, shortcuts and pointer input need the Accessibility permission the user grants Vibe Work; keys are verified with the ABC and U.S. layouts. A brief input marker shows without changing focus; capture removes it; handover to the user, Stop and chat close wait for its removal; it is excluded from page text |
 | Forms | Custom numeric datepicker formats from the widget on Safari 18.4+ (`dateFormatChecked`). Native date/time/number/color/range setters, text regions and checkable controls return observed values/states; DOM input is synthetic; visible hit, enabled/inert state and stable geometry are checked first. `page.read {selector}` and `page.select {values}` as in Firefox. `page.scroll` takes a current ref and returns pane movement and boundaries |

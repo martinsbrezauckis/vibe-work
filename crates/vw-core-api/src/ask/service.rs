@@ -407,6 +407,9 @@ impl Handle {
     pub(crate) async fn closed(&mut self) -> Outcome {
         loop {
             if let Some(outcome) = self.reply.borrow_and_update().clone() {
+                if let Some(notice) = crate::approval_notice::capture() {
+                    notice.record(&outcome);
+                }
                 return outcome;
             }
             if self.reply.changed().await.is_err() {

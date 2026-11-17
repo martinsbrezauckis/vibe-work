@@ -53,7 +53,7 @@ function protectedAudit(
       return (
         auditLine(record, summary, via) ?? {
           square: "warn",
-          text: `Said No: ${summary} · ${whoAnswered(record, via)}`,
+          text: `Declined ${summary} · ${whoAnswered(record, via)}`,
         }
       );
     case "failed":

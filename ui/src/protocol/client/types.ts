@@ -26,6 +26,14 @@ export interface DocumentsPicked {
   refused: DocumentRefusal[];
 }
 
+/** One file the native attach dialog returned (`picked_files::PickedFile`): never a path. */
+export interface PickedFile {
+  name: string;
+  size: number;
+  /** Base64 content; `null` when the file is over the documents limit or could not be read. */
+  data: string | null;
+}
+
 /** A failed core call. */
 export class CoreCallError extends Error {
   /** The structured error from the core (or synthesized for transport failures). */
@@ -192,6 +200,11 @@ export interface CoreClient {
    * webview) and adds the chosen files to the core. Unsupported in browser dev mode.
    */
   pickDocuments(): Promise<DocumentsPicked>;
+  /**
+   * Opens the same native attach dialog (one title and filter on every OS) and returns the chosen files as name, size
+   * and bytes for the composer's own router; empty when cancelled. Unsupported in browser dev mode.
+   */
+  pickAttachments(): Promise<PickedFile[]>;
   /**
    * Opens the native file picker for the company's certificate file (Settings > Network; Rust owns the dialog) and
    * returns the chosen path, or `null` when cancelled. The path is not a secret; the core checks the file when the

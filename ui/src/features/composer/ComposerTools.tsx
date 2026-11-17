@@ -38,6 +38,10 @@ export interface ToolsProps {
   onModel: (alias: string) => void;
   onEffort: (level: string) => void;
   onFiles: (files: File[]) => void;
+  /**
+   * Opens the native attach dialog and routes its files. Without a native picker, the browser file input opens.
+   */
+  onNativePick?: () => Promise<void>;
   /** The microphone button; absent: none. */
   mic?: ReactNode;
   /** The open-tab context picker. */
@@ -125,7 +129,10 @@ export function ComposerTools(p: ToolsProps): ReactElement {
         className="ibtn"
         aria-label={ATTACH_LABEL}
         title={ATTACH_LABEL}
-        onClick={() => picker.current?.click()}
+        onClick={() => {
+          if (p.onNativePick) void p.onNativePick();
+          else picker.current?.click();
+        }}
       >
         <Icon name="paperclip" />
       </button>

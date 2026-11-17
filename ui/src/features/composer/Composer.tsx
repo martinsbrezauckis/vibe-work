@@ -24,8 +24,9 @@ import { GO_TO_PROMPT_KEYS, goToWaitingPrompt, promptsOf, waitingPrompts } from 
 import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/Controls";
+import { toCallError } from "../../protocol/client/types";
 import { droppedItems, runDrop } from "../files/drop";
-import { fileItems } from "../files/attachments";
+import { fileItems, pickedItems } from "../files/attachments";
 import { registerComposerFocus } from "../../state/composerFocus";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { useStore } from "../../state/createStore";
@@ -475,6 +476,18 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           onModel={(alias) => void actions.pickModel(sessionId, alias)}
           onEffort={(level) => void actions.pickModel(sessionId, undefined, level)}
           onFiles={(files) => void runDrop(app, sessionId, fileItems(files), "ui")}
+          {...(core.client.kind === "tauri"
+            ? {
+                onNativePick: async () => {
+                  try {
+                    const files = await core.client.pickAttachments();
+                    if (files.length > 0) await runDrop(app, sessionId, pickedItems(files), "ui");
+                  } catch (error) {
+                    composer.note(sessionId, toCallError(error).error.message);
+                  }
+                },
+              }
+            : {})}
           onSend={() => {
             if (!readOnly && key === null) void actions.send(sessionId, "send");
           }}

@@ -38,6 +38,15 @@ export function arr(value: JsonValue | undefined): readonly JsonValue[] {
   return Array.isArray(value) ? value : [];
 }
 
+/** A confirmed No from a person or their explicit control, never a policy denial. */
+export function personRefusal(value: JsonValue | undefined): boolean {
+  const outcome = obj(value);
+  return (
+    outcome?.["type"] === "refused" &&
+    ["person", "voice", "debugApi"].includes(str(outcome["by"]) ?? "")
+  );
+}
+
 /** Vibe's explicit authorization failure; never infer sign-in from arbitrary error prose. */
 export function mcpSignInRequired(entry: Obj): boolean {
   const state = stateOf(entry);
@@ -181,16 +190,38 @@ export function effectView(entry: Obj): EffectView {
   const live = effectLive(entry);
   const toolName = str(detail["toolName"]) ?? str(entry["title"]) ?? "";
   const skipped = statusOf(entry) === "skipped" || state["decision"] === "skip";
-  const status = !live && skipped && toolName.startsWith("mcp_vw.") ? "declined" : statusOf(entry);
+  // A confirmed No survives success-shaped MCP results; Vibe's own No records approval cancellation.
+  const outcome = toolName.startsWith("mcp_vw.")
+    ? obj(obj(state["output"])?.["_meta"])?.["vwAskOutcome"]
+    : undefined;
+  const declined =
+    personRefusal(outcome) ||
+    (skipped && state["approvalType"] === "ask" && state["approvalSource"] === "user") ||
+    (statusOf(entry) === "cancelled" && state["reason"] === "approval cancel_turn");
+  const status = live
+    ? statusOf(entry)
+    : declined
+      ? "declined"
+      : skipped
+        ? "skipped"
+        : statusOf(entry);
   const label = live ? liveLabel(call) : settledLabel(call, settled);
-  if (!live && skipped) label.verb = status === "declined" ? "Declined" : "Stopped";
+  if (!live) {
+    if (status === "declined") label.verb = "Declined";
+    else if (status === "skipped") label.verb = "Not run";
+    else if (status === "cancelled") label.verb = "Stopped";
+  }
   // unified Vibe labels connector tool steps with the raw name (`connector_linear.list_issues`);
   // show "Linear: list issues" instead.
   const { verb } = label;
   const target =
     connectorToolLabel(toolName) ??
     toolText(toolName, label.target, str(obj(detail["input"])?.["command"]));
-  const success = settled === null ? null : settled["success"] === true;
+  const success = ["declined", "skipped"].includes(status)
+    ? false
+    : settled === null
+      ? null
+      : settled["success"] === true;
   const errorObj = obj(state["error"]);
   const error = mcpSignInRequired(entry)
     ? TEXT.connectorSignInRequired

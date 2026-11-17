@@ -36,7 +36,7 @@ import {
 } from "./entries";
 import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
-import { settledEntry } from "./settled";
+import { declinedEffects, settledEntry } from "./settled";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
 const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
@@ -329,11 +329,13 @@ function blockRows(
 export function buildRows(history: readonly JsonValue[], turns: readonly JsonValue[]): Row[] {
   const entries = dedupe(history);
   const table = turnTable(turns);
+  const declined = declinedEffects(entries);
   const settled = entries.map((entry) => {
     const turnId = turnIdOf(entry) ?? turnAt(table, createdAt(entry));
     const turn = turnId === null ? undefined : table.get(turnId);
     const status = turn?.turn["status"];
-    if (status === "interrupted" || status === "failed") entry = settledEntry(entry, status);
+    if (declined.has(entryId(entry))) entry = settledEntry(entry, "declined");
+    else if (status === "interrupted" || status === "failed") entry = settledEntry(entry, status);
     if (
       entryType(entry) !== "checkpoint" ||
       entry["kind"] !== "compaction" ||

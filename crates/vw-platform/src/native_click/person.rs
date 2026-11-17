@@ -25,7 +25,7 @@ fn recent_from(interval: Option<Duration>) -> Duration {
 mod linux {
     use gdk::prelude::*;
     use gtk::prelude::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     thread_local! {
         static OWN_INPUT: Cell<bool> = const { Cell::new(false) };
@@ -48,15 +48,13 @@ mod linux {
         blocked: super::block::Blocked,
         refused: super::block::Refused,
     ) {
-        let held = Cell::new(super::block::Held::default());
+        let held = RefCell::new(super::block::Held::default());
         view.connect_event(move |_, event| {
             if OWN_INPUT.with(Cell::get) {
                 return glib::Propagation::Proceed;
             }
             let input = classify(event);
-            let mut state = held.get();
-            let swallowed = super::block::swallow(blocked(), input, &mut state);
-            held.set(state);
+            let swallowed = super::block::swallow(blocked(), input, &mut held.borrow_mut());
             if super::block::refused_press(swallowed, input) {
                 refused();
             }
@@ -93,6 +91,7 @@ mod linux {
             | gdk::EventType::TouchpadPinch => Input::Wheel,
             // GTK handles the window's accelerators before the view sees a key, so no key here is a shortcut.
             kind @ (gdk::EventType::KeyPress | gdk::EventType::KeyRelease) => Input::Key {
+                code: u32::from(event.keycode().unwrap_or_default()),
                 tab: event.keyval().is_some_and(|key| {
                     key == *gdk::keys::constants::Tab || key == *gdk::keys::constants::ISO_Left_Tab
                 }),
@@ -160,7 +159,7 @@ mod macos {
         pressed_inside: Cell<bool>,
         blocked: super::block::Blocked,
         refused: super::block::Refused,
-        held: Cell<super::block::Held>,
+        held: RefCell<super::block::Held>,
     }
 
     thread_local! {
@@ -195,6 +194,7 @@ mod macos {
             | NSEventType::OtherMouseDragged => Input::Motion,
             NSEventType::ScrollWheel => Input::Wheel,
             NSEventType::KeyDown | NSEventType::KeyUp => Input::Key {
+                code: event.keyCode().into(),
                 tab: event.keyCode() == TAB_KEY,
                 shortcut: event
                     .modifierFlags()
@@ -258,17 +258,14 @@ mod macos {
                     Input::Release | Input::Motion | Input::Key { press: false, .. }
                 );
                 if within || follows {
-                    let mut held = entry.held.get();
                     let blocked = within && (entry.blocked)();
-                    if super::block::swallow(blocked, input, &mut held) {
-                        entry.held.set(held);
+                    if super::block::swallow(blocked, input, &mut entry.held.borrow_mut()) {
                         swallowed = true;
                         if super::block::refused_press(true, input) {
                             (entry.refused)();
                         }
                         continue;
                     }
-                    entry.held.set(held);
                 }
                 // A release counts where it happens, or wherever it ends a press that began in the view.
                 if (press || release) && (within || (!press && entry.pressed_inside.get())) {
@@ -339,7 +336,7 @@ mod macos {
                 pressed_inside: Cell::new(false),
                 blocked,
                 refused,
-                held: Cell::new(super::block::Held::default()),
+                held: RefCell::new(super::block::Held::default()),
             });
         });
         Ok(())

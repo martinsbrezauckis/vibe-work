@@ -19,6 +19,7 @@ import { createVoiceChat } from "./voiceChat";
 import { createAccessibility, type Accessibility } from "./accessibility";
 import { createPromptAudio } from "./promptAudio";
 import { createVoiceSettings } from "./voiceSettings";
+import { detectMac } from "./shortcuts";
 
 /** Creates the voice controllers. */
 export function createVoice(deps: {
@@ -47,13 +48,15 @@ export function createVoice(deps: {
   };
   const player = withOutputCheck(deps.player ?? createWebAudioPlayer(), outputAvailable);
   const prepare = deps.prepare ?? prepareCapture;
+  const dictationPrepare =
+    deps.prepare ?? (detectMac() ? () => prepareCapture({ processing: false }) : prepare);
   let narration: ReturnType<typeof createNarration> | null = null;
   let voiceChat: ReturnType<typeof createVoiceChat> | null = null;
   const dictation = createDictation({
     core: deps.core,
     composer: deps.composer,
     settings,
-    prepare,
+    prepare: dictationPrepare,
     canUseKey: deps.canUseKey,
     onStart: () => {
       narration?.stopAll();

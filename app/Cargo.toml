@@ -52,6 +52,9 @@ tauri-plugin-dialog = "=2.8.1"
 # updater channel of a release or test overlay), so the crate must name it.
 serde_json = { workspace = true }
 vw-vocabulary = { workspace = true }
+# The attach dialog's files reach the composer as base64 (`picked_files.rs`).
+base64 = { workspace = true }
+serde = { workspace = true }
 vw-host = { workspace = true }
 # The Vibe installer type held for the Vibe update check (`updater::VibeSlot`).
 vw-vibe-install = { workspace = true }

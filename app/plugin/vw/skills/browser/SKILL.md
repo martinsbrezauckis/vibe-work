@@ -37,11 +37,13 @@ await tools.mcp_vw.browser_act({ action: "close_tab", tab: "<id>" });
    A secret can go straight from its source into the vault without entering the chat: use browser_capture_secret with a browser_read ref, or secret_capture_command with a program and arguments, and give the entry a name. The user can also select a page key and choose **Save to vault** in the toolbar, in **Browser options** when narrow, or by right-click on the selection. `secret_run` uses saved keys by name.
 7. **Stop** refuses browser actions for the rest of the turn.
 
+Pause holds browser and App preview calls. After Resume, read the page again.
+
 ## Access by mode
 
 Ask: ordinary GET downloads need no approval; saving with `files.save_download` asks. Listing and waiting run.
 
-Running arbitrary page JavaScript or adding styles requires Full access because page code can expose site secrets. Reading cookie values, storage values or clipboard text requires Full access; Ask and Accept edits refuse these reads. Captured network response bodies also require Full access wherever that action is supported. Rendered page content, cookie metadata and storage keys run as ordinary reads. Named cookie/storage changes or writing the clipboard use the browser approval card below Full access; vault values are withheld. Ask runs ordinary reads, navigation, clicks and choices; typing data and explicit sends ask. A stricter tool rule the user set still applies.
+Running arbitrary page JavaScript or adding styles requires Full access because page code can expose site secrets. Reading cookie values, storage values or clipboard text requires Full access; Ask and Accept edits refuse these reads. Captured network response bodies also require Full access wherever that action is supported. Rendered page content, cookie metadata and storage keys run as ordinary reads. Named cookie/storage changes or writing the clipboard use the browser approval card below Full access; vault values are withheld. Ask: ordinary reads, navigation, clicks and choices; typing data asks. GET forms (searches, filters) run without a card; every POST send keeps its card. A stricter tool rule the user set still applies.
 
 ## More
 

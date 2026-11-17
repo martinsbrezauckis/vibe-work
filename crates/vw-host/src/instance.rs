@@ -4,7 +4,7 @@
 //! A second launch may carry a hand-over ("Send to Vibe Work", [`crate::hand_over`]): it is written after the
 //! endpoint's token, the running app admits it again and gives it to its `deliver` seam, then focuses.
 //! Request: the 64-character token, then `F` (focus) or `H` + a 4-byte big-endian length + the hand-over's JSON.
-//! Reply: one byte, `1` when the window was focused.
+//! Reply: one byte, `1` when the hand-over was delivered or the focus-only request focused the window.
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -34,9 +34,9 @@ struct Endpoint {
 pub enum InstanceStart {
     /// This process owns the folder until the guard is dropped.
     First(InstanceGuard),
-    /// Another process owns it; whether its window accepted the focus request.
+    /// Another process owns it; whether it accepted this launch's request.
     Existing {
-        /// Whether the running window accepted focus.
+        /// Whether the hand-over was delivered, or the focus-only request focused the window.
         focused: bool,
     },
 }
@@ -72,7 +72,8 @@ impl Drop for InstanceGuard {
 /// runtime. `None` means no owner was observed; callers must still acquire the guard before starting a host.
 ///
 /// # Errors
-/// Returns a lock-file error. A failed focus request is `Some(false)`.
+/// Returns a lock-file error. An unanswered request or failed focus-only request is `Some(false)`.
+/// A delivered hand-over is `Some(true)` even when the window cannot take focus.
 pub fn focus_existing(data: &Path, hand_over: Option<&HandOver>) -> io::Result<Option<bool>> {
     let lock = match OpenOptions::new()
         .read(true)
@@ -153,10 +154,15 @@ pub fn start(
                         let _ = stream.set_read_timeout(Some(WAIT));
                         let _ = stream.set_write_timeout(Some(WAIT));
                         if let Some(request) = read_request(&mut stream, &endpoint.instance) {
-                            if let Request::HandOver(hand_over) = request {
-                                deliver(hand_over.admit());
-                            }
-                            let _ = stream.write_all(if focus() { b"1" } else { b"0" });
+                            let accepted = match request {
+                                Request::Focus => focus(),
+                                Request::HandOver(hand_over) => {
+                                    deliver(hand_over.admit());
+                                    let _ = focus();
+                                    true
+                                }
+                            };
+                            let _ = stream.write_all(if accepted { b"1" } else { b"0" });
                         }
                     }
                     Err(_) => break,

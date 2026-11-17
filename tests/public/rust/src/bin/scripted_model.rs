@@ -29,8 +29,9 @@ fn arg(args: &[String], name: &str) -> Option<String> {
         .cloned()
 }
 
+/// Runs the shared CLI; the private test entry prepares its feature-selected TLS provider first.
 #[tokio::main]
-async fn main() {
+pub async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let Some(script) = arg(&args, "--script") else {
         eprintln!("usage: scripted_model --script FILE [--fallback URL] [--log FILE]");

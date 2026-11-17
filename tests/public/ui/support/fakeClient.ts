@@ -10,6 +10,7 @@ import type {
   CliSharingView,
   CoreClient,
   DocumentsPicked,
+  PickedFile,
   ExecuteOptions,
   FolderPurpose,
   HandOverView,
@@ -98,6 +99,9 @@ export interface FakeClient extends CoreClient {
   >;
   /** The native document picker: answers what `pickedDocuments` holds (default: nothing). */
   pickDocuments: ReturnType<typeof vi.fn<() => Promise<DocumentsPicked>>>;
+  /** The native attach dialog: answers what `pickedAttachments` holds (default: nothing). */
+  pickAttachments: ReturnType<typeof vi.fn<() => Promise<PickedFile[]>>>;
+  pickedAttachments: PickedFile[];
   pickedDocuments: DocumentsPicked;
   /** The native certificate picker: answers `pickedCertificate` (default: cancelled). */
   pickCertificate: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
@@ -275,6 +279,10 @@ export function fakeClient(kind: CoreClient["kind"] = "fake"): FakeClient {
     pickCertificate: vi.fn<() => Promise<string | null>>(() =>
       Promise.resolve(client.pickedCertificate),
     ),
+    pickAttachments: vi.fn<() => Promise<PickedFile[]>>(() =>
+      Promise.resolve(client.pickedAttachments),
+    ),
+    pickedAttachments: [],
     pickDocuments: vi.fn<() => Promise<DocumentsPicked>>(() =>
       Promise.resolve(client.pickedDocuments),
     ),

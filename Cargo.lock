@@ -142,11 +142,13 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
+ "base64 0.22.1",
  "dirs",
  "gtk",
  "make-latest-json",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -3746,7 +3748,7 @@ dependencies = [
 
 [[package]]
 name = "make-latest-json"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify 0.2.5",
@@ -7574,7 +7576,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibe-support-sign"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "minisign",
@@ -7602,7 +7604,7 @@ dependencies = [
 
 [[package]]
 name = "vw-agent-tools"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "dunce",
@@ -7619,7 +7621,7 @@ dependencies = [
 
 [[package]]
 name = "vw-ask"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -7629,7 +7631,7 @@ dependencies = [
 
 [[package]]
 name = "vw-browser"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "cap-std",
@@ -7652,7 +7654,7 @@ dependencies = [
 
 [[package]]
 name = "vw-changes"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "notify",
  "serde",
@@ -7668,7 +7670,7 @@ dependencies = [
 
 [[package]]
 name = "vw-core-api"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.23.1",
  "blake3",
@@ -7740,7 +7742,7 @@ dependencies = [
 
 [[package]]
 name = "vw-debug-api"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "axum",
  "futures-util",
@@ -7763,7 +7765,7 @@ dependencies = [
 
 [[package]]
 name = "vw-documents"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "calamine",
  "flate2",
@@ -7776,7 +7778,7 @@ dependencies = [
 
 [[package]]
 name = "vw-gate"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -7797,7 +7799,7 @@ dependencies = [
 
 [[package]]
 name = "vw-gh-broker"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "bstr",
  "clap",
@@ -7816,7 +7818,7 @@ dependencies = [
 
 [[package]]
 name = "vw-git"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rustix",
  "serde",
@@ -7831,7 +7833,7 @@ dependencies = [
 
 [[package]]
 name = "vw-host"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -7864,7 +7866,7 @@ dependencies = [
 
 [[package]]
 name = "vw-import"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -7875,7 +7877,7 @@ dependencies = [
 
 [[package]]
 name = "vw-keyproxy"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "axum",
  "futures-util",
@@ -7897,7 +7899,7 @@ dependencies = [
 
 [[package]]
 name = "vw-keys"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.3.4",
@@ -7921,7 +7923,7 @@ dependencies = [
 
 [[package]]
 name = "vw-logscan"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "form_urlencoded",
@@ -7938,7 +7940,7 @@ dependencies = [
 
 [[package]]
 name = "vw-market"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.23.1",
  "flate2",
@@ -7959,7 +7961,7 @@ dependencies = [
 
 [[package]]
 name = "vw-mistral"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
@@ -7985,7 +7987,7 @@ dependencies = [
 
 [[package]]
 name = "vw-netguard"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.3.4",
@@ -8009,7 +8011,7 @@ dependencies = [
 
 [[package]]
 name = "vw-pages"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "ammonia",
  "axum",
@@ -8037,7 +8039,7 @@ dependencies = [
 
 [[package]]
 name = "vw-platform"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -8096,7 +8098,7 @@ dependencies = [
 
 [[package]]
 name = "vw-preview"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -8122,7 +8124,7 @@ dependencies = [
 
 [[package]]
 name = "vw-procmon"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "listeners",
  "nix 0.31.3",
@@ -8138,7 +8140,7 @@ dependencies = [
 
 [[package]]
 name = "vw-projects"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -8151,7 +8153,7 @@ dependencies = [
 
 [[package]]
 name = "vw-proposals"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -8164,7 +8166,7 @@ dependencies = [
 
 [[package]]
 name = "vw-protocol"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -8220,7 +8222,7 @@ dependencies = [
 
 [[package]]
 name = "vw-rpc"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -8232,7 +8234,7 @@ dependencies = [
 
 [[package]]
 name = "vw-secrets"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "memchr",
@@ -8242,7 +8244,7 @@ dependencies = [
 
 [[package]]
 name = "vw-session"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -8250,7 +8252,7 @@ dependencies = [
 
 [[package]]
 name = "vw-skills"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -8261,7 +8263,7 @@ dependencies = [
 
 [[package]]
 name = "vw-supervisor"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "nix 0.31.3",
  "process-wrap",
@@ -8279,7 +8281,7 @@ dependencies = [
 
 [[package]]
 name = "vw-terminal"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "nix 0.31.3",
  "portable-pty",
@@ -8293,7 +8295,7 @@ dependencies = [
 
 [[package]]
 name = "vw-vault"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -8316,7 +8318,7 @@ dependencies = [
 
 [[package]]
 name = "vw-vibe-install"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -8343,7 +8345,7 @@ dependencies = [
 
 [[package]]
 name = "vw-video"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "process-wrap",
@@ -8360,7 +8362,7 @@ dependencies = [
 
 [[package]]
 name = "vw-video-types"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -8368,14 +8370,14 @@ dependencies = [
 
 [[package]]
 name = "vw-vocabulary"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "vw-webview"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "cairo-rs",
  "glib 0.18.5",
@@ -8397,7 +8399,7 @@ dependencies = [
 
 [[package]]
 name = "vw-worktrees"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "blake3",
  "cap-std",

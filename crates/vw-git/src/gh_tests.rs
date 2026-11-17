@@ -145,3 +145,47 @@ fn the_first_absolute_existing_file_wins() {
     assert_eq!(first, Some(bin.join("gh")), "PATH entry found");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A fork head must keep its owner when gh runs outside the checkout.
+#[cfg(unix)]
+#[test]
+fn fork_head_lookup_keeps_the_owner_and_checks() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("vw-git-fork-head-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let program = root.join("gh");
+    std::fs::write(&program, r#"#!/bin/sh
+case " $* " in
+  *" --repo=github.com/upstream/project "*) ;;
+  *) echo "wrong repository" >&2; exit 2 ;;
+esac
+for arg do selector="$arg"; done
+if [ "$selector" != 'contributor:topic' ]; then
+    echo 'no pull requests found' >&2
+    exit 1
+fi
+printf '%s\n' '{"number":17,"url":"https://github.com/upstream/project/pull/17","title":"Fix","state":"OPEN","headRefName":"topic","baseRefName":"main","statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"FAILURE"}]}'
+"#).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let gh = super::find(Some(&program), &root).unwrap();
+    let forge = crate::forge::parse_remote("https://github.com/upstream/project").unwrap();
+    let card = gh.view(&forge, "contributor:topic").unwrap().unwrap();
+    assert_eq!(card.number, 17);
+    assert_eq!(card.head, "topic");
+    assert_eq!(card.checks.items.len(), 1);
+    assert!(gh.view(&forge, "topic").unwrap().is_none());
+    for head in [
+        "",
+        ":topic",
+        "contributor:",
+        "contributor:bad:name",
+        "-bad:topic",
+        "contributor:--help",
+    ] {
+        assert!(
+            matches!(gh.view(&forge, head), Err(crate::GitError::Blocked(_))),
+            "{head}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}

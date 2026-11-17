@@ -254,9 +254,12 @@ async fn annotate_crop_follows_protected_value_admission_across_modes_and_chats(
     let engine = Arc::new(Engine::new());
     let eng = engine.clone();
     let core = crate::offline_core::start_with("annotate-protected", |config, dir| {
+        let mut preview = vw_preview::PreviewConfig::new(dir.join("preview"));
+        // Needs two slots even on the 7 GiB macOS CI host.
+        preview.memory_probe = Some(Arc::new(|| (Some(8), Some(4000))));
         config.preview = Some(crate::PreviewSetup {
             engine: eng,
-            config: vw_preview::PreviewConfig::new(dir.join("preview")),
+            config: preview,
             guard: None,
         });
     })

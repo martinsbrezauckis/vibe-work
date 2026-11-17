@@ -8,6 +8,26 @@
 //! - Other OSes: `None`; the app asks its toolkit (GTK) on the UI thread instead.
 //!
 //! Depends on: the `windows` crate (Windows), `objc2-app-kit` (macOS). Called by: the app's `notify_session` command.
+//! Also hands Windows foreground permission to an external window requested by core's browser pairing flow.
+
+/// Allows another process to take the foreground for a window this app is about to request. Windows grants this
+/// only while this process may set the foreground; other OSes do nothing. Call immediately before the focus request.
+#[cfg_attr(
+    windows,
+    allow(
+        unsafe_code,
+        reason = "Win32 foreground permission has no safe wrapper"
+    )
+)]
+pub fn allow_foreground_handover() {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
+        // SAFETY: no pointers or handles are involved. Windows checks the caller's foreground rights and expires
+        // this permission on subsequent user input. ASFW_ANY avoids guessing the browser's process from its profile.
+        let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+    }
+}
 
 /// `Some(true)` when one of this process's windows is in front, `Some(false)` when another application's is, `None`
 /// when this OS needs the toolkit's answer.

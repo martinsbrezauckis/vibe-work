@@ -251,6 +251,12 @@ pub(crate) async fn approve(
     });
     changed(shared, session);
     let outcome = handle.closed().await;
+    if let Some(call) = lock(calls(shared).ok_or(vw_vocabulary::texts::AGENT_TOOLS_UNAVAILABLE)?)
+        .iter_mut()
+        .find(|c| c.session == session && c.entry["id"] == id)
+    {
+        settle_card(&mut call.entry, &outcome);
+    }
     changed(shared, session);
     if !matches!(outcome, Outcome::Allowed { .. }) {
         return Err(vw_ask::agent_text(&outcome, "this tool call"));
@@ -422,6 +428,19 @@ pub(crate) fn answer_by(
     })
 }
 
+/// Retain the confirmed outcome with the card, including after the bounded ask registry forgets it.
+fn settle_card(entry: &mut Value, outcome: &Outcome) {
+    entry["vwAskOutcome"] = json!(outcome);
+    entry["state"] = match outcome {
+        Outcome::Cancelled { reason } => json!({"status":"cancelled", "reason":reason}),
+        Outcome::AnswerNotConfirmed { .. } => {
+            json!({"status":"cancelled", "reason":"Answer not confirmed"})
+        }
+        _ => json!({"status":"answered","output":{"type":"approval","decision":{"type":
+            if matches!(outcome, Outcome::Allowed { .. }) { "approve" } else { "deny" }}}}),
+    };
+}
+
 pub(crate) fn overlay(shared: &Shared, session: &str, state: &mut Value) {
     let Some(calls) = calls(shared) else { return };
     let Some(history) = state["history"].as_array_mut() else {
@@ -431,10 +450,8 @@ pub(crate) fn overlay(shared: &Shared, session: &str, state: &mut Value) {
     for call in lock(calls).iter().filter(|c| c.session == session) {
         let mut entry = call.entry.clone();
         let id = entry["id"].as_str().unwrap_or_default();
-        if let Some(record) = shared.asks.outcome(&format!("callback:{id}"))
-            && entry["state"]["status"] != "answered"
-        {
-            entry["state"] = json!({"status":"answered","output":{"type":"approval","decision":{"type":if matches!(record.outcome, Outcome::Allowed{..}) {"approve"} else {"deny"}}}});
+        if let Some(record) = shared.asks.outcome(&format!("callback:{id}")) {
+            settle_card(&mut entry, &record.outcome);
         }
         let next = history
             .iter()

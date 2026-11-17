@@ -5,7 +5,7 @@ Adds to [actions.md](actions.md) (index, refs, modes). The Full access rules in 
 
 | Action | Arguments | Rule |
 |---|---|---|
-| `tabs.emulate` | `width`/`height` 240–4096, or `preset: "phone"\|"tablet"\|"desktop"` (390×844, 768×1024, 1280×800); `colorScheme: "light"\|"dark"\|"system"` (Windows/macOS); `reset:true` | Browser panel only; measures the native viewport; user agent, touch and pixel density unchanged; sizes that cannot fit refuse. Color readback is the native media query; WebKitGTK cannot override one view's color. Reset restores size and color |
+| `tabs.emulate` | `width`/`height` 240–4096, or `preset: "phone"\|"tablet"\|"desktop"` (390×844, 768×1024, 1280×800); `colorScheme: "light"\|"dark"\|"system"` (Windows/macOS); `reset:true` | Change colorScheme separately from size or reset. Browser panel only; measures the native viewport; user agent, touch and pixel density unchanged; sizes that cannot fit refuse. Color readback is the native media query; WebKitGTK cannot override one view's color. Reset restores size and color |
 | `recording.start`, `recording.stop` | | GIF of screenshots after browser actions, saved in the chat folder: ≤30 frames, two minutes, 8 MiB of source screenshots (omitted frames reported), fits 800×600, intervals clipped to 0.1–5 s, no audio. The user's Stop discards the recording |
 | `recording.video.start`, `recording.video.stop` | | Report that this engine has no page-video encoder and name the GIF alternative |
 | `cookies.metadata`, `cookies.read` | `{names?}` | Metadata: current-site cookie attributes; read adds values and HttpOnly cookies |

@@ -215,6 +215,21 @@ pub async fn pick_documents(
         .await
 }
 
+/// Opens the native attach dialog (Rust owns it and its title and filter, the same on every OS) and returns the chosen
+/// files as name, size and bytes for the composer's own router, never a path. Empty when cancelled.
+///
+/// # Errors
+/// `internal` when reading the files fails to run.
+#[tauri::command]
+pub async fn pick_attachments(
+    app: AppHandle,
+) -> Result<Vec<crate::picked_files::PickedFile>, CoreError> {
+    let paths = dialogs::pick_documents(&app).await;
+    tokio::task::spawn_blocking(move || crate::picked_files::read_picked(paths))
+        .await
+        .map_err(|error| CoreError::new(ErrorCode::Internal, error.to_string()))
+}
+
 /// Opens the native file picker for a library (Rust owns it: the webview names only the library) and uploads the
 /// chosen files to Mistral. Returns what was added and refused; never a path.
 ///

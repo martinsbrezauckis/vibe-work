@@ -1,6 +1,6 @@
 ---
 name: chrome
-description: The user's own Chrome/Edge/Firefox/Safari window.
+description: The user's own Chrome/Edge/Safari, or Vibe Work's own Firefox window.
 ---
 
 ## Setup
@@ -29,11 +29,11 @@ Local addresses (localhost, private networks, link-local, `.local`) use the norm
 `auth.fill {ref,login}`/`auth.basic {url,login}`: vault name, no password args; vault consent. `secret_run {program:"tool",args:[],env:[{"name":"TOKEN","secret":"Token"}]}`: variable/secret ID or name; vault supplies value with consent.
 
 ## Files, media
-`files.wait_download`: chat download/folder; `finished`/`timedOut` = complete/unfinished; ambiguous refused. `files.list_downloads`: all chats’ Chrome saves. Upload: chat-relative `paths` or selected `fileIds`.
+`files.wait_download`: chat download/folder; `finished`/`timedOut` = complete/unfinished; ambiguous refused. `files.list_downloads`: exact chat session/lease. Upload: chat-relative `paths` or selected `fileIds`.
 `clipboard.read/write`: text; `tabs.emulate`: size/colour/touch; `network.intercept` (Chrome/Edge): test responses.
 `media.read {tabId}`: main-document audio/video handles/state; `media.play/pause {tabId,mediaId}`, `media.seek {...,timeMs}`, `media.mute {...,muted}`: actual state; `media.transcript`: loaded captions, bounded or unavailable. Media: negotiated transport/all modes; scripts: Full access.
-`tabs.audio`: muted/audible; `tabs.mute {muted}`: readback (Chrome/Edge need `tabId`; Firefox: none). Built-in Linux/Windows: native; macOS: individual `media.mute` only.
+`tabs.audio`: muted/audible; `tabs.mute {muted}`: readback; Chrome/Edge need `tabId`; unavailable in Firefox. Built-in Linux/Windows: native; macOS: individual `media.mute` only.
 `capture.page`: passive/packed HTML, Markdown/text in chat folder; reports truncation/links. `capture.media`: loaded images/fonts, saved/unavailable manifest; 5 MiB/file, 16 MiB total; text ≤1M characters. Modes: same as built-in capture.
 `page.navigate`: `file:` PDF/HTML/images in chat's first folder, ≤32 MiB, exact owned `tabId`; verifies file/grant. The user sets **Allow access to file URLs** in extension details. Browser renders PDFs; `document_read`: saved PDF when viewer text unavailable.
 
-[More actions](actions.md): support by browser, profiles, tabs/windows/groups, popups, points/wheel, focus/insert, waits, keys, rich clipboard, site-data clears, retries, Chrome/Edge extras. Firefox: [firefox.md](firefox.md). Safari: [safari.md](safari.md).
+[Actions](actions.md): profiles, tabs/windows/groups, popups, points/wheel, focus/insert, waits, keys, rich clipboard, site-data clears, retries, Chrome/Edge extras. Firefox: [firefox.md](firefox.md). Safari: [safari.md](safari.md).

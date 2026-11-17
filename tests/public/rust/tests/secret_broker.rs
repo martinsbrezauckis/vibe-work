@@ -102,6 +102,21 @@ fn run_args(program: &str, args: &[&str], env: Value) -> Value {
     json!({"program": program, "args": args, "env": env, "purpose": "deploy the test site"})
 }
 
+fn assert_person_declined(outcome: Value) {
+    let result = &outcome["vwMcpResult"];
+    assert_eq!(
+        result["_meta"]["vwAskOutcome"],
+        json!({"type": "refused", "by": "person", "note": null})
+    );
+    assert_eq!(result["isError"], false);
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("the user declined this")
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(clippy::too_many_lines)]
 async fn the_secret_broker_end_to_end() {
@@ -298,12 +313,7 @@ async fn the_secret_broker_end_to_end() {
         ),
     )
     .await;
-    assert!(
-        swapped_secret
-            .unwrap_err()
-            .contains("the user declined this"),
-        "a dialog was asked"
-    );
+    assert_person_declined(swapped_secret.expect("the person's No is a structured tool outcome"));
     assert_eq!(dialogs("vibe-work/secretRun"), 3, "another secret asks");
     let other = call(
         &who,
@@ -355,15 +365,14 @@ async fn the_secret_broker_end_to_end() {
     )
     .await;
     rig.confirmer.then(Confirmation::Declined);
-    assert!(
+    assert_person_declined(
         call(
             &who,
             "secret_run",
-            run_args("sh", &["printer.sh"], env.clone())
+            run_args("sh", &["printer.sh"], env.clone()),
         )
         .await
-        .unwrap_err()
-        .contains("the user declined this")
+        .expect("the person's No is a structured tool outcome"),
     );
     assert_eq!(dialogs("vibe-work/secretRun"), 4);
 
