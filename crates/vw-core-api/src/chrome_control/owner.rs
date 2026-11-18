@@ -63,6 +63,17 @@ pub(super) enum Answer {
     Own(Value),
 }
 
+/// A private helper refusal is different from an unavailable pipe. Page plans inspect only vetted
+/// helper messages; arbitrary error text may contain page data and must not reach a chat verbatim.
+pub(super) enum RpcFailure {
+    Unavailable,
+    Rejected {
+        code: i64,
+        helper_code: Option<String>,
+        message: String,
+    },
+}
+
 impl Answer {
     pub(super) fn value(&self) -> &Value {
         match self {
@@ -168,6 +179,16 @@ impl Owner {
         &self,
         answer: impl Fn(&str, &Value) -> Value + Send + 'static,
     ) -> std::sync::Arc<Mutex<Vec<(String, Value)>>> {
+        self.answering_after(Duration::ZERO, answer)
+    }
+
+    /// Deterministic delayed helper replies for deadline tests, through the real owner request queue.
+    #[cfg(test)]
+    pub(super) fn answering_after(
+        &self,
+        delay: Duration,
+        answer: impl Fn(&str, &Value) -> Value + Send + 'static,
+    ) -> std::sync::Arc<Mutex<Vec<(String, Value)>>> {
         let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (send, mut calls) = mpsc::channel::<Call>(16);
         let (stop, mut stopped) = watch::channel(false);
@@ -183,6 +204,9 @@ impl Owner {
                 // The real owner loop's admission rule, so tests see exactly what reaches the helper.
                 if !call.admitted() {
                     continue;
+                }
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
                 }
                 let value = answer(&call.name, &call.args);
                 log.lock()
@@ -267,18 +291,37 @@ impl Owner {
             .connection_ended(super::enroll_browser::Browser::Edge);
     }
 
-    /// One owner request on the private pipe (`method` is not a tool). `None` when the helper is not connected,
-    /// the request timed out, the connection ended, or the helper answered a JSON-RPC error (an older helper).
+    /// One owner request on the private pipe (`method` is not a tool). Older callers treat a helper
+    /// refusal like an unavailable method; page plans use `rpc_result` to retain its reason.
     pub(super) async fn rpc(&self, method: &str, params: Value) -> Option<Value> {
+        self.rpc_result(method, params).await.ok()
+    }
+
+    pub(super) async fn rpc_result(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcFailure> {
         let send = self
             .running
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .map(|run| run.send.clone())?;
-        match Self::request(send, method, params, true).await? {
-            Answer::Helper(value) if value.get("rpcError").is_none() => Some(value),
-            _ => None,
+            .map(|run| run.send.clone())
+            .ok_or(RpcFailure::Unavailable)?;
+        match Self::request(send, method, params, true).await {
+            Some(Answer::Helper(value)) => {
+                if let Some(error) = value.get("rpcError") {
+                    Err(RpcFailure::Rejected {
+                        code: error["code"].as_i64().unwrap_or_default(),
+                        helper_code: error["data"]["code"].as_str().map(str::to_owned),
+                        message: error["message"].as_str().unwrap_or_default().to_owned(),
+                    })
+                } else {
+                    Ok(value)
+                }
+            }
+            _ => Err(RpcFailure::Unavailable),
         }
     }
 
@@ -300,11 +343,23 @@ impl Owner {
             .as_ref()
             .map(|run| run.send.clone());
         let Some(send) = send else {
-            return own(vw_vocabulary::texts::CHROME_NOT_RUNNING, "OWNER_REQUIRED");
+            return own(
+                &format!(
+                    "{} Retry chrome_status in a few seconds. Ask the user to restart Vibe Work if it remains unavailable.",
+                    vw_vocabulary::texts::CHROME_NOT_RUNNING
+                ),
+                "OWNER_REQUIRED",
+            );
         };
         Self::request(send, name, args, false)
             .await
-            .unwrap_or_else(|| own(UNKNOWN, "TRANSPORT_LOST"))
+            .unwrap_or_else(|| {
+                if super::deadline::expired() {
+                    own(super::deadline::EXPIRED, "BROWSER_STEP_TIMEOUT")
+                } else {
+                    own(UNKNOWN, "TRANSPORT_LOST")
+                }
+            })
     }
 
     /// Bound queue admission and the answer together: startup may never reach the request dispatcher.
@@ -314,7 +369,11 @@ impl Owner {
         args: Value,
         rpc: bool,
     ) -> Option<Answer> {
-        tokio::time::timeout(Duration::from_secs(35), async {
+        let deadline = super::deadline::until(Duration::from_secs(35));
+        if deadline <= tokio::time::Instant::now() {
+            return None;
+        }
+        tokio::time::timeout_at(deadline, async {
             let (reply, answer) = oneshot::channel();
             send.send(Call {
                 name: name.to_owned(),
@@ -591,7 +650,7 @@ async fn serve_connection(
                 let Some(call) = call else { ended = "requests closed"; break };
                 if !call.admitted() { continue; }
                 if pending.len() >= 32 && call.name != "chrome_session" {
-                    let _ = call.reply.send(own("Not run: Chrome is busy.", "BUSY"));
+                    let _ = call.reply.send(own("Not run: browser control is busy. Retry this browser action after a moment.", "BUSY"));
                     continue;
                 }
                 let begun = if call.rpc {

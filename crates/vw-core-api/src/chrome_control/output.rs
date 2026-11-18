@@ -2,12 +2,17 @@
 //! Only payload text/list tails shrink. Receipt outcomes, schemas and ref/document bindings never change.
 use serde_json::{Value, json};
 
+#[path = "output_status_budget.rs"]
+mod status_budget;
+
 pub(super) const LIMIT: usize = 4000;
+/// One useful page read, including its envelope, stays below the agent's 16 KB code-mode return.
+pub(super) const READ_LIMIT: usize = 12_000;
 /// The app's own page.read defaults, sent on every inline read that omits them (cursor reads and exports excepted).
-/// The agent-facing action schema states these values; the helper's larger defaults apply only when it is called
-/// without them.
-pub(super) const READ_DEFAULT_LIMIT: u64 = 8;
-pub(super) const READ_DEFAULT_MAX_BYTES: u64 = 2000;
+/// The agent-facing action schema states these values; explicit file exports keep the helper's own defaults.
+pub(super) const READ_DEFAULT_LIMIT: u64 = 32;
+pub(super) const READ_DEFAULT_MAX_BYTES: u64 = 10_000;
+pub(super) const READ_DEFAULT_MAX_CHARS: u64 = 10_000;
 const GROUP_LIMIT: usize = 9000;
 const CONTINUATION: &str = "Continue page.read with textOffset=nextTextOffset for text or offset=nextOffset and limit for refs; keep filters. If offsets are absent or do not advance, narrow with find/ref/frameId. Narrow other reads with their schema; do not replay writes.";
 
@@ -34,10 +39,17 @@ pub(super) fn finish(mut result: Value, tool: &str, was_clamped: bool) -> Value 
 }
 
 pub(super) fn fits(body: &Value, limit: usize) -> bool {
-    // Two individual receipts plus the code-mode return object's indentation must fit under 16K.
     let pretty_limit = if limit <= LIMIT { 6000 } else { 15_000 };
-    body.to_string().len() <= limit
-        && serde_json::to_string_pretty(body).is_ok_and(|s| s.len() <= pretty_limit)
+    if body.to_string().len() > limit {
+        return false;
+    }
+    // A larger read gets one code-mode return. Count its wrapper's indentation, not only the inner JSON.
+    let rendered = if limit == READ_LIMIT {
+        serde_json::to_string_pretty(&json!({"result":{"reads":[body]}}))
+    } else {
+        serde_json::to_string_pretty(body)
+    };
+    rendered.is_ok_and(|s| s.len() <= pretty_limit)
 }
 
 pub(super) fn clamp_request(tool: &str, args: &mut Value) -> bool {
@@ -55,11 +67,17 @@ pub(super) fn clamp_request(tool: &str, args: &mut Value) -> bool {
             .entry("maxBytes")
             .or_insert(json!(READ_DEFAULT_MAX_BYTES));
         fields.entry("limit").or_insert(json!(READ_DEFAULT_LIMIT));
+        fields
+            .entry("maxChars")
+            .or_insert(json!(READ_DEFAULT_MAX_CHARS));
     }
     let mut clamped = false;
     for key in ["maxChars", "maxBytes"] {
-        if args["args"][key].as_u64().is_some_and(|n| n > LIMIT as u64) {
-            args["args"][key] = json!(LIMIT);
+        if args["args"][key]
+            .as_u64()
+            .is_some_and(|n| n > READ_LIMIT as u64)
+        {
+            args["args"][key] = json!(READ_LIMIT);
             clamped = true;
         }
     }
@@ -69,7 +87,7 @@ pub(super) fn clamp_request(tool: &str, args: &mut Value) -> bool {
 pub(super) fn clamped(result: &mut Value) {
     if result["structuredContent"].is_object() {
         remove_helper_hint(&mut result["structuredContent"]);
-        result["structuredContent"]["outputLimit"] = json!(limit_note(LIMIT));
+        result["structuredContent"]["outputLimit"] = json!(limit_note(READ_LIMIT));
         guard(result);
         sync_text(result);
     }
@@ -85,28 +103,48 @@ pub(super) fn sync_text(result: &mut Value) {
     result["content"] = json!(blocks);
 }
 
-pub(super) fn guard(result: &mut Value) {
-    // The batch wrapper has a separate total limit; each action already used the smaller budget.
-    let limit = if result["structuredContent"]["steps"].is_array() {
+pub(super) fn limit(body: &Value) -> usize {
+    if body["steps"].is_array() {
         GROUP_LIMIT
+    } else if body["action"] == "page.read" || body["untrustedPageContent"]["action"] == "page.read"
+    {
+        READ_LIMIT
     } else {
         LIMIT
-    };
-    guard_with_limit(result, limit);
+    }
+}
+
+pub(super) fn guard(result: &mut Value) {
+    let limit = limit(&result["structuredContent"]);
+    guard_with_limit(result, limit, &limit_note(limit));
 }
 
 /// The status's index tables: other fields hold positions into them (`{"list":n}`, capability, mode and row indexes),
 /// so a shortened table would make those positions point at nothing or at the wrong entry.
-const STATUS_TABLES: [&str; 4] = [
+const STATUS_TABLES: [&str; 7] = [
+    "/untrustedPageContent/profiles",
+    "/untrustedPageContent/profileDefaults",
+    "/addons",
     "/untrustedPageContent/featureLists",
     "/untrustedPageContent/capabilities/capabilityNames",
     "/untrustedPageContent/capabilities/actionRows",
     "/untrustedPageContent/capabilities/modes",
 ];
 
-/// Fits a discovery status into the group budget. Its index tables stay whole: they are set aside, the rest is
-/// trimmed within what they leave of the budget, and they are put back unchanged.
+/// Keeps connected profiles, versions and index tables whole before trimming lower-priority status text.
+/// Profiles inherit version facts from profileDefaults, so both must survive together with their feature indexes.
 pub(super) fn guard_status(result: &mut Value) {
+    let note = format!(
+        "Browser status capped at {GROUP_LIMIT} bytes. Use chrome_status({{action, profileId}}) for the supported action schema."
+    );
+    // Own refusals keep their plain, trusted explanation; add-on diagnostics do not turn it into page JSON.
+    if result["structuredContent"]
+        .get("untrustedPageContent")
+        .is_none()
+    {
+        guard_with_limit(result, GROUP_LIMIT, &note);
+        return;
+    }
     let mut tables = Vec::new();
     if let Some(body) = result.get_mut("structuredContent") {
         for path in STATUS_TABLES {
@@ -119,7 +157,7 @@ pub(super) fn guard_status(result: &mut Value) {
         .iter()
         .map(|(_, table)| table.to_string().len())
         .sum();
-    guard_with_limit(result, GROUP_LIMIT.saturating_sub(reserved));
+    guard_with_limit(result, GROUP_LIMIT.saturating_sub(reserved), &note);
     if tables.is_empty() {
         return;
     }
@@ -130,10 +168,16 @@ pub(super) fn guard_status(result: &mut Value) {
             }
         }
     }
+    if !fits(&result["structuredContent"], GROUP_LIMIT)
+        && status_budget::omit_capability_tables(&mut result["structuredContent"])
+    {
+        guard_status(result);
+        return;
+    }
     sync_text(result);
 }
 
-fn guard_with_limit(result: &mut Value, limit: usize) {
+fn guard_with_limit(result: &mut Value, limit: usize, note: &str) {
     let text_bytes: usize = result["content"]
         .as_array()
         .into_iter()
@@ -152,8 +196,7 @@ fn guard_with_limit(result: &mut Value, limit: usize) {
         return;
     }
     remove_helper_hint(body);
-    let note = limit_note(limit);
-    super::output_batch::share_context(body, [&note, &limit_note(LIMIT)]);
+    super::output_batch::share_context(body, &[note, &limit_note(LIMIT), &limit_note(READ_LIMIT)]);
     body["outputLimit"] = json!(note);
     while !fits(body, limit) {
         let Some((path, _)) = largest(body, "") else {

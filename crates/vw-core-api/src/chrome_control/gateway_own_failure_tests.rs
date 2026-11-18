@@ -31,13 +31,16 @@ async fn the_cores_own_failures_stay_outside_the_page_envelope() {
             "chrome_status",
             json!({}),
             "OWNER_REQUIRED",
-            vw_vocabulary::texts::CHROME_NOT_RUNNING,
+            format!(
+                "{} Retry chrome_status in a few seconds. Ask the user to restart Vibe Work if it remains unavailable.",
+                vw_vocabulary::texts::CHROME_NOT_RUNNING
+            ),
         ),
         (
             "chrome_execute",
             json!({"sessionId":"t","action":"auth.fill","args":{"ref":"field","login":"fixture"}}),
             "VAULT_PREPARATION_REQUIRED",
-            "Not filled: vault consent must be settled before the tool starts.",
+            "Not filled: vault consent must be settled before the tool starts.".to_owned(),
         ),
     ] {
         let value = super::call(shared, "s", tool, args).await.unwrap();

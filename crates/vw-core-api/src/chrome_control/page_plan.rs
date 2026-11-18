@@ -41,6 +41,73 @@ pub(super) fn supported_action(profile: &Value, action: &str) -> bool {
             || super::page_capture::NAMES.contains(&action))
 }
 
+fn primitive_failure(error: owner::RpcFailure, action: &str) -> String {
+    match error {
+        owner::RpcFailure::Unavailable => "The page operation could not be acknowledged; its outcome is unknown. Check browser state before trying again.".into(),
+        owner::RpcFailure::Rejected { code, helper_code, message } => {
+            // These are fixed helper admissions, not page-derived strings. A future helper's
+            // arbitrary error text may contain page data, so only known advice is shown verbatim.
+            const UNKNOWN_HISTORY: &str = "Not run: this document's page-script or vault-fill history could not be verified after reconnecting. Reload or navigate the tab to a new document before filling or running JavaScript.";
+            const ADVICE: &[&str] = &[
+                UNKNOWN_HISTORY,
+                "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this session.",
+                "Session start must be acknowledged",
+                "Settle the current operation before another admission",
+                "Another browser chat still has work on this tab. Use a tab in this chat's window, or wait for that work to finish.",
+            ];
+            let known_helper_code = match message.as_str() {
+                UNKNOWN_HISTORY => Some("VAULT_SCRIPT_CONFLICT"),
+                "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this session." | "Session start must be acknowledged" => Some("CONTROL_SUSPENDED"),
+                "Settle the current operation before another admission" => Some("OPERATION_BUSY"),
+                "Another browser chat still has work on this tab. Use a tab in this chat's window, or wait for that work to finish." => Some("TAB_BUSY"),
+                _ => None,
+            };
+            let rejection = if let Some(known) = known_helper_code.filter(|known| helper_code.as_deref() == Some(*known)) {
+                format!("browser rejection {code} ({known})")
+            } else {
+                format!("browser rejection {code}")
+            };
+            if code == -32602
+                && message == UNKNOWN_HISTORY
+                && matches!(action, "capture.page" | "capture.media")
+            {
+                format!("Capture was not run because Vibe Work cannot verify this page's earlier use of secrets. For your own agent tab, reload or navigate it, then capture again. For the user's tab, ask the user to reload or navigate it. ({rejection})")
+            } else if code == -32602 && ADVICE.contains(&message.as_str()) {
+                format!("{message} ({rejection})")
+            } else {
+                format!("The browser controller refused this page operation (code {code}); check browser state before trying again.")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod primitive_failure_tests {
+    use super::{owner::RpcFailure, primitive_failure};
+
+    #[test]
+    fn transport_loss_does_not_claim_a_refusal_or_a_safe_retry() {
+        let text = primitive_failure(RpcFailure::Unavailable, "capture.page");
+        assert!(text.contains("outcome is unknown"), "{text}");
+        assert!(!text.contains("refused"), "{text}");
+    }
+
+    #[test]
+    fn unexpected_helper_text_cannot_leak_page_or_secret_data() {
+        let text = primitive_failure(
+            RpcFailure::Rejected {
+                code: -32602,
+                helper_code: Some("SECRET_CODE_SENTINEL".into()),
+                message: "unexpected page text SECRET_SENTINEL".into(),
+            },
+            "capture.page",
+        );
+        assert!(text.contains("code -32602"), "{text}");
+        assert!(!text.contains("SECRET_SENTINEL"), "{text}");
+        assert!(!text.contains("SECRET_CODE_SENTINEL"), "{text}");
+    }
+}
+
 fn checked(
     shared: &Shared,
     chat: &str,
@@ -94,7 +161,7 @@ pub(super) async fn dispatch(
     }) {
         capabilities.push("page.read");
     }
-    let mut result = shared.chrome_control.owner.rpc("owner.primitive", json!({"sessionId":request["sessionId"],"tabId":tab,"steps":steps,"approvedCapabilities":capabilities})).await.ok_or("The page operation could not be acknowledged; check browser state before trying again.")?;
+    let mut result = shared.chrome_control.owner.rpc_result("owner.primitive", json!({"sessionId":request["sessionId"],"tabId":tab,"steps":steps,"approvedCapabilities":capabilities})).await.map_err(|error| primitive_failure(error, request["action"].as_str().unwrap_or_default()))?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     while matches!(result["status"].as_str(), Some("queued" | "running")) {
         if tokio::time::Instant::now() >= deadline {
@@ -106,12 +173,14 @@ pub(super) async fn dispatch(
         result = shared
             .chrome_control
             .owner
-            .rpc(
+            .rpc_result(
                 "owner.primitiveResult",
                 json!({"sessionId":request["sessionId"],"operationId":operation}),
             )
             .await
-            .ok_or("The page receipt is unavailable; inspect browser state before trying again.")?;
+            .map_err(|error| {
+                primitive_failure(error, request["action"].as_str().unwrap_or_default())
+            })?;
     }
     checked(shared, chat, request, consent)?;
     result["action"] = request["action"].clone();

@@ -290,20 +290,8 @@ fn now_ms() -> u64 {
 
 /// "paired 12 Nov 23:25" in local time (the year when it is not this year); "paired earlier" without a time.
 fn paired_label(at: Option<u64>, seconds: bool) -> String {
-    use chrono::{Datelike, TimeZone};
-    let Some(at) = at
-        .and_then(|at| i64::try_from(at).ok())
-        .and_then(|at| chrono::Local.timestamp_millis_opt(at).single())
-    else {
-        return "paired earlier".into();
-    };
-    let date = if at.year() == chrono::Local::now().year() {
-        "%-d %b"
-    } else {
-        "%-d %b %Y"
-    };
-    let time = if seconds { "%H:%M:%S" } else { "%H:%M" };
-    format!("paired {}", at.format(&format!("{date} {time}")))
+    crate::date_text::local_profile_date(at, seconds)
+        .map_or_else(|| "paired earlier".into(), |date| format!("paired {date}"))
 }
 
 pub(super) fn canonical(id: &str) -> String {

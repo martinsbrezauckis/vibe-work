@@ -16,6 +16,7 @@ const BRIDGE_COMMANDS: &[&str] = &[
     "desktop_subscribe",
     "desktop_focus_subscribe",
     "app_quit",
+    "desktop_focus_app",
     "core_subscribe",
     "ui_control_next",
     "ui_control_reply",

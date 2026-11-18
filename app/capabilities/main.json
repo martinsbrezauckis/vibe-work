@@ -10,6 +10,7 @@
     "allow-desktop-subscribe",
     "allow-desktop-focus-subscribe",
     "allow-app-quit",
+    "allow-desktop-focus-app",
     "allow-core-subscribe",
     "allow-ui-control-next",
     "allow-ui-control-reply",

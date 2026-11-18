@@ -46,6 +46,7 @@ export function SaveVault({
   visible?: boolean;
 }): ReactElement {
   const app = useApp();
+  const focusApp = app.core?.client.desktop?.focusApp;
   const blocked = useKeyReadiness("vault") !== null;
   const blockedRef = useRef(blocked);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -273,6 +274,7 @@ export function SaveVault({
         !blocked &&
         createPortal(
           <SaveNameDialog
+            {...(focusApp ? { focusApp } : {})}
             key={localChoice.handle}
             choice={localChoice}
             busy={busy}

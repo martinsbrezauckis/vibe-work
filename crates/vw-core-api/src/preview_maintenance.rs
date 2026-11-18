@@ -2,6 +2,9 @@
 //! previews' URL rules on the chats' current server ports.
 //! Depends on preview changes and process attribution; started and aborted by the preview hub.
 //! Sleeps without a timer when there are no admitted browsers, port rights or stopped-server notices.
+//! A chat server's exit (`super::server_exited`, from the process exit watch on macOS) ends the wait at once: the App
+//! preview's content rules drop its port within the rule update time, not at the next round (up to 3 s). That is not
+//! a check per request, and a server that closes its socket but keeps running is still found only by the next round.
 
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
@@ -13,8 +16,9 @@ pub(super) fn start(shared: &Arc<Shared>) -> JoinHandle<()> {
     let weak = Arc::downgrade(shared);
     // Subscribe before checking work so an open between the check and recv cannot be missed.
     let mut changes = shared.preview.as_ref().map(|hub| hub.service.changes());
+    let exits = shared.preview.as_ref().map(|hub| Arc::clone(&hub.exits));
     tokio::spawn(async move {
-        let Some(changes) = changes.as_mut() else {
+        let (Some(changes), Some(exits)) = (changes.as_mut(), exits) else {
             return;
         };
         loop {
@@ -32,13 +36,20 @@ pub(super) fn start(shared: &Arc<Shared>) -> JoinHandle<()> {
                 }
                 continue;
             }
-            tokio::time::sleep(super::PORTS_RECHECK).await;
+            let exited = tokio::time::timeout(super::PORTS_RECHECK, exits.notified())
+                .await
+                .is_ok();
             let Some(shared) = weak.upgrade() else {
                 return;
             };
             let Some(hub) = shared.preview.clone() else {
                 return;
             };
+            if exited {
+                // The running-server check already fails for the exited server's port: the App preview's rules
+                // drop it now, before the slower scan below withdraws the port rights.
+                hub.service.refresh_local_rules().await;
+            }
             #[cfg(test)]
             hub.maintenance_counts
                 .rounds

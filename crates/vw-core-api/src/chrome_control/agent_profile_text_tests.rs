@@ -20,6 +20,9 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use vw_ask::AnsweredBy;
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
+use vw_vocabulary::texts::CHROME_NAME;
+#[cfg(feature = "your-edge")]
+use vw_vocabulary::texts::EDGE_NAME;
 
 async fn core(name: &str) -> crate::Core {
     let helper = json!({"profiles":[
@@ -232,6 +235,104 @@ async fn not_now_while_another_profile_is_connected_reaches_the_agent() {
     assert_eq!(view.label, "Connected", "{view:?}");
     assert!(
         view.step.as_deref().unwrap_or_default().contains("Not now"),
+        "{view:?}"
+    );
+    // An authenticated live report for that same profile resolves the earlier refusal. It must not return
+    // after the profile later disconnects while the other profile remains connected.
+    test_support::observe_status(
+        &core.shared,
+        &json!({"profiles":[
+            {"profileId":"chrome:work","connected":true},
+            {"profileId":ASKING,"connected":true}
+        ]}),
+    );
+    assert!(
+        core.shared
+            .chrome_control
+            .owner
+            .connected_profiles
+            .snapshot()
+            .iter()
+            .any(|(profile, _)| profile == ASKING)
+    );
+    for profiles in [
+        json!([{"profileId":"chrome:work","connected":true}, {"profileId":ASKING,"connected":true}]),
+        json!([{"profileId":"chrome:work","connected":true}]),
+    ] {
+        test_support::observe_status(&core.shared, &json!({"profiles":profiles}));
+        let mut after = super::addon::view(super::AddonState::Connected, "");
+        super::profile_reason::window_card(
+            &core.shared.chrome_control,
+            &mut after,
+            super::agent_browser::Browser::Chrome,
+        );
+        assert_eq!(
+            after.instruction,
+            format!("{CHROME_NAME} is connected."),
+            "{after:?}"
+        );
+        assert_eq!(after.step, None, "{after:?}");
+    }
+    core.shutdown().await;
+}
+
+#[cfg(feature = "your-edge")]
+#[tokio::test]
+async fn edge_not_now_uses_an_edge_profile_on_the_card_and_for_the_agent() {
+    let (send, mut receive) = mpsc::unbounded_channel();
+    let core = crate::offline_core::start_with_confirmer(
+        "edge-not-now-text",
+        |config, dir| config.chrome_control.package = Some(dir.join("package")),
+        Presenter(send),
+    )
+    .await;
+    let chrome = &core.shared.chrome_control;
+    chrome
+        .set_browser_enabled(super::agent_browser::Browser::Edge, true)
+        .unwrap();
+    test_support::observe_status(
+        &core.shared,
+        &json!({"profiles":[{"profileId":"edge:work","connected":true}]}),
+    );
+    let _calls = chrome.owner.answering(|tool, _| match tool {
+        "owner.pairing.approve" => json!({"approved":false}),
+        _ => json!({"applied":true}),
+    });
+    super::owner::observe(
+        &Arc::downgrade(&core.shared),
+        &json!({"method":"notifications/owner/pairingApproval",
+            "params":{"requestId":ID,"profileId":"edge:22222222-2222-4222-8222-222222222222"}}),
+    )
+    .unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(2), receive.recv())
+        .await
+        .expect("pairing must reach the native presenter")
+        .unwrap();
+    answer.send(Confirmation::Declined).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let view = loop {
+        let mut view = super::addon::view_for(
+            super::AddonState::Connected,
+            "",
+            super::agent_browser::Browser::Edge,
+        );
+        super::profile_reason::window_card(chrome, &mut view, super::agent_browser::Browser::Edge);
+        if view.step.is_some() || tokio::time::Instant::now() >= deadline {
+            break view;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(
+        view.instruction
+            .starts_with(&format!("{EDGE_NAME} is connected.")),
+        "{view:?}"
+    );
+    assert!(view.instruction.contains("An Edge profile"), "{view:?}");
+    assert!(
+        view.step
+            .as_deref()
+            .unwrap_or_default()
+            .contains("An Edge profile"),
         "{view:?}"
     );
     core.shutdown().await;

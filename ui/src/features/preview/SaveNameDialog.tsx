@@ -5,7 +5,14 @@
  */
 import { Button } from "../../components/Controls";
 import { literalInputProps } from "../../components/inputProps";
-import { type ReactElement, type SubmitEvent, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactElement,
+  type SubmitEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { reserve } from "../../components/nativeLayer";
 import { Modal } from "../../components/Modal";
@@ -19,14 +26,35 @@ export function SaveNameDialog({
   busy,
   onClose,
   onSave,
+  focusApp,
 }: {
   choice: VaultChoice;
   busy: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
+  /** Moves the OS keyboard focus from the native page beside the prompt to the app's own window content. */
+  focusApp?: () => Promise<void>;
 }): ReactElement {
   const [name, setName] = useState(choice.suggestedName);
   const dialog = useRef<HTMLDivElement>(null);
+  // The native page beside the prompt can keep the OS keyboard focus (Windows): DOM focus alone left typing and
+  // Escape in the page until a click. Take the keyboard to the app once on open, then put the caret back in the field.
+  const focusAppOnce = useRef(focusApp);
+  useEffect(() => {
+    const focusApp = focusAppOnce.current;
+    if (focusApp === undefined) return;
+    let open = true;
+    const field = () => dialog.current?.querySelector<HTMLInputElement>("[data-vault-save-name]");
+    void focusApp()
+      .catch(() => undefined)
+      .then(() => {
+        if (open) field()?.focus();
+      });
+    return () => {
+      open = false;
+    };
+    // Once per prompt: a new choice mounts a new dialog (its key is the handle).
+  }, []);
   useLayoutEffect(() => {
     const element = dialog.current;
     if (element === null) return;

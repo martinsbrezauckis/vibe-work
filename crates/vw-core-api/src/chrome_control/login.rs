@@ -17,6 +17,15 @@ struct ChromeLoginWriter {
     args: Value,
     consent: Option<super::read_consent::Consent>,
 }
+
+fn write_failure(action: &str) -> &'static str {
+    if action == "auth.basic" {
+        "HTTP sign-in was not confirmed. The browser may have reused an existing sign-in without a new challenge. Read the current page to check its sign-in state before trying again."
+    } else {
+        "Login fill did not complete: Chrome did not confirm a filled field. Check Chrome before trying again."
+    }
+}
+
 impl LoginWriter for ChromeLoginWriter {
     async fn write(
         &self,
@@ -42,6 +51,7 @@ impl LoginWriter for ChromeLoginWriter {
                 "Not filled: this chat closed or Chrome login access was turned off.".to_owned(),
             );
         }
+        let action = self.args["action"].as_str().unwrap_or_default();
         let mut args = self.args.clone();
         args["_loginValue"] = if args["action"] == "auth.basic" {
             json!(json!({"username":login.username,"password":value}).to_string())
@@ -59,9 +69,7 @@ impl LoginWriter for ChromeLoginWriter {
             .call("chrome_execute", args)
             .await
         else {
-            return Err(
-                "Login fill did not complete: Chrome did not confirm a filled field. Check Chrome before trying again.".to_owned(),
-            );
+            return Err(write_failure(action).to_owned());
         };
         if result["structuredContent"]["status"] != "completed"
             || result["structuredContent"]["data"]["filled"] != true
@@ -79,9 +87,7 @@ impl LoginWriter for ChromeLoginWriter {
                 code = code.unwrap_or("none"),
                 "Chrome login fill did not complete"
             );
-            return Err(
-                "Login fill did not complete: Chrome did not confirm a filled field. Check Chrome before trying again.".to_owned(),
-            );
+            return Err(write_failure(action).to_owned());
         }
         Ok(result)
     }
@@ -210,6 +216,17 @@ pub(crate) async fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_basic_sign_in_without_a_new_challenge_names_possible_browser_reuse() {
+        let basic = write_failure("auth.basic");
+        assert!(basic.contains("may have reused"), "{basic}");
+        assert!(basic.contains("Read the current page"), "{basic}");
+        assert!(!basic.contains("signed in successfully"), "{basic}");
+        let field = write_failure("auth.fill");
+        assert!(!field.contains("reused"), "{field}");
+    }
+
     #[tokio::test]
     async fn running_vault_call_returns_without_starting_consent() {
         let core = crate::offline_core::start("chrome-vault-hook").await;

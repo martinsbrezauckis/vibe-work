@@ -90,9 +90,10 @@ pub(super) fn for_model(
     }
     super::output_receipt::compact(&mut result);
     if clamped {
-        result["structuredContent"]["requestLimit"] = json!(
-            "page.read maxChars/maxBytes capped at 4000 by the app. Use the returned continuation for remaining content."
-        );
+        result["structuredContent"]["requestLimit"] = json!(format!(
+            "page.read maxChars/maxBytes capped at {} by the app. Use the returned continuation for remaining content.",
+            super::output::READ_LIMIT
+        ));
         super::output::sync_text(&mut result);
     }
     bound(shared, chat, request, &mut result);
@@ -102,7 +103,7 @@ pub(super) fn for_model(
 /// Save the exact marked body before any extra app trimming, including a combined batch's whole body.
 pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut Value) {
     let body = &result["structuredContent"];
-    let limit = if body["steps"].is_array() { 9000 } else { 4000 };
+    let limit = super::output::limit(body);
     if super::output::fits(body, limit) {
         return;
     }

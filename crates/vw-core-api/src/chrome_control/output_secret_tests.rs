@@ -14,12 +14,12 @@ async fn exported_secrets(mode: &str) {
     register(SecretKind::VaultValue, &vault);
     register(SecretKind::ConnectorCredential, &app);
     let mut raw = json!({"status":"completed","action":"page.read","data":{
-        "readId":"rendered-account-page","text":format!("Account keys: {vault} {app} {}", "page text ".repeat(1000)),
+        "readId":"rendered-account-page","text":format!("Account keys: {vault} {app} {}", "page text ".repeat(3000)),
         "refs":[{"name":vault,"value":app}],"coverage":{"complete":true}}});
     if let Some(renderer) = std::env::var_os("VW_CHROME_EXPORT_RENDERER") {
         let rendered = std::process::Command::new("node")
             .arg(renderer)
-            .args([&vault, &app, &"page text ".repeat(1000)])
+            .args([&vault, &app, &"page text ".repeat(3000)])
             .output()
             .unwrap();
         assert!(
@@ -46,6 +46,10 @@ async fn exported_secrets(mode: &str) {
     let first = gateway::call(&core.shared, "s", "chrome_execute", read.clone())
         .await
         .unwrap();
+    assert!(
+        first["vwMcpResult"]["structuredContent"]["continuation"]["args"].is_object(),
+        "the fixture must exceed the inline budget to exercise a frozen export"
+    );
     for args in [
         json!({}),
         first["vwMcpResult"]["structuredContent"]["continuation"]["args"].clone(),
@@ -66,7 +70,7 @@ async fn exported_secrets(mode: &str) {
             .unwrap();
         assert!(text.contains(&marker(SecretKind::VaultValue)));
         assert!(text.contains(&marker(SecretKind::ConnectorCredential)));
-        assert!(text.ends_with(&"page text ".repeat(1000)));
+        assert!(text.ends_with(&"page text ".repeat(3000)));
         assert_eq!(file["bytes"], bytes.len());
         assert_eq!(
             saved["untrustedPageContent"]["data"]["coverage"],

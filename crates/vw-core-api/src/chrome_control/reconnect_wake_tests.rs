@@ -5,6 +5,41 @@ use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 #[tokio::test]
+async fn expired_deadline_does_not_spend_an_unstarted_browser_wake() {
+    for browser in [Browser::Chrome, Browser::Edge] {
+        let launches = Arc::new(Mutex::new(Vec::new()));
+        let recorded = launches.clone();
+        let core = fixture_with(
+            &format!("expired-browser-wake-{}", browser.id()),
+            json!([{"profileId":format!("{}:p", browser.id()),"connected":true}]),
+            move |config| {
+                let launch = Arc::new(move |url: &str| {
+                    recorded.lock().unwrap().push(url.to_owned());
+                    Ok(())
+                });
+                if browser == Browser::Edge {
+                    config.edge_launcher = Some(launch);
+                } else {
+                    config.launcher = Some(launch);
+                }
+            },
+        )
+        .await;
+        let past = tokio::time::Instant::now() - std::time::Duration::from_millis(1);
+        let generation = crate::stops::generation(&core.shared, "s");
+        super::wake(&core.shared, "s", browser, generation, past).await;
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert!(launches.lock().unwrap().is_empty());
+        assert!(
+            core.shared.chrome_control.owner.wake.take(browser),
+            "an expired call must leave a never-started wake retryable: {}",
+            browser.id()
+        );
+        core.shutdown().await;
+    }
+}
+
+#[tokio::test]
 async fn a_stopped_worker_is_woken_before_the_action_is_sent_once() {
     for (browser, profile) in [(Browser::Chrome, "chrome:p"), (Browser::Edge, "edge:p")] {
         let launches = Arc::new(Mutex::new(Vec::new()));

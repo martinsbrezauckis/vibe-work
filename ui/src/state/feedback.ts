@@ -56,6 +56,13 @@ const painted = () =>
       });
     });
   });
+/** True when no feedback form is shown: each one sits in the hidden capture layer (or is hidden some other way). */
+const formHidden = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(".feedback-dialog")).every(
+    (dialog) =>
+      dialog.closest(".feedback-capturing") !== null ||
+      getComputedStyle(dialog).visibility === "hidden",
+  );
 /**
  * Creates the feedback form store and its core calls. Send first asks the core for a review and sends only when the
  * reviewed text, screenshot and system details match what the form showed.
@@ -120,7 +127,11 @@ export function createFeedback(core: Pick<CoreController, "run" | "listen" | "tr
     }));
     try {
       // Let the hidden feedback overlay paint before the host takes native window pixels.
-      if (request.op === "screenshot" && request.include) await painted();
+      if (request.op === "screenshot" && request.include) {
+        await painted();
+        // The picture shows what the person reports, never the form: no capture unless the form is hidden by now.
+        if (!formHidden()) throw new Error("Screenshot unavailable. No screenshot attached.");
+      }
       const result = await core.run({ type: "feedback", request });
       if (result.type !== "feedback") throw new Error("Feedback is unavailable.");
       apply(result.view, request.op === "review");

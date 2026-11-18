@@ -82,6 +82,7 @@ mod chrome_control;
 mod clock;
 mod command;
 mod command_result;
+mod date_text;
 mod read_exclusions;
 #[cfg(test)]
 mod release_modules_tests;

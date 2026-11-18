@@ -10,11 +10,40 @@ mod lifecycle;
 mod mac;
 #[cfg(any(target_os = "macos", test))]
 mod plan;
+/// A refused or interrupted native Safari input. `posted` is false while no macOS event has been posted for this
+/// request (window proof, viewport match, coordinate mapping, cancellation, layout and plan checks), so the caller can
+/// report a definite "nothing was sent" instead of an unknown outcome. Once the first event is posted it is true.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputError {
+    /// The instruction for the agent.
+    pub message: String,
+    /// Whether at least one native event was posted before the failure.
+    pub posted: bool,
+}
+impl InputError {
+    /// A failure before any native event: the page cannot have received input from this request.
+    #[must_use]
+    pub fn not_sent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            posted: false,
+        }
+    }
+    /// A failure after at least one native event was posted: the page may have received part of the input.
+    #[must_use]
+    pub fn after_post(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            posted: true,
+        }
+    }
+}
 /// Perform one preparation or dispatch from an already approved, operation-bound app request.
 /// Cancellation is checked before effects; callers can drop the future without waiting for OS accessibility calls.
 ///
 /// # Errors
 /// Refuses missing Accessibility permission, stale window proofs, cancellation, unsupported keys or unavailable platforms.
+/// The error says whether any native event was posted before the failure.
 #[cfg_attr(
     not(target_os = "macos"),
     allow(
@@ -29,14 +58,16 @@ pub async fn request(
     args: Value,
     url: &str,
     cancel: Arc<AtomicBool>,
-) -> Result<Value, String> {
+) -> Result<Value, InputError> {
     if action == "page.key" {
-        vw_ask::chrome::keys::validate_args(&args)?;
+        vw_ask::chrome::keys::validate_args(&args).map_err(InputError::not_sent)?;
         if stage == "dispatch"
-            && vw_ask::chrome::keys::requires_editor(&args)?
+            && vw_ask::chrome::keys::requires_editor(&args).map_err(InputError::not_sent)?
             && prepared["editorFocused"] != true
         {
-            return Err("This editing shortcut has no checked focused editor and could invoke a browser command. Focus an editable field before sending it.".into());
+            return Err(InputError::not_sent(
+                "This editing shortcut has no checked focused editor and could invoke a browser command. Focus an editable field before sending it.",
+            ));
         }
     }
     #[cfg(target_os = "macos")]
@@ -46,7 +77,9 @@ pub async fn request(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (stage, prepared, action, args, url, cancel);
-        Err("Native Safari input requires macOS. Run this action in Vibe Work on a Mac.".into())
+        Err(InputError::not_sent(
+            "Native Safari input requires macOS. Run this action in Vibe Work on a Mac.",
+        ))
     }
 }
 

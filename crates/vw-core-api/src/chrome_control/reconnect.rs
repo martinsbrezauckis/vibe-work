@@ -129,7 +129,7 @@ pub(super) async fn wait(
         return Ok(None);
     }
     let generation = crate::stops::generation(shared, session);
-    let deadline = tokio::time::Instant::now() + WAIT;
+    let deadline = super::deadline::until(WAIT);
     tracing::debug!(browser = browser.id(), "Browser reconnect wait started");
     active(shared, session, browser, generation)?;
     wake(shared, session, browser, generation, deadline).await;
@@ -188,9 +188,7 @@ async fn wake(
         Browser::Edge => config.edge_launcher.is_some(),
         Browser::Safari | Browser::Firefox => return,
     };
-    if (!injected && !known_extension(shared, browser))
-        || !shared.chrome_control.owner.wake.take(browser)
-    {
+    if !injected && !known_extension(shared, browser) {
         return;
     }
     let weak = Arc::downgrade(shared);
@@ -212,6 +210,9 @@ async fn wake(
         if active(&shared, &session, browser, generation).is_err()
             || tokio::time::Instant::now() >= deadline
         {
+            return;
+        }
+        if !shared.chrome_control.owner.wake.take(browser) {
             return;
         }
         let config = &shared.chrome_control.config;

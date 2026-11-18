@@ -1,4 +1,4 @@
-//! Browser session grants bind the owning tool, browser lease and tier. Descriptions reuse the card's verbs.
+//! Browser session grants bind the chat, disclosed actions and tier. Descriptions reuse the card's verbs.
 //! Called only for core-created Ask cards; native vault grants remain independent.
 //! Depends on: browser classification and Ask grant matching.
 //! Called by: core-created browser permission cards.
@@ -8,36 +8,65 @@ use vw_ask::{CoversPart, GrantPermission, SessionGrant, chrome::Tier};
 
 const SCOPE: &str = "vibe_work_browser";
 
+fn requested_actions(
+    entry: &Value,
+    input: &Value,
+    builtin: bool,
+    tier: Tier,
+    actions: &[&str],
+) -> Option<Vec<String>> {
+    if !builtin && input.get("steps").is_some() {
+        if input.get("action").is_some() || entry["detail"]["vwBrowserAction"].is_string() {
+            return None;
+        }
+        let steps = crate::chrome_control::batch::steps(input).ok()?;
+        let mut requested = Vec::new();
+        for step in steps {
+            let required = vw_ask::chrome::actions::ask_required("chrome_execute", &step)?;
+            if required > tier {
+                return None;
+            }
+            if required > Tier::Ask {
+                let action = step["action"]
+                    .as_str()
+                    .filter(|action| actions.contains(action))?;
+                if !requested.iter().any(|held| held == action) {
+                    requested.push(action.to_owned());
+                }
+            }
+        }
+        return (!requested.is_empty()).then_some(requested);
+    }
+    let requested = entry["detail"]["vwBrowserAction"].as_str().or_else(|| {
+        let wire = input["action"].as_str()?;
+        if builtin {
+            vw_agent_tools::browser_input::actions()
+                .get(wire)
+                .map(String::as_str)
+        } else {
+            Some(wire)
+        }
+    });
+    requested
+        .filter(|action| actions.contains(action))
+        .map(|action| vec![action.to_owned()])
+}
+
 pub(super) fn scope(entry: &Value, tool: &str, tier: u64) -> Scopeable {
     let input = &entry["detail"]["effect"]["input"];
     let builtin = tool == "mcp_vw.browser_act";
     if !builtin && tool != "mcp_vw.chrome_execute" {
         return Scopeable::No;
     }
-    let browser_session = if builtin {
-        Value::Null
-    } else {
-        let Some(id) = input["sessionId"].as_str().filter(|id| !id.is_empty()) else {
-            return Scopeable::No;
-        };
-        json!(id)
-    };
+    if !builtin && input["sessionId"].as_str().is_none_or(str::is_empty) {
+        return Scopeable::No;
+    }
     let tier = match tier {
         1 => Tier::AcceptEdits,
         2 => Tier::FullAccess,
         _ => return Scopeable::No,
     };
-    let browser = if builtin {
-        "the built-in browser"
-    } else {
-        match entry["vwBrowser"].as_str() {
-            Some(vw_vocabulary::texts::CHROME_NAME) => vw_vocabulary::texts::CHROME_NAME,
-            Some(vw_vocabulary::texts::EDGE_NAME) => vw_vocabulary::texts::EDGE_NAME,
-            Some(vw_vocabulary::texts::SAFARI_NAME) => vw_vocabulary::texts::SAFARI_NAME,
-            Some(vw_vocabulary::texts::FIREFOX_NAME) => vw_vocabulary::texts::FIREFOX_NAME,
-            _ => "your browser",
-        }
-    };
+    let browser = "a browser this chat uses";
     let Ok(texts) = serde_json::from_str::<Value>(vw_ask::chrome::ACTION_TEXT) else {
         return Scopeable::No;
     };
@@ -49,19 +78,9 @@ pub(super) fn scope(entry: &Value, tool: &str, tier: u64) -> Scopeable {
     } else {
         vw_ask::chrome::package_actions(tier).collect()
     };
-    let requested = entry["detail"]["vwBrowserAction"].as_str().or_else(|| {
-        let wire = input["action"].as_str()?;
-        if builtin {
-            vw_agent_tools::browser_input::actions()
-                .get(wire)
-                .map(String::as_str)
-        } else {
-            Some(wire)
-        }
-    });
-    if requested.is_none_or(|action| !actions.contains(&action)) {
+    let Some(requested) = requested_actions(entry, input, builtin, tier, &actions) else {
         return Scopeable::No;
-    }
+    };
     let descriptions: Vec<_> = actions
         .iter()
         .filter_map(|action| {
@@ -77,7 +96,7 @@ pub(super) fn scope(entry: &Value, tool: &str, tier: u64) -> Scopeable {
                 .replace(" from {page}", "")
                 .replace("{page}'s ", "")
                 .replace("{in}", &format!(" in {browser}"))
-                .replace("{your}", &browser.replace("Your ", "your "))
+                .replace("{your}", "the browser's")
                 .replace("{submit}", "")
                 .replace("{key}", "a key")
         })
@@ -89,13 +108,15 @@ pub(super) fn scope(entry: &Value, tool: &str, tier: u64) -> Scopeable {
         tool: tool.to_owned(),
         permissions: vec![GrantPermission {
             scope: SCOPE.into(),
-            session_pattern:
-                json!({"tier":tier as u8,"browserSession":browser_session,"actions":actions})
-                    .to_string(),
+            session_pattern: json!({"tier":tier as u8,"actions":actions,"requested":requested})
+                .to_string(),
             exact: true,
         }],
         labels: descriptions.clone(),
-        covers: vec![CoversPart::words(&descriptions.join("; "))],
+        covers: vec![CoversPart::words(&format!(
+            "For this chat, in every browser you use: {}",
+            descriptions.join("; ")
+        ))],
     }
 }
 
@@ -106,7 +127,11 @@ pub(super) fn covers(
     wanted: &[GrantPermission],
 ) -> bool {
     if grant.session != session
-        || grant.tool != tool
+        || !matches!(
+            grant.tool.as_str(),
+            "mcp_vw.browser_act" | "mcp_vw.chrome_execute"
+        )
+        || !matches!(tool, "mcp_vw.browser_act" | "mcp_vw.chrome_execute")
         || grant.permissions.len() != 1
         || wanted.len() != 1
     {
@@ -120,13 +145,19 @@ pub(super) fn covers(
     let (Some(have), Some(want)) = (parse(&grant.permissions[0]), parse(&wanted[0])) else {
         return false;
     };
-    have["browserSession"] == want["browserSession"]
-        && have["actions"]
-            .as_array()
-            .zip(want["actions"].as_array())
-            .is_some_and(|(have, want)| {
-                !want.is_empty() && want.iter().all(|action| have.contains(action))
-            })
+    have["actions"]
+        .as_array()
+        .zip(want["requested"].as_array())
+        .zip(want["actions"].as_array())
+        .is_some_and(|((have, requested), allowed)| {
+            !requested.is_empty()
+                && requested.len() <= 16
+                && requested.iter().all(|action| {
+                    action.as_str().is_some_and(|action| !action.is_empty())
+                        && have.contains(action)
+                        && allowed.contains(action)
+                })
+        })
         && have["tier"]
             .as_u64()
             .zip(want["tier"].as_u64())

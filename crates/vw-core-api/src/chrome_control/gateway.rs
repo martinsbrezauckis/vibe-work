@@ -40,6 +40,15 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
+    super::deadline::run(call_entry(shared, session, tool, args)).await
+}
+
+async fn call_entry(
+    shared: &Arc<Shared>,
+    session: &str,
+    tool: &str,
+    args: Value,
+) -> Result<Value, String> {
     super::firefox_sharing::refuse_agent_reach(tool, &args)?;
     let browser = agent_browser::selected(shared, session, tool, &args);
     if tool == "chrome_execute" {
@@ -154,7 +163,7 @@ pub(super) async fn call_selected(
         validate_session_args(&args, browser)?;
     }
     if shared.store.view(session).is_none() {
-        return Err("Not run: this chat is not open in Vibe Work.".to_owned());
+        return Err("Not run: this chat is not open in Vibe Work. Open the chat in Vibe Work, then try again.".to_owned());
     }
     // Tool calls racing the interrupt keep the person's reason, including session get/cancel/stop.
     if tool != "chrome_status" {
@@ -222,7 +231,7 @@ fn local_reply(
         return Ok(Some(json!({"vwMcpResult":answer})));
     }
     if shared.store.view(session).is_none() {
-        return Err("Not run: this chat is not open in Vibe Work.".to_owned());
+        return Err("Not run: this chat is not open in Vibe Work. Open the chat in Vibe Work, then try again.".to_owned());
     }
     // The gateway's own checks decide; the card only words a refusal while nothing usable is connected
     // (`availability::refusal`). The person's switch and an outdated extension refuse first, even when live.
@@ -294,6 +303,20 @@ pub(super) async fn call_one_inner(
     shared: &Arc<Shared>,
     session: &str,
     tool: &str,
+    args: Value,
+    consent: Option<&super::read_consent::Consent>,
+    previous: Option<&str>,
+) -> Result<Value, String> {
+    super::deadline::run(call_one_scoped(
+        shared, session, tool, args, consent, previous,
+    ))
+    .await
+}
+
+async fn call_one_scoped(
+    shared: &Arc<Shared>,
+    session: &str,
+    tool: &str,
     mut args: Value,
     consent: Option<&super::read_consent::Consent>,
     previous: Option<&str>,
@@ -301,7 +324,12 @@ pub(super) async fn call_one_inner(
     // A pause that started after this call's receipt: wait inside the tool's own deadline, before any shared lock
     // (another chat's open must not wait for this chat's person). Every check after this runs after the wait.
     if crate::paused_tools_gate::browser_call(tool, &args) {
-        crate::paused_tools_gate::wait(shared, session, crate::paused_tools::GATEWAY_WAIT).await?;
+        crate::paused_tools_gate::wait(
+            shared,
+            session,
+            super::deadline::remaining(crate::paused_tools::GATEWAY_WAIT),
+        )
+        .await?;
     }
     let opening = tool == "chrome_session" && args["action"] == "open";
     if opening {
@@ -409,7 +437,6 @@ async fn call_prepared(
         )
         .await?;
     }
-    pending.finish(shared, session, browser, &answer)?;
     scope_result(
         shared,
         session,
@@ -443,3 +470,7 @@ mod listing_tests;
 #[cfg(test)]
 #[path = "gateway_own_failure_tests.rs"]
 mod own_failure_tests;
+
+#[cfg(test)]
+#[path = "gateway_deadline_tests.rs"]
+mod deadline_tests;

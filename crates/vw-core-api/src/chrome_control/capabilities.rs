@@ -136,6 +136,24 @@ pub(super) fn filter(result: &mut Value, selected_profile: Option<&str>) {
         }
         for row in rows {
             super::connected_schema::filter(row, &profiles, selected_profile);
+            // Defaults describe the app's inline request, including when an older helper keeps its schema.
+            // Only existing fields are changed; this cannot advertise an unsupported optional argument.
+            if row["action"] == "page.read"
+                && let Some(fields) = row
+                    .get_mut("inputSchema")
+                    .and_then(|schema| schema.get_mut("properties"))
+                    .and_then(Value::as_object_mut)
+            {
+                for (name, default) in [
+                    ("limit", super::output::READ_DEFAULT_LIMIT),
+                    ("maxBytes", super::output::READ_DEFAULT_MAX_BYTES),
+                    ("maxChars", super::output::READ_DEFAULT_MAX_CHARS),
+                ] {
+                    if let Some(property) = fields.get_mut(name).and_then(Value::as_object_mut) {
+                        property.insert("default".into(), json!(default));
+                    }
+                }
+            }
         }
     }
     if let Some(permissions) = body["capabilities"]["permissions"].as_array_mut() {

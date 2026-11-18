@@ -72,7 +72,7 @@ function Body({ row, sessionId }: { row: Row; sessionId: string }): ReactElement
         <DividerRow entry={row.entry} />
       );
     case "turnEnd":
-      return <TurnEndRow turn={row.turn} />;
+      return <TurnEndRow turn={row.turn} declined={row.declined} />;
     case "other":
       return <OtherRow entry={row.entry} />;
   }

@@ -57,6 +57,13 @@ impl Attempts {
             *attempt = Some(Attempt::Finished(result));
         }
     }
+    fn abandon_unstarted(&self, browser: Browser, id: u64) {
+        let mut state = self.0.lock_or_recover();
+        let attempt = &mut state.attempts[usize::from(browser == Browser::Edge)];
+        if matches!(attempt, Some(Attempt::Pending(current)) if *current == id) {
+            *attempt = None;
+        }
+    }
     fn error(&self, browser: Browser) -> Option<String> {
         match &self.0.lock_or_recover().attempts[usize::from(browser == Browser::Edge)] {
             Some(Attempt::Finished(Err(reason))) => Some(reason.clone()),
@@ -117,7 +124,14 @@ pub(super) async fn wait(
     }
     let generation = crate::stops::generation(shared, session);
     active(shared, session, browser, generation)?;
-    let deadline = tokio::time::Instant::now() + WAIT;
+    let deadline = super::deadline::until(WAIT);
+    if tokio::time::Instant::now() >= deadline {
+        return Ok(Some(failure(
+            browser,
+            "BROWSER_CONNECT_TIMEOUT",
+            &browser.words("This browser step reached its time limit before Vibe Work could open {fullBrowser}."),
+        )));
+    }
     if let Some(id) = shared.chrome_control.owner.starts.begin(shared, browser) {
         let weak = Arc::downgrade(shared);
         let chat = session.to_owned();
@@ -125,10 +139,10 @@ pub(super) async fn wait(
             let Some(shared) = weak.upgrade() else {
                 return;
             };
-            let result = (|| {
+            let ready = (|| -> Result<bool, String> {
                 active(&shared, &chat, browser, generation)?;
                 if super::availability::live(&shared, browser) {
-                    return Ok(());
+                    return Ok(false);
                 }
                 if !browser.reconnectable(&shared)
                     || !matches!(
@@ -138,16 +152,18 @@ pub(super) async fn wait(
                 {
                     return Err("The browser connection changed before it could be opened".into());
                 }
-                if tokio::time::Instant::now() >= deadline {
-                    return Err("The browser launch did not finish in time".into());
-                }
-                super::browser::open_paired(&shared, browser)
+                Ok(true)
             })();
-            shared
-                .chrome_control
-                .owner
-                .starts
-                .finish(browser, id, result);
+            let starts = &shared.chrome_control.owner.starts;
+            match ready {
+                Ok(true) if tokio::time::Instant::now() >= deadline => {
+                    starts.abandon_unstarted(browser, id);
+                }
+                Ok(true) => {
+                    starts.finish(browser, id, super::browser::open_paired(&shared, browser));
+                }
+                Ok(false) | Err(_) => starts.abandon_unstarted(browser, id),
+            }
         });
     }
     loop {
@@ -172,7 +188,7 @@ pub(super) async fn wait(
             return Ok(super::availability::refusal(shared, browser, false));
         }
         if tokio::time::Instant::now() >= deadline {
-            return Ok(Some(failure(browser, "BROWSER_CONNECT_TIMEOUT", &browser.words("Vibe Work asked {fullBrowser} to open, but its extension did not connect within 10 seconds."))));
+            return Ok(Some(failure(browser, "BROWSER_CONNECT_TIMEOUT", &browser.words("Vibe Work asked {fullBrowser} to open, but its extension did not connect before this step's time limit."))));
         }
         tokio::time::sleep_until((tokio::time::Instant::now() + POLL).min(deadline)).await;
     }
@@ -195,6 +211,57 @@ mod wording_tests {
                     "Not run: this chat's {} work ended with this turn. Finish the reply; the browser can be used again in the next turn.",
                     browser.short_name()
                 )
+            );
+            core.shutdown().await;
+        }
+    }
+}
+
+#[cfg(all(test, feature = "your-edge"))]
+mod expired_attempt_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn expired_deadline_does_not_spend_an_unstarted_browser_launch() {
+        for browser in [Browser::Chrome, Browser::Edge] {
+            let launches = Arc::new(AtomicUsize::new(0));
+            let recorded = launches.clone();
+            let core = super::super::browser_start_tests::fixture(
+                &format!("expired-browser-launch-{}", browser.id()),
+                browser,
+                Arc::new(move |_| {
+                    recorded.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }),
+            )
+            .await;
+            let past = tokio::time::Instant::now() - Duration::from_millis(1);
+            let reply = super::super::deadline::test_scope(past, wait(&core.shared, "a", browser))
+                .await
+                .unwrap()
+                .expect("an expired step has a browser-specific reply");
+            let expected = format!(
+                "before Vibe Work could open {}",
+                browser.words("{fullBrowser}")
+            );
+            assert!(reply.to_string().contains(&expected), "{reply}");
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            assert_eq!(launches.load(Ordering::SeqCst), 0);
+            assert!(
+                !core.shared.chrome_control.owner.starts.pending(browser),
+                "an expired call must leave a never-started launch retryable: {}",
+                browser.id()
+            );
+            assert!(
+                core.shared
+                    .chrome_control
+                    .owner
+                    .starts
+                    .begin(&core.shared, browser)
+                    .is_some(),
+                "the next call may attempt the launch: {}",
+                browser.id()
             );
             core.shutdown().await;
         }

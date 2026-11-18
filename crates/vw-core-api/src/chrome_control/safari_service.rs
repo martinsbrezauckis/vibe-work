@@ -43,6 +43,22 @@ fn after_request(claim: &Value, message: String) -> ServiceFault {
         message.into()
     }
 }
+/// Native input failure -> agent fault. A dispatch refused before its first macOS event (window or web-area proof,
+/// coordinate mapping, Stop) changed nothing on the page, so it is a definite refusal; once an event was posted the
+/// effect is unknown.
+fn native_fault(claim: &Value, error: vw_platform::safari_input::InputError) -> ServiceFault {
+    if error.posted {
+        after_request(claim, error.message)
+    } else if claim["stage"] == "dispatch" {
+        format!(
+            "{} No input was sent to the page, so nothing changed there.",
+            error.message
+        )
+        .into()
+    } else {
+        error.message.into()
+    }
+}
 struct Cancel(Arc<AtomicBool>);
 impl Drop for Cancel {
     fn drop(&mut self) {
@@ -146,7 +162,7 @@ async fn run(shared: &Arc<Shared>, claim: &Value) -> Result<Value, ServiceFault>
                     cancel.0.clone(),
                 )
                 .await
-                .map_err(|message| after_request(claim, message))
+                .map_err(|error| native_fault(claim, error))
             }
             Some("clipboard") => {
                 let mut args = claim["args"].clone();
@@ -202,6 +218,42 @@ mod tests {
             ServiceFault::from("vault refusal before dispatch").code,
             "SAFARI_APP_REFUSED"
         );
+    }
+    // PREDICT (before the fix): a native dispatch refused before any macOS event (here Safari's web area did not
+    // match) is reported as OUTCOME_UNKNOWN "The requested effect may have occurred", so the agent must treat a
+    // drag or click that never happened as possibly done. After the fix: a definite refusal that says nothing was
+    // sent; a failure after the first posted event stays OUTCOME_UNKNOWN.
+    #[test]
+    fn native_refusal_before_any_event_is_a_definite_not_sent() {
+        use vw_platform::safari_input::InputError;
+        let claim = json!({"kind":"native","stage":"dispatch","action":"page.drag"});
+        let refused = native_fault(
+            &claim,
+            InputError::not_sent(
+                "Safari did not expose one matching visible web area through Accessibility. Keep the checked page active and read it again.",
+            ),
+        );
+        assert_eq!(refused.code, "SAFARI_APP_REFUSED", "{refused:?}");
+        assert!(
+            refused.message.contains("No input was sent to the page"),
+            "the agent learns nothing happened: {refused:?}"
+        );
+        assert!(
+            !refused.message.contains("may have occurred"),
+            "{refused:?}"
+        );
+        let interrupted = native_fault(
+            &claim,
+            InputError::after_post("Safari input was cancelled."),
+        );
+        assert_eq!(interrupted.code, "OUTCOME_UNKNOWN");
+        assert!(interrupted.message.contains("may have occurred"));
+        // Preparation never posts input: unchanged definite refusal.
+        let prepare = native_fault(
+            &json!({"kind":"native","stage":"prepare"}),
+            InputError::not_sent("no window"),
+        );
+        assert_eq!(prepare.code, "SAFARI_APP_REFUSED");
     }
     #[tokio::test]
     async fn app_service_rechecks_ownership_mode_and_enabled_state() {

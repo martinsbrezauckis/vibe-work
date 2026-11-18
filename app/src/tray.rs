@@ -9,7 +9,15 @@ use vw_platform::Notifier;
 use vw_vocabulary::texts;
 
 pub(crate) const OPEN: &str = "open";
+pub(crate) const RESTART: &str = "restart";
 pub(crate) const QUIT: &str = "quit";
+/// The tray's Restart item (only the tray says it; the shared vocabulary's sentences already say "Restart Vibe Work").
+const RESTART_VIBE_WORK: &str = "Restart Vibe Work";
+
+/// The tray menu's last items, in order (after Open and Feedback): Restart beside Quit. Both ask first while agent work
+/// runs (`quit_guard`); Restart stops the app exactly as Quit does, then starts it again.
+pub(crate) const END_ITEMS: [(&str, &str); 2] =
+    [(RESTART, RESTART_VIBE_WORK), (QUIT, texts::QUIT_VIBE_WORK)];
 
 pub(crate) struct TrayState {
     preferences: Mutex<TrayPreferences>,
@@ -73,12 +81,37 @@ pub(crate) fn menu(app: &AppHandle, id: &str) -> Result<(), String> {
             crate::feedback_entry::open(app);
             Ok(())
         }
+        RESTART => {
+            crate::quit_guard::request(app, crate::quit_guard::End::Restart);
+            Ok(())
+        }
         QUIT => {
-            app.exit(0);
+            crate::quit_guard::request(app, crate::quit_guard::End::Quit);
             Ok(())
         }
         _ => Err("unknown tray menu item".to_owned()),
     }
+}
+
+/// Quits as Quit does (the host shuts down at exit), then starts the app again (after `quit_guard`'s question). The restart mark lets the new process
+/// wait for this one's data-folder lock instead of calling the folder "already running".
+pub(crate) fn restart(app: &AppHandle) {
+    match crate::startup::data_dir(app) {
+        Ok(data) => {
+            if let Err(error) = vw_host::instance::mark_restart(&data) {
+                tracing::warn!(%error, "restart mark not written");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "restart mark not written: no data folder"),
+    }
+    // Linux (the AppImage): as for an update's restart, the new process must not inherit the old image's mount
+    // keep-alive descriptor.
+    #[cfg(target_os = "linux")]
+    {
+        let changed = vw_platform::stop_descriptor_inheritance();
+        tracing::info!(changed, "restart: inherited descriptors closed");
+    }
+    app.request_restart();
 }
 
 pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -147,7 +180,15 @@ fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             Box::new(move || crate::feedback_entry::open(&feedback)),
         ));
     }
-    actions.push((texts::QUIT_VIBE_WORK, Box::new(move || quit.exit(0))));
+    let restart = app.clone();
+    actions.push((
+        END_ITEMS[0].1,
+        Box::new(move || crate::quit_guard::request(&restart, crate::quit_guard::End::Restart)),
+    ));
+    actions.push((
+        END_ITEMS[1].1,
+        Box::new(move || crate::quit_guard::request(&quit, crate::quit_guard::End::Quit)),
+    ));
     vw_platform::tray::indicator::create(
         &crate::startup::data_dir(app)?.join("tray"),
         include_bytes!("../icons/tray-linux.png"),
@@ -162,7 +203,6 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
     let open = MenuItem::with_id(app, OPEN, texts::OPEN_VIBE_WORK, true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT, texts::QUIT_VIBE_WORK, true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open])?;
     menu.append(&MenuItem::with_id(
@@ -173,7 +213,9 @@ fn build(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?)?;
     menu.append(&separator)?;
-    menu.append(&quit)?;
+    for (id, label) in END_ITEMS {
+        menu.append(&MenuItem::with_id(app, id, label, true, None::<&str>)?)?;
+    }
     #[cfg(windows)]
     let icon = tauri::include_image!("icons/tray-windows.ico");
     #[cfg(target_os = "macos")]
@@ -258,6 +300,8 @@ pub(crate) fn close(window: &tauri::Window, api: &tauri::CloseRequestApi) {
     let host =
         enabled && icon && tauri::async_runtime::block_on(vw_platform::tray::host_available());
     if !vw_host::tray::hides(WindowAction::Close, enabled, icon, host) {
+        // This close ends the app: while agent work runs the person is asked first.
+        crate::quit_guard::hold_close(window, api);
         return;
     }
     api.prevent_close();
@@ -326,4 +370,19 @@ fn first_notice(app: &AppHandle) {
             }),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Restart sits beside Quit at the end of the tray menu, worded as the owner chose, on every system.
+    #[test]
+    fn the_tray_offers_restart_beside_quit() {
+        assert_eq!(
+            super::END_ITEMS,
+            [
+                ("restart", "Restart Vibe Work"),
+                ("quit", vw_vocabulary::texts::QUIT_VIBE_WORK)
+            ]
+        );
+    }
 }

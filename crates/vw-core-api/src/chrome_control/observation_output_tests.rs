@@ -32,7 +32,7 @@ async fn helper_fields_and_tokens_pass_through_verbatim_within_both_budgets() {
         .unwrap();
         let body = &reply["vwMcpResult"]["structuredContent"];
         assert_receipt(body, &receipt);
-        assert!(super::output::fits(body, 4000));
+        assert!(super::output::fits(body, super::output::limit(body)));
         println!(
             "SIZE {}: compact={}, pretty={}",
             receipt["action"],
@@ -113,10 +113,7 @@ pub(super) async fn reconstruct(
     let mut text = String::new();
     for _ in 0..1000 {
         let body = &reply["vwMcpResult"]["structuredContent"];
-        assert!(super::output::fits(
-            body,
-            if body["steps"].is_array() { 9000 } else { 4000 }
-        ));
+        assert!(super::output::fits(body, super::output::limit(body)));
         let details = &body["untrustedPageContent"]["details"];
         assert_eq!(details["offset"], text.encode_utf16().count());
         text.push_str(details["text"].as_str().unwrap());

@@ -100,7 +100,7 @@ async fn save_page(resource: &Resources<'_>) -> Result<Value, String> {
         format,
         &text,
         data["url"].as_str().unwrap_or_default(),
-        &chrono::Utc::now().to_rfc3339(),
+        &crate::date_text::capture_timestamp(),
         cut,
     );
     let saved = page_files::save(

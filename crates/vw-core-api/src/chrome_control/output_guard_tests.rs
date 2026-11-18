@@ -32,7 +32,7 @@ fn text_paging_counts_utf16_and_keeps_document_bindings() {
     content::mark(&mut result);
     output::guard(&mut result);
     let body = &result["structuredContent"];
-    assert!(output::fits(body, 4000));
+    assert!(output::fits(body, output::READ_LIMIT));
     let data = &body["untrustedPageContent"]["data"];
     assert_eq!(
         data["nextTextOffset"],
@@ -68,7 +68,7 @@ fn list_guard_preserves_refs_and_advertises_the_next_offset() {
     content::mark(&mut result);
     output::guard(&mut result);
     let body = &result["structuredContent"];
-    assert!(output::fits(body, 4000));
+    assert!(output::fits(body, output::READ_LIMIT));
     let data = &body["untrustedPageContent"]["data"];
     let refs = data["refs"].as_array().unwrap();
     assert_ne!(refs.len(), 0);

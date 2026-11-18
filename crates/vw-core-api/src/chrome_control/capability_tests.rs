@@ -302,6 +302,8 @@ fn app_action_schemas_match_the_helper_catalog() {
                 schema["properties"]["limit"]["default"] = json!(5);
             }
             if row["id"] == "page.read" {
+                schema["properties"]["maxChars"]["default"] =
+                    json!(super::output::READ_DEFAULT_MAX_CHARS);
                 schema["properties"]["limit"]["default"] = json!(super::output::READ_DEFAULT_LIMIT);
                 schema["properties"]["maxBytes"]["default"] =
                     json!(super::output::READ_DEFAULT_MAX_BYTES);
@@ -386,5 +388,28 @@ fn the_built_in_download_wait_matches_the_catalog() {
         row["description"].as_str().unwrap().contains(&default),
         "{}",
         row["description"]
+    );
+}
+
+#[test]
+fn older_read_schemas_advertise_the_effective_app_inline_defaults() {
+    let mut result = json!({"structuredContent":{
+        "profiles":[{"profileId":"chrome:old","connected":true,"features":["page.read"],"extensionCapabilities":[]}],
+        "capabilities":{"actions":[{"action":"page.read","description":"Older read options",
+            "inputSchema":{"type":"object","properties":{
+                "maxChars":{"type":"integer","default":800},
+                "maxBytes":{"type":"integer","default":3000},
+                "limit":{"type":"integer","default":32}
+            }}}]}
+    }});
+    super::capabilities::filter(&mut result, Some("chrome:old"));
+    let fields =
+        &result["structuredContent"]["capabilities"]["actions"][0]["inputSchema"]["properties"];
+    assert_eq!(fields["maxChars"]["default"], 10_000);
+    assert_eq!(fields["maxBytes"]["default"], 10_000);
+    assert_eq!(fields["limit"]["default"], 32);
+    assert!(
+        fields.get("includeText").is_none(),
+        "older extensions do not gain options"
     );
 }

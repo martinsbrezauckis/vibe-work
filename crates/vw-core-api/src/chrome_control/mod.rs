@@ -35,6 +35,7 @@ pub(crate) mod commands;
 mod commands_view;
 mod connection_notice;
 mod content;
+mod deadline;
 #[cfg(test)]
 #[cfg(feature = "your-edge")]
 mod edge_agent_tests;
@@ -257,7 +258,6 @@ pub(crate) struct ChromeControl {
     pub(crate) config: ChromeControlConfig,
     owner: owner::Owner,
     lifecycle: tokio::sync::Mutex<()>,
-    generation: AtomicU64,
     /// Revokes Safari replies across an off/on switch cycle without invalidating Chrome work.
     safari_generation: AtomicU64,
     /// Registered installation diagnostics, independent of the helper connection.
@@ -343,7 +343,6 @@ impl ChromeControl {
             config,
             owner: owner::Owner::default(),
             lifecycle: tokio::sync::Mutex::new(()),
-            generation: AtomicU64::new(0),
             safari_generation: AtomicU64::new(0),
             safari_copies: Mutex::new(Vec::new()),
             connect_requested: AtomicBool::new(false),
@@ -467,7 +466,6 @@ impl ChromeControl {
         profiles::disconnected(self);
         self.connect_requested.store(false, Ordering::SeqCst);
         self.edge_connect_requested.store(false, Ordering::SeqCst);
-        self.generation.fetch_add(1, Ordering::SeqCst);
         self.work
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

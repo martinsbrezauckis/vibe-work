@@ -167,6 +167,18 @@ pub(crate) fn from_config(config: &crate::CoreConfig) -> AwakeState {
 }
 
 impl crate::Core {
+    /// Whether agent work runs in any open chat (a turn in progress, also one waiting for the person's answer, or a
+    /// running subagent): the app asks before Quit or Restart would end it.
+    #[must_use]
+    pub fn agent_work_running(&self) -> bool {
+        self.shared.channels.open_channels().iter().any(|channel| {
+            self.shared
+                .store
+                .activity(&channel.session_id)
+                .is_some_and(vw_session::Activity::running)
+        })
+    }
+
     /// Current preference and hold status without an OS request.
     #[must_use]
     pub fn keep_awake_view(&self) -> KeepAwakeView {

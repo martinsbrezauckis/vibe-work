@@ -2,6 +2,18 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.14 (2026-11-18)
+
+Bugfix release. Built for Vibe 3.1.2 on Python 3.14.8.
+
+- **Quit and Restart** ask first when an agent is still working; Restart is now in the tray menu.
+- **"Allow for this chat"** now covers every browser the chat uses.
+- **Card numbers and PINs** are always left for you to enter.
+- **Safari**: rich text editors and drag-and-drop need Safari 26 or later.
+- **Chrome and Edge extension 0.1.14** works more reliably on busy pages.
+
+Vibe Work needs macOS 14 or later.
+
 ## 0.1.13 (2026-11-17)
 
 Built for Vibe 3.1.2 on Python 3.14.8.

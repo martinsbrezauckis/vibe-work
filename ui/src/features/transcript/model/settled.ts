@@ -55,6 +55,23 @@ export function declinedEffects(entries: readonly Obj[]): Set<string> {
   return ids;
 }
 
+/**
+ * The entry records the person's No on Vibe's own approval card, which ends the turn (Vibe's `cancel_turn`): the
+ * effect Vibe cancelled for it, or the answered card. A card Stop closed carries a cancelled outcome and is no No.
+ */
+export function turnEndingNo(entry: Obj): boolean {
+  const state = stateOf(entry);
+  if (entryType(entry) === "effect")
+    return state["status"] === "cancelled" && state["reason"] === "approval cancel_turn";
+  return (
+    entryType(entry) === "callback" &&
+    detailOf(entry)["kind"] === "approval" &&
+    state["status"] === "answered" &&
+    obj(obj(state["output"])?.["decision"])?.["type"] === "cancel_turn" &&
+    (personRefusal(entry["vwAskOutcome"]) || entry["vwAskOutcome"] === undefined)
+  );
+}
+
 /** A failed or interrupted turn cannot keep work live. Finished results win. */
 export function settledEntry(entry: Obj, status: "failed" | "interrupted" | "declined"): Obj {
   const { cache, status: effectStatus, reason, verb } = resolutions[status];

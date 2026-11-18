@@ -322,28 +322,32 @@ export function ChipsRow({
   );
 }
 
-/** Offered after a turn that was stopped or failed. */
+/** Offered after a turn that was declined, stopped or failed. */
 export function RetryRow({
   problem,
   disabled = false,
   onRetry,
 }: {
-  problem: "interrupted" | "failed";
+  problem: "declined" | "interrupted" | "failed";
   disabled?: boolean;
   onRetry: () => void;
 }): ReactElement {
   return (
     <div className="retry-row">
       <span>
-        {problem === "interrupted" ? "The last turn was stopped." : "The last turn failed."}
+        {problem === "declined"
+          ? "The last turn was declined."
+          : problem === "interrupted"
+            ? "The last turn was stopped."
+            : "The last turn failed."}
       </span>
       <Button
         data-testid="composer.composer-parts-mini-5"
         type="button"
         appearance="compact"
         disabled={disabled}
-        title="Retry the last stopped or failed turn"
-        aria-label="Retry the last stopped or failed turn"
+        title="Retry the last turn"
+        aria-label="Retry the last turn"
         onClick={onRetry}
       >
         <Icon name="rotate-ccw" /> Retry

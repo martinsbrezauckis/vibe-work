@@ -174,7 +174,15 @@ impl Host {
                 (None, Startup::Unavailable(reason))
             }
             Ok(supervisor) => {
-                match Core::start(supervisor, secrets, config.confirmer, core_config).await {
+                // Boxed: the core start future exceeds clippy's large_futures limit on Windows.
+                match Box::pin(Core::start(
+                    supervisor,
+                    secrets,
+                    config.confirmer,
+                    core_config,
+                ))
+                .await
+                {
                     Ok(core) => (Some(core), Startup::Running),
                     Err(error) => {
                         warn!(%error, "the core did not start");

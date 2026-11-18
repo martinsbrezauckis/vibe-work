@@ -6,6 +6,7 @@
  * Invariants: pure; a session without state reads as idle with an empty queue.
  */
 import type { JsonValue } from "../../../protocol/core";
+import { declinedTurns } from "../../transcript/model/build";
 import { type Obj, arr, obj, str } from "../../transcript/model/entries";
 
 /** The id of the turn that is running, or `null` when the session is idle. */
@@ -91,12 +92,16 @@ export function anchorProblem(entry: Obj): string | null {
 }
 
 /**
- * How the last turn ended when it did not complete (`interrupted` by Stop or a crash; `failed` with
- * Vibe's error), so the composer can offer Retry; `null` when it completed or nothing ran yet.
+ * How the last turn ended when it did not complete (`declined` at the person's No, `interrupted` by Stop or a crash;
+ * `failed` with Vibe's error), so the composer can offer Retry; `null` when it completed or nothing ran yet.
  */
-export function lastTurnProblem(state: Obj | null): "interrupted" | "failed" | null {
+export function lastTurnProblem(state: Obj | null): "declined" | "interrupted" | "failed" | null {
   const turns = arr(state?.["turns"]);
   const last = obj(turns[turns.length - 1] ?? null);
   const status = last?.["status"];
+  if (status === "interrupted") {
+    const id = str(last?.["id"] ?? null);
+    if (id !== null && declinedTurns(arr(state?.["history"]), turns).has(id)) return "declined";
+  }
   return status === "interrupted" || status === "failed" ? status : null;
 }

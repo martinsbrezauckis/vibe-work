@@ -152,8 +152,7 @@ async fn paired_navigation_flaps_wait_and_execute_once_without_an_owner_card() {
             browser.name()
         );
         assert!(!result.to_string().contains("OWNER_REQUIRED"), "{result}");
-        let sent =
-            json!({"sessionId":"task","action":"page.read","args":{"maxBytes":2000,"limit":8}});
+        let sent = json!({"sessionId":"task","action":"page.read","args":{"maxBytes":10000,"limit":32,"maxChars":10000}});
         assert_eq!(call_count(&seen, "chrome_execute", &sent), 1);
         core.shutdown().await;
     }
@@ -388,8 +387,7 @@ async fn a_disconnect_during_an_action_is_not_replayed_or_replaced_by_pairing_in
         );
         // Exercise the background switch delivery that can race the action under suite load.
         super::send_local_network(&core.shared).await;
-        let sent =
-            json!({"sessionId":"task","action":"page.read","args":{"maxBytes":2000,"limit":8}});
+        let sent = json!({"sessionId":"task","action":"page.read","args":{"maxBytes":10000,"limit":32,"maxChars":10000}});
         assert_eq!(
             call_count(&seen, "chrome_execute", &sent),
             1,

@@ -96,7 +96,9 @@ fn authorize_mode(
         crate::browser_handover::check(shared, session)?;
     }
     let Some(view) = shared.store.view(session) else {
-        return Err("Not run: this chat is not open.".into());
+        return Err(
+            "Not run: this chat is not open. Open the chat in Vibe Work, then try again.".into(),
+        );
     };
     if view.state["session"]["parentSessionId"]
         .as_str()

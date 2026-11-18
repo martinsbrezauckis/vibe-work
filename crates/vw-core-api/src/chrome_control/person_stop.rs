@@ -250,3 +250,7 @@ impl PendingCall {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "stop_admission_tests.rs"]
+mod admission_tests;

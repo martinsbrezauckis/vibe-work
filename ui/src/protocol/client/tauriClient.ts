@@ -66,6 +66,9 @@ export function createTauriClient(): CoreClient {
       async quit() {
         await call<null>("app_quit", {});
       },
+      focusApp: async () => {
+        await call<null>("desktop_focus_app", {});
+      },
       async subscribe(onClose, notifications) {
         const channel = new Channel<null>();
         channel.onmessage = onClose;

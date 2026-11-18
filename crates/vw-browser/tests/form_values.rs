@@ -201,6 +201,69 @@ async fn unsupported_native_edit_keys_name_the_value_setting_route() {
 }
 
 #[tokio::test]
+async fn native_stepped_keys_do_not_change_payment_fields() {
+    let rig = page().await;
+    rig.engine.eval("document.body.insertAdjacentHTML('beforeend', '<label>Card number <input id=card-number type=number value=4111></label><label>Card range <input id=card-range type=range autocomplete=cc-number min=0 max=10 value=4></label><label>Card option <select id=card-option autocomplete=cc-number><option value=one>One</option><option value=two>Two</option></select></label><label>Card date <input id=card-date type=date autocomplete=cc-exp value=2026-11-18></label><label>Card number <textarea id=card-text>4111</textarea></label><label>Card number <input id=card-search type=search value=4111></label><div id=card-host contenteditable aria-label=\"Card number\">4111</div>')").await;
+    rig.browser
+        .observe(SESSION, ReadOptions::default())
+        .await
+        .unwrap();
+    for (id, key, expected) in [
+        ("card-number", "ArrowUp", "4111"),
+        ("card-range", "End", "4"),
+        ("card-option", "ArrowDown", "one"),
+        ("card-date", "ArrowUp", "2026-11-18"),
+        ("card-text", "Enter", "4111"),
+        ("card-search", "Escape", "4111"),
+    ] {
+        rig.engine
+            .eval(&format!("document.getElementById({}).focus()", json!(id)))
+            .await;
+        let error = rig
+            .browser
+            .act(
+                SESSION,
+                vw_browser::parse(&json!({"action":"press","key":key})).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.text.contains("Card details"), "{error:?}");
+        assert_eq!(
+            rig.engine
+                .eval(&format!("document.getElementById({}).value", json!(id)))
+                .await,
+            expected,
+        );
+    }
+    rig.engine
+        .eval("document.getElementById('card-host').focus()")
+        .await;
+    let error = rig
+        .browser
+        .act(
+            SESSION,
+            vw_browser::parse(&json!({"action":"press","key":"Enter"})).unwrap(),
+            Actor::Agent,
+            &NoNavigation,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.text.contains("Card details"), "{error:?}");
+    assert_eq!(
+        rig.engine
+            .eval("document.getElementById('card-host').innerHTML")
+            .await,
+        "4111",
+    );
+    let receipt = act(&rig, "range", json!({"action":"press","key":"ArrowUp"}))
+        .await
+        .unwrap();
+    assert!(receipt["change"]["summary"].as_str().is_some());
+}
+
+#[tokio::test]
 async fn range_keys_report_changes_and_respect_bounds() {
     let rig = page().await;
     for (key, value) in [

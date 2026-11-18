@@ -132,6 +132,21 @@ impl Approvals {
             }
         }
     }
+
+    /// A later authenticated status can resolve a person's earlier Not now without a new pairing event.
+    /// An explicitly removed profile stays quiet even if its extension still reports a connection.
+    pub(super) fn connected(&self, data: &Value) {
+        if let Some(profiles) = data["profiles"].as_array() {
+            for row in profiles {
+                if row["connected"] == true
+                    && let Some(profile) = row["profileId"].as_str()
+                    && !self.quiet(profile)
+                {
+                    self.forget_declined(profile);
+                }
+            }
+        }
+    }
 }
 
 pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
@@ -443,10 +458,11 @@ pub(super) fn not_now_card(
         .iter()
         .any(|profile| chrome.owner.approvals.quiet(profile));
     let a = if browser == Browser::Edge { "an" } else { "a" };
+    let a_cap = if browser == Browser::Edge { "An" } else { "A" };
     let waits = if removed {
         browser.words(&format!("The user removed {a} {{browser}} profile in Vibe Work while its extension is still connected in {{browser}}. Ask the user to click Connect {{browser}} in Settings > Browser to pair it again."))
     } else {
-        browser.words("A {browser} profile asked to connect to Vibe Work and the user chose Not now. Ask the user to click Connect {browser} in Settings > Browser to be asked again.")
+        browser.words(&format!("{a_cap} {{browser}} profile asked to connect to Vibe Work and the user chose Not now. Ask the user to click Connect {{browser}} in Settings > Browser to be asked again."))
     };
     if view.state == super::AddonState::Connected {
         // Another profile of this browser stays connected: the agent keeps that fact and also learns of the
@@ -467,9 +483,9 @@ pub(super) fn not_now_card(
             "You removed {a} {{browser}} profile that is still connected in {{browser}}. Click Connect {{browser}} to pair it again."
         ))
     } else {
-        browser.words(
-            "A {browser} profile asked to connect and you chose Not now. Click Connect {browser} to be asked again.",
-        )
+        browser.words(&format!(
+            "{a_cap} {{browser}} profile asked to connect and you chose Not now. Click Connect {{browser}} to be asked again."
+        ))
     });
 }
 

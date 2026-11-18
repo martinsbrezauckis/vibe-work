@@ -2,6 +2,20 @@
 //! Called by the core before launch and after attaching the install progress/ready hooks.
 use crate::{InstallError, InstallPhase, InstallSource, VibeInstaller, layout::Layout};
 
+/// A new probe home under `probe_dir` for one start check, never a folder an earlier run made: on Windows a folder an
+/// elevated run created can be unusable for the normal account, and the remembered Vibe then ends before it answers.
+pub(crate) fn fresh_saved_home(probe_dir: &std::path::Path) -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    probe_dir.join(format!(
+        "saved-{}-{stamp}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ))
+}
+
 impl VibeInstaller {
     /// Reprobe a remembered user install: it may have changed since the user selected it.
     /// An unsupported executable remains a setup choice with a plain explanation and is never launched.
@@ -12,14 +26,19 @@ impl VibeInstaller {
         let Some(choice) = layout.choice() else {
             return;
         };
+        let home = fresh_saved_home(&layout.probe_dir());
         let result = crate::existing::probe_checked(
             crate::existing::SAVED_PROBE_LIMIT,
             &choice.path,
             &[],
-            &layout.root.join("probe/saved"),
+            &home,
             &self.inner.config.parent_env,
         )
         .await;
+        // Best effort: a home that cannot be removed now is only a few small files.
+        if let Err(error) = vw_platform::remove_owned_tree(&layout.root, &home) {
+            tracing::debug!(%error, "the start check's probe home stays");
+        }
         if let Err(failure) = &result {
             tracing::warn!(server = %choice.path.display(), ?failure, "the remembered Vibe gave no version");
         }
@@ -89,5 +108,55 @@ impl VibeInstaller {
         let offer = self.prepare()?;
         self.confirm(&offer.offer_id, "app-update")?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The start check of a remembered install runs in a fresh probe home each time.
+    //! PREDICT (before the change): the check always used `probe/saved`; on Windows a folder an elevated run made
+    //! there earlier is unusable for the normal account, Vibe ends before it answers and the start fails. These tests
+    //! do not compile before (no `fresh_saved_home`); after, the home is new and an unusable old folder is never used.
+    use super::fresh_saved_home;
+
+    #[test]
+    fn each_check_gets_a_new_home_under_the_probe_folder() {
+        let probe = std::path::Path::new("/data/vibe/probe");
+        let (first, second) = (fresh_saved_home(probe), fresh_saved_home(probe));
+        assert_ne!(first, second);
+        assert_ne!(first, probe.join("saved"));
+        assert!(first.starts_with(probe) && second.starts_with(probe));
+    }
+
+    /// An old `probe/saved` the account cannot open (made by another, elevated, account) does not fail the check.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unusable_old_probe_folder_is_not_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vw-probe-fresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("vibe-app-server");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nread line\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"serverInfo\":{\"version\":\"3.1.2\"}}}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let probe = dir.join("probe");
+        let old = probe.join("saved");
+        std::fs::create_dir_all(old.join("vibe-home")).unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let home = fresh_saved_home(&probe);
+        let result = crate::existing::probe_checked(
+            std::time::Duration::from_secs(20),
+            &program,
+            &[],
+            &home,
+            &[],
+        )
+        .await;
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(result.as_deref(), Ok("3.1.2"));
     }
 }

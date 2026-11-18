@@ -297,6 +297,15 @@ impl CdpFrames {
         );
     }
 
+    /// Forgets child sessions that could not list their frames and moves the registry generation.
+    fn forget(&self, dead: &[(String, String)]) {
+        let mut state = self.state.borrow_mut();
+        for (session, _) in dead {
+            state.sessions.remove(session);
+        }
+        state.generation += 1;
+    }
+
     fn evaluate_once(&self, target: Option<&str>, script: &str, done: FramesDone, retry: bool) {
         let sessions: Vec<String> = std::iter::once(String::new())
             .chain(self.state.borrow().sessions.iter().cloned())
@@ -349,6 +358,13 @@ impl CdpFrames {
                     };
                     if let Some(error) = error {
                         (next.done)(Err(error));
+                    } else if !dead.is_empty() && !retry && next.target.is_none() {
+                        // Every frame, after the recovery: a child process that is gone again (ad and consent
+                        // frames replaced all the time) leaves its frames out instead of failing the page. Its frames
+                        // were not listed, so the reader names them unreadable; the generation moves, so a checked
+                        // click across them fails closed.
+                        next.frames.forget(&dead);
+                        next.run(frames);
                     } else if let Some((_, error)) = dead.first() {
                         next.recover(&dead, error, retry);
                     } else {
@@ -363,6 +379,10 @@ impl CdpFrames {
 #[cfg(test)]
 #[path = "cdp_act_tests.rs"]
 mod act_tests;
+
+#[cfg(test)]
+#[path = "cdp_frames_churn_tests.rs"]
+mod churn_tests;
 
 struct Trees {
     left: usize,
@@ -414,13 +434,7 @@ impl Next {
     /// click across this fails closed), ask again for every frame in another process (a live one returns under a
     /// new session before that answer), then read once more.
     fn recover(self, dead: &[(String, String)], error: &str, retry: bool) {
-        {
-            let mut state = self.frames.state.borrow_mut();
-            for (session, _) in dead {
-                state.sessions.remove(session);
-            }
-            state.generation += 1;
-        }
+        self.frames.forget(dead);
         if !retry {
             (self.done)(Err(failed("frame list", Some(error))));
             return;

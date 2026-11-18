@@ -7,7 +7,7 @@
 // Adapted from ShellX control script (native value setter, beforeinput/input/
 // change, contenteditable insertText) and actionability checks; changed: Enter submits the form the way a
 // browser does for a real key press, select uses the native setter.
-/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelledToggle, nativeClickPoint, observedTarget, privateField, privateLabel, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
+/* global authorizationPage, ENV, MAX_FRAME_DEPTH, MAX_SHADOW_DEPTH, REQ, actionRef, candidates, clip, composedParent, consentSnapshot, describe, editable, enabled, globalRect, labelledToggle, nativeClickPoint, nativeKeyWrites, observedTarget, privateField, privateLabel, refOf, roleOf, secretKind, viewOf, visibilityState, visible -- Supplied by the Rust script assembler and its shared prelude. */
 (() => {
   /* global dragTo -- Inserted by the script assembler. */
   __VW_COMMON__;
@@ -461,6 +461,8 @@
     const control = el.closest?.("label")?.control || el;
     if (!REQ.nativeUser && action === "click" && control?.localName === "input" && control.type === "color")
       return result("unsupportedPicker", { target });
+    if (REQ.nativeKeyboard && action === "press" && (nativeKeyWrites(el, REQ.keyboard) || REQ.keyboard?.editor) && secretKind(el))
+      return result("secret", { kind: secretKind(el), target });
     if (action === "press" && el.localName === "input" &&
         ["color", "date", "time", "datetime-local", "month", "week"].includes(el.type) &&
         !["Tab", "Escape"].includes(REQ.key) && (el.type === "color" || REQ.key !== "Enter"))
@@ -479,8 +481,6 @@
     if (REQ.nativeKeyboard && action === "press" && el.localName === "select" &&
         (["Enter", "Space", " "].includes(REQ.key) || REQ.modifiers?.altKey && ["ArrowDown", "ArrowUp"].includes(REQ.key)))
       return result("unsupportedSelectKey", { target });
-    if (REQ.nativeKeyboard && action === "press" && (REQ.keyboard?.writes || REQ.keyboard?.editor) && secretKind(el))
-      return result("secret", { kind: secretKind(el), target });
     if (REQ.nativeKeyboard && action === "insert_text" && String(REQ.text ?? "") === "" && editable(el)) {
       ENV.insertExpected ||= new WeakMap(); ENV.insertExpected.set(el, String(el.isContentEditable ? el.textContent : el.value));
       return controlPostcondition(el, target);

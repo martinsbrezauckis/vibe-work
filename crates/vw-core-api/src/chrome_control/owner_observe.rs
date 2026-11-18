@@ -106,6 +106,7 @@ fn update_pairing_state(shared: &Weak<Shared>, result: &Value) {
             .owner
             .connected_profiles
             .observe(&data);
+        shared.chrome_control.owner.approvals.connected(&data);
     }
     // The pairing states below (Edge's and Chrome's) leave out a profile the person removed, also while its
     // extension still reaches the helper; the observers above keep the helper's own report.

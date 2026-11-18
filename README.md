@@ -14,8 +14,8 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.13: approval cards always show, Mac dictation hears you clearly, Firefox page sharing works with Ubuntu's
-Snap Firefox, and saved PDFs show only the page.
+Version 0.1.14 is a bugfix release: browser connections give clearer next steps, long pages share more text,
+and browser approval cards remember your choice for the same chat, access level and action.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -71,7 +71,8 @@ Questions and reports: `CONTRIBUTING.md`.
 - **Your Chrome, Your Edge, Your Safari and Your Firefox.** Connect the extension in Settings > Browser > Your Chrome
   or Your Edge (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in
   your own Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows,
-  with Stop in the extension and on the page. In Firefox the agent works in a window Vibe Work opens with its own
+  with Stop in the extension frame; extension 0.1.13 also shows Pause and Resume. In Firefox the agent works in a
+  window Vibe Work opens with its own
   empty profile each time: Settings > Browser > Your Firefox > Open window (on Linux also Ubuntu's Snap Firefox).
   Local pages open like in a normal browser. To share from your own
   Firefox (on Linux also Ubuntu's Snap Firefox), choose Connect next to Ask Vibe Work and add the Vibe Work add-on when Firefox asks; then right-click a
@@ -258,7 +259,7 @@ cleanup of settings and of session data, each unchecked by default.
   marketplace, platform code).
 - `app/`: the Tauri application crate and the built-in Vibe plugin with Vibe Work's skills.
 - `ui/`: the React and TypeScript user interface.
-- `docs/public/`: the Debug API manual, the handbook format, the shared vocabulary, browser pools, Chrome Control and
+- `docs/public/`: the Debug API manual, the handbook format, the shared vocabulary, browser pools, browser control and
   how to verify a release.
 - `scripts/public/`: build and check scripts. `release/public-paths.json`: what the public source contains.
 

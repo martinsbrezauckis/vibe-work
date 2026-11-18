@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::future::Future;
 use std::time::Duration;
 
-pub(super) fn steps(args: &Value) -> Result<Vec<Value>, String> {
+pub(crate) fn steps(args: &Value) -> Result<Vec<Value>, String> {
     let object = args.as_object().ok_or("Not run: invalid batch.")?;
     if object
         .keys()

@@ -37,7 +37,7 @@ function sameRow(prev: Row, next: Row): boolean {
         sameItems(prev.items, next.items)
       );
     case "turnEnd":
-      return prev.kind === "turnEnd" && prev.turn === next.turn;
+      return prev.kind === "turnEnd" && prev.turn === next.turn && prev.declined === next.declined;
     case "user":
       return prev.kind === "user" && prev.entry === next.entry && prev.steer === next.steer;
     case "callback":

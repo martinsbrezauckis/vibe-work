@@ -145,6 +145,14 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
 /// Invalidate earlier decisions immediately and stop protected-change work.
 pub(crate) fn stopped(shared: &Shared, session: &str) {
     let id = shared.channels.canonical(session);
+    // Fence late helper replies before browser cleanup can wait on its own locks.
+    {
+        let mut chats = shared.stops.chats();
+        let chat = chats.entry(id.clone()).or_default();
+        chat.generation += 1;
+        chat.stopped_by_person = true;
+    }
+    shared.stops.ended.notify_waiters();
     // A paused call waiting for the person never runs after Stop.
     shared.paused_tools.stop_chat(session);
     shared.paused_tools.stop_chat(&id);
@@ -154,13 +162,6 @@ pub(crate) fn stopped(shared: &Shared, session: &str) {
         crate::chrome_control::stop_chat(shared, &id);
         crate::browser::stop_for_chat(shared, &id);
     }
-    {
-        let mut chats = shared.stops.chats();
-        let chat = chats.entry(id.clone()).or_default();
-        chat.generation += 1;
-        chat.stopped_by_person = true;
-    }
-    shared.stops.ended.notify_waiters();
     crate::protected_changes::stop(shared, session);
     if id != session {
         crate::protected_changes::stop(shared, &id);

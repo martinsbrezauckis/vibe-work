@@ -589,10 +589,20 @@ pub fn desktop_focus_subscribe(app: AppHandle, focused: Channel<bool>) -> Result
     crate::window_focus::subscribe(&app, focused)
 }
 
+/// Moves the OS keyboard focus to the calling webview, the app's own content (the capability grants it to the main
+/// webview only), out of a native page view beside one of its prompts. Nothing of the page is focused or read.
+// Tauri injects the calling Webview by value into commands.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub fn desktop_focus_app(webview: tauri::Webview) -> Result<(), String> {
+    webview.set_focus().map_err(|error| error.to_string())
+}
+
 /// Explicit Quit, shared with the tray menu and the Debug API.
 // Tauri injects AppHandle by value into commands.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn app_quit(app: AppHandle) {
-    app.exit(0);
+    // Asks the person first while agent work runs; the Debug API can ask to quit but never answer the question.
+    crate::quit_guard::request(&app, crate::quit_guard::End::Quit);
 }

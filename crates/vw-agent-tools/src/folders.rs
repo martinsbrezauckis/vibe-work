@@ -250,7 +250,7 @@ impl Layout {
         }
         if access != Access::Read && real.starts_with(&self.vibe_home) {
             return Some(format!(
-                "Not run: Vibe Work's own configuration and session data, the Vibe home ({}); the agent does not \
+                "Not run: Vibe Work's own configuration and session data, the Vibe home ({}); this tool cannot read or \
                  change it. {own} Read skills with the skill tool or read_file. To change files there, propose the change with propose_protected_change; the user reviews it.",
                 shown::shown(&joined)
             ));

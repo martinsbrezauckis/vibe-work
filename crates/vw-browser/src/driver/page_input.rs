@@ -173,7 +173,7 @@ impl Browser {
                     "Native clipboard shortcuts bypass the app's protected clipboard. Use clipboard.read or clipboard.write, then insert_text for text entry.",
                 ));
             }
-            request["keyboard"] = json!({"key":key,"modifiers":modifiers,"writes":key.chars().count() == 1 || matches!(key.as_str(), "Backspace" | "Delete" | "Space"),"editor":vw_ask::chrome::keys::requires_editor(&args).map_err(refused)?});
+            request["keyboard"] = json!({"key":key,"modifiers":modifiers,"writes":key.chars().count() == 1 || matches!(key.as_str(), "Backspace" | "Delete" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "PageUp" | "PageDown" | "Home" | "End"),"editor":vw_ask::chrome::keys::requires_editor(&args).map_err(refused)?});
         } else if let Action::Type { text, .. } = action {
             request["keyboard"] = if text.is_empty() {
                 json!({"key":"Backspace","modifiers":[],"replace":true,"editor":true})

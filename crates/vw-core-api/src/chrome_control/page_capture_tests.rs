@@ -35,6 +35,58 @@ fn page_capture_is_an_ordinary_read_in_all_modes() {
 }
 
 #[tokio::test]
+async fn capture_reports_a_helper_document_history_refusal() {
+    let core = super::read_consent_tests::core("page-capture-history-refusal").await;
+    let folder = core
+        .shared
+        .instructions
+        .own_home
+        .parent()
+        .unwrap()
+        .join("chat");
+    std::fs::create_dir_all(&folder).unwrap();
+    let _ = core
+        .shared
+        .store
+        .load(
+            json!({"session":{"id":"s","cwd":folder},"history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    super::test_support::answering(&core.shared, |tool, _| match tool {
+        "chrome_status" => {
+            json!({"structuredContent":{"profiles":[{"profileId":"chrome:p","connected":true,"extensionCapabilities":["transport.contract.v1"]}],"sessions":[{"sessionId":"t","profileId":"chrome:p"}]}})
+        }
+        "owner.primitive" => {
+            json!({"rpcError":{"code":-32602,"message":"Not run: this document's page-script or vault-fill history could not be verified after reconnecting. Reload or navigate the tab to a new document before filling or running JavaScript.","data":{"code":"VAULT_SCRIPT_CONFLICT"}}})
+        }
+        _ => panic!("unexpected {tool}"),
+    });
+    let request =
+        json!({"sessionId":"t","action":"capture.page","args":{"tabId":7,"format":"text"}});
+    let error = super::page_capture::send(&core.shared, "s", &request, None)
+        .await
+        .err()
+        .expect("the helper refusal must prevent capture");
+    assert!(error.contains("Capture was not run"), "{error}");
+    assert!(
+        error.contains("cannot verify this page's earlier use of secrets"),
+        "{error}"
+    );
+    assert!(
+        error.contains("For your own agent tab, reload or navigate it"),
+        "{error}"
+    );
+    assert!(
+        error.contains("For the user's tab, ask the user to reload or navigate it"),
+        "{error}"
+    );
+    assert!(error.contains("VAULT_SCRIPT_CONFLICT"), "{error}");
+    assert!(!error.contains("could not be acknowledged"), "{error}");
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn capture_transfer_checks_the_real_file_size_and_chat_boundary() {
     let (core, folder) = super::read_output_tests::fixture("page-capture-transfer").await;
     let path = folder.join("output.json");

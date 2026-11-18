@@ -115,3 +115,49 @@ fn missing_file_refusal_is_delivered_without_focus() {
         "the owner received the refusal for the composer"
     );
 }
+
+/// Restart: the relaunched process starts while the old one is still shutting down. It must wait for the old
+/// owner's lock (never focus the closing window or refuse the folder as "already running").
+#[test]
+fn a_restart_waits_for_the_closing_owner() {
+    let data = tempfile::tempdir().unwrap();
+    let (guard, _received, calls) = owner(data.path());
+    instance::mark_restart(data.path()).unwrap();
+    assert_eq!(
+        instance::focus_existing(data.path(), None).unwrap(),
+        None,
+        "a restart never asks the closing window to focus"
+    );
+    let closing = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        drop(guard);
+    });
+    let outcome = instance::start(data.path(), None, || true, |_| ()).unwrap();
+    closing.join().unwrap();
+    assert!(
+        matches!(outcome, InstanceStart::First(_)),
+        "the relaunched app owns the folder"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    drop(outcome);
+    // The mark is used once: the next launch into a running app is an ordinary second launch again.
+    let (_guard, _received, calls) = owner(data.path());
+    assert_eq!(
+        instance::focus_existing(data.path(), None).unwrap(),
+        Some(false)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// An old restart mark (a relaunch that never came) does not change a later ordinary second launch.
+#[test]
+fn a_stale_restart_mark_is_ignored() {
+    let data = tempfile::tempdir().unwrap();
+    let (_guard, _received, calls) = owner(data.path());
+    std::fs::write(data.path().join(instance::RESTART_MARK), "1000").unwrap();
+    assert_eq!(
+        instance::focus_existing(data.path(), None).unwrap(),
+        Some(false)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

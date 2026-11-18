@@ -319,12 +319,12 @@ async fn page_requests_clamp_and_say_so_once() {
         .iter()
         .find(|(tool, _)| tool == "chrome_execute")
         .unwrap();
-    assert_eq!(sent.1["args"]["maxChars"], 4000);
-    assert_eq!(sent.1["args"]["maxBytes"], 4000);
+    assert_eq!(sent.1["args"]["maxChars"], 12_000);
+    assert_eq!(sent.1["args"]["maxBytes"], 12_000);
     let text = answer["vwMcpResult"]["content"][0]["text"]
         .as_str()
         .unwrap();
-    assert_eq!(text.matches("capped at 4000").count(), 1);
+    assert_eq!(text.matches("capped at 12000").count(), 1);
     core.shutdown().await;
 }
 
@@ -418,7 +418,7 @@ async fn chrome_page_read_inline_budget() {
         .unwrap();
         let (compact, pretty) = sizes(&answer);
         println!("SIZE page.read({args}): compact={compact}, pretty={pretty}");
-        if compact > 4000 || pretty > 6000 {
+        if compact > 12_000 || pretty > 15_000 {
             failures.push((args, compact, pretty));
         }
     }
@@ -563,24 +563,113 @@ async fn an_over_budget_status_keeps_every_feature_list_its_profiles_name() {
             .await
             .unwrap();
         let status = &answer["vwMcpResult"]["structuredContent"]["untrustedPageContent"];
-        let lists = status["featureLists"].as_array().unwrap();
+        let profiles = status["profiles"].as_array().unwrap();
+        assert_eq!(
+            profiles.len(),
+            2,
+            "{args}: connected profiles must survive capabilities"
+        );
         let defaults = status["profileDefaults"].clone();
-        for profile in status["profiles"].as_array().unwrap() {
-            for key in ["features", "extensionCapabilities"] {
-                let reference = profile.get(key).unwrap_or(&defaults[key]);
-                let index = usize::try_from(reference["list"].as_u64().unwrap()).unwrap();
-                assert!(
-                    index < lists.len(),
-                    "{args}: {key} -> {index} of {}",
-                    lists.len()
-                );
+        for profile in profiles {
+            let mut restored = defaults.as_object().cloned().unwrap_or_default();
+            restored.extend(profile.as_object().unwrap().clone());
+            assert_eq!(restored["connected"], true, "{args}: {restored:?}");
+            assert_eq!(
+                restored["extensionVersion"], "0.1.6",
+                "{args}: {restored:?}"
+            );
+            assert_eq!(
+                restored["browserVersion"], "142.0.7444.60",
+                "{args}: {restored:?}"
+            );
+        }
+        if let Some(lists) = status["featureLists"].as_array() {
+            for profile in status["profiles"].as_array().unwrap() {
+                for key in ["features", "extensionCapabilities"] {
+                    let reference = profile.get(key).unwrap_or(&defaults[key]);
+                    let index = usize::try_from(reference["list"].as_u64().unwrap()).unwrap();
+                    assert!(
+                        index < lists.len(),
+                        "{args}: {key} -> {index} of {}",
+                        lists.len()
+                    );
+                }
+            }
+            let text = answer["vwMcpResult"]["content"].to_string();
+            assert!(
+                text.contains("extension.capability.199.v1"),
+                "{args}: list cut"
+            );
+        } else {
+            assert!(
+                status["capabilities"]["availability"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("omitted") && s.contains("chrome_status"))
+            );
+            for profile in status["profiles"].as_array().unwrap() {
+                for key in ["features", "extensionCapabilities"] {
+                    assert!(profile.get(key).is_none() && defaults.get(key).is_none());
+                }
             }
         }
-        let text = answer["vwMcpResult"]["content"].to_string();
-        assert!(
-            text.contains("extension.capability.199.v1"),
-            "{args}: list cut"
-        );
+        let body = &answer["vwMcpResult"]["structuredContent"];
+        assert!(body.to_string().len() <= 9000);
+        assert!(serde_json::to_string_pretty(body).unwrap().len() <= 15_000);
     }
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn crowded_status_keeps_profiles_and_versions_within_one_return() {
+    let core = core("chrome-output-crowded-capabilities").await;
+    test_support::answering(&core.shared, |_, args| {
+        let mut result = status(args);
+        let names: Vec<Value> = (0..512)
+            .map(|i| json!(format!("cap{i:03}{}", "x".repeat(122))))
+            .collect();
+        for profile in result["structuredContent"]["profiles"]
+            .as_array_mut()
+            .unwrap()
+        {
+            profile["extensionCapabilities"] = json!(names);
+        }
+        result
+    });
+    let answer = gateway::call(&core.shared, "s", "chrome_status", json!({}))
+        .await
+        .unwrap();
+    let body = &answer["vwMcpResult"]["structuredContent"];
+    let status = &body["untrustedPageContent"];
+    assert!(
+        body["outputLimit"].as_str().unwrap().contains("9000"),
+        "status reports its complete return budget: {}",
+        body["outputLimit"]
+    );
+    assert!(
+        body["outputLimit"]
+            .as_str()
+            .unwrap()
+            .contains("chrome_status")
+    );
+    assert!(
+        body.to_string().len() <= 9000,
+        "compact status exceeded budget"
+    );
+    assert!(serde_json::to_string_pretty(body).unwrap().len() <= 15_000);
+    assert_eq!(status["profiles"].as_array().map(Vec::len), Some(2));
+    let defaults = status["profileDefaults"].clone();
+    for profile in status["profiles"].as_array().unwrap() {
+        let mut restored = defaults.as_object().cloned().unwrap_or_default();
+        restored.extend(profile.as_object().unwrap().clone());
+        assert_eq!(restored["connected"], true);
+        assert_eq!(restored["browserVersion"], "142.0.7444.60");
+        assert_eq!(restored["extensionVersion"], "0.1.6");
+        assert!(restored.get("features").is_none());
+        assert!(restored.get("extensionCapabilities").is_none());
+    }
+    assert!(status.get("featureLists").is_none());
+    let availability = status["capabilities"]["availability"].as_str().unwrap();
+    assert!(availability.contains("chrome_status") && availability.contains("profileId"));
+    assert!(availability.contains("omitted"), "{availability}");
     core.shutdown().await;
 }

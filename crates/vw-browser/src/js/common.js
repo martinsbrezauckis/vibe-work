@@ -6,7 +6,7 @@
 // roots, global rects across frames), actionability (attached, visible, stable, enabled, receives
 // events, the covering element).
 /* global REQ, formControl, nearbyLabel, labelledToggle, labelledSubmit, renderedLabelText -- Supplied by the Rust script assembler and its shared prelude. */
-/* exported authorizationPage, editingHost, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, privateField, privateLabel, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
+/* exported authorizationPage, editingHost, nodeIdentity, observedTarget, actionRef, actionableCandidate, visualCandidate, collect, consentSnapshot, describe, domPath, editable, findRef, globalRect, hideKeys, inFrame, keyHolder, loginRole, nativeKeyWrites, privateField, privateLabel, refOf, rememberLabelledKeys, secretKind, submitMethods, submitOrigins, vaultFilled */
 const ENV = (() => {
   try {
     return window[REQ.page] || null;
@@ -15,6 +15,10 @@ const ENV = (() => {
   }
 })();
 const clip = (v, n) => String(v === undefined || v === null ? "" : v).replace(/\s+/g, " ").trim().slice(0, n);
+const nativeKeyWrites = (el, input) => {
+  const key = input?.key, stepped = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(key), horizontal = ["ArrowLeft", "ArrowRight"].includes(key), lineOrClear = (key === "Enter" && (el?.localName === "textarea" || el?.isContentEditable)) || (key === "Escape" && el?.localName === "input" && el.type === "search"); // Enter adds a line; Escape clears a search field without beforeinput.
+  return lineOrClear || (el?.localName === "select" && (stepped || horizontal)) || (el?.localName === "input" && (el.type === "range" && (stepped || horizontal) || ["number", "date", "time", "datetime-local", "month", "week"].includes(el.type) && stepped)) || Boolean(input?.writes && !(stepped || horizontal));
+};
 const MAX_ROOTS = 32, MAX_NODES = 12000, MAX_FRAME_DEPTH = 4, MAX_SHADOW_DEPTH = 8;
 const INTERACTIVE =
   "a[href],button,input:not([type=hidden]),textarea,select,summary,iframe,frame," +
@@ -35,7 +39,6 @@ const customClickable = (el) => {
   return !el.querySelector(INTERACTIVE);
 };
 const actionableCandidate = (el) => matches(el, INTERACTIVE) || customClickable(el);
-
 const roleOf = (el) => {
   const tag = String(el.localName || "").toLowerCase();
   const explicit = el.getAttribute && el.getAttribute("role");
@@ -60,7 +63,6 @@ const roleOf = (el) => {
   if (el.isContentEditable) return "textbox";
   return tag || "element";
 };
-
 const escCss = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/[^a-zA-Z0-9_-]/g, "\\$&"));
 const segment = (el) => {
   const tag = el.localName.toLowerCase();
@@ -145,7 +147,6 @@ const nodeIdentity = (el) => {
   }
   return id;
 };
-
 const frameDoc = (frame) => {
   try {
     const doc = frame.contentDocument;
@@ -280,7 +281,6 @@ const candidates = () => {
   const all = collect();
   return { ...all, elements: all.elements.filter(actionableCandidate) };
 };
-
 const viewOf = (el) => (el.ownerDocument && el.ownerDocument.defaultView) || window;
 const inFrame = (el) => el.ownerDocument !== document;
 // Walk the rendered ancestry, including slotted content, open/closed shadow hosts and same-origin frame elements.

@@ -75,6 +75,10 @@ pub(crate) struct PreviewHub {
     task: Mutex<Option<JoinHandle<()>>>,
     /// Re-checks the previews' ports.
     ports_task: Mutex<Option<JoinHandle<()>>>,
+    /// Woken when a chat server's process exits ([`server_exited`]): the port re-check runs at once.
+    pub(crate) exits: Arc<tokio::sync::Notify>,
+    /// Reports the exit of the chats' servers each scan found (`preview_ports`; macOS only, `None` elsewhere).
+    pub(crate) exit_watch: Option<vw_procmon::ExitWatch>,
     /// Installs the mounted pages' content rules again when their inputs change.
     rules_task: Mutex<Option<JoinHandle<()>>>,
     /// Chat -> the id of the turn in which the agent last used its browser (`browser_input_block`).
@@ -108,6 +112,9 @@ pub(crate) fn open(setup: Option<PreviewSetup>) -> Option<Arc<PreviewHub>> {
     let pending_wipes = setup.config.storage_root.join("wipe-pending.json");
     retry_wipes(&pending_wipes);
     let service = PreviewService::new(setup.engine, setup.config);
+    let exits = Arc::new(tokio::sync::Notify::new());
+    let notify = Arc::clone(&exits);
+    let exit_watch = vw_procmon::ExitWatch::start(Arc::new(move |pid| server_exited(&notify, pid)));
     let browser =
         vw_browser::Browser::new(service.clone(), Arc::new(vw_browser::Sessions::default()));
     Some(Arc::new(PreviewHub {
@@ -118,6 +125,8 @@ pub(crate) fn open(setup: Option<PreviewSetup>) -> Option<Arc<PreviewHub>> {
         pending_wipes,
         task: Mutex::new(None),
         ports_task: Mutex::new(None),
+        exits,
+        exit_watch,
         rules_task: Mutex::new(None),
         agent_turns: Mutex::new(std::collections::HashMap::new()),
         #[cfg(test)]
@@ -258,6 +267,16 @@ pub(crate) fn start_events(shared: &Arc<Shared>) {
     });
     *hub.ports_task.lock_or_recover() = Some(maintenance::start(shared));
     *hub.rules_task.lock_or_recover() = Some(crate::browser_guard::watch_rule_inputs(shared));
+}
+
+/// A chat server's process exited (`pid`): the previews' port re-check runs now instead of at its next round.
+pub(crate) fn server_exited(exits: &tokio::sync::Notify, pid: u32) {
+    tracing::debug!(
+        pid,
+        "a chat server exited: re-checking the previews' ports now"
+    );
+    // One stored permit: an exit during a running round makes the next wait return at once (never lost).
+    exits.notify_one();
 }
 
 /// How often the previews' ports are re-checked.

@@ -142,6 +142,25 @@ mod tests {
     #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
     #[test]
     fn a_port_is_held_only_by_its_current_listeners_process() {
+        if std::env::var_os("VW_PROCMON_ISOLATED_PORT_TEST").is_none() {
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "os::tests::a_port_is_held_only_by_its_current_listeners_process",
+                    "--nocapture",
+                ])
+                .env("VW_PROCMON_ISOLATED_PORT_TEST", "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&child.stdout);
+            assert!(
+                child.status.success() && stdout.contains("test result: ok. 1 passed; 0 failed"),
+                "isolated listener check failed: {} {}",
+                stdout,
+                String::from_utf8_lossy(&child.stderr)
+            );
+            return;
+        }
         let me = super::identity(std::process::id()).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

@@ -555,7 +555,6 @@ Cargo normal dependency graphs
 - hyper-rustls@0.27.10 — Apache-2.0 OR ISC OR MIT; crates.io; linux
 - hyper-tls@0.6.0 — MIT/Apache-2.0; crates.io; macos,windows
 - hyper-util@0.1.21 — MIT; crates.io; linux,macos,windows
-- iana-time-zone@0.1.65 — MIT OR Apache-2.0; crates.io; linux,macos
 - ico@0.5.0 — MIT; crates.io; linux,macos,windows
 - icu_collections@2.3.0 — Unicode-3.0; crates.io; linux,macos,windows
 - icu_locale_core@2.3.0 — Unicode-3.0; crates.io; linux,macos,windows
@@ -643,6 +642,7 @@ Cargo normal dependency graphs
 - num-iter@0.1.46 — MIT OR Apache-2.0; crates.io; linux
 - num-rational@0.4.2 — MIT OR Apache-2.0; crates.io; linux
 - num-traits@0.2.19 — MIT OR Apache-2.0; crates.io; linux,macos,windows
+- num_threads@0.1.8 — MIT OR Apache-2.0; crates.io; linux,macos
 - objc2@0.6.5 — MIT; crates.io; macos
 - objc2-app-kit@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos
 - objc2-av-foundation@0.3.2 — Zlib OR Apache-2.0 OR MIT; crates.io; macos

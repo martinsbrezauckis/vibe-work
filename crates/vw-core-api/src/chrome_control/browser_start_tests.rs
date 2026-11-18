@@ -160,7 +160,7 @@ async fn reconnect_timeout_never_dispatches_the_call_or_relaunches_on_retry() {
         assert!(
             reply
                 .to_string()
-                .contains("did not connect within 10 seconds")
+                .contains("did not connect before this step's time limit")
                 && reply.to_string().contains(&format!(
                     "check that {} is on",
                     vw_vocabulary::label("workNames", "chromeExtension")

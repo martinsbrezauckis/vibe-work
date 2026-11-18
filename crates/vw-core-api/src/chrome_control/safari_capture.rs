@@ -198,7 +198,7 @@ pub(super) async fn send(
         format,
         &text,
         meta["url"].as_str().unwrap_or_default(),
-        &chrono::Utc::now().to_rfc3339(),
+        &crate::date_text::capture_timestamp(),
         meta["cut"] == true,
     );
     let file = page_files::save(shared, chat, suffix, mime, text.as_bytes())?;

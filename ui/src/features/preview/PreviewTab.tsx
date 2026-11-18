@@ -197,14 +197,7 @@ export function PreviewTab({
             busy={busy}
           />
         }
-        activity={
-          <AgentStrip
-            state={agent}
-            turnRunning={turnRunning}
-            onStop={() => void browser.stopAgent(sessionId)}
-            onResume={() => void browser.resumeAgent(sessionId)}
-          />
-        }
+        activity={<AgentStrip state={agent} />}
         save={(collapsed, close, visible) =>
           open && (
             <SaveVault

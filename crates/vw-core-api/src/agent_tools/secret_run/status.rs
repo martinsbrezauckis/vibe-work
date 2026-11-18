@@ -48,7 +48,7 @@ fn collect(run: &mut Run) -> Option<Result<Value, String>> {
         }
         RunState::Running => return None,
     };
-    let at = chrono::Local::now().format("%H:%M").to_string();
+    let at = crate::date_text::local_receipt_time();
     run.state = tokio::sync::watch::channel(RunState::Reported {
         outcome,
         at,

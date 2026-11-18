@@ -37,7 +37,7 @@ required-features = ["ts"]
 [dependencies]
 vw-video-types = { workspace = true }
 vw-video = { path = "../vw-video", optional = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+time = { version = "=0.3.55", features = ["local-offset", "parsing"] }
 vw-ask = { workspace = true }
 vw-proposals = { path = "../vw-proposals" }
 vw-logscan = { path = "../vw-logscan" }

@@ -109,7 +109,7 @@ async fn outer_buffer_reassembles_original_before_helper_continuation() {
     let mut restored = String::new();
     for _ in 0..300 {
         let body = &answer["vwMcpResult"]["structuredContent"];
-        assert!(super::output::fits(body, 4000));
+        assert!(super::output::fits(body, super::output::limit(body)));
         let details = &body["untrustedPageContent"]["details"];
         if details.is_object() {
             assert_eq!(details["offset"], restored.encode_utf16().count());

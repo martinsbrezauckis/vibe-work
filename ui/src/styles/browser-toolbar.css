@@ -75,10 +75,6 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   gap: 5px;
   padding-inline: 3px;
 }
-.browser-strip[data-state="stopped"] .preview-btn {
-  color: var(--text-2);
-  border-color: var(--line-2);
-}
 .browser-strip-dot {
   width: 7px;
   height: 7px;
@@ -93,9 +89,6 @@ body[data-browser-overlay="restoring"] [data-browser-overlay-menu] {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-.browser-strip[data-state="stopped"] .browser-strip-dot {
-  background: var(--text-3);
 }
 .browser-strip[data-state="acting"] .browser-strip-dot {
   animation: browser-pulse var(--t-loop) var(--ease-pulse) infinite;

@@ -127,8 +127,10 @@ async fn accepted_arguments_reach_capable_extension_verbatim() {
         assert_eq!(sent["action"], call["action"]);
         let mut expected = call["args"].clone();
         if call["action"] == "page.read" && expected.get("cursor").is_none() {
-            expected["maxBytes"] = json!(2000);
-            expected["limit"] = json!(8);
+            let fields = expected.as_object_mut().unwrap();
+            fields.entry("maxBytes").or_insert(json!(10000));
+            fields.entry("limit").or_insert(json!(32));
+            fields.entry("maxChars").or_insert(json!(10000));
         }
         assert_eq!(sent["args"], expected);
     }

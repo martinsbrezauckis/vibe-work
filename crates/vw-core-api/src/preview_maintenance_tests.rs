@@ -1,5 +1,6 @@
 //! Preview maintenance counts real process scans and timer rounds on an offline core.
-//! Uses a windowless engine; verifies idle sleep, port withdrawal and wake-up after an open.
+//! Uses a windowless engine; verifies idle sleep, port withdrawal, wake-up after an open and the immediate round
+//! after a chat server's exit notice.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,9 +47,13 @@ impl PreviewEngine for Engine {
 }
 
 async fn core(name: &str) -> crate::Core {
+    core_with(name, Arc::new(Engine)).await
+}
+
+async fn core_with(name: &str, engine: Arc<dyn PreviewEngine>) -> crate::Core {
     crate::offline_core::start_with(name, |config, dir| {
         config.preview = Some(super::PreviewSetup {
-            engine: Arc::new(Engine),
+            engine,
             config: vw_preview::PreviewConfig::new(dir.join("preview")),
             guard: None,
         });
@@ -146,4 +151,85 @@ async fn portless_browser_still_reaps_after_ten_idle_minutes() {
     assert!(!hub.service.has_active_browsers());
     assert_eq!(hub.maintenance_counts.scans.load(Ordering::SeqCst), 0);
     core.shutdown().await;
+}
+
+/// Records every URL rule update it applies (the App preview's content rules on macOS).
+#[derive(Default)]
+struct RulesEngine {
+    updates: std::sync::Mutex<Vec<vw_netguard::rules::RulePage>>,
+}
+impl PreviewEngine for RulesEngine {
+    fn attach(&self, _: Arc<dyn PreviewHooks>) {}
+    fn mount(&self, _: MountSpec) -> EngineFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn navigate(&self, _: &MountId, _: url::Url) -> EngineFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn history(&self, _: &MountId, _: HistoryStep) -> EngineFuture<'_, ()> {
+        panic!("maintenance must not reload")
+    }
+    fn place(&self, _: &MountId, _: Option<Placement>) -> EngineFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn close(&self, _: &MountId) -> EngineFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn update_rules(
+        &self,
+        _: &MountId,
+        rules: vw_netguard::rules::RulePage,
+    ) -> EngineFuture<'_, ()> {
+        self.updates.lock().unwrap().push(rules);
+        Box::pin(async { Ok(()) })
+    }
+    fn screenshot(&self, _: &MountId) -> EngineFuture<'_, Vec<u8>> {
+        panic!("maintenance must not capture")
+    }
+    fn drain_console(&self, _: &MountId) -> EngineFuture<'_, Vec<ConsoleEntry>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn wipe(&self, _: &Storage) -> EngineFuture<'_, Vec<PathBuf>> {
+        panic!("maintenance must preserve storage")
+    }
+}
+
+/// PREDICT: on macOS the App preview's content rules are the only control on loopback literals, and they followed a
+/// stopped chat server only at the next port re-check (up to 3 s): another program that bound the vacated port in
+/// that window was reachable. An exit notice for a chat server now runs the re-check at once, so its port leaves
+/// the App preview's rules well before the periodic round (here: no listener on the port, so the round withdraws it).
+#[tokio::test]
+async fn a_chat_server_exit_notice_refreshes_the_app_preview_rules_at_once() {
+    let engine = Arc::new(RulesEngine::default());
+    let core = core_with("preview-exit-notice", engine.clone()).await;
+    let hub = core.shared.preview.as_ref().unwrap();
+    open(hub, "chat", vec![28107]).await;
+    // Let the maintenance loop start its periodic wait (it woke for the open).
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let rounds = hub.maintenance_counts.rounds.load(Ordering::SeqCst);
+    assert_eq!(rounds, 0, "no periodic round has run yet");
+    let noticed = std::time::Instant::now();
+    super::server_exited(&hub.exits, 4242);
+    let withdrawn = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if engine
+                .updates
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|page| *page == vw_netguard::rules::RulePage::App { ports: Vec::new() })
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    let elapsed = noticed.elapsed();
+    core.shutdown().await;
+    assert!(
+        withdrawn.is_ok(),
+        "the App preview's rules still allowed the port 2 s after the exit notice"
+    );
+    assert!(elapsed < Duration::from_secs(1), "{elapsed:?}");
 }

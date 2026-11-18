@@ -67,7 +67,10 @@ async fn the_shared_helper_refusals_name_no_single_browser() {
         .into_value();
     assert_eq!(
         idle["structuredContent"]["error"]["message"],
-        "Not run: Vibe Work's browser connection is not running."
+        format!(
+            "{} Retry chrome_status in a few seconds. Ask the user to restart Vibe Work if it remains unavailable.",
+            vw_vocabulary::texts::CHROME_NOT_RUNNING
+        )
     );
     let (send, requests) = mpsc::channel(1);
     let (stop, stopped) = watch::channel(false);
@@ -96,5 +99,31 @@ async fn the_shared_helper_refusals_name_no_single_browser() {
         restarting["structuredContent"]["error"],
         json!({"code":"OWNER_CLOSED",
             "message":"Not run: Vibe Work's browser connection is restarting. Retry this step in a few seconds."})
+    );
+}
+#[test]
+fn busy_browser_refusal_gives_an_agent_retry_step() {
+    assert!(
+        include_str!("owner.rs").contains(
+            "Not run: browser control is busy. Retry this browser action after a moment."
+        ),
+        "the owner queue refusal must tell the agent how to proceed"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_browser_helper_names_the_persons_recovery_step() {
+    let answer = Owner::default().call("chrome_status", json!({})).await;
+    let message = answer.value()["structuredContent"]["error"]["message"]
+        .as_str()
+        .unwrap();
+    assert!(
+        message.contains("Ask the user to restart Vibe Work"),
+        "{message}"
+    );
+    assert!(message.contains("chrome_status"), "{message}");
+    assert_eq!(
+        answer.value()["structuredContent"]["error"]["code"],
+        "OWNER_REQUIRED"
     );
 }

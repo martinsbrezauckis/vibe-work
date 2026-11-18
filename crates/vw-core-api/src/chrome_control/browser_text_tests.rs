@@ -12,16 +12,22 @@ const BROWSERS: [Browser; 4] = [
     Browser::Firefox,
 ];
 
-/// The exact Chrome words each producer emitted before the ids existed; Chrome agents keep reading these bytes.
+/// The expected Chrome wording for each fixed refusal.
 fn chrome_words(id: Fixed) -> String {
     let words = match id {
-        Fixed::InvalidArguments => "Not run: invalid Chrome tool arguments.",
+        Fixed::InvalidArguments => {
+            "Not run: invalid Chrome tool arguments. Use chrome_status for the action's argument schema."
+        }
         Fixed::OpenSessionFirst => "Not run: open a Chrome session in this chat first.",
         Fixed::SelectionFromUser => {
             "Not run: selection is sent by the user from Chrome. Ask the user to use Ask Vibe Work in Chrome's context menu."
         }
-        Fixed::OtherChat => "Not run: this Chrome session belongs to another chat.",
-        Fixed::LostConnection => "Not run: this Chrome session lost its connection to Chrome.",
+        Fixed::OtherChat => {
+            "Not run: this Chrome session belongs to another chat. Open a Chrome session for this chat with chrome_session."
+        }
+        Fixed::LostConnection => {
+            "Not run: this Chrome session lost its connection to Chrome. Check chrome_status, reconnect the browser if needed, then open a new session with chrome_session."
+        }
         Fixed::Stopped => {
             "Not run: this Chrome session was stopped; open a new one with chrome_session."
         }
@@ -47,11 +53,14 @@ fn a_changed_producer_sentence_still_renders_by_its_id() {
     let reason =
         super::super::gateway::validate_public_args(&json!({"_internal": true}), Browser::Firefox)
             .unwrap_err();
-    assert_eq!(reason, "Not run: invalid Firefox tool arguments.");
+    assert_eq!(
+        reason,
+        "Not run: invalid Firefox tool arguments. Use chrome_status for the action's argument schema."
+    );
 }
 
 #[test]
-fn chrome_agents_read_the_same_bytes_as_before() {
+fn chrome_agents_read_the_expected_refusals() {
     for id in Fixed::ALL {
         assert_eq!(id.text(Browser::Chrome), chrome_words(id), "{id:?}");
     }
@@ -89,6 +98,41 @@ fn render_matches_no_fixed_refusal_sentence() {
                 let text = id.text(worded);
                 assert_eq!(render(agent, &text), text, "{id:?} {worded:?} -> {agent:?}");
             }
+        }
+    }
+}
+
+#[test]
+fn session_refusals_tell_each_browser_how_to_recover() {
+    for browser in BROWSERS {
+        let other = Fixed::OtherChat.text(browser);
+        assert!(other.contains("chrome_session"), "{browser:?}: {other}");
+        let lost = Fixed::LostConnection.text(browser);
+        assert!(lost.contains("chrome_status"), "{browser:?}: {lost}");
+        assert!(lost.contains("chrome_session"), "{browser:?}: {lost}");
+    }
+}
+
+#[test]
+fn every_fixed_refusal_has_a_next_step_for_each_browser() {
+    for browser in BROWSERS {
+        for id in Fixed::ALL {
+            let message = id.text(browser);
+            let step = match id {
+                Fixed::InvalidArguments | Fixed::UnknownAction => "chrome_status",
+                Fixed::OpenSessionFirst => "open a",
+                Fixed::SelectionFromUser
+                    if browser == Browser::Firefox
+                        && !super::super::firefox_sharing::PAGE_SHARING_AVAILABLE =>
+                {
+                    "Use chrome_status"
+                }
+                Fixed::SelectionFromUser => "Ask the user",
+                Fixed::OtherChat | Fixed::Stopped => "chrome_session",
+                Fixed::LostConnection => "reconnect",
+                Fixed::Unavailable => "Use an available browser",
+            };
+            assert!(message.contains(step), "{browser:?} {id:?}: {message}");
         }
     }
 }

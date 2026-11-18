@@ -346,6 +346,8 @@ export interface DesktopClient {
   attention?(count: number): Promise<void>;
   settings(enabled?: boolean): Promise<{ enabled: boolean; available: boolean }>;
   quit(): Promise<void>;
+  /** Moves the OS keyboard focus to the app's own window content (out of a native page view beside a prompt). */
+  focusApp?: () => Promise<void>;
   /** Receives actual closes and synchronizes the user's notification preference. */
   subscribe(onClose: () => void, notifications: boolean): Promise<() => void>;
 }

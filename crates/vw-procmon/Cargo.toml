@@ -32,6 +32,8 @@ nix = { workspace = true, features = ["signal", "process", "user"] }
 rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# kqueue (EVFILT_PROC / NOTE_EXIT) for `exit_watch`: the same nix, one more feature (no new crate).
+nix = { workspace = true, features = ["event"] }
 # Listening TCP sockets with their owner pid (macOS: libproc fd walk); Windows uses vw-platform. Checked
 # 0.6.1 (MIT), deps windows 0.62 / byteorder only; no declared MSRV, edition 2024 +
 # let-chains = 1.88 in practice (0.4.0-0.6.1 all use let-chains; 0.3.0 has none but no socket state field). Linux uses our own /proc reader

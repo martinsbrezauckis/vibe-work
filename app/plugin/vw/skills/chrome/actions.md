@@ -4,7 +4,7 @@
 
 ## Support by browser
 
-`chrome_status` lists each profile's actions; an action it does not list is refused for that browser, so choose another action or browser instead of retrying. Chrome and Edge share one action set.
+`chrome_status` lists each profile's actions and extension version; an action it does not list is refused for that browser, so choose another action or browser instead of retrying. Chrome and Edge can have different options while their installed extensions differ. Before using an optional field, look up `chrome_status {action,profileId}` and use its returned `inputSchemaJson`.
 
 | Where | Actions |
 |---|---|
@@ -17,21 +17,22 @@
 
 ## Profiles and session
 
-Each chat has one fixed browser profile. A single eligible profile or the user's default seeds it; several profiles without a default require the user's choice in the chat. `chrome_status`: `selectedProfile`, named `profileChoices` with connection states; `chrome_session open` and receipts: actual `profileId`, `profileName`. Chrome and Edge IDs with the same UUID are separate accounts; a rename changes the label, never the identity. An unavailable selected profile runs no action; select a connected profile or reconnect it. A switch made by the user releases the old task first; an unconfirmed release keeps work stopped. First pairing and a changed owner require the extension's approval ceremony; only approved identities reconnect automatically, including after an app or extension update.
+Each chat has one profile, seeded by its sole eligible profile or the user's default; otherwise ask the user to choose. `chrome_status` lists `selectedProfile` and named `profileChoices`; open/receipts give actual `profileId` and `profileName`. Chrome and Edge IDs are distinct even with the same UUID; renames affect labels only. If the selection is unavailable, choose a connected profile or reconnect. Switching releases old work first; unconfirmed release stops work. Pairing and changed owners need extension approval; approved IDs reconnect after updates.
 
-A completed turn retains the same session for follow-ups after acknowledged visual release. Stop, chat close, app exit or 30 minutes without browser work ends the session. An unanswered user question holds that expiry until answered or the chat ends. Stop and idle expiry leave tabs open. Deleting a browser chat ends control and leaves its window and tabs open (`controlEnded` vs `windowClosed`).
+A completed turn retains its session after acknowledged visual release. Stop, chat close, app exit or 30 minutes idle ends it; an unanswered user question holds expiry. Stop, idle expiry and chat deletion leave tabs open (`controlEnded` versus `windowClosed`).
 
 Pause holds this chat's browser calls. Resume or a new user message permits work after a fresh page read.
 
 ## Hand-over to the user
 
-An open user question hands this chat's browser back: capture and agent actions wait, the page stays open, and a confirmed answer permits the next browser action. Skip keeps browser work held until a new user message. Stop cancels browser work; a late answer cannot resume it. Use this for steps only the user can do (sign-in challenges, passkeys/biometrics, CAPTCHAs), then read the page before continuing.
+An open user question holds capture and agent actions while the page stays open. A confirmed answer resumes; Skip holds until a new user message; Stop cancels, and a late answer cannot resume. Use for sign-in challenges, passkeys, biometrics and CAPTCHAs, then reread the page.
 
 ## Tabs and windows
 
 | Action | Arguments | Rule |
 |---|---|---|
 | `tabs.context` | `{}` or `{tabId}` | `{}`: open tab titles/addresses without handing over a window; `{tabId}`: its bounded page text. Other chats' tabs are excluded; no activation or ownership change. Firefox sees only its agent window |
+| `tabs.inspect_other` | `{tabIds:[23,24]}` | Inspect explicitly listed tab IDs. First list tabs and pass the integer `tabIds` array; an individual `tabId` is not this action's argument |
 | `tabs.pin` | `{pinned, tabId?}` | Owned window only, negotiated support; receipt reads real pinned state and met. Personal tabs outside the owned window are refused |
 | `tabs.group` / `tabs.group_update` / `tabs.ungroup` | `{tabId?, groupId?, title?}` / `{tabId?, title}` / `{tabId?}` | Supplying a title or renaming a group asks for approval in Ask; Accept edits and Full access include these writes. Grouping without a title remains an ordinary browsing action. Every tab in the window must belong to this chat. Ungroup finishes after a fresh inventory; missing readback is unknown |
 | `tabs.create` | `{url, active?}` | Chrome/Edge: an active created tab (the default) becomes the session's tab; `active:false` only when it has none |
@@ -39,7 +40,9 @@ An open user question hands this chat's browser back: capture and agent actions 
 | `windows.list` | | Current chat window's native focus and geometry |
 | `window.close` | `{windowId?}` | Closes this chat's exact owned-window snapshot (≤32 tabs Chrome/Edge/Safari, 128 Firefox). It never closes personal or other-chat tabs. Receipt: `windowClosed`, `allOwnedTabsClosed`, `closedTabs`, `skippedTabs`, `remainingTabs`, reasons; `met` = window closed; personal, moved, changed and new tabs are kept; an empty window left open is windowClosed:false. Missing confirmation returns an unknown outcome: inspect the current tabs before continuing, and do not repeat automatically |
 
-Popups: a verified popup receipt retains its exact opener; `popups.closedCount` counts confirmed closes once, `openCount` is unknown until inventory is complete, `trackingTruncated` marks a full retained set. When the popup closes, `popupContinuation` says whether the same opener document, origin and window remain; a confirmed return updates the session target: read that page before sending more input. A changed, closed, moved or other-chat opener is unavailable, and no unrelated tab is selected. Stop, a new selection or a permission change cancels a pending return.
+Popup receipts retain the opener. `popups.closedCount` counts confirmed closes once; `openCount` stays unknown until inventory completes; `trackingTruncated` marks a full set. After close, `popupContinuation` confirms whether the same opener document, origin and window remain. A confirmed return updates the target: reread before input. Changed, closed, moved or other-chat openers are unavailable; no unrelated tab is selected. Stop, selection or permission change cancels a pending return.
+
+Focus routes differ: `chrome_execute {sessionId,action:"window.focus",args:{tabId:23}}` uses a browser tab ID; the built-in browser's `browser_act {action:"window.focus",windowId:"..."}` uses its own window ID. Check the selected tool's schema before sending either.
 
 ## Input
 
@@ -65,9 +68,9 @@ Transport retries with the same authenticated browser call identity reuse its on
 
 ## Chrome/Edge
 
-- Chrome/Edge when `chrome_status` lists it: `page.read {selector:{kind,value,index?}}` (kind css/xpath/alt/title/testId, zero-based index; open shadow roots only); `page.select {ref,values:[...]}` (`[]` clears; `trustedInput:false`); `page.type` into date/time/month/week/datetime-local part by part with trusted keys (`page.type.dateKeys`, `route:"keyboard"`; colour fields and clearing use the value setter, `trustedInput:false`); `page.drag {ref|x,y, path:[{x,y,durationMs?}], holdMs?, button?}` (top document or same-process frame; a held button is always released); `page.reload {bypassCache}`; `page.inspect`; `page.errors.clear`; `cookies.change {operation:"clear"}` (all paths, parent-domain and partitioned cookies of the host). Ref clicks wait ≤2 s for an enabled, visible, stable, uncovered target. A popup closed by the agent's input = `effect:"tab_closed"`. `tabs.create {reopenTabId}` reopens a tab this chat closed with `tabs.close_owned`, once, as a new owned tab at its last address, no history; local, intranet and file addresses are refused. Protected fields (passwords, PINs, payment cards, masked fields) read as `[withheld]` with `valueWithheld`.
+- When `chrome_status` lists them: `page.read {selector:{kind,value,index?}}` (css/xpath/alt/title/testId, zero-based; open shadow roots); `page.select {ref,values:[...]}` (`[]` clears, synthetic input); `page.type` into date/time/month/week/datetime-local with trusted keys (`page.type.dateKeys`, `route:"keyboard"`); colour and clearing use a synthetic setter. `page.drag {ref|x,y,path:[{x,y,durationMs?}],holdMs?,button?}` releases the held button; same-process frames work. Also `page.reload {bypassCache}`, `page.inspect`, `page.errors.clear`, `cookies.change {operation:"clear"}` (all paths, parent-domain and partitioned cookies). Ref clicks wait ≤2 s for visible, enabled, stable, uncovered targets. An input-closed popup reports `effect:"tab_closed"`. `tabs.create {reopenTabId}` reopens one chat-closed tab without history; local, intranet and file addresses refuse. Protected fields return `[withheld]` and `valueWithheld`.
 - Diagnostics: `extensions.status {tabId}` (version/state, missing permissions/file-URL grant; `chrome_status` shows off/disconnected), `extensions.list {tabId}` (others' version/enabled). `notifications.create {tabId,id,title,message}`, `notifications.list {tabId}`, `notifications.clear {tabId,id}`: chat notifications, verified IDs; create/clear: Ask card; diagnostics: all modes.
 - `capture.screenshot {labels:true}`: up to 12 visible controls labelled on a PNG viewport copy; numbers map to executable refs; locations verified before and after; page unchanged; inline only.
 - PNG viewport capture: `capture.screenshot {compare:"before"}` stores a session/tab baseline; `compare:"after"` returns the image, changed-pixel percentage and pixel bounds. Viewport, scale and origin must match; exact RGBA changes count, animations included; ≤8 baselines.
-- `page.read` export: table exports need `args.ref` for one table subtree; `args.interactiveOnly:false` exposes table/list structure; the returned cursor continues captured rows; `extract.header:false` keeps a continuation's first data row. Table/list/link records with positional column names; CSS and relative-column queries are built-in-only. Saved rows cover the returned read and its coverage limits.
+- `page.read` export: table exports need `args.ref` for one table subtree; `args.interactiveOnly:false` exposes table/list structure; the returned cursor continues captured rows. Put `extract:{header:false,...}` and `saveTo:"file"` at the top level of `chrome_execute`, beside `action` and `args`, not inside `args`; a continuation's first data row needs `extract.header:false`. Table/list/link records with positional column names; CSS and relative-column queries are built-in-only. Saved rows cover the returned read and its coverage limits.
 - `page.add_style {css, tabId?}` (all four browsers) uses Full access and the same document/vault exclusion as `raw.execute`; result: accepted rule count. `console.clear {tabId?}` clears this tab's retained-console view; later messages stay readable, `page.errors` is separate, filters and paging stay.

@@ -2,6 +2,30 @@
 use serde_json::json;
 
 #[tokio::test]
+async fn closed_chat_browser_calls_explain_how_to_resume() {
+    let core = crate::offline_core::start("browser-closed-chat").await;
+    let shared = &core.shared;
+    let reason = super::call_selected(shared, "missing", "chrome_status", json!({}))
+        .await
+        .unwrap_err();
+    assert!(reason.contains("Open the chat in Vibe Work"), "{reason}");
+    let reason =
+        super::local_reply(shared, "missing", "chrome_status", &json!({}), None).unwrap_err();
+    assert!(reason.contains("Open the chat in Vibe Work"), "{reason}");
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn closed_chat_permission_check_explains_how_to_resume() {
+    let core = crate::offline_core::start("browser-closed-permission").await;
+    let reason =
+        super::super::check::authorize(&core.shared, "missing", "chrome_status", &json!({}))
+            .unwrap_err();
+    assert!(reason.contains("Open the chat in Vibe Work"), "{reason}");
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn missing_chrome_session_fields_are_named_before_any_helper_call() {
     let fixture = crate::feature_test_core::Fixture::new().await;
     for (args, field) in [

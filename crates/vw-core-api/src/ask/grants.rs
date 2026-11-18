@@ -5,6 +5,8 @@
 //! this session" also keeps a [`SessionGrant`] here, and a later approval in the same session whose tool and
 //! required-permission set equal a kept grant is answered `approve` by the core (the pump), recorded
 //! `Allowed { Session, Grant }`.
+//! Browser Ask grants match the requested disclosed action and tier across browsers in that chat;
+//! the browser's current connection and access checks still run before the card is considered.
 //!
 //! What can be kept (`scope_of`, from the callback Vibe sent; source: pinned Vibe 2.26.1):
 //! - a call with required permissions: that tool + exactly those permissions (`vw_ask::GrantPermission`);

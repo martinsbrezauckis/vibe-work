@@ -87,6 +87,15 @@ mod tests {
     // version, `cargo test --release` (debug assertions off, as in a release build) leaves the guard list unchanged.
     #[test]
     fn the_live_list_follows_the_build_profile() {
+        fn parse_live(line: &str) -> Option<&str> {
+            line.rsplit_once("LIVE ")
+                .map(|(_, versions)| versions.trim())
+        }
+        assert_eq!(
+            parse_live("test e2e_guard::tests::print_live_list ... LIVE 3.1.2"),
+            Some("3.1.2"),
+            "serial libtest can prefix captured output with its test name"
+        );
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--ignored",
@@ -97,10 +106,15 @@ mod tests {
             .env(E2E_EXTRA_GUARDED_VIBE, "9.9.9")
             .output()
             .unwrap();
+        assert!(
+            out.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let text = String::from_utf8_lossy(&out.stdout);
         let live = text
             .lines()
-            .find_map(|line| line.strip_prefix("LIVE "))
+            .find_map(parse_live)
             .unwrap_or_else(|| panic!("no LIVE line: {text}"));
         let mut expected = crate::guarded_vibe_versions();
         if cfg!(debug_assertions) {

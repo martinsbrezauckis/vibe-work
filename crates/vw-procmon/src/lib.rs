@@ -18,6 +18,7 @@
 
 mod attribution;
 mod error;
+mod exit_watch;
 mod explain;
 mod handoff;
 mod leases;
@@ -39,6 +40,7 @@ pub use attribution::{
     Inputs, Owner, SessionContext, normalize,
 };
 pub use error::{LeaseError, LedgerError, ScanError};
+pub use exit_watch::{ExitWatch, OnExit};
 pub use explain::{PortExplanation, PortOption, explain};
 pub use handoff::HandOffReport;
 pub use leases::{

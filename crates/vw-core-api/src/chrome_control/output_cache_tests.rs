@@ -142,7 +142,7 @@ async fn clamped_unicode_receipts_reconstruct_without_shortening_fragment_text()
     .unwrap();
     let restored = super::super::observation_output_tests::reconstruct(&core.shared, reply).await;
     assert_eq!(restored["untrustedPageContent"], raw);
-    assert!(restored["requestLimit"].as_str().unwrap().contains("4000"));
+    assert!(restored["requestLimit"].as_str().unwrap().contains("12000"));
     core.shutdown().await;
 }
 

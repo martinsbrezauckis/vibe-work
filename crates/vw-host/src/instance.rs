@@ -5,6 +5,8 @@
 //! endpoint's token, the running app admits it again and gives it to its `deliver` seam, then focuses.
 //! Request: the 64-character token, then `F` (focus) or `H` + a 4-byte big-endian length + the hand-over's JSON.
 //! Reply: one byte, `1` when the hand-over was delivered or the focus-only request focused the window.
+//! Restart: the app writes [`RESTART_MARK`] before it relaunches itself; the new process then waits for the old
+//! owner's lock instead of focusing the closing window or refusing the folder, and removes the mark once it owns it.
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -13,7 +15,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +25,12 @@ const WAIT: Duration = Duration::from_secs(2);
 /// How long a second launch waits for a starting owner to publish its endpoint (several file manager entries
 /// may start at once, one process per file).
 const STARTING: Duration = Duration::from_secs(10);
+/// The data-folder file that marks the next launch as this app's own restart (epoch milliseconds of the request).
+pub const RESTART_MARK: &str = "instance.restart";
+/// A mark older than this is a relaunch that never came; it is ignored.
+const RESTART_FRESH: Duration = Duration::from_secs(30);
+/// How long the relaunched process waits for the closing owner to release the folder.
+const RESTART_WAIT: Duration = Duration::from_secs(15);
 
 #[derive(Serialize, Deserialize)]
 struct Endpoint {
@@ -86,9 +94,52 @@ pub fn focus_existing(data: &Path, hand_over: Option<&HandOver>) -> io::Result<O
     };
     match lock.try_lock() {
         Ok(()) => Ok(None),
+        // The owner is this app closing for its restart: nothing to focus; admission waits for its lock.
+        Err(TryLockError::WouldBlock) if restarting(data) => Ok(None),
         Err(TryLockError::WouldBlock) => Ok(Some(request(data, hand_over))),
         Err(TryLockError::Error(error)) => Err(error),
     }
+}
+
+/// Marks the next launch into `data` as this app's own restart. Call it just before the app relaunches itself.
+///
+/// # Errors
+/// Returns the write error; the relaunch then behaves as an ordinary second launch.
+pub fn mark_restart(data: &Path) -> io::Result<()> {
+    vw_platform::replace_private(&data.join(RESTART_MARK), now_ms().to_string().as_bytes())
+        .map_err(io::Error::other)
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+/// A fresh restart mark is present.
+fn restarting(data: &Path) -> bool {
+    std::fs::read_to_string(data.join(RESTART_MARK))
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .is_some_and(|at| {
+            now_ms().saturating_sub(at) <= u64::try_from(RESTART_FRESH.as_millis()).unwrap_or(0)
+        })
+}
+
+/// Waits up to [`RESTART_WAIT`] for the closing owner's lock; false when it is still held.
+fn wait_for_owner_exit(lock: &File) -> io::Result<bool> {
+    let deadline = Instant::now() + RESTART_WAIT;
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        match lock.try_lock() {
+            Ok(()) => return Ok(true),
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+    }
+    Ok(false)
 }
 
 /// Claims the data folder or asks its existing app to show its window.
@@ -114,6 +165,7 @@ pub fn start(
     let endpoint_path = data.join("instance.json");
     match lock.try_lock() {
         Ok(()) => (),
+        Err(TryLockError::WouldBlock) if restarting(data) && wait_for_owner_exit(&lock)? => (),
         Err(TryLockError::WouldBlock) => {
             return Ok(InstanceStart::Existing {
                 focused: request(data, hand_over.as_ref()),
@@ -121,6 +173,8 @@ pub fn start(
         }
         Err(TryLockError::Error(error)) => return Err(error),
     }
+    // This process owns the folder: a restart mark (used now, or left by a relaunch that never came) is spent.
+    let _ = std::fs::remove_file(data.join(RESTART_MARK));
     // A stale endpoint from a crashed owner must not answer a second launch while this one starts.
     let _ = std::fs::remove_file(&endpoint_path);
     let (listener, own) = vw_netguard::listeners::bind_own()?;

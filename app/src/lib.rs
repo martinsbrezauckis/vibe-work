@@ -39,8 +39,11 @@ mod feedback_entry;
 mod in_front;
 mod instance;
 mod live_profile;
+#[cfg(target_os = "macos")]
+mod mac_menu;
 mod notifications;
 mod picked_files;
+mod quit_guard;
 #[cfg(target_os = "macos")]
 mod send_to;
 mod setup;
@@ -243,6 +246,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::desktop_subscribe,
         commands::desktop_focus_subscribe,
         commands::app_quit,
+        commands::desktop_focus_app,
         commands::core_subscribe,
         commands::ui_control_next,
         commands::ui_control_reply,
@@ -299,8 +303,21 @@ pub fn run() -> tauri::Result<()> {
     let mut builder = tauri::Builder::default()
         .plugin(navigation_guard())
         .plugin(dialog_plugin::init());
+    // Raw device events are unused. On Windows, the foreground raw keyboard registration can bypass the
+    // low-level keyboard hook that blocks the person's input in a browser view the agent controls.
+    #[cfg(windows)]
+    {
+        builder = builder.device_event_filter(tauri::DeviceEventFilter::Always);
+    }
     if let Some(plugin) = updater {
         builder = builder.plugin(plugin);
+    }
+    // macOS: Cmd+Q and the app menu's Quit ask about running work like the tray's Quit (see mac_menu).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .menu(mac_menu::build)
+            .on_menu_event(|app, event| mac_menu::on_event(app, &event));
     }
     let app = builder
         .manage(handle.clone())
@@ -327,6 +344,10 @@ pub fn run() -> tauri::Result<()> {
             let _ = app_handle.run_on_main_thread(|| {
                 let _ = vw_platform::confirm_window::raise_shown();
             });
+        }
+        // An exit the OS requests for the person asks first while agent work runs (Quit's question).
+        if let RunEvent::ExitRequested { code, api, .. } = &event {
+            quit_guard::hold_exit(app_handle, *code, api);
         }
         // On this (UI) thread, bounded even when a runtime task waits for this thread (`vw_host::exit`).
         if let RunEvent::Exit = event

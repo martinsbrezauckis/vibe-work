@@ -1,6 +1,6 @@
 // Event-time keyboard target proof in the isolated world; point.js arms it after exact frame validation.
 // Native adapters supply trusted events; the host collects this receipt once and never retries sent input.
-/* global REQ, editable, secretKind, implicitSubmission -- Supplied by the point script assembler. */
+/* global REQ, editable, secretKind, implicitSubmission, nativeKeyWrites -- Supplied by the point script assembler. */
 /* exported armKeyboardReceipt */
 const armKeyboardReceipt = (check, target) => {
   const key = REQ.page + "_pointReceipt";
@@ -14,7 +14,7 @@ const armKeyboardReceipt = (check, target) => {
   if (!boundary) throw new Error("checked input capture is unavailable");
   const active = () => { let node = document.activeElement; while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement; return node; };
   const focused = () => Boolean(check?.target && target?.isConnected && active() === target &&
-    (!input.editor || editable(target)) && (!(text || input.replace || input.writes || input.editor) || !secretKind(target)));
+    (!input.editor || editable(target)) && (!(text || input.replace || nativeKeyWrites(target, input) || input.editor) || !secretKind(target)));
   if (check?.target) {
     if (!target.ownerDocument.hasFocus()) target.ownerDocument.defaultView.focus();
     if (active() !== target) target.focus({ preventScroll: true });

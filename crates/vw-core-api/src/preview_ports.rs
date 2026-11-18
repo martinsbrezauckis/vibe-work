@@ -160,7 +160,8 @@ fn note_listener(
 
 /// Gives the preview the chats' servers scan `scan` found: ports whose every listener is attributed to a chat session
 /// (`PreviewService::set_chat_servers`; one listener of another owner on the port keeps it out), with the check that
-/// each one's server still runs ([`server_alive`]).
+/// each one's server still runs ([`server_alive`]). Their processes are watched for exit (`PreviewHub::exit_watch`),
+/// so the App preview's rules drop a stopped server's port at once.
 fn publish_chat_servers(shared: &Shared, scan: u64, servers: ChatServers) {
     if let Some(hub) = &shared.preview {
         let servers: BTreeMap<u16, Vec<Option<vw_procmon::ProcessRef>>> = servers
@@ -168,6 +169,11 @@ fn publish_chat_servers(shared: &Shared, scan: u64, servers: ChatServers) {
             .filter_map(|(port, (chat, processes))| chat.then_some((port, processes)))
             .collect();
         let ports = servers.keys().copied().collect();
+        if let Some(watch) = &hub.exit_watch {
+            let processes: Vec<vw_procmon::ProcessRef> =
+                servers.values().flatten().flatten().copied().collect();
+            watch.watch(&processes);
+        }
         hub.service
             .set_chat_servers(scan, ports, server_alive(servers));
     }

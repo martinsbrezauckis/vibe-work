@@ -117,7 +117,9 @@ async fn calls_by_id_keep_both_browsers_and_their_own_refusals() {
         let browser = if profile == EDGE { "Edge" } else { "Chrome" };
         assert_eq!(
             refused,
-            format!("Not run: this {browser} session belongs to another chat.")
+            format!(
+                "Not run: this {browser} session belongs to another chat. Open a {browser} session for this chat with chrome_session."
+            )
         );
     }
     // Availability and ownership refusals name the id's browser even after selecting the other one.

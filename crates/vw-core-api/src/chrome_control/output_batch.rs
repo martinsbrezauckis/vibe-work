@@ -2,7 +2,7 @@
 //! Every step keeps its outcome, operation and untrusted boundary; equal envelope fields have explicit defaults.
 use serde_json::{Map, Value};
 
-pub(super) fn share_context(body: &mut Value, limit_notes: [&str; 2]) {
+pub(super) fn share_context(body: &mut Value, limit_notes: &[&str]) {
     let Some(steps) = body.get_mut("steps").and_then(Value::as_array_mut) else {
         return;
     };

@@ -113,7 +113,7 @@ async fn a_completed_turn_keeps_the_same_session_for_reads_and_batches() {
     .await;
     assert_eq!(
         other.unwrap_err(),
-        "Not run: this Chrome session belongs to another chat."
+        "Not run: this Chrome session belongs to another chat. Open a Chrome session for this chat with chrome_session."
     );
     // An id no chat ever had says so (Mistral passed a made-up "default" in T34/T35).
     let unknown = super::gateway::call(

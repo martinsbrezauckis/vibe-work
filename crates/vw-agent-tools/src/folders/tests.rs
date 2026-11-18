@@ -4,6 +4,24 @@
 use super::*;
 
 #[test]
+fn shell_read_of_vibe_home_explains_the_tool_specific_boundary() -> std::io::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let layout = Layout::new(&cwd.join("vibe-home"), &cwd)?;
+    let permits = |_: &Path, _: bool| Ok(());
+    let file = layout.vibe_home.join("config.toml");
+    assert!(layout.check(&file, &cwd, Access::Read, &permits).is_none());
+    let refusal = layout
+        .check(&file, &cwd, Access::Unknown, &permits)
+        .expect("shell read must be refused");
+    assert!(
+        refusal.contains("this tool cannot read or change it"),
+        "{refusal}"
+    );
+    assert!(refusal.contains("read_file"), "{refusal}");
+    Ok(())
+}
+
+#[test]
 fn windows_leading_assignment_is_not_a_folder_path() -> std::io::Result<()> {
     let cwd = std::fs::canonicalize(std::env::temp_dir())?;
     // If the assignment name is treated as a path, it lands inside this guarded root.

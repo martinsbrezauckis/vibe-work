@@ -170,7 +170,12 @@ fn every_action_observation_uses_the_small_receipt_budget() {
         if matches!(id, "page.click" | "page.read") {
             println!("SIZE {id} receipt: compact={compact}, pretty={pretty}");
         }
-        if compact > 4000 || pretty > 6000 {
+        let (limit, pretty_limit) = if id == "page.read" {
+            (12_000, 15_000)
+        } else {
+            (4000, 6000)
+        };
+        if compact > limit || pretty > pretty_limit {
             failures.push((id.to_owned(), compact, pretty));
         }
         let body = &result["vwMcpResult"]["structuredContent"];
@@ -240,7 +245,7 @@ async fn fixture() -> crate::Core {
 }
 
 #[tokio::test]
-async fn click_and_read_together_stay_below_the_code_mode_limit() {
+async fn a_large_read_and_compact_click_outcome_fit_the_code_mode_limit() {
     let core = fixture().await;
     // Startup can retry this status request between actions; exercise it without depending on elapsed time.
     super::send_local_network(&core.shared).await;
@@ -263,7 +268,13 @@ async fn click_and_read_together_stay_below_the_code_mode_limit() {
         )
         .await
         .unwrap();
-        let result = json!({"click":click["vwMcpResult"]["structuredContent"],"read":read["vwMcpResult"]["structuredContent"]});
+        let outcome = &click["vwMcpResult"]["structuredContent"];
+        assert_eq!(outcome["status"], "completed");
+        assert!(outcome["error"].is_null());
+        // A full-size read is returned once; the already inspected click needs only its outcome summary.
+        let result = json!({"click":{"operationId":outcome["operationId"],"action":outcome["action"],
+            "status":outcome["status"],"error":outcome["error"],"effect":outcome["untrustedPageContent"]["data"]["effect"]},
+            "read":read["vwMcpResult"]["structuredContent"]});
         let pretty = serde_json::to_string_pretty(&result)
             .unwrap()
             .chars()

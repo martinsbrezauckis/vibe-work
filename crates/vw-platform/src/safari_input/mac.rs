@@ -21,7 +21,7 @@ struct Request {
     args: Value,
     url: String,
     cancel: Arc<AtomicBool>,
-    reply: tokio::sync::oneshot::Sender<Result<Value, String>>,
+    reply: tokio::sync::oneshot::Sender<Result<Value, super::InputError>>,
 }
 struct Ticket {
     window: ax::Window,
@@ -39,7 +39,7 @@ pub(super) async fn request(
     args: Value,
     url: &str,
     cancel: Arc<AtomicBool>,
-) -> Result<Value, String> {
+) -> Result<Value, super::InputError> {
     let worker = WORKER.get_or_init(|| {
         let (tx, rx) = mpsc::sync_channel::<Request>(8);
         std::thread::spawn(move || {
@@ -66,10 +66,15 @@ pub(super) async fn request(
         reply: tx,
     };
     worker.try_send(request).map_err(|_| {
-        "Safari native input is busy. Wait for the current action before trying again.".to_owned()
+        super::InputError::not_sent(
+            "Safari native input is busy. Wait for the current action before trying again.",
+        )
     })?;
+    // A worker that ends mid-request may have posted part of the input.
     rx.await.map_err(|_| {
-        "The Safari input worker ended. Reconnect Safari before continuing.".to_owned()
+        super::InputError::after_post(
+            "The Safari input worker ended. Reconnect Safari before continuing.",
+        )
     })?
 }
 fn check(r: &Request) -> Result<(), String> {
@@ -84,7 +89,19 @@ fn parse<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, String> {
         "Safari's native preparation is malformed. Read the page and prepare a new action.".into()
     })
 }
-fn run(r: &Request, tickets: &mut HashMap<String, Ticket>) -> Result<Value, String> {
+/// Every refusal before `events::dispatch` posts its first event is reported as "nothing was sent".
+fn run(r: &Request, tickets: &mut HashMap<String, Ticket>) -> Result<Value, super::InputError> {
+    let posted = std::cell::Cell::new(false);
+    attempt(r, tickets, &posted).map_err(|message| super::InputError {
+        message,
+        posted: posted.get(),
+    })
+}
+fn attempt(
+    r: &Request,
+    tickets: &mut HashMap<String, Ticket>,
+    posted: &std::cell::Cell<bool>,
+) -> Result<Value, String> {
     check(r)?;
     if r.stage == "prepare" {
         let bounds = parse(&r.prepared["window"])?;
@@ -147,7 +164,7 @@ fn run(r: &Request, tickets: &mut HashMap<String, Ticket>) -> Result<Value, Stri
         .map_err(|_| "The system clock is unavailable. Retry after checking the clock.")?
         .as_millis();
     geometry::recent(checked, now)?;
-    events::dispatch(&r.action, &r.args, point, end, || {
+    events::dispatch(&r.action, &r.args, point, end, posted, || {
         super::lifecycle::confirm(
             || check(r),
             || {

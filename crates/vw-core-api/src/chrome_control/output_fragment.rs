@@ -42,7 +42,12 @@ pub(super) fn page(
     offset: usize,
     continuation: impl Fn(usize) -> Value,
 ) -> Value {
-    let mut end = (offset + 1800).min(encoded.len());
+    let chunk = if super::output::limit(header) == super::output::READ_LIMIT {
+        8000
+    } else {
+        1800
+    };
+    let mut end = (offset + chunk).min(encoded.len());
     while !encoded.is_char_boundary(end) {
         end -= 1;
     }
@@ -58,7 +63,7 @@ pub(super) fn page(
         if end < encoded.len() {
             body["continuation"] = continuation(end);
         }
-        let limit = if body["steps"].is_array() { 9000 } else { 4000 };
+        let limit = super::output::limit(&body);
         if super::output::fits(&body, limit) || end == offset {
             return body;
         }

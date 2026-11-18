@@ -36,7 +36,7 @@ import {
 } from "./entries";
 import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
-import { declinedEffects, settledEntry } from "./settled";
+import { declinedEffects, settledEntry, turnEndingNo } from "./settled";
 
 /** The `searches` of an answer without web searches (one shared list: rows stay comparable). */
 const NO_SEARCHES: readonly Obj[] = Object.freeze([]);
@@ -82,7 +82,13 @@ export type Row =
   | { kind: "notice"; key: string; entry: Obj }
   | { kind: "hook"; key: string; entry: Obj; text: string; error: boolean }
   | { kind: "divider"; key: string; entry: Obj }
-  | { kind: "turnEnd"; key: string; turn: Obj }
+  | {
+      kind: "turnEnd";
+      key: string;
+      turn: Obj;
+      /** The turn ended at the person's No (its end says Declined, not Interrupted). */
+      declined: boolean;
+    }
   | { kind: "other"; key: string; entry: Obj };
 
 /** Turn statuses that end a turn with an end row (`PublicTurnStatus`). */
@@ -295,6 +301,7 @@ function blockRows(
   info: TurnInfo | undefined,
   byId: Map<string, Obj>,
   steps: ReadonlyMap<string, Obj>,
+  declined: ReadonlySet<string>,
 ): Row[] {
   const rows: Row[] = [];
   let segment: Obj[] = [];
@@ -318,7 +325,12 @@ function blockRows(
     rows[rows.length - 1] = { ...last, live: true };
   }
   if (ENDED.has(status))
-    rows.push({ kind: "turnEnd", key: `end:${block.turnId ?? ""}`, turn: info.turn });
+    rows.push({
+      kind: "turnEnd",
+      key: `end:${block.turnId ?? ""}`,
+      turn: info.turn,
+      declined: block.turnId !== null && declined.has(block.turnId),
+    });
   return rows;
 }
 
@@ -330,6 +342,7 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
   const entries = dedupe(history);
   const table = turnTable(turns);
   const declined = declinedEffects(entries);
+  const endedAtNo = declinedIn(entries, table);
   const settled = entries.map((entry) => {
     const turnId = turnIdOf(entry) ?? turnAt(table, createdAt(entry));
     const turn = turnId === null ? undefined : table.get(turnId);
@@ -348,8 +361,33 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
   const byId = new Map(settled.map((entry) => [entryId(entry), entry]));
   const steps = refusedSteps(settled);
   return blocksOf(transcriptEntries(settled, steps), table).flatMap((block) =>
-    blockRows(block, block.turnId === null ? undefined : table.get(block.turnId), byId, steps),
+    blockRows(
+      block,
+      block.turnId === null ? undefined : table.get(block.turnId),
+      byId,
+      steps,
+      endedAtNo,
+    ),
   );
+}
+
+/** The interrupted turns that ended at the person's No (raw entries; Stop's own records never count). */
+function declinedIn(entries: readonly Obj[], table: Map<string, TurnInfo>): Set<string> {
+  const out = new Set<string>();
+  for (const entry of entries) {
+    if (!turnEndingNo(entry)) continue;
+    const id = turnIdOf(entry) ?? turnAt(table, createdAt(entry));
+    if (id !== null && table.get(id)?.turn["status"] === "interrupted") out.add(id);
+  }
+  return out;
+}
+
+/** The ids of the interrupted turns that ended at the person's No: they say Declined, never Stopped. */
+export function declinedTurns(
+  history: readonly JsonValue[],
+  turns: readonly JsonValue[],
+): Set<string> {
+  return declinedIn(dedupe(history), turnTable(turns));
 }
 
 /** The history entries a row shows (the audit's related effect is shown by its own row). */

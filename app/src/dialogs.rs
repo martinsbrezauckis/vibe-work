@@ -119,6 +119,18 @@ async fn show_dialog<R: Runtime>(
     return windows_confirmation::show_dialog(app, text, labels, modal, ask).await;
 }
 
+/// Asks the person a question of the app's own (no gate request) in the modal native confirmation: `labels` first to
+/// last, the LAST declines and is the default; the pressed label, `None` when the window was closed or failed. Only the
+/// person can answer it.
+pub(crate) async fn ask_person<R: Runtime>(
+    app: &AppHandle<R>,
+    text: String,
+    labels: &[String],
+) -> Option<String> {
+    let _ = crate::tray::reveal_main_window(app);
+    show_dialog(app, text, labels, true, None).await
+}
+
 /// A shortened request (`vw_host::shortened_dialog_text`): the overview (start, marker,
 /// end; default "Show the full request"), then every part of the full text in turn ("Next part"), and Allow only on
 /// the last part. Each step is one native dialog; anything but the forward button declines.

@@ -77,8 +77,14 @@ export const DividerRow = memo(function DividerRow({
   );
 });
 
-/** The end of a turn: complete (with its duration), failed or interrupted. */
-export const TurnEndRow = memo(function TurnEndRow({ turn }: { turn: Obj }): ReactElement {
+/** The end of a turn: complete (with its duration), failed, declined (ended at the person's No) or interrupted. */
+export const TurnEndRow = memo(function TurnEndRow({
+  turn,
+  declined = false,
+}: {
+  turn: Obj;
+  declined?: boolean;
+}): ReactElement {
   const status = str(turn["status"]) ?? "";
   const error = useErrorText(str(obj(turn["error"])?.["message"]) ?? "The turn failed.");
   const started = num(turn["startedAt"]);
@@ -99,7 +105,9 @@ export const TurnEndRow = memo(function TurnEndRow({ turn }: { turn: Obj }): Rea
     return (
       <div className="turn-end int" data-turn-id={str(turn["id"]) ?? ""}>
         <span className="px warn" aria-hidden="true" />
-        Interrupted{took === null ? "" : ` after ${took}`}: the turn did not finish.
+        {declined ? "Declined" : "Interrupted"}
+        {took === null ? "" : ` after ${took}`}:{" "}
+        {declined ? "the turn ended." : "the turn did not finish."}
       </div>
     );
   }

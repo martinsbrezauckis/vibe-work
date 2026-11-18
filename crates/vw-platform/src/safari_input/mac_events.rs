@@ -102,6 +102,7 @@ pub(super) fn dispatch(
     args: &Value,
     point: Point,
     end: Option<Point>,
+    posted: &std::cell::Cell<bool>,
     check: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let mut held = Held {
@@ -114,6 +115,8 @@ pub(super) fn dispatch(
         super::ax::require_us_layout()?;
     }
     check()?;
+    // From here on the page may receive input: a later failure is an unknown outcome, never "nothing was sent".
+    posted.set(true);
     mouse(5, point, 0, 0, 0)?;
     for (code, flag) in plan.modifiers {
         check()?;
