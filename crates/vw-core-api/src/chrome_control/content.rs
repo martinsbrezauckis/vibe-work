@@ -135,7 +135,9 @@ fn withhold_receipt_values(payload: &mut Value) {
             _ => {}
         }
     }
-    fn copies(value: &mut Value, withheld: &[String]) {
+    // `receipt` is true only for a receipt's own object: the payload root and each batch step. Identity keys are
+    // exempt there; the same names inside page data (a script result, a page row) are page-derived and scrubbed.
+    fn copies(value: &mut Value, withheld: &[String], receipt: bool) {
         match value {
             Value::String(text) => {
                 for secret in withheld {
@@ -144,13 +146,21 @@ fn withhold_receipt_values(payload: &mut Value) {
             }
             Value::Array(rows) => {
                 for child in rows {
-                    copies(child, withheld);
+                    copies(child, withheld, false);
                 }
             }
             Value::Object(row) => {
                 for (key, child) in row {
-                    if !RECEIPT_IDENTITY.contains(&key.as_str()) && key != "valueWithheld" {
-                        copies(child, withheld);
+                    if receipt && key == "steps" {
+                        if let Value::Array(steps) = child {
+                            for step in steps {
+                                copies(step, withheld, true);
+                            }
+                        }
+                    } else if !(receipt && RECEIPT_IDENTITY.contains(&key.as_str()))
+                        && key != "valueWithheld"
+                    {
+                        copies(child, withheld, false);
                     }
                 }
             }
@@ -159,7 +169,7 @@ fn withhold_receipt_values(payload: &mut Value) {
     }
     let mut withheld = Vec::new();
     fields(payload, false, &mut withheld);
-    copies(payload, &withheld);
+    copies(payload, &withheld, true);
 }
 
 // Only the broker-failure marker proves provenance of its message. Legacy adapter
@@ -359,6 +369,30 @@ mod tests {
             if batch {
                 assert_eq!(observed["data"]["valueWithheld"], "password");
             }
+        }
+    }
+
+    #[test]
+    fn identity_named_keys_inside_page_data_are_still_withheld() {
+        // A page script result or page row may use the same key names as a receipt's identity.
+        let receipt = json!({"operationId":"op","status":"completed","action":"page.insert_text",
+            "data":{"value":"hunter2","status":"hunter2","result":{"state":"x hunter2 x","action":"hunter2"}}});
+        for batch in [false, true] {
+            let payload = if batch {
+                json!({"steps":[receipt.clone()]})
+            } else {
+                receipt.clone()
+            };
+            let mut result = json!({"structuredContent":payload});
+            mark(&mut result);
+            let page = &result["structuredContent"]["untrustedPageContent"];
+            let observed = if batch { &page["steps"][0] } else { page };
+            assert_eq!(observed["status"], "completed");
+            assert_eq!(observed["operationId"], "op");
+            assert_eq!(observed["data"]["status"], "[withheld]");
+            assert_eq!(observed["data"]["result"]["state"], "x [withheld] x");
+            assert_eq!(observed["data"]["result"]["action"], "[withheld]");
+            assert!(!page.to_string().contains("hunter2"), "{page}");
         }
     }
 
