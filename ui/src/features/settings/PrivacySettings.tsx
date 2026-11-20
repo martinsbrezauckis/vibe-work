@@ -3,9 +3,8 @@
  * change what Mistral may do with your conversations (that is an account setting, not this one).
  * Depends on: AppContext, hooks, state/privacy, state/modelChoice. Called by: settings/SettingsPage (the Settings dialog is gone).
  * Invariants: the consequence line is always visible: with telemetry off Mistral's experiments do not
- * run, so features still being rolled out (smart approve, extra models) do not appear. Turning a switch
- * on asks the native confirmation (the gate requires it); off does not. A value that the environment
- * or an administrator sets is shown as such and cannot be changed here.
+ * run, so features still being rolled out (smart approve, extra models) do not appear. Both switches
+ * stay off and locked because the guarded runtime disables data sharing.
  */
 import { Switch } from "../../components/Controls";
 import { useEffect, useState } from "react";
@@ -41,9 +40,8 @@ export function PrivacySettings() {
   const readFor = readKey ?? "latest";
   useEffect(() => {
     if (core === null || !running) return;
-    const at = sessionForPick(core, selected);
     let live = true;
-    readPrivacy(core, at)
+    readPrivacy()
       .then((v) => {
         if (live) {
           setView(v);
@@ -68,7 +66,7 @@ export function PrivacySettings() {
     setSaving(which);
     setError(null);
     writePrivacy(core, via, which, !current.on)
-      .then(() => readPrivacy(core, via))
+      .then(() => readPrivacy())
       .then((v) => {
         setView(v);
       })
@@ -118,15 +116,11 @@ export function PrivacySettings() {
   return (
     <section aria-labelledby="privacy-settings-title">
       <h3 id="privacy-settings-title">Privacy</h3>
-      {via === null && view !== null && <p className="key-line">{SWITCHES_NEED_CHAT}</p>}
+      <p className="key-line">Usage data and crash reports are disabled by Vibe Work.</p>
       {view === null && error === null && <p className="key-line">Reading the switches…</p>}
       {view !== null && (
         <>
-          {row(
-            "telemetry",
-            "Send usage data to Mistral",
-            "Sends anonymous usage, errors and timings to Mistral.",
-          )}
+          {row("telemetry", "Send usage data to Mistral", "Disabled while Vibe runs in Vibe Work.")}
           {row("experiments", "Take part in Mistral's experiments", "Needs usage data on.")}
           <p className="key-field-hint ui-help" data-testid="privacy-consequence">
             Off: features still rolling out (smart approve, some models) are not offered.
@@ -141,6 +135,3 @@ export function PrivacySettings() {
     </section>
   );
 }
-
-/** Shown when the switches were read without a chat (there is none): Vibe saves them only through one. */
-const SWITCHES_NEED_CHAT = "Changing these switches needs a chat: Vibe saves them through one.";

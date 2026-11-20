@@ -132,12 +132,7 @@ pub fn staging_file(staging: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(staging).map_err(|e| format!("staging folder: {e}"))?;
     let mut bytes = [0u8; 12];
     getrandom::fill(&mut bytes).map_err(|e| format!("random name: {e}"))?;
-    let mut name = String::with_capacity(29);
-    for byte in bytes {
-        let _ = std::fmt::Write::write_fmt(&mut name, format_args!("{byte:02x}"));
-    }
-    name.push_str(".part");
-    Ok(staging.join(name))
+    Ok(staging.join(format!("{}.part", hex::encode(bytes))))
 }
 
 /// Checks that `dir` (`<session>/downloads`) is a real folder (created when missing), not a symlink or junction,
@@ -146,7 +141,7 @@ fn real_downloads_dir(dir: &Path) -> Result<(), String> {
     let parent = dir.parent().ok_or("the downloads folder has no parent")?;
     match std::fs::symlink_metadata(dir) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            return Err("the session's downloads folder is a link; nothing was saved".to_owned());
+            return Err("the chat's downloads folder is a link; nothing was saved".to_owned());
         }
         Ok(meta) if !meta.is_dir() => return Err("downloads is not a folder".to_owned()),
         Ok(_) => {}
@@ -160,7 +155,7 @@ fn real_downloads_dir(dir: &Path) -> Result<(), String> {
     if resolved == expected {
         Ok(())
     } else {
-        Err("the session's downloads folder resolves elsewhere; nothing was saved".to_owned())
+        Err("the chat's downloads folder resolves elsewhere; nothing was saved".to_owned())
     }
 }
 

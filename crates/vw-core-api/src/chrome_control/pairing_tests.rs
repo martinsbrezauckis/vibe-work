@@ -3,6 +3,7 @@
 use super::*;
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::{Mutex, atomic::Ordering};
 
 #[tokio::test]
 async fn a_pairing_click_is_not_a_live_browser_connection() {

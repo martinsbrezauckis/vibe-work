@@ -23,20 +23,9 @@ fn mac_command(browser: Browser, url: &str) -> Command {
     command
 }
 
-/// Build a detached native browser launch. An empty URL starts the browser without selecting a page;
-/// the authenticated extension creates each chat's own window after it reconnects.
-///
-/// # Errors
-/// Returns the installation issue when native discovery cannot find the requested browser.
-pub fn launch_command(
-    browser: Browser,
-    home: &Path,
-    url: &str,
-) -> Result<Command, InstallationIssue> {
-    launch_command_with_profile(browser, home, url, None)
-}
-
-/// Build a detached launch for a known profile directory. macOS retains its `LaunchServices` launch.
+/// Build a detached native browser launch, in the profile directory `profile` when one is known (`None`: the
+/// browser's own choice). An empty URL starts the browser without selecting a page; the authenticated extension
+/// creates each chat's own window after it reconnects. macOS retains its `LaunchServices` launch.
 ///
 /// # Errors
 /// Returns the installation issue when native discovery cannot find the requested browser.

@@ -19,7 +19,7 @@ fn requested_actions(
         if input.get("action").is_some() || entry["detail"]["vwBrowserAction"].is_string() {
             return None;
         }
-        let steps = crate::chrome_control::batch::steps(input).ok()?;
+        let steps = crate::chrome_control::batch_steps(input).ok()?;
         let mut requested = Vec::new();
         for step in steps {
             let required = vw_ask::chrome::actions::ask_required("chrome_execute", &step)?;
@@ -71,7 +71,7 @@ pub(super) fn scope(entry: &Value, tool: &str, tier: u64) -> Scopeable {
         return Scopeable::No;
     };
     let actions = if builtin {
-        let Some(actions) = crate::chrome_control::builtin::package_actions(tier) else {
+        let Some(actions) = crate::chrome_control::builtin_package_actions(tier) else {
             return Scopeable::No;
         };
         actions

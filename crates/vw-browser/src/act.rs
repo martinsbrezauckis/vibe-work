@@ -129,9 +129,7 @@ pub fn parse(args: &Value) -> Result<Action, String> {
         Some("recording.video.stop") => Some(crate::recording::Request::VideoStop),
         _ => None,
     } {
-        if args.get("format").is_some_and(|f| f != "gif") {
-            return Err("Action recording supports GIF only; recording.video.start reports this engine's video availability.".into());
-        }
+        recording_format(args, &request)?;
         return Ok(Action::Recording(request));
     }
     if args["action"] == "tabs.audio" {
@@ -214,6 +212,23 @@ pub fn parse(args: &Value) -> Result<Action, String> {
         return crate::site_storage::Request::parse(args).map(Action::Storage);
     }
     parse_page(args)
+}
+
+fn recording_format(args: &Value, request: &crate::recording::Request) -> Result<(), String> {
+    let video = matches!(
+        request,
+        crate::recording::Request::VideoStart | crate::recording::Request::VideoStop
+    );
+    let expected = if video { "webm" } else { "gif" };
+    if args.get("format").is_some_and(|format| format != expected) {
+        let key = if video {
+            "browserVideoFormat"
+        } else {
+            "browserGifFormat"
+        };
+        return Err(vw_vocabulary::text(key).unwrap_or_default().into());
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_page(args: &Value) -> Result<Action, String> {

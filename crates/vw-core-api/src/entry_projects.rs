@@ -31,7 +31,7 @@ impl EntryProjects {
         self.lock()
             .get(id)
             .cloned()
-            .unwrap_or_else(|| Err("this session has no captured project identity".to_owned()))
+            .unwrap_or_else(|| Err("this chat has no captured project identity".to_owned()))
     }
 
     pub(crate) fn known(&self, id: &str) -> Option<Captured> {
@@ -97,7 +97,7 @@ pub(crate) async fn before_open(shared: &Shared, method: &str, params: &Value) -
             .await
             .unwrap_or_else(|_| Err("the project identity could not be captured".to_owned()))
     } else {
-        Err("this session has no user-selected project folder".to_owned())
+        Err("this chat has no user-selected project folder".to_owned())
     };
     Some(Opening {
         identity,
@@ -169,7 +169,7 @@ pub(crate) async fn finish_copy(shared: &Shared, id: &str, path: Option<&Path>) 
             let cwd = cwd
                 .and_then(|cwd| vw_platform::canonical_plain(Path::new(&cwd)).ok())
                 .filter(|cwd| cwd.starts_with(&path))
-                .ok_or_else(|| "the session folder is outside its copy".to_owned())?;
+                .ok_or_else(|| "the chat folder is outside its copy".to_owned())?;
             let mut registered = opening.registered;
             registered.retain(|p| p == Path::new(chosen.allowed_project()));
             // An admitted start makes its exact chosen folder known, including a native copy-dialog choice.

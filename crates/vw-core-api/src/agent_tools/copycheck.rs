@@ -15,7 +15,7 @@
 //! - **The caller**: the hook payload's `parent_session_id` when there is one (filled by Vibe's runtime, not the model:
 //!   a subagent works inside its parent's turn and folder, so parent and subagent are one holder), else its
 //!   `session_id`.
-//! - **Fails closed**: a copy nobody is known to use is refused ("cannot tell which session uses this copy"); the whole
+//! - **Fails closed**: a copy nobody is known to use is refused ("cannot tell which chat uses this copy"); the whole
 //!   decision (read the holders, take the lock) happens under one mutex, so two sessions racing for an idle copy cannot
 //!   both get it.
 //!
@@ -196,7 +196,7 @@ pub(crate) async fn check(shared: &Arc<Shared>, args: Value) -> Result<Value, St
         .unwrap_or_else(|| question.session_id.clone());
     if caller.is_empty() || question.copy.is_empty() {
         return Ok(
-            json!({"decision": "deny", "reason": report(Failure::CopyRequest, "no session or copy named")}),
+            json!({"decision": "deny", "reason": report(Failure::CopyRequest, "no chat or copy named")}),
         );
     }
     let Some(tools) = shared.agent_tools.clone() else {

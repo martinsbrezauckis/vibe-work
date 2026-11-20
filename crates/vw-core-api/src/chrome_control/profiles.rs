@@ -11,6 +11,18 @@ use std::{
     path::Path,
 };
 use vw_platform::sync::LockRecover;
+#[path = "profiles_observe.rs"]
+mod observation;
+pub(super) use observation::observe;
+#[path = "profiles_view.rs"]
+mod views;
+pub(super) use views::{agent_inventory, agent_view, optional_view, view};
+#[path = "profiles_removal.rs"]
+mod removal;
+pub(super) use removal::{
+    REMOVAL_NOT_SAVED, all_removed, forget_all, pairing_allowed, reapprove, remove_browser,
+    remove_browser_saved, removed_not_connected, retired, retired_by,
+};
 
 mod names;
 
@@ -314,161 +326,6 @@ fn metadata_name(value: &Value) -> Option<String> {
     .then(|| name.to_owned())
 }
 
-pub(super) fn observe(chrome: &ChromeControl, data: &Value) {
-    let Some(rows) = data["profiles"].as_array() else {
-        return;
-    };
-    let mut profiles = chrome.profiles.lock_or_recover();
-    if profiles.storage_unavailable {
-        return;
-    }
-    let before = serde_json::to_vec(&*profiles).ok();
-    if let Some(owner) = data["ownerPublicKey"].as_str() {
-        profiles.owner = Some(owner.into());
-    }
-    profiles.live.clear();
-    for row in rows {
-        let Some(id) = row["profileId"]
-            .as_str()
-            .filter(|id| !id.is_empty() && id.len() <= 128)
-        else {
-            continue;
-        };
-        let id = canonical(id);
-        if id == AGENT_FIREFOX {
-            continue;
-        }
-        if row["connected"] == true {
-            profiles.live.insert(id.clone());
-        }
-        let owner = profiles.owner.clone();
-        let number = profiles.next_number(&id);
-        let record = profiles
-            .records
-            .entry(id.clone())
-            .or_insert_with(|| Record::new(owner.clone(), number));
-        let changed_owner = row["connected"] == true
-            && record
-                .owner
-                .as_ref()
-                .zip(owner.as_ref())
-                .is_some_and(|(old, current)| old != current);
-        if row["connected"] == true && owner.is_some() {
-            record.owner = owner;
-        }
-        if row["connected"] == true {
-            // A live authenticated connection outranks any earlier deletion evidence, and proves a superseded
-            // identity is a different running profile.
-            record.deleted = false;
-            record.replaced_by = None;
-        }
-        if let Some(name) = metadata_name(&row["name"]) {
-            record.metadata_name = Some(name);
-        }
-        if changed_owner {
-            profiles.defaults.retain(|_, selected| selected != &id);
-        }
-    }
-    if before != serde_json::to_vec(&*profiles).ok()
-        && let Err(reason) = profiles.save(chrome.dir())
-    {
-        tracing::warn!(%reason, "Browser profile inventory could not be saved");
-    }
-}
-
-/// The profiles an agent may choose, default or be asked about: every paired Chrome, Edge and Safari identity. The
-/// person's Firefox add-on is push-only and never takes an agent action, so no Firefox identity appears here; the
-/// agent's only Firefox is the owned window (`AGENT_FIREFOX`).
-pub(super) fn agent_view(shared: &crate::core::Shared) -> Vec<BrowserProfile> {
-    let mut rows = view(shared);
-    rows.retain(|row| Browser::from_profile(&row.profile_id) != Browser::Firefox);
-    rows
-}
-
-/// `agent_view` plus the owned Firefox window while it is open, for the inventory the agent reads.
-pub(super) fn agent_inventory(shared: &crate::core::Shared) -> Vec<BrowserProfile> {
-    let mut rows = agent_view(shared);
-    let open = cfg!(feature = "your-firefox")
-        && Browser::Firefox.enabled(shared)
-        && shared
-            .chrome_control
-            .owner
-            .firefox_pairing
-            .lock_or_recover()
-            .0
-            == super::PairingState::WindowOpen;
-    if open {
-        rows.push(BrowserProfile {
-            profile_id: AGENT_FIREFOX.into(),
-            browser: Browser::Firefox.id().into(),
-            name: Browser::Firefox.short_name().into(),
-            state: ProfileState::Connected,
-            enabled: true,
-            eligible: true,
-            is_default: false,
-            reason: None,
-            account: None,
-        });
-    }
-    rows
-}
-
-/// Every retained identity, in pairing order within each browser (the order Settings, the card and the agent show).
-pub(super) fn view(shared: &crate::core::Shared) -> Vec<BrowserProfile> {
-    let chrome = &shared.chrome_control;
-    let profiles = chrome.profiles.lock_or_recover();
-    let mut records: Vec<_> = profiles.records.iter().collect();
-    records.sort_by_key(|(id, record)| (Browser::from_profile(id).id(), record.number, *id));
-    let mut rows: Vec<BrowserProfile> = records
-        .into_iter()
-        .filter(|(id, _)| profiles.shown(id))
-        .filter_map(|(id, record)| {
-            let browser = Browser::from_profile(id);
-            if (id.starts_with("edge:") && !cfg!(feature = "your-edge"))
-                || (id.starts_with("safari:") && !cfg!(feature = "your-safari"))
-                || (id.starts_with("firefox:") && !cfg!(feature = "your-firefox"))
-            {
-                return None;
-            }
-            let available = record.enabled && browser.enabled(shared);
-            let same_owner = record
-                .owner
-                .as_ref()
-                .zip(profiles.owner.as_ref())
-                .is_none_or(|(a, b)| a == b);
-            let state = if record.deleted || !available || !same_owner {
-                ProfileState::Unavailable
-            } else if profiles.live.contains(id) {
-                ProfileState::Connected
-            } else {
-                ProfileState::Offline
-            };
-            Some(BrowserProfile {
-                profile_id: id.clone(),
-                browser: browser.id().into(),
-                name: profiles.name(id),
-                state,
-                enabled: record.enabled,
-                eligible: state == ProfileState::Connected,
-                is_default: profiles.defaults.get(browser.id()) == Some(id),
-                reason: if record.deleted {
-                    Some(format!("Removed in {}", browser.short_name()))
-                } else if !available {
-                    Some("Off".into())
-                } else if !same_owner {
-                    Some("Pairing changed".into())
-                } else {
-                    None
-                },
-                account: profiles.account(id),
-            })
-        })
-        .collect();
-    drop(profiles);
-    super::profile_reason::offline(chrome, &mut rows);
-    rows
-}
-
 /// The profile's name for agent and status text: "Chrome · Work (company.example)", or "Chrome profile 2" when the name
 /// is only the pairing order (`Profiles::agent_name`). Carries the account's domain, never the account.
 pub(super) fn label(chrome: &ChromeControl, id: &str) -> String {
@@ -515,11 +372,6 @@ pub(super) fn deleted(chrome: &ChromeControl, id: &str) -> bool {
         .is_some_and(|record| record.deleted)
 }
 
-pub(super) fn optional_view(shared: &crate::core::Shared) -> Option<Vec<BrowserProfile>> {
-    let rows = view(shared);
-    (!rows.is_empty()).then_some(rows)
-}
-
 pub(super) fn disconnected(chrome: &ChromeControl) {
     chrome.profiles.lock_or_recover().live.clear();
 }
@@ -538,73 +390,6 @@ pub(super) fn observed_tab(chrome: &ChromeControl, id: &str) {
         .entry(id.clone())
         .or_insert_with(|| Record::new(owner, number));
     saved.live.insert(id);
-}
-
-/// Every pairing of `browser` was removed in Browser settings (at least one record, none kept). A retired identity
-/// (`Profiles::retired`) is no pairing kept: it is never shown, and its folder holds a newer identity. A display fact
-/// for the card: the extension may still be on, and only a new pairing brings the browser back.
-pub(super) fn all_removed(chrome: &ChromeControl, browser: Browser) -> bool {
-    let saved = chrome.profiles.lock_or_recover();
-    let mut mine = saved
-        .records
-        .iter()
-        .filter(|(id, _)| browser.owns_profile(id))
-        .peekable();
-    mine.peek().is_some() && mine.all(|(id, record)| record.removed || saved.retired(id))
-}
-
-/// In a helper status, marks each profile the person removed in Settings (and has not paired again, `reapprove`) as not
-/// connected. Its extension may still reach the helper, but it is not its browser's connection: the browser pairing
-/// states read from this status (the card and the agent) never say Connected because of it.
-pub(super) fn removed_not_connected(chrome: &ChromeControl, data: &mut Value) {
-    let Some(rows) = data.get_mut("profiles").and_then(Value::as_array_mut) else {
-        return;
-    };
-    let saved = chrome.profiles.lock_or_recover();
-    for row in rows {
-        let removed = row["profileId"].as_str().is_some_and(|id| {
-            saved
-                .records
-                .get(&canonical(id))
-                .is_some_and(|record| record.removed)
-        });
-        if removed {
-            row["connected"] = Value::Bool(false);
-        }
-    }
-}
-
-/// The older identities proven to be the same browser profile as `id`: a Chrome or Edge identity in `id`'s folder with
-/// an earlier pairing, not removed and not connected now (`Profiles::retired`). They are never shown, yet the helper
-/// keeps their approval, so Remove of `id` unpairs them too: no approved pairing of that profile stays without a row.
-/// A Safari or Firefox identity that `id` only replaced (`replaced_by`) is not proven to be the same profile; it may be
-/// a second real profile, so it keeps its pairing and shows again when it connects.
-pub(super) fn retired_by(chrome: &ChromeControl, id: &str) -> Vec<String> {
-    let saved = chrome.profiles.lock_or_recover();
-    let Some(newer) = saved.records.get(id) else {
-        return Vec::new();
-    };
-    let browser = Browser::from_profile(id);
-    saved
-        .records
-        .iter()
-        .filter(|(other, record)| {
-            other.as_str() != id
-                && other.as_str() != AGENT_FIREFOX
-                && browser.owns_profile(other)
-                && !record.removed
-                && saved.retired(other)
-                && newer.folder.is_some()
-                && record.folder == newer.folder
-                && (record.number, other.as_str()) < (newer.number, id)
-        })
-        .map(|(other, _)| other.clone())
-        .collect()
-}
-
-/// A newer identity of the same browser profile replaced this one (`Profiles::retired`).
-pub(super) fn retired(chrome: &ChromeControl, id: &str) -> bool {
-    chrome.profiles.lock_or_recover().retired(&canonical(id))
 }
 
 /// Called after the person approved a pairing and the helper saved its pin. Stamps the pairing time. For Safari and
@@ -662,79 +447,4 @@ pub(super) fn paired(
         return;
     }
     *saved = next;
-}
-
-/// The Remove hint when the removal could not be saved (`{browser}` as in `Browser::words`).
-pub(super) const REMOVAL_NOT_SAVED: &str = "Vibe Work could not save this removal: the {browser} profiles may show again after Vibe Work restarts. Remove them again then.";
-
-/// The person removed a whole browser in Settings: every identity of it is removed like a single profile's Remove
-/// (record kept, off, no default), so it never returns as an Offline profile; pairing it again brings it back.
-/// The removal stays in memory even when it cannot be saved (the helper side is already unpaired, so this run must
-/// not show those identities again); a failed save is only logged ([`remove_browser_saved`] reports it).
-pub(super) fn remove_browser(chrome: &ChromeControl, browser: Browser) {
-    let _ = remove_browser_saved(chrome, browser);
-}
-
-/// [`remove_browser`] with the failed save as an error, so the caller can tell the person that a restart may bring
-/// the removed identities back ([`REMOVAL_NOT_SAVED`]). An inventory that was unreadable when Vibe Work started is not
-/// written (`Profiles::save` refuses it, leaving the file as it is), so that removal is unsaved too and says so.
-pub(super) fn remove_browser_saved(chrome: &ChromeControl, browser: Browser) -> Result<(), String> {
-    let mut saved = chrome.profiles.lock_or_recover();
-    let mut next = saved.clone();
-    for (id, record) in &mut next.records {
-        if browser.owns_profile(id) {
-            record.removed = true;
-            record.enabled = false;
-        }
-    }
-    next.defaults.remove(browser.id());
-    next.live.retain(|id| !browser.owns_profile(id));
-    let written = next.save(chrome.dir());
-    if let Err(reason) = &written {
-        tracing::warn!(%reason, "Browser profile inventory could not be saved");
-    }
-    *saved = next;
-    written
-}
-
-/// The last browser connection was removed and its folder deleted: nothing of the old inventory may be saved again.
-pub(super) fn forget_all(chrome: &ChromeControl) {
-    let mut saved = chrome.profiles.lock_or_recover();
-    if saved.storage_unavailable {
-        return;
-    }
-    // Fences for in-flight work keep counting up, so an earlier task can never match a later generation.
-    let generations = std::mem::take(&mut saved.generations);
-    *saved = Profiles {
-        generations,
-        ..Profiles::default()
-    };
-}
-
-/// A removed pin can request a fresh native ceremony; an identity switched Off cannot.
-pub(super) fn pairing_allowed(chrome: &ChromeControl, id: &str) -> bool {
-    let saved = chrome.profiles.lock_or_recover();
-    !saved.storage_unavailable
-        && saved
-            .records
-            .get(&canonical(id))
-            .is_none_or(|record| record.enabled || record.removed)
-}
-
-/// Called only after the person approves the native pairing dialog, before accepting the new signed key.
-pub(super) fn reapprove(chrome: &ChromeControl, id: &str) -> Result<(), String> {
-    let mut saved = chrome.profiles.lock_or_recover();
-    let mut next = saved.clone();
-    let id = canonical(id);
-    if let Some(record) = next.records.get_mut(&id)
-        && record.removed
-    {
-        record.removed = false;
-        record.enabled = true;
-        record.owner.clone_from(&next.owner);
-        next.live.remove(&id);
-    }
-    next.save(chrome.dir())?;
-    *saved = next;
-    Ok(())
 }

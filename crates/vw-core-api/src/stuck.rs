@@ -3,7 +3,7 @@
 //! Users must never get stuck mid-work, and the core makes no automatic retries.
 //! So after the first failed reopen the session is marked stuck; its commands are refused at once
 //! (`sessionStuck`, nothing waits); its history stays readable through the lobby; and the user has two
-//! explicit actions: try again (one bounded attempt, cancellable) or continue in a new session (same
+//! explicit actions: try again (one bounded attempt, cancellable) or continue in a new chat (same
 //! folder, same profile, linked).
 //!
 //! Depends on: `core` (`Core`, `Shared`), `recovery` (`open_session`), `restore` (profile of the new
@@ -33,7 +33,7 @@ use crate::event::CoreEvent;
 use crate::view::StuckView;
 
 /// The text users see for a stuck session.
-pub(crate) const STUCK_TEXT: &str = "Vibe can't reopen this session right now";
+pub(crate) const STUCK_TEXT: &str = "Vibe can't reopen this chat right now";
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock_or_recover()
@@ -132,7 +132,7 @@ impl StuckSessions {
 pub(crate) fn refusal(_id: &str, method: &str) -> CoreError {
     CoreError::new(
         ErrorCode::SessionStuck,
-        format!("{STUCK_TEXT}. Try again or continue in a new session."),
+        format!("{STUCK_TEXT}. Try again or continue in a new chat."),
     )
     .with_method(method)
 }
@@ -176,10 +176,7 @@ impl Core {
     /// Marks a session stuck after a failed reopen and tells subscribers.
     pub(crate) fn note_stuck(&self, id: &str) {
         if self.shared.stuck.mark(id) {
-            warn!(
-                session_id = id,
-                "session is stuck: Vibe could not reopen it"
-            );
+            warn!(session_id = id, "chat is stuck: Vibe could not reopen it");
             self.emit_stuck(id, true);
         }
     }
@@ -227,7 +224,7 @@ impl Core {
             .with_method("session/resume")),
             None => Err(CoreError::new(
                 ErrorCode::Cancelled,
-                "stopped waiting for Vibe to reopen the session",
+                "stopped waiting for Vibe to reopen the chat",
             )
             .with_method("session/resume")),
         }
@@ -297,7 +294,7 @@ impl Core {
                 session_id = id,
                 new = snapshot.session_id,
                 agent,
-                "continued a stuck session in a new one"
+                "continued a stuck chat in a new one"
             );
             if self.shared.stuck.is_stuck(id) {
                 self.emit_stuck(id, true);

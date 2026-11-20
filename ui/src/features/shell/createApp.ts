@@ -265,6 +265,8 @@ export function createApp(options: CreateAppOptions): App {
             toasts,
             persist: options.persist ?? true,
             canUseKey,
+            answer: (sessionId, callbackId, output) =>
+              transcript.answer(sessionId, callbackId, output, "window"),
             ...(options.prepareCapture === undefined ? {} : { prepare: options.prepareCapture }),
             ...(options.player === undefined ? {} : { player: options.player }),
           }),

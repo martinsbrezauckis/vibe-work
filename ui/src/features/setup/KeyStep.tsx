@@ -72,7 +72,7 @@ export function KeyStep({
               <Button
                 data-testid="setup.key-step-use-saved"
                 type="button"
-                appearance="dialog"
+                variant="primary"
                 disabled={busy}
                 onClick={() => {
                   void keys?.useSaved(c.itemId);
@@ -133,7 +133,7 @@ export function KeyStep({
         <div className="key-actions">
           <Button
             type="submit"
-            appearance="dialog"
+            variant="primary"
             data-testid="setup.save"
             disabled={busy || (additional && name.trim() === "")}
           >

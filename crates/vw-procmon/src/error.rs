@@ -18,7 +18,7 @@ pub enum ScanError {
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum LeaseError {
     /// The explicitly requested port belongs outside this session's lease.
-    #[error("port {port} is not leased to this session; its ports are {leased:?} (port_lease)")]
+    #[error("port {port} is not leased to this chat; its ports are {leased:?} (port_lease)")]
     NotLeased {
         /// The requested port.
         port: u16,

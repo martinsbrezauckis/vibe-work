@@ -204,6 +204,7 @@ pub(crate) async fn stop_recovered(
         .map_err(|e| CoreError::from_gate("turn/interrupt", &e));
     // Invalidate continuations of the old turn without publishing a separate user Stop action.
     crate::stops::stopped(shared, id);
+    crate::stops::aim(shared, id, Some(&turn));
     let mut confirmed = false;
     loop {
         let reply = shared
@@ -229,7 +230,7 @@ pub(crate) async fn stop_recovered(
         }
         let idle = confirmed && idle_state(state);
         if idle {
-            crate::stops::finished(shared, &[id.to_owned()]);
+            crate::stops::finished(shared, &[id.to_owned()], true);
             *resumed = reply.result;
             if let Some(old) = shared.interrupted_send.0.lock_or_recover().get_mut(id) {
                 old.pending = false;

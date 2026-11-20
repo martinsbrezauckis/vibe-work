@@ -8,8 +8,9 @@
 //! the page): no vault access at all; (2) the login lookup (metadata) and "this login is for this site"; (3) a user
 //! name goes in without a grant (it is not a secret); a password needs an active "always for this site" grant (read
 //! now) or the native dialog (Allow once / Always for this site / Don't allow); (4) an "always" grant is read again
-//! right before the password; (5) `KeyService::login_password` (counted, registered as a stored secret); (6) vw-browser
-//! `fill_write` (the page script repeats every check in the same call that writes).
+//! right before the password; (5) `KeyService::login_password` (counted, registered as a stored secret); (6) a fresh
+//! grant check and the per-site effect lane before `fill_write` (the page script repeats every check in the same call
+//! that writes). Revoke shares the lane and waits for an admitted effect or refuses success if it is unconfirmed.
 //!
 //! Who decides: only the native dialog. Its method is in `vault_scope::DIALOG_METHODS` (the confirmer reads it), so a Debug API
 //! request (on the vault the Debug API has the agent's rights) gets the same dialog and never an automatic
@@ -39,6 +40,7 @@ use crate::secrets_view::SecretUseView;
 pub(crate) const METHOD: &str = "vibe-work/fillLogin";
 /// The dialog's "always" button.
 pub(crate) const ALWAYS_LABEL: &str = "Always for this site";
+const WITHDRAWN: &str = "the user withdrew vault access for this site";
 
 /// One fill as the agent (or the Debug API) asked for it.
 struct Wanted {
@@ -137,7 +139,7 @@ fn consent(
         method: METHOD.to_owned(),
         requester,
         summary: format!(
-            "The agent of the session {} wants to sign in on {} with your saved login {}{}: Vibe Work puts the \
+            "The agent of the chat {} wants to sign in on {} with your saved login {}{}: Vibe Work puts the \
              password into the field {} on that page. The agent never sees the password.{}",
             vw_gate::dialog_chat_quote(title),
             vw_gate::dialog_quote(&target.origin),
@@ -203,7 +205,7 @@ pub(crate) async fn prepare(
         .map_err(|error| error.message)?
         .service
         .owner_session_id(session_id)
-        .ok_or_else(|| "browser page has no session owner".to_owned())?;
+        .ok_or_else(|| "browser page has no owning chat".to_owned())?;
     let wanted = parse(args)?;
     // (1) every check before the vault is touched.
     let target = driver
@@ -222,6 +224,8 @@ pub(crate) async fn prepare(
             driver,
             session_id,
             by,
+            #[cfg(test)]
+            pause_before_effect: None,
         };
         let record = |text: &str| driver.fill_refused(session_id, by, &wanted.reference, text);
         authorized
@@ -238,12 +242,89 @@ pub(crate) trait LoginWriter: Sync {
         target: &FillTarget,
         login: &Login,
         value: &str,
+        effect: &FillEffect<'_>,
     ) -> impl std::future::Future<Output = Result<Value, String>> + Send;
+}
+
+/// A writer enters this lane immediately before its page effect, after any asynchronous setup.
+/// The held permit keeps a revoke from reporting success until the effect has finished.
+pub(crate) struct FillEffect<'a> {
+    shared: &'a Shared,
+    login_id: &'a str,
+    origin: &'a str,
+    decision: &'static str,
+    decided_ms: i64,
+}
+
+impl FillEffect<'_> {
+    pub(crate) fn new<'a>(
+        shared: &'a Shared,
+        login_id: &'a str,
+        origin: &'a str,
+        decision: &'static str,
+        decided_ms: i64,
+    ) -> FillEffect<'a> {
+        FillEffect {
+            shared,
+            login_id,
+            origin,
+            decision,
+            decided_ms,
+        }
+    }
+
+    async fn withdrawn(&self) -> bool {
+        match self.decision {
+            "grant" | "allowedAlways" => {
+                !fill_grants::holds(self.shared, self.login_id, self.origin).await
+                    || fill_grants::revoked_during(
+                        self.shared,
+                        self.login_id,
+                        self.origin,
+                        self.decided_ms,
+                    )
+                    .await
+            }
+            "allowedOnce" => {
+                fill_grants::revoked_during(
+                    self.shared,
+                    self.login_id,
+                    self.origin,
+                    self.decided_ms,
+                )
+                .await
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) async fn enter(&self) -> Result<fill_grants::EffectPermit, String> {
+        let id = vw_vault::fill_grant::id_for(self.login_id, self.origin);
+        let permit = self.shared.fill_effects.enter(&id).await;
+        if permit.unconfirmed() {
+            return Err(refused(
+                "grant",
+                "a previous browser fill has not been confirmed; close its tab and restart Vibe Work",
+            ));
+        }
+        if self.withdrawn().await {
+            return Err(refused("grant", WITHDRAWN));
+        }
+        Ok(permit)
+    }
 }
 struct BrowserLoginWriter<'a> {
     driver: &'a Browser,
     session_id: &'a str,
     by: Actor,
+    #[cfg(test)]
+    pause_before_effect: Option<Arc<WriterPause>>,
+}
+
+#[cfg(test)]
+struct WriterPause {
+    reached: tokio::sync::watch::Sender<bool>,
+    resume: tokio::sync::watch::Receiver<bool>,
 }
 impl LoginWriter for BrowserLoginWriter<'_> {
     async fn write(
@@ -251,11 +332,27 @@ impl LoginWriter for BrowserLoginWriter<'_> {
         target: &FillTarget,
         _login: &Login,
         value: &str,
+        effect: &FillEffect<'_>,
     ) -> Result<Value, String> {
-        self.driver
+        #[cfg(test)]
+        if let Some(pause) = &self.pause_before_effect {
+            pause.reached.send_replace(true);
+            let mut resume = pause.resume.clone();
+            resume
+                .wait_for(|ready| *ready)
+                .await
+                .map_err(|_| "fill interrupted")?;
+        }
+        let mut permit = effect.enter().await?;
+        permit.dispatched();
+        let result = self
+            .driver
             .fill_write(self.session_id, target, value, self.by)
-            .await
-            .map_err(|e| refused(e.check, &e.text))?;
+            .await;
+        if result.is_ok() {
+            permit.settled();
+        }
+        result.map_err(|e| refused(e.check, &e.text))?;
         Ok(Value::Null)
     }
 }
@@ -274,6 +371,8 @@ struct Authorized {
     policy: crate::entry_permissions::Policy,
     login: Login,
     decision: &'static str,
+    /// When the decision was taken: a revoke of this login's grant on the site at or after it refuses the write.
+    decided_ms: i64,
 }
 
 /// Steps (2) to (4) for both browser routes: the login, its entry policy, and the grant or the native dialog.
@@ -320,6 +419,7 @@ async fn authorize(
         return Err(fail("login", "this login has no password".to_owned()));
     }
     // (3) + (4) the grant, or the user's answer.
+    let decided_ms = fill_grants::now_ms();
     let decision = if target.role == LoginRole::Username {
         "username"
     } else {
@@ -343,6 +443,7 @@ async fn authorize(
         policy,
         login: login.clone(),
         decision,
+        decided_ms,
     })
 }
 
@@ -361,6 +462,13 @@ impl Authorized {
         };
         let keys = shared.config.keys.as_ref().ok_or("Vault closed.")?;
         let login = &self.login;
+        let effect = FillEffect::new(
+            shared,
+            &login.id,
+            &target.origin,
+            self.decision,
+            self.decided_ms,
+        );
         if target.role == LoginRole::Username {
             if self.project.policy(keys, &login.id).await.ok().as_ref() != Some(&self.policy) {
                 return Err(fail(
@@ -368,18 +476,40 @@ impl Authorized {
                     "the entry permission changed meanwhile".to_owned(),
                 ));
             }
-            let receipt = writer.write(target, login, &login.username).await?;
+            let receipt = writer
+                .write(target, login, &login.username, &effect)
+                .await?;
             return Ok(FilledLogin {
                 receipt,
                 summary: answer(target, login),
             });
         }
         crate::agent_access::check(shared)?;
+        // A batch prepares its fills before its first step runs, so the person may change the entry permission or
+        // revoke the site permission before this one runs: both are read again before the password. A saved grant
+        // must still hold; an answer must not have been revoked since it was given.
+        if self.project.policy(keys, &login.id).await.ok().as_ref() != Some(&self.policy) {
+            return Err(fail(
+                "permission",
+                "the entry permission changed meanwhile".to_owned(),
+            ));
+        }
+        if effect.withdrawn().await {
+            log(shared, &self.owner, target, login, "refused");
+            return Err(fail(
+                "grant",
+                "the user revoked this permission meanwhile: the next fill asks them".to_owned(),
+            ));
+        }
         // (5) the password, only now.
         let password = keys
             .login_password(login.id.clone())
             .await
             .map_err(|e| fail("vault", format!("the password could not be read ({e})")))?;
+        if effect.withdrawn().await {
+            log(shared, &self.owner, target, login, "refused");
+            return Err(fail("grant", WITHDRAWN.to_owned()));
+        }
         crate::agent_access::check(shared)?;
         if self.project.policy(keys, &login.id).await.ok().as_ref() != Some(&self.policy) {
             return Err(fail(
@@ -387,9 +517,20 @@ impl Authorized {
                 "the entry permission changed meanwhile".to_owned(),
             ));
         }
+        if effect.withdrawn().await {
+            log(shared, &self.owner, target, login, "refused");
+            return Err(fail("grant", WITHDRAWN.to_owned()));
+        }
         // (6) the write (the page repeats every check).
-        let written = writer.write(target, login, password.expose()).await;
+        let written = writer
+            .write(target, login, password.expose(), &effect)
+            .await;
         drop(password);
+        if let Err(error) = &written
+            && error.contains(WITHDRAWN)
+        {
+            record(error);
+        }
         log(
             shared,
             &self.owner,
@@ -527,15 +668,15 @@ async fn local_holder(shared: &Arc<Shared>, session_id: &str, origin: &str) -> S
     .flatten();
     match found {
         Some((PortOwner::ThisSession, Some((name, pid)))) => format!(
-            "{name}{} started in this session (port {port})",
+            "{name}{} started in this chat (port {port})",
             pid.map_or_else(String::new, |p| format!(" (pid {p})"))
         ),
-        Some((PortOwner::ThisSession, None)) => format!("this session (port {port})"),
+        Some((PortOwner::ThisSession, None)) => format!("this chat (port {port})"),
         Some((PortOwner::OtherSession(name) | PortOwner::OtherApp(name), _)) => {
             format!("{name} (port {port})")
         }
         Some((PortOwner::NotProven, _)) => {
-            format!("a program in this session's folder that Vibe Work did not start (port {port})")
+            format!("a program in this chat's folder that Vibe Work did not start (port {port})")
         }
         Some((PortOwner::Nobody, _)) => format!("no program right now (port {port})"),
         None => format!("an unknown program (port {port})"),
@@ -574,3 +715,7 @@ fn log(shared: &Shared, session_id: &str, target: &FillTarget, login: &Login, de
         decision: decision.to_owned(),
     });
 }
+
+#[cfg(test)]
+#[path = "browser_fill_tests.rs"]
+pub(crate) mod tests;

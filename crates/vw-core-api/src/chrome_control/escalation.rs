@@ -28,8 +28,21 @@ pub(super) async fn send(
         // The agent's network rule: a url argument is checked now, everything else in Chrome (network.rs).
         super::network::prepare(shared, session, &mut args).await?;
     }
-    // DNS and port discovery can wait: captured permissions never outlive the live chat mode.
-    if sensitive {
+    let operation = if tool == "chrome_execute" {
+        args["sessionId"]
+            .as_str()
+            .map(|id| shared.chrome_control.external_video.operation(id))
+    } else {
+        None
+    };
+    // Waiting behind a guarded video frame cannot carry an earlier mode's grant into the helper.
+    // Network preparation runs first because a local-file navigation can itself dispatch a checked primitive.
+    let _operation_guard = if let Some(lock) = &operation {
+        Some(lock.lock().await)
+    } else {
+        None
+    };
+    if tool == "chrome_execute" {
         tier = super::check::authorize_read(shared, session, tool, &args, consent)?;
         super::gateway::validate_session(shared, session, tool, &args)?;
         args["_approvedCapabilities"] =
@@ -62,6 +75,40 @@ pub(super) async fn send(
         // The same plain refusal `check::authorize` gives before a call; the helper's words stay unread.
         return Err(reason);
     }
+    Ok(answer)
+}
+
+/// Capture one video frame with the chat's current screenshot authority while always requiring
+/// the helper's protected-field scan. Full access does not delegate protected values to video.
+pub(super) async fn video_frame(
+    shared: &Arc<Shared>,
+    session: &str,
+    mut args: Value,
+) -> Result<owner::Answer, String> {
+    debug_assert_eq!(args["action"], "capture.screenshot");
+    let tier = super::check::authorize_read(shared, session, "chrome_execute", &args, None)?;
+    super::gateway::validate_session(shared, session, "chrome_execute", &args)?;
+    super::reconnect::stopped(
+        shared,
+        session,
+        super::agent_browser::selected(shared, session, "chrome_execute", &args),
+    )?;
+    let mut capabilities = call_capabilities(shared, session, "chrome_execute", &args, tier, false);
+    capabilities.retain(|capability| *capability != "auth.secrets");
+    args["_approvedCapabilities"] = json!(capabilities);
+    let checked = args.clone();
+    let answer = shared
+        .chrome_control
+        .owner
+        .call("chrome_execute", args)
+        .await;
+    super::check::authorize_read(shared, session, "chrome_execute", &checked, None)?;
+    super::gateway::validate_session(shared, session, "chrome_execute", &checked)?;
+    super::reconnect::stopped(
+        shared,
+        session,
+        super::agent_browser::selected(shared, session, "chrome_execute", &checked),
+    )?;
     Ok(answer)
 }
 
@@ -111,23 +158,21 @@ fn call_capabilities(
 
 /// The core's own refusal when the helper reports that the action needs a higher mode than this chat's, or `None`.
 /// Built only from the matched capability name, the requested action and the mode labels: no helper or page text.
-/// A screenshot, PDF or recording of a page that shows a password, PIN or card value needs Full access too.
+/// Protected capture refusals are final in every mode and are never translated into a mode upgrade.
 fn refusal(result: &Value, action: &str, tier: Tier, mode: &str) -> Option<String> {
     let capability = result
         .pointer("/structuredContent/error/details/capability")
         .and_then(Value::as_str)?;
-    // Every action that takes the page's pixels (screenshot, zoom, page/media capture, PDF, recordings) gets the
-    // capture wording; only typing and filling get "typing sensitive data".
+    // Pixel-taking actions keep the helper's final protected-value refusal; typing and filling may need a higher mode.
     let capture = action.starts_with("capture.")
         || action.starts_with("recording.")
         || action == "files.save_pdf";
+    if capture && capability == "auth.secrets" {
+        return None;
+    }
     let (required, operation) = match capability {
         "page.commit" => (Tier::AcceptEdits, "sending this form"),
         "page.edit" => (Tier::AcceptEdits, "changing this field"),
-        "auth.secrets" if capture => (
-            Tier::FullAccess,
-            "capturing a page that shows a password, PIN or card value",
-        ),
         "auth.secrets" => (Tier::FullAccess, "typing sensitive data"),
         "raw.execute" => (Tier::FullAccess, "this action"),
         _ => return None,
@@ -139,10 +184,9 @@ fn refusal(result: &Value, action: &str, tier: Tier, mode: &str) -> Option<Strin
 mod tests {
     use super::*;
 
-    /// PREDICT: before the change a refused capture.zoom on a protected page said "typing sensitive data"; every
-    /// pixel-taking action must name the capture, and typing keeps its own words.
+    /// PREDICT: a protected capture is treated as a Full access request, inviting an access-mode change.
     #[test]
-    fn every_capture_action_gets_the_capture_words_below_full_access() {
+    fn protected_capture_refusal_never_invites_full_access() {
         let secrets =
             json!({"structuredContent":{"error":{"details":{"capability":"auth.secrets"}}}});
         for action in [
@@ -154,10 +198,9 @@ mod tests {
             "recording.start",
             "recording.video.start",
         ] {
-            let text = refusal(&secrets, action, Tier::AcceptEdits, "accept-edits").unwrap();
             assert!(
-                text.contains("capturing a page that shows a password, PIN or card value"),
-                "{action}: {text}"
+                refusal(&secrets, action, Tier::AcceptEdits, "accept-edits").is_none(),
+                "{action}"
             );
         }
         let typing = refusal(&secrets, "page.type", Tier::AcceptEdits, "accept-edits").unwrap();
@@ -246,25 +289,13 @@ mod tests {
             .await
             .unwrap();
         }
-        // Compatibility delivery can interleave with reads when the full suite reaches its retry timer.
-        // Exercise it explicitly so this contract does not depend on machine load or a two-second sleep.
-        super::super::send_local_network(&core.shared).await;
-        super::super::send_local_network(&core.shared).await;
         core.shutdown().await;
         let calls = seen.lock().unwrap();
         let reads: Vec<_> = calls
             .iter()
-            .filter_map(|(tool, args)| {
-                if tool == "chrome_execute" {
-                    Some(args)
-                } else {
-                    assert_eq!(tool, "chrome_status", "unexpected helper call: {args}");
-                    assert_eq!(
-                        args,
-                        &json!({"_netPolicyChange":{"localNetwork":true,"generation":0}})
-                    );
-                    None
-                }
+            .map(|(tool, args)| {
+                assert_eq!(tool, "chrome_execute", "unexpected helper call: {args}");
+                args
             })
             .collect();
         assert_eq!(reads.len(), actions.len(), "helper calls: {calls:?}");
@@ -387,8 +418,7 @@ mod tests {
             .is_none()
         );
         assert!(refusal(&helper("page.read"), "page.read", Tier::Ask, "ask").is_none());
-        // PREDICT: before the action was considered, a refused screenshot or PDF of a page showing a protected value
-        // was explained as "typing sensitive data".
+        // A protected capture refusal is final even when an older helper names auth.secrets as its capability.
         for action in [
             "capture.screenshot",
             "files.save_pdf",
@@ -399,14 +429,8 @@ mod tests {
                 action,
                 Tier::AcceptEdits,
                 "accept-edits",
-            )
-            .unwrap();
-            assert!(
-                capture.starts_with(
-                    "Not run: capturing a page that shows a password, PIN or card value needs "
-                ),
-                "{capture}"
             );
+            assert!(capture.is_none(), "{action}: {capture:?}");
         }
         let typing = refusal(
             &helper("auth.secrets"),

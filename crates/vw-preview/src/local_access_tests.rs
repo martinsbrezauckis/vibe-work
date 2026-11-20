@@ -16,6 +16,7 @@ fn request(class: IpClass, port: u16, initiator: Option<&'static str>) -> LocalR
         own_address: false,
         initiator,
         nested: false,
+        tls: false,
     }
 }
 
@@ -30,6 +31,23 @@ fn public(site: &str) -> Member {
 
 fn none(_: &str) -> Option<SiteAnswer> {
     None
+}
+
+#[test]
+fn a_timed_out_site_refuses_retries_until_the_person_changes_it_in_settings() {
+    let ask = LocalVerdict::Ask {
+        site: "https://a.example".to_owned(),
+        session: "chat".to_owned(),
+    };
+    assert_eq!(after_timed_out(ask.clone(), |_| false), ask);
+    assert!(matches!(
+        after_timed_out(ask, |site| site == "https://a.example"),
+        LocalVerdict::Refuse(reason) if reason.contains("the question was not answered")
+    ));
+    assert_eq!(
+        after_timed_out(LocalVerdict::Allow, |_| true),
+        LocalVerdict::Allow
+    );
 }
 
 #[test]
@@ -176,17 +194,31 @@ fn a_shared_web_store_asks_only_when_the_requester_is_clear() {
             session: "chat".to_owned()
         }
     );
-    // Unattributed with two undecided sites: refused, no one is asked.
-    assert!(matches!(
+    // Unattributed with two undecided sites: refused, no one is asked; both are named for the person's answer.
+    // PREDICT: a plain refusal that named no site, so the person could not allow the site they meant.
+    let candidates = |sites: &[&str]| -> Vec<(String, String)> {
+        sites
+            .iter()
+            .map(|s| ((*s).to_owned(), "chat".to_owned()))
+            .collect()
+    };
+    assert_eq!(
         verdict(&store, &request(IpClass::Loopback, 80, None), none),
-        LocalVerdict::Refuse(_)
-    ));
-    // Unattributed and one site undecided while another is allowed: refused (it may be either), not asked.
+        LocalVerdict::Unanswered {
+            reason: crate::local_access::UNANSWERED_TEXT.to_owned(),
+            sites: candidates(&["https://a.example", "https://b.example"]),
+        }
+    );
+    // Unattributed and one site undecided while another is allowed: refused (it may be either), not asked; only the
+    // undecided one is named.
     let one_allowed = |site: &str| (site == "https://a.example").then_some(SiteAnswer::Allow);
-    assert!(matches!(
+    assert_eq!(
         verdict(&store, &request(IpClass::Loopback, 80, None), one_allowed),
-        LocalVerdict::Refuse(_)
-    ));
+        LocalVerdict::Unanswered {
+            reason: crate::local_access::UNANSWERED_TEXT.to_owned(),
+            sites: candidates(&["https://b.example"]),
+        }
+    );
     // Every page allowed: sent.
     let all = |_: &str| Some(SiteAnswer::Allow);
     assert_eq!(
@@ -297,10 +329,10 @@ fn a_top_level_navigation_to_this_computer_is_not_asked() {
         verdict(&store, &request(IpClass::Loopback, 3000, None), none),
         LocalVerdict::Allow
     );
-    // Only that host and port: another port is still a request of the page.
+    // Only that host and port: another port is still a request of the page (refused; its sites wait for an answer).
     assert!(matches!(
         verdict(&store, &request(IpClass::Loopback, 3001, None), none),
-        LocalVerdict::Refuse(_)
+        LocalVerdict::Refuse(_) | LocalVerdict::Unanswered { .. }
     ));
     // Blocked or not, a navigation away is not a request of the page.
     let blocked = |_: &str| Some(SiteAnswer::Block);
@@ -325,6 +357,7 @@ fn a_frames_navigation_to_this_computer_is_asked_like_a_subresource() {
     };
     let frame = LocalRequest {
         nested: true,
+        tls: false,
         ..request(IpClass::Loopback, 3000, Some("https://public.example"))
     };
     let store = std::slice::from_ref(&navigating);
@@ -367,6 +400,7 @@ fn the_navigation_exemption_is_literal_own_and_single() {
         own_address: false,
         initiator: None,
         nested: false,
+        tls: false,
     };
     assert!(matches!(
         verdict(std::slice::from_ref(&named), &rebinding, none),
@@ -474,6 +508,7 @@ fn a_local_page_reaches_its_own_origin_without_asking() {
         own_address: false,
         initiator: Some("http://localhost:8765"),
         nested: false,
+        tls: false,
     };
     assert_eq!(
         verdict(std::slice::from_ref(&page), &own("localhost", 8765), none),
@@ -540,6 +575,7 @@ fn a_name_never_counts_as_the_pages_own_local_origin() {
         own_address: false,
         initiator: Some("https://a.example"),
         nested: false,
+        tls: false,
     };
     assert_eq!(
         verdict(&[public("https://a.example")], &rebound, none),
@@ -557,9 +593,78 @@ fn a_name_never_counts_as_the_pages_own_local_origin() {
         own_address: false,
         initiator: Some("http://localhost:8765"),
         nested: false,
+        tls: false,
     };
     assert_eq!(
         verdict(&[public("http://localhost:8765")], &other, blocked),
         LocalVerdict::Refuse(blocked_text("http://localhost:8765"))
     );
+}
+
+/// PREDICT (fails before the change): every chat's web pages share one store, so an older chat's page of the same
+/// site is a candidate too. The candidates were kept once per site, under the first chat that had it, so the chat
+/// whose page sent the request lost that site and its card listed only its other site.
+#[test]
+fn an_unattributed_candidate_is_kept_for_every_chat_that_has_the_site_open() {
+    let page = |site: &str, chat: &str| Member::Public {
+        site: Some(site.to_owned()),
+        session: chat.to_owned(),
+        navigating: None,
+        loaded: true,
+    };
+    let store = [
+        page("http://example.com", "old"),
+        page("http://example.com", "new"),
+        page("https://example.org", "new"),
+    ];
+    let LocalVerdict::Unanswered { sites, .. } =
+        verdict(&store, &request(IpClass::Private, 18115, None), none)
+    else {
+        panic!("an unattributed request with several undecided sites is refused unanswered");
+    };
+    for (site, chat) in [
+        ("http://example.com", "old"),
+        ("http://example.com", "new"),
+        ("https://example.org", "new"),
+    ] {
+        assert!(
+            sites.contains(&(site.to_owned(), chat.to_owned())),
+            "{site} of {chat} missing from {sites:?}"
+        );
+    }
+    // One undecided site open in two chats, nothing else: still asked once, as before.
+    let same = [
+        page("http://example.com", "old"),
+        page("http://example.com", "new"),
+    ];
+    assert!(matches!(
+        verdict(&same, &request(IpClass::Private, 18115, None), none),
+        LocalVerdict::Ask { .. }
+    ));
+}
+
+/// PREDICT (fails before the change): the waiting list kept only (site, chat), so the chat's card could not tell a
+/// site whose own question went unanswered from one refused because the request named no sender, and it gave every
+/// site the no-sender sentence. Each entry now says which (`asked`).
+#[test]
+fn a_waiting_site_says_whether_its_own_question_went_unanswered() {
+    let pair = |site: &str, chat: &str| (site.to_owned(), chat.to_owned());
+    let mut waiting = Waiting::default();
+    assert!(waiting.note(&pair("http://example.com", "chat"), true));
+    assert!(waiting.note(&pair("https://example.org", "chat"), false));
+    // The same refusal again is nothing new (one card row, one notice).
+    assert!(!waiting.note(&pair("https://example.org", "chat"), false));
+    assert!(!waiting.note(&pair("http://example.com", "chat"), false));
+    assert_eq!(
+        waiting.list().collect::<Vec<_>>(),
+        vec![
+            ("http://example.com".to_owned(), "chat".to_owned(), true),
+            ("https://example.org".to_owned(), "chat".to_owned(), false),
+        ]
+    );
+    // A site first refused with no sender whose own question later times out is asked from then on.
+    assert!(waiting.note(&pair("https://example.org", "chat"), true));
+    assert!(waiting.list().all(|(_, _, asked)| asked));
+    waiting.forget("http://example.com");
+    assert_eq!(waiting.list().count(), 1);
 }

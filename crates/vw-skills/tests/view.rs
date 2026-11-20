@@ -1,5 +1,7 @@
 //! Exercises the manager projection using tagged-model fixtures. Public replies
 //! are the sole input: no directory or configuration discovery occurs here.
+//! PREDICT: A session-scoped skill must display as session; projection without
+//! that scope cannot compile once the installed Vibe wire enum includes it.
 
 #![allow(clippy::unwrap_used)]
 
@@ -26,6 +28,45 @@ fn inputs() -> (
         result(include_str!("fixtures/updates.json")),
         result(include_str!("fixtures/list.json")),
     )
+}
+
+#[test]
+fn session_scope_keeps_its_source() {
+    let (installed, catalog, updates, active) = inputs();
+    for (name, skill) in [
+        (
+            "local",
+            installed.skills.iter().find(|s| s.name == "draft").unwrap(),
+        ),
+        (
+            "registry",
+            installed
+                .skills
+                .iter()
+                .find(|s| s.name == "review" && s.scope == SkillScope::Global)
+                .unwrap(),
+        ),
+    ] {
+        let mut skill = skill.clone();
+        skill.name = format!("{name}-session");
+        skill.scope = SkillScope::Session;
+        let mut installed = installed.clone();
+        installed.skills = vec![skill];
+        let mut active = active.clone();
+        active.skills.clear();
+        let mut catalog = catalog.clone();
+        catalog.skills.clear();
+        catalog.updates.clear();
+        let mut updates = updates.clone();
+        updates.updates.clear();
+        let view = SkillsView::merge(&installed, &catalog, &updates, &active, &[]);
+        assert_eq!(view.skills[0].source, Some(SkillsSource::Session));
+        assert_eq!(
+            serde_json::to_value(view.skills[0].source).unwrap(),
+            serde_json::json!("session")
+        );
+        assert_eq!(view.skills[0].installations[0].scope, SkillScope::Session);
+    }
 }
 
 #[test]

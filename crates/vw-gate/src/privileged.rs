@@ -104,7 +104,7 @@ pub(crate) fn check_p1(
                 .is_some_and(escalates);
             Ok(escalating.then(|| {
                 format!(
-                    "Switch this session to {}: the agent will run every tool without asking",
+                    "Switch this chat to {}: the agent will run every tool without asking",
                     vw_vocabulary::label("accessModes", "auto-approve")
                 )
             }))

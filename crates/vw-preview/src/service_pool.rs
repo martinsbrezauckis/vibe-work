@@ -159,7 +159,7 @@ impl PreviewService {
     pub(super) fn browser_released(&self, session: &str) {
         if let Some(entry) = self.inner.lock().entries.get_mut(session) {
             entry.browser_mount = BrowserMountState::Released;
-            entry.loading = false;
+            entry.set_loading(false);
         }
         self.inner.changed(session);
     }

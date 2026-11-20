@@ -12,10 +12,16 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Store } from "../../state/createStore";
 import { requestComposerFocus } from "../../state/composerFocus";
+import { cardDeclinedLine } from "../../state/declineAnnounce";
 import { useApp } from "../shell/AppContext";
 
 /** How long a card that left the transcript waits for its answer record before it stays silent (ms). */
 const LATE_MS = 30_000;
+
+/** The line said for a closed card in `chat`: a person's decline pairs with the turn it ended (declineAnnounce). */
+function closedLine(chat: string, text: string): string {
+  return text.startsWith("Declined ") ? cardDeclinedLine(chat, text) : text;
+}
 
 /**
  * Says `late()`'s text once it is there: at once, or at the first change of `store` that brings it (within
@@ -75,7 +81,7 @@ export function useCardClose(
     }
     if (!wasOpen.current) return;
     wasOpen.current = false;
-    if (text !== null) transcript.announce(text);
+    if (text !== null) transcript.announce(closedLine(composerKey, text));
     if (focused.current) {
       focused.current = false;
       requestComposerFocus(composerKey);
@@ -91,7 +97,7 @@ export function useCardClose(
       const store = coreRef.current?.store;
       if (compute !== undefined && store !== undefined) {
         announceWhenSettled(store, compute, (words) => {
-          transcriptRef.current.announce(words);
+          transcriptRef.current.announce(closedLine(key.current, words));
         });
       }
     },

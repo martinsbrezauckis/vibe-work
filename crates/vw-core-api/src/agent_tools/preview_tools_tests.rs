@@ -35,7 +35,7 @@ fn window_visibility_precedes_a_retained_stopped_server_marker() {
 fn open_answer_names_away_reasons_without_width_advice() {
     for reason in [
         "The Vibe Work window is minimized or hidden, so App preview cannot be captured. Ask the user to show it, or check App preview errors with preview_console.",
-        "The user is viewing another session, so App preview cannot be captured. Ask the user to open this session, or check App preview errors with preview_console.",
+        "The user is viewing another chat, so App preview cannot be captured. Ask the user to open this chat, or check App preview errors with preview_console.",
     ] {
         let answer = open_note(&view(), Some(reason.to_owned()));
         assert_eq!(

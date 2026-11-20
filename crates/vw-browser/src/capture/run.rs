@@ -164,7 +164,7 @@ impl Browser {
         let result = if by == Actor::Agent {
             tokio::select! {
                 result = work => result,
-                _ = cancel.changed() => Err(ActError { capture_block: None, outcome: Outcome::Stopped, text: STOPPED.to_owned() }),
+                _ = cancel.changed() => Err(ActError { capture_block: None, protected_values_withheld: None, outcome: Outcome::Stopped, text: STOPPED.to_owned() }),
             }
         } else {
             work.await
@@ -200,6 +200,7 @@ impl Browser {
                 .map_err(|error| match error {
                     vw_preview::PreviewError::ScreenshotHidden(ref block) => ActError {
                         capture_block: Some(block.kind),
+                        protected_values_withheld: None,
                         outcome: Outcome::Refused,
                         text: error.to_string(),
                     },
@@ -239,7 +240,9 @@ impl Browser {
         let folder = match request.what {
             What::After => {
                 let before = self.captures().before(session_id).ok_or_else(|| {
-                    refused("there is no before shot in this session: capture with what \"before\" first")
+                    refused(
+                        "there is no before shot in this chat: capture with what \"before\" first",
+                    )
                 })?;
                 let folder =
                     Folder::reopen(target.session_folder, &before.relative).map_err(failed)?;

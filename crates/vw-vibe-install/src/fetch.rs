@@ -4,9 +4,10 @@
 //!
 //! Network: the shared client of vw-mistral (OS trust store, the system proxy; `HTTPS_PROXY` & co. are honoured).
 //! That client never follows redirects (it also carries the key elsewhere); GitHub release assets redirect to their
-//! CDN, so this module follows them itself: at most [`MAX_REDIRECTS`] hops, each to `https` (plain `http` only from
-//! a loopback address to a loopback address: the tests' local server). No secret is sent; the pinned SHA-256 decides
-//! whether the bytes are used.
+//! CDN, so this module follows them itself: at most [`MAX_REDIRECTS`] hops. The first address and every hop must
+//! pass [`crate::download_hosts::allows`] (the download servers the pinned addresses use; plain `http` only between
+//! loopback addresses: the tests' local server) before a request is sent to it; any other address ends the download
+//! with [`FetchError::Refused`]. No secret is sent; the pinned SHA-256 decides whether the bytes are used.
 //! A connection problem is reported as [`FetchError::Network`] with the host, so the setup screen can say
 //! "no connection to github.com" instead of a library message.
 //!
@@ -42,6 +43,14 @@ pub enum FetchError {
         /// The client's short reason.
         detail: String,
     },
+    /// The address is not one of the download servers ([`crate::download_hosts`]): nothing was requested from it.
+    #[error("{}", refused_text(host, *redirected))]
+    Refused {
+        /// The refused address's host.
+        host: String,
+        /// Whether a download server's redirect named it (else it was the first address).
+        redirected: bool,
+    },
     /// The server answered with an error status.
     #[error("{host} answered HTTP {status}")]
     Status {
@@ -75,6 +84,35 @@ pub enum FetchError {
         /// The OS error.
         source: std::io::Error,
     },
+}
+
+fn refused_text(host: &str, redirected: bool) -> String {
+    if redirected {
+        format!(
+            "the download was redirected to {host}, which is not a Vibe download server, so nothing was downloaded from it"
+        )
+    } else {
+        format!(
+            "the download address {host} is not a Vibe download server, so nothing was downloaded from it"
+        )
+    }
+}
+
+/// `Ok` when a request may go to `to` ([`crate::download_hosts::allows`]), else [`FetchError::Refused`].
+fn check_address(from: Option<&reqwest::Url>, to: &reqwest::Url) -> Result<(), FetchError> {
+    if crate::download_hosts::allows(from, to) {
+        return Ok(());
+    }
+    tracing::warn!(
+        scheme = to.scheme(),
+        host = to.host_str().unwrap_or(""),
+        redirected = from.is_some(),
+        "vibe download address refused"
+    );
+    Err(FetchError::Refused {
+        host: to.host_str().unwrap_or(to.scheme()).to_owned(),
+        redirected: from.is_some(),
+    })
 }
 
 fn host_of(url: &str) -> String {
@@ -162,7 +200,7 @@ async fn fetch_to(
     }
     file.flush().await.map_err(disk)?;
     drop(file);
-    let found = crate::pin::hex(&hasher.finalize());
+    let found = hex::encode(hasher.finalize());
     if found != asset.sha256 {
         return Err(FetchError::Checksum {
             found,
@@ -172,26 +210,15 @@ async fn fetch_to(
     Ok(())
 }
 
-/// GETs a small file (the supported-Vibe manifest and its signature) into memory: `https` (or `http`
-/// between loopback addresses: the tests' fake channel), redirects by the module's rule, at most `cap` bytes, within
-/// `limit`. A missing file is [`FetchError::Status`] (404): the caller treats every error as "no offer".
+/// GETs a small file (the supported-Vibe manifest and its signature) into memory: the address and its redirects by
+/// the module's rule, at most `cap` bytes, within `limit`. A missing file is [`FetchError::Status`] (404): the caller
+/// treats every error as "no offer".
 ///
 /// # Errors
-/// [`FetchError::Network`], [`FetchError::Status`], [`FetchError::TooLarge`], [`FetchError::Timeout`].
+/// [`FetchError::Refused`], [`FetchError::Network`], [`FetchError::Status`], [`FetchError::TooLarge`],
+/// [`FetchError::Timeout`].
 pub async fn get_small(url: &str, cap: u64, limit: Duration) -> Result<Vec<u8>, FetchError> {
     let inner = async {
-        let parsed = reqwest::Url::parse(url).map_err(|e| FetchError::Network {
-            host: url.to_owned(),
-            detail: e.to_string(),
-        })?;
-        let loopback = matches!(parsed.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
-            || matches!(parsed.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback());
-        if !(parsed.scheme() == "https" || (parsed.scheme() == "http" && loopback)) {
-            return Err(FetchError::Network {
-                host: host_of(url),
-                detail: "only https addresses are used".to_owned(),
-            });
-        }
         let client = vw_mistral::https_client().map_err(|e| FetchError::Network {
             host: host_of(url),
             detail: e.to_string(),
@@ -224,12 +251,14 @@ pub async fn get_small(url: &str, cap: u64, limit: Duration) -> Result<Vec<u8>, 
         .unwrap_or(Err(FetchError::Timeout(limit)))
 }
 
-/// GETs `url`, following up to [`MAX_REDIRECTS`] redirects by the module's rule.
+/// GETs `url`, following up to [`MAX_REDIRECTS`] redirects; the address and every hop are checked by the module's
+/// rule before they are requested.
 async fn follow(client: &reqwest::Client, url: &str) -> Result<reqwest::Response, FetchError> {
     let mut current = reqwest::Url::parse(url).map_err(|e| FetchError::Network {
         host: url.to_owned(),
         detail: e.to_string(),
     })?;
+    check_address(None, &current)?;
     for _ in 0..=MAX_REDIRECTS {
         let response = client
             .get(current.clone())
@@ -251,18 +280,7 @@ async fn follow(client: &reqwest::Client, url: &str) -> Result<reqwest::Response
             host: host_of(current.as_str()),
             detail: format!("bad redirect target: {e}"),
         })?;
-        let loopback = |u: &reqwest::Url| {
-            matches!(u.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
-                || matches!(u.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback())
-        };
-        let allowed = next.scheme() == "https"
-            || (next.scheme() == "http" && loopback(&current) && loopback(&next));
-        if !allowed {
-            return Err(FetchError::Network {
-                host: host_of(next.as_str()),
-                detail: format!("redirect to a non-https address refused: {}", next.scheme()),
-            });
-        }
+        check_address(Some(&current), &next)?;
         current = next;
     }
     Err(FetchError::Network {

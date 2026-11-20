@@ -59,9 +59,17 @@ fn failure(error: &SpeechFailure) -> CoreError {
             e.server_code = Some("keyNeeded".to_owned());
             e
         }
-        SpeechFailure::Speech(_) => {
+        SpeechFailure::Speech(speech) => {
             let mut e = CoreError::new(ErrorCode::ServerError, error.to_string());
-            e.server_code = Some("speech".to_owned());
+            // The window tells a refused text (it can speak a shorter one) from a failing service.
+            e.server_code = Some(
+                if matches!(speech, vw_mistral::SpeechError::Guardrail) {
+                    "speechGuardrail"
+                } else {
+                    "speech"
+                }
+                .to_owned(),
+            );
             e
         }
     }
@@ -98,6 +106,7 @@ pub(crate) fn start(
         stream_id,
         mode,
         max_seconds: dictations.config().max_seconds,
+        answer_window_ms: None,
     }))
 }
 
@@ -286,6 +295,11 @@ pub(crate) async fn execute(
             let cancelled = shared.dictations.cancel(&stream_id);
             crate::voice_prompts::cancel_stream(shared, &stream_id);
             Ok(result(SpeechResult::Cancelled { cancelled }))
+        }
+        SpeechRequest::Heard { text } => {
+            let heard: String = text.chars().take(200).collect();
+            info!(heard = %heard, "voice answer not understood");
+            Ok(result(SpeechResult::Cancelled { cancelled: false }))
         }
         SpeechRequest::Speak { text, voice } => speak(shared, &text, voice).await,
         SpeechRequest::ScreenReader {} => Ok(result(SpeechResult::ScreenReader {

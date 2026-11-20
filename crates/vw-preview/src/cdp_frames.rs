@@ -19,8 +19,11 @@ use crate::FrameAnswer;
 #[path = "cdp_act.rs"]
 mod act;
 use act::Act;
+#[path = "cdp_closed_roots.rs"]
+mod closed_roots;
 #[path = "cdp_keyboard.rs"]
 mod keyboard;
+pub use closed_roots::CLOSED_ROOTS_LINE;
 
 /// Completes one protocol call with its result object, or the protocol's error text.
 pub type CdpDone = Box<dyn FnOnce(Result<Value, String>)>;
@@ -102,6 +105,8 @@ pub struct CdpFrames {
     /// This evaluation runs as the person's gesture (an agent act's own input).
     gesture: bool,
     await_promise: bool,
+    /// The protected scan's closed-root searches on this channel, one at a time (`cdp_closed_roots`).
+    closed: Rc<RefCell<closed_roots::Queue>>,
 }
 
 fn auto_attach() -> Value {
@@ -119,6 +124,7 @@ impl CdpFrames {
             state: Rc::default(),
             gesture: false,
             await_promise: false,
+            closed: Rc::default(),
         }
     }
 
@@ -586,6 +592,7 @@ fn evaluate_frame(
     let act_gate = frames.clone();
     let gesture = frames.gesture;
     let await_promise = frames.await_promise;
+    let closed = frames.closed.clone();
     let (pending, script) = (pending.clone(), script.to_owned());
     let listed = frame.clone();
     // A tolerated child's failure is an unreadable answer, never its error text.
@@ -645,19 +652,31 @@ fn evaluate_frame(
                         finish(&pending, index, Err(error));
                         return;
                     }
+                    let answered: CdpDone = Box::new(move |answer| {
+                        let answer = match answer {
+                            Ok(answer) => by_value(&answer),
+                            Err(error) => Err(failed("script", Some(&error))),
+                        }
+                        .map(|value| (frame, value.to_string()));
+                        finish(&pending, index, answer);
+                    });
+                    // A protected-value scan also reads every closed shadow root (`cdp_closed_roots`).
+                    if closed_roots::split(&script).is_some() {
+                        let call = closed_roots::Call {
+                            gesture,
+                            await_promise,
+                        };
+                        closed_roots::evaluate(
+                            &follow, &closed, &session, context, &script, call, answered,
+                        );
+                        return;
+                    }
                     follow.call(
                         &session,
                         "Runtime.evaluate",
                         json!({"expression": script, "contextId": context, "returnByValue": true, "silent": true,
                             "userGesture": gesture, "awaitPromise": await_promise}),
-                        Box::new(move |answer| {
-                            let answer = match answer {
-                                Ok(answer) => by_value(&answer),
-                                Err(error) => Err(failed("script", Some(&error))),
-                            }
-                            .map(|value| (frame, value.to_string()));
-                            finish(&pending, index, answer);
-                        }),
+                        answered,
                     );
                 }),
             );

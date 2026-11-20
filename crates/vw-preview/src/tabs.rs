@@ -274,7 +274,7 @@ impl PreviewService {
             || owner.starts_with('\0')
             || self.inner.lock().page_owners.contains_key(owner)
         {
-            return Err(PreviewError::InvalidTab("invalid owner session".to_owned()));
+            return Err(PreviewError::InvalidTab("invalid owner chat".to_owned()));
         }
         let mut bytes = [0_u8; 16];
         getrandom::fill(&mut bytes).map_err(|error| {
@@ -399,7 +399,7 @@ impl PreviewService {
                 .is_none_or(|found| found != owner)
         {
             return Err(PreviewError::InvalidTab(
-                "page does not belong to this session".to_owned(),
+                "page does not belong to this chat".to_owned(),
             ));
         }
         let tabs = state.tabs.entry(owner.to_owned()).or_default();
@@ -427,7 +427,7 @@ impl PreviewService {
             .is_none_or(|found| found != owner)
         {
             return Err(PreviewError::InvalidTab(
-                "web page does not belong to this session".to_owned(),
+                "web page does not belong to this chat".to_owned(),
             ));
         }
         if state

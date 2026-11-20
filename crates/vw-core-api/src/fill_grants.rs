@@ -9,23 +9,92 @@
 //!
 //! Depends on: vw-keys (`fill_grant`, `fill_grants`, `update_fill_grant`), vw-vault (`fill_grant`), `secrets_view`.
 //! Called by: `browser_fill` (find, grant, check), `secrets` (list, revoke, login removal).
-//! Invariants: no value is ever stored or logged here; nothing is cached (every decision reads the vault now); any
+//! Invariants: no value is ever stored or logged here; no grant decision is cached (every decision reads the vault now); any
 //! read error counts as "no grant" (the dialog asks) or, right before a fill, refuses it.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use vw_platform::sync::LockRecover;
 
 use vw_keys::{FillGrant, KeyService};
 use vw_vault::fill_grant::{id_for, is_grant_id};
 
 use crate::core::Shared;
-use crate::error::CoreError;
+use crate::error::{CoreError, ErrorCode};
+use crate::event::CoreEvent;
 use crate::secrets_view::FillGrantView;
 
 /// Use counts and last use of this run (grant id -> (uses, last use ms)).
 #[derive(Default)]
 pub(crate) struct FillUses(Mutex<HashMap<String, (u32, i64)>>);
+
+/// One effect lane for each login and exact origin (the vault grant id names that pair).
+/// Revoke holds the lane while changing the vault; a page writer holds it until its effect ends.
+#[derive(Default)]
+pub(crate) struct Effects(Mutex<HashMap<String, Arc<EffectLane>>>);
+
+#[derive(Default)]
+struct EffectLane {
+    operation: Arc<tokio::sync::Mutex<()>>,
+    unconfirmed: AtomicBool,
+}
+
+/// A dispatched page effect retains the lane until a confirmed result. Losing its caller marks
+/// the lane unconfirmed, so a revoke can persist the change without reporting that the page is quiet.
+pub(crate) struct EffectPermit {
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+    lane: Arc<EffectLane>,
+    dispatched: bool,
+    settled: bool,
+}
+
+impl EffectPermit {
+    pub(crate) fn unconfirmed(&self) -> bool {
+        self.lane.unconfirmed.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn dispatched(&mut self) {
+        self.dispatched = true;
+    }
+
+    pub(crate) fn settled(&mut self) {
+        self.settled = true;
+    }
+}
+
+impl Drop for EffectPermit {
+    fn drop(&mut self) {
+        if self.dispatched && !self.settled {
+            self.lane.unconfirmed.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl Effects {
+    fn for_id(&self, id: &str) -> Arc<EffectLane> {
+        let mut lanes = self.0.lock_or_recover();
+        lanes
+            .entry(id.to_owned())
+            .or_insert_with(|| Arc::new(EffectLane::default()))
+            .clone()
+    }
+
+    pub(crate) async fn enter(&self, id: &str) -> EffectPermit {
+        let lane = self.for_id(id);
+        let guard = lane.operation.clone().lock_owned().await;
+        EffectPermit {
+            _guard: guard,
+            lane,
+            dispatched: false,
+            settled: false,
+        }
+    }
+
+    fn unconfirmed(&self, id: &str) -> bool {
+        self.for_id(id).unconfirmed.load(Ordering::SeqCst)
+    }
+}
 
 impl FillUses {
     /// Counts one use of grant `id`, now.
@@ -45,15 +114,8 @@ impl FillUses {
     }
 }
 
-/// Milliseconds since the Unix epoch as the vault's signed timestamp; 0 before the epoch or past `i64::MAX`.
-/// Shared by the vault-facing modules; unsigned wall-clock readings use `vw_changes::now_ms`.
-pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+/// The vault's signed timestamp now (shared by the vault-facing modules; unsigned readings use `vw_changes::now_ms`).
+pub(crate) use vw_platform::wall_clock::unix_ms_signed as now_ms;
 
 fn keys(shared: &Shared) -> Option<&KeyService> {
     shared.config.keys.as_deref()
@@ -116,6 +178,12 @@ pub(crate) async fn grant_always(
 ) -> Result<String, String> {
     let keys = keys(shared).ok_or("no vault is connected")?;
     let id = id_for(login_id, origin);
+    if shared.fill_effects.unconfirmed(&id) {
+        return Err(
+            "a previous browser fill has not been confirmed; close its tab and restart Vibe Work"
+                .into(),
+        );
+    }
     let answered = now_ms();
     let (record_id, login, name, site) = (
         id.clone(),
@@ -156,7 +224,8 @@ pub(crate) async fn grant_always(
     }
 }
 
-/// Revokes fill grant `id`. False when there is no such grant.
+/// Revokes fill grant `id`. False when there is no such grant. An unconfirmed page effect leaves
+/// the grant withdrawn but returns an error, so the caller cannot report a completed revoke.
 ///
 /// # Errors
 /// `keyService` (no vault, locked, storage).
@@ -165,6 +234,8 @@ pub(crate) async fn revoke(shared: &Shared, id: &str) -> Result<bool, CoreError>
     if !is_grant_id(id) {
         return Ok(false);
     }
+    let lane = shared.fill_effects.for_id(id);
+    let _effect = lane.operation.lock().await;
     let now = now_ms();
     let after = keys
         .update_fill_grant(id.to_owned(), move |current| {
@@ -175,27 +246,42 @@ pub(crate) async fn revoke(shared: &Shared, id: &str) -> Result<bool, CoreError>
         })
         .await
         .map_err(|e| crate::keys::key_error(&e))?;
+    if after.is_some() && lane.unconfirmed.load(Ordering::SeqCst) {
+        shared.emit(CoreEvent::SecretsChanged {});
+        return Err(CoreError::new(
+            ErrorCode::Timeout,
+            "Vault access was withdrawn, but an earlier browser fill has not been confirmed to stop. Close its tab and restart Vibe Work before checking the grant again.",
+        ));
+    }
     Ok(after.is_some())
 }
 
-/// Revokes every active grant of login `login_id` (it was removed). Returns how many.
-pub(crate) async fn revoke_login(shared: &Shared, login_id: &str) -> usize {
-    let Some(keys) = keys(shared) else {
-        return 0;
-    };
-    let Ok(list) = keys.fill_grants().await else {
-        return 0;
-    };
+/// Revokes every active or unconfirmed grant of login `login_id` (it was removed). Returns how many.
+pub(crate) async fn revoke_login(shared: &Shared, login_id: &str) -> Result<usize, CoreError> {
+    let keys = keys(shared).ok_or_else(crate::keys::no_vault)?;
+    let list = keys
+        .fill_grants()
+        .await
+        .map_err(|e| crate::keys::key_error(&e))?;
     let mut n = 0;
-    for grant in list
-        .into_iter()
-        .filter(|g| g.active() && g.login_id == login_id)
-    {
-        if matches!(revoke(shared, &grant.id).await, Ok(true)) {
-            n += 1;
+    let mut first_error = None;
+    for grant in list.into_iter().filter(|g| {
+        g.login_id == login_id && (g.active() || shared.fill_effects.unconfirmed(&g.id))
+    }) {
+        match revoke(shared, &grant.id).await {
+            Ok(true) => n += 1,
+            Ok(false) => {}
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
         }
     }
-    n
+    if let Some(error) = first_error {
+        shared.emit(CoreEvent::SecretsChanged {});
+        Err(error)
+    } else {
+        Ok(n)
+    }
 }
 
 /// The active grants for Settings > Project secrets (newest first). Empty while the vault cannot be read.

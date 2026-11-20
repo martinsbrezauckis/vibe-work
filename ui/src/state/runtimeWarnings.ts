@@ -3,7 +3,7 @@
  * Local notices survive refreshes, deduplicate by line and turn, and defer config problems to the bell.
  */
 import type { JsonValue } from "../protocol/core";
-import { isConfigProblem } from "./configNotices";
+import { isConfigProblem, settledModelWarning } from "./configNotices";
 import type { SessionEntry } from "./sessionSummary";
 
 type Obj = Record<string, JsonValue | undefined>;
@@ -37,7 +37,7 @@ export function withRuntimeWarning(entry: SessionEntry, params: JsonValue): Sess
   // A successful lookup in the next catalogue source changes no user-visible capability.
   if (/^the model catalogue at .+ has no entry for .+; using the next source\.?$/i.test(raw))
     return entry;
-  if (isConfigProblem(entry.runtime, raw)) return entry;
+  if (isConfigProblem(entry.runtime, raw) || settledModelWarning(entry.runtime, raw)) return entry;
   const plain = raw !== "" && raw.length <= 180 && !/Traceback:|https?:\/\/|`|\/mcp\b/.test(raw);
   const message = plain ? raw : (FALLBACK[code] ?? "Vibe reported a warning.");
   const history = list(entry.state["history"]);

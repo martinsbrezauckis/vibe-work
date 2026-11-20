@@ -14,7 +14,7 @@ pub(crate) fn review_fingerprint(
     let tabs = state
         .tabs
         .get(owner)
-        .ok_or_else(|| PreviewError::InvalidTab("unknown session tabs".to_owned()))?;
+        .ok_or_else(|| PreviewError::InvalidTab("unknown chat tabs".to_owned()))?;
     let kind = tabs
         .owners
         .get(page_key)
@@ -101,7 +101,7 @@ impl PreviewService {
         let tabs = state
             .tabs
             .get(owner)
-            .ok_or_else(|| PreviewError::InvalidTab("unknown session tabs".to_owned()))?;
+            .ok_or_else(|| PreviewError::InvalidTab("unknown chat tabs".to_owned()))?;
         if tabs.owners.get(page_key) != Some(&from) {
             return Err(PreviewError::InvalidTab(
                 "page ownership changed".to_owned(),
@@ -127,7 +127,7 @@ impl PreviewService {
             )?;
         }
         let Some(tabs) = state.tabs.get_mut(owner) else {
-            return Err(PreviewError::InvalidTab("unknown session tabs".to_owned()));
+            return Err(PreviewError::InvalidTab("unknown chat tabs".to_owned()));
         };
         tabs.owners.insert(page_key.to_owned(), to);
         if to == PageTabOwner::DelegatedToAgent {

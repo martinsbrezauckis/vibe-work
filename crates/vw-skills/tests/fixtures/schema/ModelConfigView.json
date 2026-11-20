@@ -53,6 +53,17 @@
       "title": "Name",
       "type": "string"
     },
+    "requires": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModelRequirementView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "source": {
       "anyOf": [
         {

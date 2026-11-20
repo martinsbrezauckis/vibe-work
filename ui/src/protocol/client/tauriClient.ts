@@ -69,6 +69,9 @@ export function createTauriClient(): CoreClient {
       focusApp: async () => {
         await call<null>("desktop_focus_app", {});
       },
+      titleBar: async (dark) => {
+        await call<null>("desktop_title_bar", { dark });
+      },
       async subscribe(onClose, notifications) {
         const channel = new Channel<null>();
         channel.onmessage = onClose;
@@ -154,6 +157,7 @@ export function createTauriClient(): CoreClient {
         channel.onmessage = onView;
         return call<boolean>("update_subscribe", { events: channel });
       },
+      offReason: () => call<string | null>("update_off_reason", {}),
       async check() {
         await call<null>("update_check", {});
       },

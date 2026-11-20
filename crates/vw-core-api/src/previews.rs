@@ -396,7 +396,7 @@ pub(crate) async fn open_for_session(
     let owner = hub.service.owner_session_id(session_id).ok_or_else(|| {
         CoreError::new(
             ErrorCode::Denied,
-            "browser page is not owned by a loaded session",
+            "browser page is not owned by an open chat",
         )
     })?;
     if !crate::new_chat::known_owner(shared, &owner) {
@@ -458,7 +458,7 @@ pub(crate) async fn open_for_session(
         )
     {
         return Err(denied(
-            "App preview opens this session's local servers only; open a web tab for public pages"
+            "App preview opens this chat's local servers only; open a web tab for public pages"
                 .to_owned(),
         ));
     }

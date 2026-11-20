@@ -192,3 +192,60 @@ async fn an_ended_buffer_does_not_reopen_browser_work() {
     );
     core.shutdown().await;
 }
+
+/// A read too large for one answer comes back frozen: its page JSON travels as text in `details.text`, where no `ref`
+/// field is visible. Its references are still the person's browser's: a built-in action naming one is refused with
+/// the browser's name, from the first page on and after the continuation is read.
+/// PREDICT (before the change): the gateway recorded only the `ref` fields it could see, none in a frozen page, so the
+/// built-in browser answered "is not a ref" for a long read's reference (seen with Edge on macOS: a 120-link page)
+/// while a short read's reference got the provenance refusal; the first assertion fails.
+#[tokio::test]
+async fn a_frozen_reads_references_are_the_person_browsers() {
+    let core = output_tests::core("chrome-cache-frozen-refs").await;
+    let refs: Vec<String> = (0..120)
+        .map(|n| format!("eb434719cec37444cb19d119d288ce{n:03}"))
+        .collect();
+    let rows: Vec<Value> = refs
+        .iter()
+        .enumerate()
+        .map(|(n, r)| json!({"ref":r,"role":"link","name":format!("Article {n}: a long enough link name to fill the page")}))
+        .collect();
+    test_support::answering(&core.shared, move |_, _| {
+        output_tests::mcp(json!({
+            "operationId":"read","sessionId":"t","status":"completed","action":"page.read",
+            "untrustedPageContent":{"data":{"readId":"r","refs":rows.clone(),"text":"Long news list ".repeat(400)}}}))
+    });
+    let read = json!({"sessionId":"t","action":"page.read","args":{"tabId":1}});
+    let answer = gateway::call(&core.shared, "s", "chrome_execute", read)
+        .await
+        .unwrap();
+    let next = &answer["vwMcpResult"]["structuredContent"]["continuation"];
+    assert!(
+        is_continuation(&json!({"args":next["args"]})),
+        "the read was frozen: {answer}"
+    );
+    let click = |r: &str| json!({"action":"click","ref":r});
+    for r in [&refs[0], &refs[119]] {
+        let refused = core
+            .shared
+            .browser_ref_origins
+            .check_builtin("s", &click(r))
+            .unwrap_err();
+        assert!(
+            refused.contains(r) && refused.contains("came from your last read in"),
+            "{refused}"
+        );
+    }
+    // Reading the rest of the frozen receipt keeps them the person's browser's.
+    let request = json!({"sessionId":"t","action":next["action"],"args":next["args"]});
+    gateway::call(&core.shared, "s", "chrome_execute", request)
+        .await
+        .unwrap();
+    assert!(
+        core.shared
+            .browser_ref_origins
+            .check_builtin("s", &click(&refs[0]))
+            .is_err()
+    );
+    core.shutdown().await;
+}

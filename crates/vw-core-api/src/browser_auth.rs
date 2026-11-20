@@ -4,7 +4,7 @@
 //! Called by: browser tool preparation.
 use crate::{
     ask::tool_calls::receipts::Execution,
-    browser_fill::{self, LoginWriter},
+    browser_fill::{self, FillEffect, LoginWriter},
     core::Shared,
 };
 use serde_json::{Value, json};
@@ -57,12 +57,15 @@ impl LoginWriter for Writer {
         _target: &FillTarget,
         login: &vw_keys::Login,
         value: &str,
+        effect: &FillEffect<'_>,
     ) -> Result<Value, String> {
         let shared = self.shared.upgrade().ok_or("Vibe Work closed.")?;
         self.current(&shared)?;
         crate::agent_access::check_for(&shared, browser_fill::METHOD, &self.owner)?;
         let hub = crate::previews::hub(&shared).map_err(|e| e.message)?;
         let loads = hub.service.load_state(&self.page).map_or(0, |v| v.loads);
+        let mut permit = effect.enter().await?;
+        permit.dispatched();
         hub.service.answer_dialog(&self.mount, &self.dialog, vw_preview::DialogAnswer {
             accept: true, text: None, credentials: Some((Zeroizing::new(login.username.clone()), Zeroizing::new(value.to_owned())))
         }).await.map_err(|_| "HTTP sign-in could not answer the native challenge. Read the page before trying again.")?;
@@ -88,6 +91,7 @@ impl LoginWriter for Writer {
                     return Err("HTTP credentials were sent, but the page left the checked origin. Read the page before continuing.".into());
                 }
                 hub.service.block_shots_on_this_document(&self.page);
+                permit.settled();
                 return Ok(
                     json!({"Outcome":"Answered the HTTP sign-in challenge and loaded the checked site.","action":"auth.basic","filled":true,"origin":self.origin}),
                 );

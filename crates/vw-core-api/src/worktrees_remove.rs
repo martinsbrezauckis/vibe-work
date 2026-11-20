@@ -35,6 +35,12 @@ use crate::worktrees::{blocking, core_error, find_path};
 use crate::worktrees_view::{BranchPlan, RemoveOutcome, WorktreeInspection};
 
 const METHOD: &str = "workspace/git/worktrees/remove";
+fn held_copy_reason(held: u32) -> String {
+    format!(
+        "{held} other {} this copy; it was not removed.",
+        if held == 1 { "chat uses" } else { "chats use" }
+    )
+}
 fn names(paths: &[String]) -> String {
     paths
         .iter()
@@ -121,10 +127,7 @@ impl Core {
             );
         }
         let record = records.get(session_id).ok_or_else(|| {
-            CoreError::new(
-                ErrorCode::NotFound,
-                "Vibe Work made no copy for this session",
-            )
+            CoreError::new(ErrorCode::NotFound, "Vibe Work made no copy for this chat")
         })?;
         let path = find_path(&record.repo_root, &record.branch);
         let misplaced = path
@@ -149,7 +152,7 @@ impl Core {
             return Some("This copy belongs to a chat in the other chat list.".to_owned());
         }
         if crate::recovery::working(&self.shared, &target.session_id) {
-            return Some("Its session is still working. Stop it first.".to_owned());
+            return Some("Its chat is still working. Stop it first.".to_owned());
         }
         None
     }
@@ -219,7 +222,10 @@ impl Core {
                 "kept_unmanaged" => Some("Vibe did not make this folder (or no longer manages it), so Vibe Work does not remove it.".to_owned()),
                 "not_found" => Some("The copy's folder is gone; there is nothing to remove.".to_owned()),
                 // Its own session's hold goes when the channel closes (done before a removal).
-                "kept_in_use" if !own_channel || held > 1 => Some(format!("{held} other session(s) use this copy.")),
+                "kept_in_use" if !own_channel || held > 1 => Some(format!(
+                    "{held} other {} this copy.",
+                    if held == 1 { "chat uses" } else { "chats use" }
+                )),
                 "kept_error" => Some("Vibe could not check this copy.".to_owned()),
                 _ => None,
             };
@@ -359,10 +365,7 @@ impl Core {
         self.shared.channels.close(&target.session_id).await;
         let (outcome, held) = self.vibe_probe(origin, &path_text).await?;
         if outcome == "kept_in_use" {
-            return Err(CoreError::new(
-                ErrorCode::Denied,
-                format!("{held} other session(s) use this copy; it was not removed."),
-            ));
+            return Err(CoreError::new(ErrorCode::Denied, held_copy_reason(held)));
         }
         let reply = self
             .forward(origin, METHOD, params, Some(token.as_str().to_owned()))

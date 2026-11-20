@@ -200,8 +200,10 @@ async fn a_second_profile_card_in_the_same_turn_is_refused_without_a_card() {
     core.shutdown().await;
 }
 
+/// PREDICT: a card pick is the default until actual use; the first different
+/// profile may open, then the chat is locked to that used profile.
 #[tokio::test]
-async fn the_call_naming_another_profile_than_the_pick_is_told_which_profile_the_user_picked() {
+async fn a_card_pick_is_a_default_until_first_actual_use() {
     let core = core("card-agent-picked").await;
     // The agent asked for Personal; the person picked Work on the card.
     let held = hook_open(&core.shared, "chrome:personal");
@@ -216,37 +218,43 @@ async fn the_call_naming_another_profile_than_the_pick_is_told_which_profile_the
         .unwrap()
         .unwrap()
         .unwrap();
-    let refused = super::gateway::call(
+    super::gateway::call(
         &core.shared,
         "s",
         "chrome_session",
         json!({"action":"open","profileId":"chrome:personal"}),
     )
     .await
-    .unwrap_err();
-    assert!(
-        refused.contains("The user picked Work (example.com) for this chat; use it"),
-        "{refused}"
-    );
-    assert!(refused.contains("chrome:work"), "{refused}");
-    for wrong in ["another chat", "another browser profile", "work@"] {
-        assert!(!refused.contains(wrong), "{wrong}: {refused}");
-    }
-    // Person commands (the composer's tab picker) keep their own text, without the agent's profile ID.
-    let person =
-        super::profile_bindings::check(&core.shared.chrome_control, "s", "chrome:personal")
-            .unwrap_err();
-    assert!(person.contains("another browser profile"), "{person}");
-    assert!(!person.contains("profileId"), "{person}");
-    // The picked profile itself opens.
-    super::gateway::call(
+    .unwrap();
+    let refused = super::gateway::call(
         &core.shared,
         "s",
         "chrome_session",
         json!({"action":"open","profileId":"chrome:work"}),
     )
     .await
-    .unwrap();
+    .unwrap_err();
+    assert!(
+        refused.contains("Close that browser session first")
+            && refused.contains("built-in browser in parallel"),
+        "{refused}"
+    );
+    for wrong in ["another chat", "another browser profile", "work@"] {
+        assert!(!refused.contains(wrong), "{wrong}: {refused}");
+    }
+    // Person commands (the composer's tab picker) keep their own text, without the agent's profile ID.
+    let person = super::profile_bindings::check(&core.shared.chrome_control, "s", "chrome:work")
+        .unwrap_err();
+    assert!(
+        person.contains("Close that browser session first")
+            && person.contains("built-in browser in parallel"),
+        "{person}"
+    );
+    assert!(!person.contains("profileId"), "{person}");
+    assert_eq!(
+        super::profile_bindings::selected(&core.shared.chrome_control, "s").as_deref(),
+        Some("chrome:personal")
+    );
     core.shutdown().await;
 }
 

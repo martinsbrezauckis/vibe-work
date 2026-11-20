@@ -28,7 +28,7 @@
   color: var(--text);
   line-height: var(--leading-ui);
 }
-.key-notice .btn-primary {
+.key-notice .tb-btn.primary {
   flex-shrink: 0;
 }
 .view-tx > .key-notice {

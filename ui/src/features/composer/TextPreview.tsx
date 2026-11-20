@@ -58,7 +58,7 @@ export function TextPreview({
         <Button
           data-testid={`composer.${close.testId}`}
           type="button"
-          appearance="dialog"
+          variant="primary"
           title={close.label}
           aria-label={close.label}
           data-dialog-initial-focus="true"

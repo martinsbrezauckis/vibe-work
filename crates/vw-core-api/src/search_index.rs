@@ -291,9 +291,7 @@ async fn list_all(shared: &Shared) -> Result<BTreeMap<String, Listed>, CoreError
         }
         let reply = tokio::time::timeout(LIST_WAIT, shared.gate.call("session/list", params, None))
             .await
-            .map_err(|_| {
-                CoreError::new(crate::ErrorCode::Timeout, "the session list did not answer")
-            })?
+            .map_err(|_| CoreError::new(crate::ErrorCode::Timeout, "the chat list did not answer"))?
             .map_err(|e| CoreError::from_gate("session/list", &e))?;
         let mut result = reply.result;
         // The index and the name cache keep titles with vault-value parts withheld (`title_guard`).
@@ -328,7 +326,7 @@ impl Core {
             .map_err(|_| {
                 CoreError::new(
                     crate::ErrorCode::Timeout,
-                    "the session's history did not answer",
+                    "the chat's history did not answer",
                 )
             })??;
         let from_store = self.shared.store.view(session_id).map(|v| v.state);

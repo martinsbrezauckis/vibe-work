@@ -5,13 +5,13 @@ description: The user's own Chrome/Edge/Safari, or Vibe Work's own Firefox windo
 
 ## Setup
 Extensions auto-update independently of the app. `session_status`: connection/next step, `extensionVersion`, `updateNeeded` (below minimum), support. `chromeExtensionStore`: `review`/`available`/`null` = reviewing/listed/unknown.
-Connect Chrome and Edge separately in Settings > Browser; removing one keeps the other connected. `addon_suggest {addon:"chrome"/"edge",reason}`: Connect Chrome opens setup; Connect Edge: Your Edge settings, whose initial button is Connect Edge. Only the user installs/pairs/enables. Add a browser tab… shows connection state; opens ready tab picker or Settings > Browser.
+Connect Chrome/Edge separately; removing one keeps the other connected. `addon_suggest {addon:"chrome"/"edge",reason}`: Connect Chrome opens setup; Connect Edge opens Your Edge settings (Connect Edge). Only the user installs/pairs/enables. Add a browser tab… shows connection state; opens ready tab picker or Settings > Browser.
 Safari (macOS): Settings > Browser > Your Safari switch/pairing; exact `safari:` profileId; no launch/`addon_suggest`. Firefox: Vibe Work's own window (Settings > Browser > Your Firefox > Open window); `firefox:agent` profileId. Subagents: `browser_read`/`browser_act` only.
 
-## Session, tabs
-`chrome_status {}`: profiles/actions, `allowedInThisMode`, `approvalRequired`; `profileId` filters (`edge`/`Your Edge`). Check its `extensionVersion` and `features` before acting. `chrome_status {action,profileId}` gives its `inputSchemaJson`; `{actions:[...]}` gives ≤8 schemas/constraints. Repeat after reconnect or browser switch. `interactiveOnly`, `offset`, `limit`/`maxBytes` ≤500/64000, `includeText`, bounds/revisions: per support.
-`chrome_session {action:"open",profileId}` opens; `get` reads; `cancel` cancels; `stop` ends work, keeps window. Closed paired Chrome/Edge: `profileId:"chrome"`/`"edge"`/exact ID launches, awaits extension ≤10 s; no Ask card. Reconnects: exact ID; failure recovery. Detached browser/tabs outlive Vibe Work.
-Chat owns window/tabs. `browserTab`: `profileId,tabId`; open takes `tabId` for a requested existing tab/window. No `tabId`: no selected page; `scope.tabIds:[]` = no tab; `tabs.create {url}`: HTTP/HTTPS. Titles: `session.title`, no title args. Completed turns release control after acknowledgement; session ID remains, refs expire. Stop refuses rest-of-turn actions.
+## Browser sessions and tabs
+`chrome_status {}`: profiles/actions, `allowedInThisMode`, `approvalRequired`; `profileId` filters (`edge`/`Your Edge`). Check `extensionVersion`/`features`. `chrome_status {action,profileId}` gives its `inputSchemaJson`; `{actions:[...]}` gives ≤8 schemas/constraints. Refresh after switches. `interactiveOnly`, `offset`, `limit`/`maxBytes` ≤500/64000, `includeText`, bounds/revisions: per support.
+`chrome_session {action:"open",profileId}` opens; `get` reads; `cancel` cancels; `stop` ends work, keeps window. Closed paired Chrome/Edge: `profileId:"chrome"`/`"edge"`/exact ID launches; ≤10 s, no Ask card. Reconnect: exact ID. Tabs outlive Vibe Work.
+Picked default until first use; other use shows a chat notice. One external profile/chat then locks until agent window close or Stop/release; built-in browser works in parallel. `browserTab`: `profileId,tabId`; open: `tabId` for a tab. No `tabId`: no page (`scope.tabIds:[]`); `tabs.create {url}`: HTTP/HTTPS. Title: `session.title`. Completed turns release control after acknowledgement; the browser session ID remains, refs expire. Stop blocks this turn.
 CAPTCHA, payment and passkeys are the user's: open `ask_user_question` to hand over this chat's browser; after the answer, read the page and continue.
 `tabs.list`: owned/handed windows, including blank/internal tabs. `tabs.close_user`: any listed tab; `tabs.close_owned`: chat-opened tabs. Non-web actions refused. Handed-window tabs stay open until closed. `active`: per window; `selection.activeTabIds`: active tabs; `focusedWindowKnown:false/currentTabId:null`: focus unknown.
 
@@ -29,7 +29,7 @@ Local addresses (localhost, private networks, link-local, `.local`) use the norm
 `auth.fill {ref,login}`/`auth.basic {url,login}`: vault name, no password args; vault consent. `secret_run {program:"tool",args:[],env:[{"name":"TOKEN","secret":"Token"}]}`: variable/secret ID or name; vault supplies value with consent.
 
 ## Files, media
-`files.wait_download`: chat download/folder; `finished`/`timedOut` = complete/unfinished; ambiguous refused. `files.list_downloads`: exact chat session/lease. Upload: chat-relative `paths` or selected `fileIds`.
+`files.wait_download`: chat download/folder; `finished`/`timedOut` = complete/unfinished; ambiguous refused. `files.list_downloads`: exact browser session/lease for this chat. Upload: chat-relative `paths` or selected `fileIds`.
 `clipboard.read/write`: text; `tabs.emulate`: size/colour/touch; `network.intercept` (Chrome/Edge): test responses.
 `media.read {tabId}`: main-document audio/video handles/state; `media.play/pause {tabId,mediaId}`, `media.seek {...,timeMs}`, `media.mute {...,muted}`: actual state; `media.transcript`: loaded captions, bounded or unavailable. Media: negotiated transport/all modes; scripts: Full access.
 `tabs.audio`: muted/audible; `tabs.mute {muted}`: readback; Chrome/Edge need `tabId`; unavailable in Firefox. Built-in Linux/Windows: native; macOS: individual `media.mute` only.

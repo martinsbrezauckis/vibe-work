@@ -1,4 +1,4 @@
-/** Protects ask cards from window-activation clicks. Uses capture listeners; installed by shell wiring and removed on unmount. */
+/** Allows native first clicks on ask cards while holding back synthetic activation clicks. */
 import type { DesktopClient } from "../../protocol/client/types";
 import { endCardKeys } from "../ask/cardKeys";
 
@@ -7,16 +7,17 @@ import { endCardKeys } from "../ask/cardKeys";
 const ACTIVATION_MS = 400;
 
 /**
- * Whether a press on a card is the one that activated the window: after the window lost focus, before or right after
- * the focus came back. The Debug API's ui/click is judged the same way, as a person's click would be.
+ * Whether a synthetic press on a card should be held back after the window activates. Native pointer input may
+ * answer the card on its first click; the Debug API's synthetic click cannot gain that authority from activation.
  */
 export function isActivationPress(p: {
   activating: boolean;
   focusedAt: number | null;
   now: number;
   onApproval: boolean;
+  trusted?: boolean;
 }): boolean {
-  if (!p.activating || !p.onApproval) return false;
+  if (!p.activating || !p.onApproval || p.trusted) return false;
   return p.focusedAt === null || p.now - p.focusedAt <= ACTIVATION_MS;
 }
 
@@ -75,6 +76,7 @@ export function guardActivationClick(subscribeFocus?: DesktopClient["subscribeFo
       focusedAt,
       now: performance.now(),
       onApproval: event.target instanceof Element && event.target.closest(".approval") !== null,
+      trusted: event.isTrusted,
     });
     activating = false;
     if (blocked) cancel(event);

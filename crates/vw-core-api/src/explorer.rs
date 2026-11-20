@@ -40,12 +40,9 @@ impl Core {
         // `\\?\C:\...` form `canonicalize` gives, while the window asks with the folder dialog's `C:\...`, so
         // without it a picked folder with no session yet (a new chat's folder) was refused. Names still compare
         // exactly (case included), so a spelling of another folder never matches.
-        let path = lexical_clean(Path::new(folder))
+        let path = crate::files_scope::lexical(Path::new(folder))
             .map(|path| vw_platform::plain_path(&path))
             .ok_or_else(denied)?;
-        if !path.is_absolute() {
-            return Err(denied());
-        }
         let path = self.known_folder(path).ok_or_else(denied)?;
         vw_git::browser::safe_path(Path::new(""), &path)
             .filter(|p| p.is_dir())
@@ -230,24 +227,6 @@ fn denied() -> CoreError {
 /// plain spelling of `root` (Windows: without the `\\?\` prefix when that names the same folder). No disk access.
 pub(crate) fn within(path: &Path, root: &Path) -> bool {
     path.starts_with(vw_platform::plain_path(root))
-}
-
-/// Removes `.` and resolves `..` against the preceding component without touching the disk; None when a
-/// `..` would climb above the path's root.
-fn lexical_clean(path: &Path) -> Option<PathBuf> {
-    let mut clean = PathBuf::new();
-    for part in path.components() {
-        match part {
-            std::path::Component::ParentDir => {
-                if !clean.pop() {
-                    return None;
-                }
-            }
-            std::path::Component::CurDir => {}
-            other => clean.push(other.as_os_str()),
-        }
-    }
-    Some(clean)
 }
 
 fn workspace_review(root: &Path, scratch: &Path) -> Result<ExplorerResult, CoreError> {

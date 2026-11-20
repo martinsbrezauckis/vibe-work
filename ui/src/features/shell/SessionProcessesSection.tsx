@@ -17,6 +17,10 @@ const KIND_TEXT: Record<string, string> = {
   vibe: "Vibe's background process: it ends when Vibe or this chat's connection ends.",
   started:
     "Started for the agent by Vibe Work: it keeps running until you stop it, also after you quit.",
+  // Quitting ends the Terminal tab and what runs in it, but a program detached from the terminal
+  // keeps running, by the person's own choice, and the next start does not list it; say so where it is listed now.
+  terminal:
+    "Started in this chat's Terminal tab: it stops when you quit, unless it was detached from the terminal (nohup, setsid, disown). A detached program keeps running after you quit and is not listed here again.",
 };
 
 /** The short kind words of a row. */

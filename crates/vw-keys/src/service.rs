@@ -227,13 +227,7 @@ pub(crate) async fn blocking<T: Send + 'static>(
         .map_err(|_| KeyError::Internal)
 }
 
-pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+pub(crate) use vw_platform::wall_clock::unix_ms_signed as now_ms;
 
 impl KeyService {
     /// Starts the proxy and restores the vault's last state: unlocked with the kept key, or locked

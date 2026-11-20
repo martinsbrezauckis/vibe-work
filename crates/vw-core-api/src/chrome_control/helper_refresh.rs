@@ -18,6 +18,7 @@
 //! (app start) and the Connect command.
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use vw_platform::link_entry::is_link;
 
 use super::setup::{self, ChromeControlConfig};
 
@@ -88,19 +89,6 @@ pub(super) fn refresh_with(
         setup::repair_registrations(config, state, None)?;
     }
     Ok(outcome)
-}
-
-/// True when `meta` (from `symlink_metadata`) is a symbolic link or, on Windows, any reparse point.
-fn is_link(meta: &std::fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt as _;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return true;
-        }
-    }
-    meta.file_type().is_symlink()
 }
 
 fn refuse_links(folders: &[&Path]) -> Result<(), String> {

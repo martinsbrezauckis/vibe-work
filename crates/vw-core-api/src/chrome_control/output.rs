@@ -145,6 +145,10 @@ pub(super) fn guard_status(result: &mut Value) {
         guard_with_limit(result, GROUP_LIMIT, &note);
         return;
     }
+    // The trim below runs against the budget left after the tables. When the tables are omitted afterwards, the
+    // status is trimmed again from this untrimmed copy, so session rows and other facts are not cut for tables
+    // that the agent never receives.
+    let untrimmed = result.clone();
     let mut tables = Vec::new();
     if let Some(body) = result.get_mut("structuredContent") {
         for path in STATUS_TABLES {
@@ -168,11 +172,15 @@ pub(super) fn guard_status(result: &mut Value) {
             }
         }
     }
-    if !fits(&result["structuredContent"], GROUP_LIMIT)
-        && status_budget::omit_capability_tables(&mut result["structuredContent"])
-    {
-        guard_status(result);
-        return;
+    if !fits(&result["structuredContent"], GROUP_LIMIT) {
+        let mut retry = untrimmed;
+        if status_budget::omit_capability_tables(&mut retry["structuredContent"]) {
+            // The omission is itself the cap, also when nothing else needs trimming afterwards.
+            retry["structuredContent"]["outputLimit"] = json!(note);
+            *result = retry;
+            guard_status(result);
+            return;
+        }
     }
     sync_text(result);
 }
@@ -333,8 +341,13 @@ fn largest(value: &Value, path: &str) -> Option<(String, usize)> {
                 .filter_map(|(i, row)| largest(row, &format!("{path}/{i}")))
                 .max_by_key(|(_, size)| *size);
             // Never discard batch outcomes or frame bindings. A ref row keeps its identity, even if its name is huge.
+            // A status's session rows are the chat's own leases (at most one per browser): only their text shrinks.
             let min = usize::from(path.ends_with("/refs"));
-            if rows.len() > min && !path.ends_with("/steps") && !path.ends_with("/frames") {
+            if rows.len() > min
+                && !path.ends_with("/steps")
+                && !path.ends_with("/frames")
+                && path != "/untrustedPageContent/sessions"
+            {
                 Some((path.to_owned(), value.to_string().len()))
             } else {
                 children

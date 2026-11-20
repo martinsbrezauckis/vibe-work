@@ -59,6 +59,8 @@ pub const ALLOWLIST: &[RouteSpec] = &[
     // Model list (Vibe's model probe; our own test call goes direct, not through here).
     api("GET", "/v1/models"),
     api("GET", "/v1/models/{}"),
+    // Vibe's catalog uses the configured provider and the same Mistral credential.
+    api("GET", "/v1/model-catalog"),
     // Vibe 3.1 `_billing.HttpBillingGateway`: optional monthly allowance reads.
     api("GET", "/v1/billing/subscription"),
     api("GET", "/v1/billing/budget"),

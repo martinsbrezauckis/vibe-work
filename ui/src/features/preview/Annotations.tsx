@@ -32,7 +32,7 @@ function NoteRow({
         <Button
           data-testid="preview.annotations-preview-btn"
           type="button"
-          appearance="preview"
+          shape="outlined"
           aria-label="Remove this note"
           onClick={onRemove}
         >
@@ -84,7 +84,7 @@ export function Annotations({
               <Button
                 data-testid="preview.annotations-annotate"
                 type="button"
-                appearance="preview"
+                shape="outlined"
                 title="Click an element in the preview to add a note about it"
                 onClick={() => void browser.annotate(sessionId, "element")}
               >
@@ -93,7 +93,7 @@ export function Annotations({
               <Button
                 data-testid="preview.annotations-annotate-2"
                 type="button"
-                appearance="preview"
+                shape="outlined"
                 title="Drag a box in the preview to add a note about that area"
                 onClick={() => void browser.annotate(sessionId, "box")}
               >
@@ -110,7 +110,7 @@ export function Annotations({
             <Button
               data-testid="preview.annotations-cancel-pick"
               type="button"
-              appearance="preview"
+              shape="outlined"
               onClick={() => void browser.cancelPick(sessionId)}
             >
               Cancel
@@ -121,7 +121,7 @@ export function Annotations({
           <Button
             data-testid="preview.annotations-send"
             type="button"
-            appearance="preview"
+            shape="outlined"
             placement="browser-notes"
             onClick={() => {
               browser.send(sessionId);
@@ -134,7 +134,7 @@ export function Annotations({
           <Button
             data-testid="preview.annotations-recheck"
             type="button"
-            appearance="preview"
+            shape="outlined"
             onClick={() => void browser.recheck(sessionId)}
           >
             Check again

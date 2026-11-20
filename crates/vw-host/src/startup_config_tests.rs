@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use super::{Draft, Written, prepare, write_config};
 
 const MARKER: &str = ".vw-registry-skills-default-v1";
+const CATALOG_MARKER: &str = ".vw-model-catalog-default-v1";
 const MODES: [&str; 3] = ["product", "product-marked", "dev"];
 
 fn fixtures() -> PathBuf {
@@ -81,32 +82,43 @@ fn every_step_writes_the_same_bytes_in_one_write() {
         .collect();
     names.sort();
     assert!(names.len() >= 16, "{names:?}");
+    let mut mismatches = Vec::new();
     for name in &names {
         let input = os_paths(std::fs::read(fixtures().join(format!("{name}.in.toml"))).unwrap());
         for mode in MODES {
             let want = expected(name, mode, Some(&input));
             let (after, writes, marker) = launch(mode, Some(&input));
-            assert!(
-                after == want,
-                "{name} ({mode}) differs:\n{}",
-                String::from_utf8_lossy(&after)
-            );
-            assert_eq!(writes, usize::from(want != input), "{name} ({mode}) writes");
+            if after == want {
+                assert_eq!(writes, usize::from(want != input), "{name} ({mode}) writes");
+            } else {
+                mismatches.push(format!(
+                    "@@@ {name}.{mode} BEGIN\n{}@@@ END\n",
+                    String::from_utf8_lossy(&after)
+                ));
+            }
             // Invalid TOML skips the experiment step, so its migration stays to do.
             let recorded = mode == "product-marked" || name != "invalid";
             assert_eq!(marker, recorded, "{name} ({mode}) migration marker");
         }
     }
+    assert!(mismatches.is_empty(), "{}", mismatches.join(""));
 }
 
 #[test]
 fn a_launch_without_a_config_writes_the_whole_first_config_once() {
+    let mut mismatches = Vec::new();
     for mode in MODES {
         let (after, writes, marker) = launch(mode, None);
-        assert!(after == expected("fresh", mode, None), "fresh ({mode})");
+        if after != expected("fresh", mode, None) {
+            mismatches.push(format!(
+                "@@@ fresh.{mode} BEGIN\n{}@@@ END\n",
+                String::from_utf8_lossy(&after)
+            ));
+        }
         assert_eq!(writes, 1, "fresh ({mode})");
         assert!(marker, "fresh ({mode})");
     }
+    assert!(mismatches.is_empty(), "{}", mismatches.join(""));
 }
 
 /// A config every step edits (relative extension path, old Large 4 values, no title model, no credit line, no trust
@@ -129,9 +141,111 @@ fn a_failing_combined_write_changes_nothing() {
             !home.join(MARKER).exists(),
             "migration recorded without the write"
         );
-        // The Large 4 step changed the text, so only the product launch fails.
+        assert!(
+            !home.join(CATALOG_MARKER).exists(),
+            "catalog default recorded without the write"
+        );
+        // The catalog migration is a non-critical startup edit.
+        assert!(failed.is_ok(), "product launch: {product}");
+    }
+}
+
+#[test]
+fn a_failing_offline_model_write_stops_the_product_launch() {
+    for product in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("vibe-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(CATALOG_MARKER), b"1\n").unwrap();
+        let original = std::fs::read(fixtures().join("default_model.in.toml")).unwrap();
+        std::fs::write(home.join("config.toml"), &original).unwrap();
+        let failed = prepare(&home, product, |_, _, _| Err(io::Error::other("disk full")));
+        assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), original);
         assert_eq!(failed.is_err(), product, "product launch: {product}");
     }
+}
+
+#[test]
+fn a_later_catalog_off_choice_survives_product_and_dev_launches() {
+    for product in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("vibe-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(CATALOG_MARKER), b"1\n").unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            std::fs::read(fixtures().join("default_model.in.toml")).unwrap(),
+        )
+        .unwrap();
+        prepare(&home, product, write_config).unwrap();
+        let config: toml::Table = std::fs::read_to_string(home.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            config["experimental_enable_model_catalog"].as_bool(),
+            Some(false)
+        );
+        assert!(config.contains_key("models"), "offline local model remains");
+    }
+}
+
+// PREDICT: product startup removes its old model seed with the catalog on, but dev startup
+// skips the model step and keeps that seed as an overriding default.
+#[test]
+fn catalog_upgrade_retires_the_exact_app_model_in_product_and_dev() {
+    for product in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("vibe-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            std::fs::read(fixtures().join("settled.in.toml")).unwrap(),
+        )
+        .unwrap();
+        prepare(&home, product, write_config).unwrap();
+        let config: toml::Table = std::fs::read_to_string(home.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            config["experimental_enable_model_catalog"].as_bool(),
+            Some(true)
+        );
+        assert!(!config.contains_key("models"), "product={product}");
+        assert_eq!(config["active_model"].as_str(), Some("large-4"));
+    }
+}
+
+// PREDICT: startup currently removes an exact app row on every catalog-on launch,
+// including after its first migration marker has been recorded.
+#[test]
+fn catalog_seed_cleanup_runs_once_after_the_marker() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("vibe-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let old = std::fs::read_to_string(fixtures().join("settled.in.toml")).unwrap();
+    std::fs::write(home.join("config.toml"), &old).unwrap();
+    prepare(&home, true, write_config).unwrap();
+    assert!(home.join(CATALOG_MARKER).is_file());
+    let first: toml::Table = std::fs::read_to_string(home.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(!first.contains_key("models"));
+
+    let repeated_seed = old.replace(
+        "experimental_enable_model_catalog = false",
+        "experimental_enable_model_catalog = true",
+    );
+    std::fs::write(home.join("config.toml"), repeated_seed).unwrap();
+    prepare(&home, true, write_config).unwrap();
+    let second: toml::Table = std::fs::read_to_string(home.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(second["active_model"].as_str(), Some("large-4"));
+    assert!(second.contains_key("models"));
 }
 
 #[test]
@@ -139,7 +253,7 @@ fn a_failing_write_without_a_large_four_change_only_logs() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("vibe-home");
     std::fs::create_dir_all(&home).unwrap();
-    let original = std::fs::read(fixtures().join("title_model_append.in.toml")).unwrap();
+    let original = needs_every_step();
     std::fs::write(home.join("config.toml"), &original).unwrap();
     prepare(&home, true, |_, _, _| Err(io::Error::other("disk full"))).unwrap();
     assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), original);
@@ -154,7 +268,7 @@ fn a_config_changed_meanwhile_is_not_written() {
     std::fs::write(&config, needs_every_step()).unwrap();
     let mut draft = Draft::open(&home).unwrap();
     let staged = draft.apply(
-        |text, _| crate::title_model::edit(text),
+        |text, _| crate::title_model::edit(text, true),
         crate::title_model::TitleModel::Skipped,
     );
     assert!(staged.changed);
@@ -181,6 +295,7 @@ fn a_config_that_appears_meanwhile_is_not_replaced() {
         prepare(&home, product, appeared).unwrap();
         assert_eq!(std::fs::read_to_string(&config).unwrap(), theirs);
         assert!(!home.join(MARKER).exists());
+        assert!(!home.join(CATALOG_MARKER).exists());
     }
 }
 

@@ -104,7 +104,7 @@ async fn propose(shared: &Arc<Shared>, session_id: &str, args: Value) -> Result<
     // Not paused by the vault's agent access switch (it covers vault data only): the proposal is itself the card
     // that asks the user.
     if !shared.channels.has_channel(session_id) || shared.store.view(session_id).is_none() {
-        return Err("this session is not live in Vibe Work right now".into());
+        return Err("this chat is not live in Vibe Work right now".into());
     }
     let epoch = *shared
         .protected_changes
@@ -158,7 +158,7 @@ async fn propose(shared: &Arc<Shared>, session_id: &str, args: Value) -> Result<
             .count()
             >= 8
         {
-            return Err("at most 8 pending proposals per session".into());
+            return Err("at most 8 pending proposals per chat".into());
         }
         hub.reviews.save(Saved {
             view: view.clone(),
@@ -252,7 +252,7 @@ async fn status(shared: &Arc<Shared>, session_id: &str, args: &Value) -> Result<
     let id = args["proposalId"]
         .as_str()
         .ok_or("protected_change_status needs a proposalId")?;
-    let unknown = || "no such proposal in this session".to_owned();
+    let unknown = || "no such proposal in this chat".to_owned();
     let outcome = {
         let hub = shared.protected_changes.lock();
         match hub.outcomes.get(id) {
@@ -348,7 +348,7 @@ pub(crate) async fn decide(
     by: vw_ask::AnsweredBy,
 ) -> Result<ProtectedChangeView, CoreError> {
     if !shared.channels.has_channel(&session_id) {
-        return Err(invalid("this proposal has no live session"));
+        return Err(invalid("this proposal has no live chat"));
     }
     if note.as_ref().is_some_and(|s| {
         s.len() > 8000
@@ -366,7 +366,7 @@ pub(crate) async fn decide(
             .get(&id)
             .ok_or_else(|| invalid("this proposal is no longer pending"))?;
         if session_id != pending.proposal.session_id() {
-            return Err(invalid("this proposal belongs to another session"));
+            return Err(invalid("this proposal belongs to another chat"));
         }
     }
     // A No is settled like any decision: nothing is written, the proposal call returns the declined result and the

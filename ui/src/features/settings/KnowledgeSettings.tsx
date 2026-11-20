@@ -1,13 +1,14 @@
 /**
  * Settings > Knowledge base: the places the user names so the agent looks there first ("look at our library"), in
- * two groups: the user's Mistral Libraries, and folders on this computer or the user's cloud drives. Add, Rename and
- * Remove; the core checks and saves each change.
+ * two groups: the user's Mistral Libraries, and folders on this computer or the user's cloud drives. Add, Rename,
+ * Edit note and Remove; the core checks and saves each change, and the page follows changes made elsewhere.
  * Depends on: useKnowledge, KnowledgeForms (the field and the Add forms), Controls, AppContext. Called by:
  * SettingsPage ("knowledge" category).
  * Invariants: names, paths, notes and library names are the user's text and render as text; a place is a pointer
  * only (the copy says so); the Mistral Libraries list is fetched only when the user opens Add in that group; the
  * core's refusal is said once by the app's announcer (the paragraph is no live region) and goes when an Add form
- * closes.
+ * closes; an opened Rename or Edit note form takes focus on its field and, closed, hands focus back to the button
+ * that opened it.
  */
 import { useEffect, useRef, useState } from "react";
 import type { KnowledgePlace } from "../../protocol/core";
@@ -29,45 +30,72 @@ function where(place: KnowledgePlace): string {
   }
 }
 
-/** One place: its name and where it is, with Rename and Remove. */
+/** Which one-line edit a row has open: its name or its note. */
+type Editing = { what: "name" | "note"; text: string };
+
+/** One place: its name, where it is and its note, with Rename, Edit note and Remove. */
 function PlaceRow({ place, knowledge }: { place: KnowledgePlace; knowledge: Knowledge }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  if (draft !== null)
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const row = useRef<HTMLLIElement>(null);
+  // The button whose form just closed gets focus back (the form replaced it in the row).
+  const closed = useRef<Editing["what"] | null>(null);
+  const mode = editing?.what ?? null;
+  useEffect(() => {
+    const root = row.current;
+    if (root === null) return;
+    if (mode !== null) {
+      root.querySelector<HTMLElement>("input")?.focus();
+      return;
+    }
+    if (closed.current === null) return;
+    const opener =
+      closed.current === "name" ? "settings.knowledge-rename" : "settings.knowledge-note-edit";
+    root.querySelector<HTMLElement>(`[data-testid="${opener}"]`)?.focus();
+    closed.current = null;
+  }, [mode]);
+  const close = () => {
+    if (editing !== null) closed.current = editing.what;
+    setEditing(null);
+  };
+  if (editing !== null) {
+    const name = editing.what === "name";
+    const prefix = name ? "settings.knowledge-rename" : "settings.knowledge-note";
     return (
-      <li className="knowledge-place" data-place={place.id} data-settings-form="">
+      <li className="knowledge-place" data-place={place.id} data-settings-form="" ref={row}>
         <Field
-          label={`New name for ${place.name}`}
-          value={draft}
-          onChange={setDraft}
-          testId="settings.knowledge-rename-field"
+          label={name ? `New name for ${place.name}` : `Note for ${place.name}`}
+          value={editing.text}
+          onChange={(text) => {
+            setEditing({ ...editing, text });
+          }}
+          testId={`${prefix}-field`}
+          {...(name ? {} : { placeholder: "contracts and offers" })}
         />
         <div className="knowledge-actions">
           <Button
-            data-testid="settings.knowledge-rename-save"
+            data-testid={`${prefix}-save`}
             shape="outlined"
             disabled={knowledge.busy}
             onClick={() => {
-              void knowledge.rename(place.id, draft).then((ok) => {
-                if (ok) setDraft(null);
+              const saved = name
+                ? knowledge.rename(place.id, editing.text)
+                : knowledge.setNote(place.id, editing.text);
+              void saved.then((ok) => {
+                if (ok) close();
               });
             }}
           >
             Save
           </Button>
-          <Button
-            data-testid="settings.knowledge-rename-cancel"
-            shape="outlined"
-            onClick={() => {
-              setDraft(null);
-            }}
-          >
+          <Button data-testid={`${prefix}-cancel`} shape="outlined" onClick={close}>
             Cancel
           </Button>
         </div>
       </li>
     );
+  }
   return (
-    <li className="knowledge-place" data-place={place.id}>
+    <li className="knowledge-place" data-place={place.id} ref={row}>
       <span className="knowledge-place-text">
         <span className="knowledge-place-name">{place.name}</span>
         <span className="d">{where(place)}</span>
@@ -80,10 +108,21 @@ function PlaceRow({ place, knowledge }: { place: KnowledgePlace; knowledge: Know
           aria-label={`Rename ${place.name}`}
           disabled={knowledge.busy}
           onClick={() => {
-            setDraft(place.name);
+            setEditing({ what: "name", text: place.name });
           }}
         >
           Rename
+        </Button>
+        <Button
+          data-testid="settings.knowledge-note-edit"
+          shape="outlined"
+          aria-label={`Edit note for ${place.name}`}
+          disabled={knowledge.busy}
+          onClick={() => {
+            setEditing({ what: "note", text: place.note ?? "" });
+          }}
+        >
+          Edit note
         </Button>
         <Button
           data-testid="settings.knowledge-remove"
@@ -148,10 +187,10 @@ export function KnowledgeSettings() {
     <section aria-labelledby="knowledge-title" className="knowledge" ref={section}>
       <h3 id="knowledge-title">Knowledge base</h3>
       <p className="key-field-hint ui-help">
-        Name the places that hold your knowledge. When you say &quot;look at our library&quot;, the
-        agent looks there first instead of searching the whole computer. This list only points the
-        way: it gives the agent no extra access, and nothing is copied. A new document is saved into
-        a place only when you ask for it.
+        Name the places that hold your knowledge. When you say “look at our library”, the agent
+        looks there first instead of searching the whole computer. This list only points the way: it
+        gives the agent no extra access, and nothing is copied. A new document is saved into a place
+        only when you ask for it.
       </p>
       <div className="knowledge-group" data-setting="knowledge-mistral">
         <h4>In your Mistral account</h4>

@@ -90,7 +90,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install JavaScript dependencies
@@ -113,7 +113,10 @@ jobs:
           echo "VW_TEST_VIBE_SERVER=$server" >> "$GITHUB_ENV"
 
       - name: scripts/public/check.sh
-        run: bash scripts/public/check.sh
+        # macOS: tests that refuse symlinked paths need a temp folder without the /var -> /private/var symlink.
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then export TMPDIR="$(cd "${TMPDIR:-/tmp}" && pwd -P)/"; fi
+          bash scripts/public/check.sh
 
       - name: Disk left (diagnostics)
         if: always()

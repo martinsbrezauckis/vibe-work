@@ -215,7 +215,7 @@ fn decorate(
                 |id| names.confirmation_title(store, id),
             );
         request.summary = format!(
-            "Delete session {} and its history permanently (the Vibe CLI loses it too)?",
+            "Delete chat {} and its history permanently (the Vibe CLI loses it too)?",
             vw_gate::dialog_chat_quote(&title),
         );
     } else if let Some(text) = crate::connector_consent::describe(&request.method, &request.params)
@@ -318,7 +318,7 @@ mod tests {
                 "session/delete",
                 json!({"sessionId": "s1"}),
                 format!(
-                    "Delete session \"{title}\" and its history permanently (the Vibe CLI loses it too)?"
+                    "Delete chat \"{title}\" and its history permanently (the Vibe CLI loses it too)?"
                 ),
             ),
             (

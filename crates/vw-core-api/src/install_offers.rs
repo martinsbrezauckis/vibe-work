@@ -101,12 +101,7 @@ fn random_id() -> Option<String> {
     let mut bytes = [0_u8; 16];
     // No predictable fallback: an offer id is the only thing that tells a shown offer from a raw call.
     getrandom::fill(&mut bytes).ok()?;
-    let mut id = String::from("offer-");
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(id, "{byte:02x}");
-    }
-    Some(id)
+    Some(format!("offer-{}", hex::encode(bytes)))
 }
 
 impl Offers {

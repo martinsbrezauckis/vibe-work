@@ -20,6 +20,8 @@ zip = { workspace = true, features = ["deflate"] }
 # flate2 (already in the lock file through zip): inflates PDF object streams for the page count.
 flate2 = { workspace = true }
 getrandom = { workspace = true }
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 

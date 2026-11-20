@@ -103,9 +103,7 @@ pub(crate) async fn tool(shared: &Shared, session: &str, args: &Value) -> Result
         .as_object()
         .ok_or("Reading aloud needs an object with optional text.")?;
     if args.keys().any(|key| key != "text") {
-        return Err(
-            "Reading aloud can only read this session's reply or the given text.".to_owned(),
-        );
+        return Err("Reading aloud can only read this chat's reply or the given text.".to_owned());
     }
     let text = match args.get("text") {
         None => None,
@@ -126,17 +124,11 @@ pub(crate) async fn start(
     before_request: bool,
 ) -> Value {
     let Some(view) = shared.store.view(session) else {
-        return outcome(
-            "noReply",
-            "This session has no finished reply to read aloud.",
-        );
+        return outcome("noReply", vw_vocabulary::texts::READ_ALOUD_NO_REPLY);
     };
     let mut reservation = if before_request {
         let Some(turn) = requesting_turn(&view.state) else {
-            return outcome(
-                "noReply",
-                "This session has no finished reply to read aloud.",
-            );
+            return outcome("noReply", vw_vocabulary::texts::READ_ALOUD_NO_REPLY);
         };
         let Some(reservation) = shared.readings.reserve(session, turn) else {
             return outcome(
@@ -178,10 +170,7 @@ pub(crate) async fn start(
         .map(str::to_owned)
         .or_else(|| previous_reply(&view.state, before_request));
     let Some(text) = resolved.filter(|text| !text.trim().is_empty()) else {
-        return outcome(
-            "noReply",
-            "This session has no finished reply to read aloud.",
-        );
+        return outcome("noReply", vw_vocabulary::texts::READ_ALOUD_NO_REPLY);
     };
     let truncated = text.chars().count() > LIMIT;
     let title = view.state["session"]["title"]

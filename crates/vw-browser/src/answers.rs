@@ -8,7 +8,8 @@
 
 use crate::act::{Action, PageAnswer};
 use crate::driver::{ActError, failed, refused};
-use crate::sessions::Outcome;
+
+pub(crate) const NATIVE_SELECT_POPUP: &str = vw_preview::NATIVE_SELECT_POPUP_REFUSAL;
 
 /// Whether an actionability answer can settle during the driver's bounded retry window.
 pub(crate) fn transient(answer: &PageAnswer) -> bool {
@@ -56,11 +57,17 @@ fn input_refusal(answer: &PageAnswer) -> Option<String> {
         }
         "unsupportedPicker" => Some("Clicking this native colour picker is unsupported because its panel cannot be controlled through page refs. Use browser_act type with this field's ref and text in #RRGGBB format to set the colour.".to_owned()),
         "unsupportedInputSelect" => Some("Selecting an option is unsupported for this input because it is not a select box. Use browser_act type with this ref and the required value in text.".to_owned()),
-        "unsupportedSelectKey" => Some("This key opens a native select popup whose completion cannot be read through page refs. Use browser_act select with this ref and the option value instead.".to_owned()),
+        "unsupportedSelectKey" => Some("This key opens a native select popup whose completion cannot be read through page refs. Ask the user to close the menu, then use browser_act select with this ref and the option value.".to_owned()),
+        "nativeSelectPopup" => Some(NATIVE_SELECT_POPUP.to_owned()),
         "unsupportedNativeKey" => Some("This key is unsupported for the control's native editor because page key events do not perform its native editing action. Use browser_act type with this field's ref and the required value in text.".to_owned()),
         _ => None,
     }
 }
+
+/// Enter in a payment card field, refused before any key reached the page.
+const CARD_ENTER: &str = "Enter was not pressed: in a payment card field it could send the payment. Nothing was \
+     sent and the field is unchanged. Paying is the user's step: ask the user to send the form in the Browser tab, \
+     then continue.";
 
 /// `Ok` for a done action; the refusal or failure text otherwise.
 ///
@@ -77,10 +84,7 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
             "Not done: the original control changed before its final state could be verified. The action may already have taken effect. Read the page again; do not repeat the action.",
         )),
         "sendRequired" => Err(refused(crate::sending::SEND_REQUIRED.to_owned())),
-        "unmet" => Err(ActError {
-            capture_block: None,
-            outcome: Outcome::Failed,
-            text: match action {
+        "unmet" => Err(failed(match action {
                 Action::Check { .. } => {
                     let role = answer.target.as_ref().map(|target| target.role.as_str());
                     let checked = answer.checked == Some(true);
@@ -95,14 +99,14 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                 Action::Type { .. } => "The field does not contain the requested text; the page did not accept the change.".to_owned(),
                 Action::Upload { .. } => "The page replaced or rejected the requested file selection after its input/change handlers ran. Inspect the file field before deciding whether to attach the files again.".to_owned(),
                 _ => "The page did not accept the requested change.".to_owned(),
-            },
-        }),
+            })),
         "nativeKeyboardFocus" => Err(refused("The browser did not focus this field, so no keyboard input was sent. Use a checked page.click on the field, then read the page before typing again.")),
         "stale" | "ambiguous" => Err(refused(format!(
             "ref {reference} is not on the page any more (the page changed since your last browser_read): call \
              browser_read again and use a fresh ref"
         ))),
         "consentChanged" => Err(refused("the authorization page or target changed while access was checked: call browser_read again".to_owned())),
+        "cardEnter" => Err(refused(CARD_ENTER)),
         "secret" => Err(refused(format!(
             "not typed: this is a {} field. The agent never types passwords or card details. For a \
              password: browser_act fill {{ref, login}} with a login the user saved in the vault for this site \
@@ -157,13 +161,9 @@ pub(crate) fn interpret(answer: PageAnswer, action: &Action) -> Result<PageAnswe
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
-        _ => Err(ActError {
-            capture_block: None,
-            outcome: Outcome::Failed,
-            text: format!(
+        _ => Err(failed(format!(
                 "the action failed in the page: {}",
                 page_text(answer.message.as_deref().unwrap_or("no reason given"))
-            ),
-        }),
+            ))),
     }
 }

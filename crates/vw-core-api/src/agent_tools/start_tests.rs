@@ -102,3 +102,22 @@ async fn restart_still_refuses_a_port_that_stays_busy() {
     assert!(elapsed >= Duration::from_millis(1800), "{elapsed:?}");
     assert!(elapsed < Duration::from_secs(4), "{elapsed:?}");
 }
+
+#[test]
+fn a_server_on_a_literal_port_is_named_beside_its_leased_port() {
+    // `python3 -m http.server` (no $PORT) listened on 8000 while the reply said port 28112.
+    let note = super::port_note(28112, &[8000]).expect("a note when it listens elsewhere");
+    assert!(
+        note.starts_with("it listens on 8000, not on its leased port 28112"),
+        "{note}"
+    );
+    assert!(note.contains("$PORT"), "{note}");
+    let mut reply = serde_json::json!({"port": 28112, "listening": [8000]});
+    super::add_port_note(&mut reply, 28112, &[8000]);
+    assert_eq!(reply["port"], 28112, "port stays the leased $PORT");
+    assert!(reply["portNote"].is_string());
+    // Listening on the leased port (also beside others), or not yet listening: no note.
+    assert_eq!(super::port_note(28112, &[28112]), None);
+    assert_eq!(super::port_note(28112, &[28112, 9229]), None);
+    assert_eq!(super::port_note(28112, &[]), None);
+}

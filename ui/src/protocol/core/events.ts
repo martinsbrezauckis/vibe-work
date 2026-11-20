@@ -5,11 +5,12 @@
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
 
-import type { Origin, AlertKind, JsonValue } from "./index";
+import type { Origin, JsonValue } from "./index";
 
 import type { SessionChange, SessionSnapshot } from "./sessions";
 import type { RateLimitsView, ServerStatus, DebugApiFlag } from "./status";
 import type { ChangesMode } from "./changes";
+import type { AlertKind } from "./errors";
 import type { ProtectedChangeView } from "./proposals";
 import type { TerminalEventView } from "./terminal";
 import type { DocumentView, DocumentRefusal, DocumentSource } from "./documents";
@@ -332,7 +333,7 @@ y: number,
 /**
  * The click was on selected text.
  */
-selected: boolean, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "filesChanged",
+selected: boolean, } | { "type": "projectsChanged", } | { "type": "secretsChanged", } | { "type": "knowledgeChanged", } | { "type": "filesChanged",
 /**
  * The session.
  */

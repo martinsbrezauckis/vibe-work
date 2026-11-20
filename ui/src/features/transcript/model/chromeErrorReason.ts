@@ -23,13 +23,18 @@ export function chromeErrorReason(
   const error = obj(answer?.["error"]);
   // Retain the existing fixed missing-tab diagnosis and recovery instruction for older receipts.
   if (error?.["code"] === "TARGET_REQUIRED") return null;
+  // `CONTROL_SUSPENDED` means the chat's browser session was not active (stopped, or not started yet); a tab the
+  // person paused answers `PERSON_PAUSED`. Their words are for the agent, so the person gets the fixed line.
+  const code = error?.["code"];
+  if (
+    (code === "PERSON_PAUSED" || (code === "CONTROL_SUSPENDED" && status !== "paused")) &&
+    status !== "unknown" &&
+    !uncertain
+  )
+    return null;
   const message = cleanReason(str(error?.["message"]) ?? "");
   if (message === "") return null;
   const prefix =
-    status === "unknown" || uncertain
-      ? "Not known"
-      : status === "paused" || error?.["code"] === "CONTROL_SUSPENDED"
-        ? "Paused"
-        : "Not done";
+    status === "unknown" || uncertain ? "Not known" : status === "paused" ? "Paused" : "Not done";
   return `${prefix}: ${message}`;
 }

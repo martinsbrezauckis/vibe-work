@@ -11,7 +11,7 @@
 //! What can be kept (`scope_of`, from the callback Vibe sent; source: pinned Vibe 2.26.1):
 //! - a call with required permissions: that tool + exactly those permissions (`vw_ask::GrantPermission`);
 //! - a call without them for a tool Vibe grants whole (`_unified_permissions.py:545-560`, MCP/provided tools and
-//!   the file tools): every call of the tool in this session (`every_call`, the card says so before the click);
+//!   the file tools): every call of the tool in this chat (`every_call`, the card says so before the click);
 //! - a call without them for a builtin Vibe cannot scope (`grant()` returns early, `_unified_permissions.py:563`:
 //!   `_FALLBACK_SCOPES` and `_PROCESS_UNGATED_BUILTINS`): nothing, so no session button is offered.
 //!
@@ -99,9 +99,9 @@ fn own_call(tool: &str, input: &Value) -> Own {
     match name {
         // Browser session scope comes only from the described tier package above. A generic card
         // (including an unknown action) must never fall back to granting the whole browser tool.
-        names::BROWSER_ACT => Own::Nothing,
+        names::PUSH | names::BROWSER_ACT => Own::Nothing,
         "chrome_execute" => {
-            if !crate::chrome_control::read_consent::personal_read(name, input) {
+            if !crate::chrome_control::personal_read(name, input) {
                 return Own::Nothing;
             }
             let label = if input["action"] == "history.read" {
@@ -258,11 +258,11 @@ fn whole_tool_words(tool: &str) -> Vec<CoversPart> {
             return vec![
                 CoversPart::words("every call of "),
                 CoversPart::code(tool),
-                CoversPart::words(" in this session"),
+                CoversPart::words(" in this chat"),
             ];
         }
     };
-    vec![CoversPart::words(&format!("{action} in this session"))]
+    vec![CoversPart::words(&format!("{action} in this chat"))]
 }
 
 /// What a session grant would keep for the approval callback `entry` (Vibe's `ApprovalCallbackDetail`).
@@ -475,6 +475,11 @@ impl Grants {
     /// Every kept grant, oldest first.
     pub(crate) fn list(&self) -> Vec<SessionGrant> {
         self.lock().kept.iter().map(|k| k.grant.clone()).collect()
+    }
+
+    /// Whether the same grant still exists after a prepared call has waited to run.
+    pub(crate) fn contains(&self, id: &str) -> bool {
+        self.lock().kept.iter().any(|kept| kept.grant.id == id)
     }
 
     /// What "Allow for this session" would keep on each open card that offers it (the cards' covers lines).

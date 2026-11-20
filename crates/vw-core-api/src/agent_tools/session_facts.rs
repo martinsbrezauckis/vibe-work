@@ -3,7 +3,7 @@
 //! path installs, enables, pairs or authenticates anything. The add-on states are reported whatever the chat's
 //! launch line (a chat without the Chrome tools still learns why and what the person does).
 
-use crate::chrome_control::agent_browser::Browser;
+use crate::chrome_control::Browser;
 
 fn browsers() -> impl Iterator<Item = Browser> {
     [Browser::Chrome]
@@ -13,7 +13,7 @@ fn browsers() -> impl Iterator<Item = Browser> {
 
 /// Every shipped add-on reports its own state, even when this chat has no browser tools.
 fn addons(shared: &Shared) -> Value {
-    crate::chrome_control::installation::addons(shared)
+    crate::chrome_control::addons(shared)
 }
 
 fn reason(args: &Value) -> Result<&str, String> {
@@ -79,7 +79,7 @@ pub(super) async fn call(
     let view = shared
         .store
         .view(session)
-        .ok_or("this session is not open in Vibe Work right now")?;
+        .ok_or("this chat is not open in Vibe Work right now")?;
     let core = Core {
         shared: shared.clone(),
     };
@@ -97,7 +97,7 @@ pub(super) async fn call(
             "thinkingLevel":view.state["session"]["reasoningEffort"],
             "vibeVersion":status.vibe_version,
             "vibeWorkVersion":status.app_version,
-            "chromeExtensionStore":crate::chrome_control::commands::extension_store(shared),
+            "chromeExtensionStore":crate::chrome_control::extension_store(shared),
             "addons":addons(shared),
             "network":crate::network_facts::read(shared).await,
         }));
@@ -423,7 +423,7 @@ mod tests {
         .unwrap();
         crate::chrome_control::test_support::observe_status(
             &core.shared,
-            &json!({"profiles":[{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.3"}]}),
+            &json!({"profiles":[{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.7"}]}),
         );
         let status = call(&core.shared, "s", tools::SESSION_STATUS, &json!({}))
             .await
@@ -486,7 +486,7 @@ mod tests {
         }
         // Nothing was set up, paired or turned on by the suggestion.
         assert_eq!(
-            crate::chrome_control::commands::addon(&core.shared).state,
+            crate::chrome_control::addon_view(&core.shared).state,
             crate::chrome_control::AddonState::NotSetUp
         );
         core.shutdown().await;

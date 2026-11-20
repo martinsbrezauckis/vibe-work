@@ -155,8 +155,9 @@ impl Broker {
     fn run(&self, request: &Request) -> Reply {
         if let Err(reason) = policy::validate(&request.argv) {
             return Reply::refused(&format!(
-                "Not run: {reason}. Use a supported GitHub read command. {}",
-                crate::remote_change_refusal!()
+                "Not run: {reason}. Use a supported GitHub read command. {} {}",
+                crate::remote_change_refusal!(),
+                vw_vocabulary::texts::PUSH_TOOL_POINTER
             ));
         }
         #[cfg(windows)]

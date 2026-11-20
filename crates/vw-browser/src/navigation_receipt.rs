@@ -22,7 +22,11 @@ impl Browser {
             return;
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-        while tokio::time::Instant::now() < deadline {
+        // Woken by every loading change and refusal of the page (subscribed before the first read).
+        let Some(mut changes) = self.service.load_changes(session) else {
+            return;
+        };
+        loop {
             if self
                 .service
                 .load_state(session)
@@ -31,7 +35,12 @@ impl Browser {
             {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(60)).await;
+            if !matches!(
+                tokio::time::timeout_at(deadline, changes.changed()).await,
+                Ok(Ok(()))
+            ) {
+                break;
+            }
         }
     }
 

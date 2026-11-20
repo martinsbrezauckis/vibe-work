@@ -20,6 +20,7 @@ impl PreviewService {
 
 impl Hooks {
     pub(crate) fn route_popup(&self, label: &str, url: &Url) {
+        self.window_requested(label, url);
         let source = {
             let state = self.0.lock();
             state.session_of(label).map(|page| crate::MountId {

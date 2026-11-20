@@ -98,6 +98,12 @@ pub enum SpeechRequest {
         /// The stream.
         stream_id: String,
     },
+    /// Writes what voice chat heard (or why nothing was heard) for an answer it did not understand into the local
+    /// diagnostics log. Nothing is sent anywhere; answers `cancelled` with `cancelled: false`.
+    Heard {
+        /// The heard words, or the reason the audio could not be turned into words; cut to 200 characters.
+        text: String,
+    },
     /// Speaks a text with Voxtral TTS (WAV). The window asks the native confirmation; the Debug API's is answered by the core.
     Speak {
         /// At most 2,000 characters.
@@ -142,8 +148,13 @@ pub enum SpeechResult {
     },
     /// Outcome of matching a prompt's own audio.
     PromptAnswer {
-        /// allowed, refused, retry, repeat or card. Only the first two answered the card.
+        /// allowed, refused, retry, repeat, ended or card. Only the first two answered the card.
         status: String,
+        /// For an answer that was not understood (`retry`, or the `card` after the last miss): the words heard, cut
+        /// to 200 characters (empty when nothing was heard), so the window can say what it heard. Absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        heard: Option<String>,
     },
     /// The system screen-reader flag; null means this desktop could not report it.
     ScreenReader {
@@ -165,6 +176,10 @@ pub enum SpeechResult {
         mode: DictationMode,
         /// The longest dictation, in seconds.
         max_seconds: u32,
+        /// Core-owned answer capture duration in milliseconds; present only for a permission prompt.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        answer_window_ms: Option<u32>,
     },
     /// `append`.
     Appended {

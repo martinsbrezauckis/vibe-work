@@ -50,6 +50,8 @@ struct Session {
     opened: Instant,
     turn: Option<String>,
     stop: Stop,
+    /// Ended because the chat's access mode was lowered (the agent's refusal and the chat notice say so).
+    lowered: bool,
 }
 /// Stop intent is independent of the helper's last display state. A poll can predate acknowledgement.
 #[derive(Default, PartialEq, Eq)]
@@ -65,7 +67,10 @@ impl Work {
     pub(super) fn releases(&self, chat: &str) -> Vec<super::profile_selection::Release> {
         self.0
             .iter()
-            .filter(|session| session.row.session_id == chat && session.row.state != "stopped")
+            .filter(|session| {
+                session.row.session_id == chat
+                    && !matches!(session.row.state.as_str(), "stopped" | "disconnected")
+            })
             .map(|session| super::profile_selection::Release {
                 id: session.id.clone(),
                 profile: session.profile.clone(),
@@ -109,6 +114,7 @@ impl Work {
             opened: Instant::now(),
             turn: turn.map(str::to_owned),
             stop: Stop::None,
+            lowered: false,
         });
         while self.0.len() > 128 {
             self.0.pop_front();
@@ -228,6 +234,30 @@ impl Work {
             .collect()
     }
     /// The chat whose session `helper` is, when it is still shown.
+    /// The chat's access mode was lowered: marks its live sessions as ended for that reason (before they are ended) and
+    /// returns their browsers, once each.
+    pub(super) fn lower_mode(&mut self, chat: &str) -> Vec<Browser> {
+        let mut browsers = Vec::new();
+        for session in &mut self.0 {
+            if session.row.session_id == chat
+                && session.stop == Stop::None
+                && !matches!(session.row.state.as_str(), "stopped" | "disconnected")
+            {
+                session.lowered = true;
+                let browser = Browser::from_profile(&session.profile);
+                if !browsers.contains(&browser) {
+                    browsers.push(browser);
+                }
+            }
+        }
+        browsers
+    }
+    /// Whether the helper session ended because its chat's access mode was lowered.
+    pub(super) fn lowered(&self, helper: &str) -> bool {
+        self.0
+            .iter()
+            .any(|session| session.id == helper && session.lowered)
+    }
     pub(super) fn chat_of(&self, helper: &str) -> Option<&str> {
         self.0
             .iter()
@@ -329,193 +359,5 @@ fn display_state(state: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn an_asked_stop_marks_only_the_owned_helper_session() {
-        let mut work = Work::default();
-        // Two sessions of one chat (Chrome and Edge) guard against using the chat-wide end path. Without Edge a
-        // chat holds one live session per browser, so the second session exists only in the Edge build.
-        let edge = cfg!(feature = "your-edge");
-        work.open("a1", "a", "active", "chrome:p", None);
-        if edge {
-            work.open("a2", "a", "connecting", "edge:p", None);
-        }
-        work.open("b1", "b", "active", "chrome:p", None);
-        work.ask_stop("a1", "b");
-        work.ask_stop("unknown", "a");
-        assert_eq!(work.state_of("a1", "a"), Some("active"));
-        work.ask_stop("a1", "a");
-        assert_eq!(work.state_of("a1", "a"), Some("stopping"));
-        assert_eq!(work.state_of("a2", "a"), edge.then_some("connecting"));
-        assert_eq!(work.state_of("b1", "b"), Some("active"));
-        assert_eq!(
-            work.stopped_unasked(
-                &[json!({"sessionId":"a1","state":"stopping"})],
-                Instant::now(),
-            ),
-            Vec::<super::super::person_stop::Stopped>::new()
-        );
-        assert_eq!(
-            work.stopped_unasked(
-                &[
-                    json!({"sessionId":"a1","state":"stopped"}),
-                    json!({"sessionId":"a2","state":"stopping"}),
-                    json!({"sessionId":"b1","state":"stopped"}),
-                ],
-                Instant::now(),
-            ),
-            [
-                edge.then(|| super::super::person_stop::Stopped {
-                    chat: "a".into(),
-                    browser: Browser::from_profile("edge:p"),
-                    turn: None,
-                    connection_ended: false,
-                }),
-                Some(super::super::person_stop::Stopped {
-                    chat: "b".into(),
-                    browser: Browser::from_profile("chrome:p"),
-                    turn: None,
-                    connection_ended: false,
-                }),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn only_a_connection_loss_reason_drops_the_person_attribution() {
-        for (reason, ended) in [
-            (json!("ADAPTER_DISCONNECTED"), true),
-            (json!("SESSION_CHANGED"), true),
-            (json!("LEASE_EXPIRED"), true),
-            (json!("STOP_REQUESTED"), false),
-            (json!(null), false),
-            (json!("SOMETHING_NEW"), false),
-        ] {
-            let mut work = Work::default();
-            work.open("task", "chat", "active", "chrome:p", Some("one"));
-            let stopped = work.stopped_unasked(
-                &[json!({"sessionId":"task","state":"stopped","suspensionReason":reason})],
-                Instant::now(),
-            );
-            assert_eq!(stopped.len(), 1, "{reason}");
-            assert_eq!(stopped[0].connection_ended, ended, "{reason}");
-            let words = super::super::person_stop::notice(&stopped[0]);
-            assert_eq!(words.ends_with(" by you"), !ended, "{reason}: {words}");
-        }
-    }
-
-    /// PREDICT: the helper fences an open the browser never confirmed with `suspensionReason`
-    /// `START_UNCONFIRMED`; the agent's open already returned `SESSION_NOT_READY`. That reason was unknown here,
-    /// so the stop kept the person attribution: "Stopped in Your Firefox by you" and the turn was interrupted
-    /// although nobody touched the browser. Such a fence is not a stop of the agent's work and is not reported.
-    #[test]
-    fn a_helper_fence_for_an_unconfirmed_open_is_not_a_person_stop() {
-        let mut work = Work::default();
-        work.open("task", "chat", "connecting", "firefox:p", Some("one"));
-        for state in ["stopping", "stopped"] {
-            assert_eq!(
-                work.stopped_unasked(
-                    &[
-                        json!({"sessionId":"task","state":state,"suspensionReason":"START_UNCONFIRMED"})
-                    ],
-                    Instant::now(),
-                ),
-                Vec::<super::super::person_stop::Stopped>::new(),
-                "{state}"
-            );
-        }
-    }
-
-    #[test]
-    fn polls_cannot_undo_an_asked_stop_but_an_explicit_refusal_can() {
-        for state in ["active", "connecting"] {
-            let mut work = Work::default();
-            work.open("task", "chat", state, "chrome:p", None);
-            let mut tasks = HashMap::from([("task".into(), "chat".into())]);
-            let rows = [json!({"sessionId":"task","state":state})];
-            let started = Instant::now();
-            work.ask_stop("task", "chat");
-            assert!(!work.observe(&rows, &mut tasks, started));
-            assert_eq!(work.state_of("task", "chat"), Some("stopping"));
-            assert!(!work.observe(&rows, &mut tasks, Instant::now()));
-            work.stop_refused("task", "chat");
-            assert!(work.observe(&rows, &mut tasks, Instant::now()));
-            assert_eq!(work.state_of("task", "chat"), Some(state));
-            assert_eq!(tasks.get("task").map(String::as_str), Some("chat"));
-            // A later unasked stopping poll still identifies the person's Stop immediately.
-            assert_eq!(
-                work.stopped_unasked(
-                    &[json!({"sessionId":"task","state":"stopping"})],
-                    Instant::now(),
-                ),
-                vec![super::super::person_stop::Stopped {
-                    chat: "chat".into(),
-                    browser: Browser::from_profile("chrome:p"),
-                    turn: None,
-                    connection_ended: false,
-                }]
-            );
-        }
-    }
-
-    #[test]
-    fn a_status_started_before_open_does_not_revoke_the_new_session() {
-        let started = Instant::now();
-        let mut work = Work::default();
-        work.open("new", "chat", "active", "p", None);
-        let mut tasks = HashMap::from([("new".into(), "chat".into())]);
-        work.observe(&[], &mut tasks, started);
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(work.view()[0].state, "active");
-        work.observe(
-            &[json!({"sessionId":"new","state":"active"})],
-            &mut tasks,
-            Instant::now(),
-        );
-        assert_eq!(tasks.len(), 1);
-    }
-    #[test]
-    fn stop_releases_authority_only_for_that_chat_and_stays_visible() {
-        let mut work = Work::default();
-        work.open("a1", "a", "active", "p", None);
-        work.open("b1", "b", "active", "p", None);
-        let mut tasks = HashMap::from([("a1".into(), "a".into()), ("b1".into(), "b".into())]);
-        work.end("a", false);
-        assert_eq!(work.view()[0].state, "stopping");
-        assert!(work.observe(
-            &[
-                json!({"sessionId":"a1","state":"stopped"}),
-                json!({"sessionId":"b1","state":"active"})
-            ],
-            &mut tasks,
-            Instant::now(),
-        ));
-        assert_eq!(tasks.len(), 1);
-        assert!(tasks.contains_key("b1"));
-        assert_eq!(work.view()[0].state, "stopped");
-        work.disconnected();
-        assert_eq!(work.view()[0].state, "stopped");
-        assert_eq!(work.view()[1].state, "disconnected");
-        work.end("a", true);
-        assert_eq!(work.view().len(), 1);
-    }
-    #[test]
-    fn absent_or_unknown_state_cannot_claim_stopped_and_history_is_bounded() {
-        let mut work = Work::default();
-        for i in 0..1000 {
-            work.open(&format!("s{i}"), &format!("c{i}"), "active", "p", None);
-        }
-        assert_eq!(work.view().len(), 128);
-        work.observe(&[], &mut HashMap::new(), Instant::now());
-        assert!(work.view().iter().all(|r| r.state == "disconnected"));
-        work.open("replacement", "c999", "page-controlled-text", "p", None);
-        assert_eq!(work.view().len(), 127);
-        assert_eq!(work.view().last().unwrap().state, "disconnected");
-    }
-}
+#[path = "work_tests.rs"]
+mod tests;

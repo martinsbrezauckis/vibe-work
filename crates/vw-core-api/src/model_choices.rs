@@ -25,11 +25,18 @@ pub(crate) fn unavailable_default_alias(config: &Value) -> Option<String> {
 mod records;
 use records::Records;
 
+mod retired;
+
 mod live;
 pub(crate) use live::{admission, before, pick, publish, selected};
 
+mod provider_recovery;
+pub(crate) use provider_recovery::completed as provider_completed;
+
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(all(test, unix))]
+mod retired_tests;
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +86,8 @@ pub(crate) struct Choices {
     handed_off: Mutex<std::collections::BTreeSet<(String, String)>>,
     /// Display names by alias from the model lists seen in this run ([`Self::learn`]).
     names: Mutex<BTreeMap<String, String>>,
+    /// Latest rejected turn admitted for recovery in each chat; repeated notifications do not repeat the alert.
+    rejected_turns: Mutex<BTreeMap<String, String>>,
 }
 
 /// Aliases whose display name is remembered (a model list holds a few dozen at most).
@@ -90,6 +99,7 @@ impl Choices {
             records: Records::load(dir),
             handed_off: Mutex::default(),
             names: Mutex::default(),
+            rejected_turns: Mutex::default(),
         }
     }
 
@@ -133,8 +143,20 @@ impl Choices {
         choice
     }
 
+    /// The model name reopening restores for `alias` (empty when none), in fallback/pending/remembered order:
+    /// what Vibe's alias-only pin stands for in that chat ([`retired_row`]).
+    pub(crate) fn saved_name(&self, id: &str, alias: &str) -> String {
+        self.records
+            .get(id)
+            .expected()
+            .filter(|saved| saved.alias == alias)
+            .map(|saved| saved.name)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn forget(&self, id: &str) {
         self.records.forget(id);
+        self.rejected_turns.lock_or_recover().remove(id);
         self.handed_off
             .lock_or_recover()
             .retain(|(old, new)| old != id && new != id);
@@ -173,6 +195,29 @@ impl Choices {
         }
         self.records.update(id, |record| record.accepted(choice))
     }
+}
+
+/// The model row a chat saved on the retired `large-4` alias shows while it is not open: the config view's
+/// (`{models}`) one catalog Large 4 row with the chat's own level (`retired`), the same model reopen and Send put
+/// back. `name` is the model the chat's saved choice records for the alias ([`Choices::saved_name`]): a project's own
+/// model under the alias is not Large 4. `None` for any other alias or model, or when the list does not settle it.
+pub(crate) fn retired_row(config: &Value, alias: &str, effort: &str, name: &str) -> Option<Value> {
+    let saved = Choice {
+        alias: alias.into(),
+        effort: effort.into(),
+        display_name: String::new(),
+        name: name.into(),
+    };
+    let resolved = retired::resolve(&json!({"config":config}), &saved)?;
+    let mut row = config["models"]
+        .as_array()?
+        .iter()
+        .find(|row| row["alias"] == resolved.alias.as_str())?
+        .clone();
+    if !resolved.effort.is_empty() {
+        row["thinking"] = json!(resolved.effort);
+    }
+    Some(row)
 }
 
 /// Capture the stored alias before the resume/profile runtime replaces the store snapshot.

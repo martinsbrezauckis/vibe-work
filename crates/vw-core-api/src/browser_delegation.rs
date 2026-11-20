@@ -66,7 +66,7 @@ impl DelegationAuthorizer for NativeDelegation {
         else {
             return false;
         };
-        crate::chrome_control::check::mode(&shared, &owner)
+        crate::chrome_control::chat_mode(&shared, &owner)
             .as_deref()
             .and_then(vw_ask::chrome::Tier::from_mode)
             == Some(vw_ask::chrome::Tier::FullAccess)
@@ -81,7 +81,7 @@ impl DelegationAuthorizer for NativeDelegation {
             .preview
             .as_ref()
             .and_then(|hub| hub.service.owner_session_id(&receipt.session_id))
-            .ok_or_else(|| "browser page has no session owner".to_owned())?;
+            .ok_or_else(|| "browser page has no owning chat".to_owned())?;
         let mut row = receipt.clone();
         row.session_id = owner;
         self.receipts.record(row)

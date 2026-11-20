@@ -80,7 +80,7 @@ export function TabHandoffDialog({
         <Button
           data-testid="preview.tab-handoff-dialog-btn-primary"
           type="button"
-          appearance="dialog"
+          variant="primary"
           data-dialog-initial-focus
           disabled={busy}
           onClick={onConfirm}

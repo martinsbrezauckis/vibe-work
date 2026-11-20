@@ -19,6 +19,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
 import { Selector } from "../../components/Selector";
 import { useStore } from "../../state/createStore";
+import { term } from "../../vocabulary";
 import type { Projects, StatusFilter } from "../../state/projects";
 import { useApp } from "../shell/AppContext";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
@@ -93,7 +94,8 @@ function Page({ projects }: { projects: Projects }): ReactElement {
           <div>
             <h2 id="pj-title">Projects</h2>
             <div className="pj-sub">
-              {counts.all} project{counts.all === 1 ? "" : "s"} · {running} session
+              {counts.all} project{counts.all === 1 ? "" : "s"} · {running}{" "}
+              {term("workNames", "chat").name}
               {running === 1 ? "" : "s"} running
             </div>
           </div>
@@ -125,7 +127,8 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             <Button
               data-testid="projects.projects-page-pick-folder"
               type="button"
-              appearance="project"
+              shape="outlined"
+              placement="project"
               title="Choose a folder and start a chat in it; it then shows here"
               onClick={() => {
                 void sessionActions?.pickFolder().then((folder) => {
@@ -139,7 +142,8 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             <Button
               data-testid="projects.projects-page-close"
               type="button"
-              appearance="project"
+              shape="outlined"
+              placement="project"
               title="A project of your own: a name now, a main folder later if you like"
               onClick={() => {
                 projects.close();
@@ -152,7 +156,8 @@ function Page({ projects }: { projects: Projects }): ReactElement {
             <Button
               data-testid="projects.projects-page-refresh"
               type="button"
-              appearance="project"
+              shape="outlined"
+              placement="project"
               aria-label="Read the projects again"
               title="Read the projects again"
               disabled={state.loading}

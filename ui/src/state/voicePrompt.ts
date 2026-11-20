@@ -3,6 +3,12 @@ import type { SpeechRequest, SpeechResult } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import type { Accessibility } from "./accessibility";
 import { createStore } from "./createStore";
+import { toCallError } from "../protocol/client/types";
+import { openPrompts } from "./voiceChatTurns";
+import { callbackEntry } from "./askBell";
+import { approvalQuestion } from "../features/ask/model";
+import { approvalQuestionSaid } from "../features/voice/voiceChatText";
+import { heardSentence, VOICE_ANSWER_ENDED } from "./voiceQuestion";
 
 /** The permission prompt answered by voice: its core ticket, answer phrase, spoken text and whether it has played. */
 export interface VoicePromptState {
@@ -10,6 +16,11 @@ export interface VoicePromptState {
   ticket: string;
   phrase: string;
   text: string;
+  /**
+   * The short prompt spoken when Mistral's safety filter refuses `text`: the card's question (from the effect kind and
+   * tool, never the agent's own words) and the answer phrase. `null`: the action cannot be named, so the card stays.
+   */
+  fallback: string | null;
   ready: boolean;
 }
 /**
@@ -24,13 +35,22 @@ export function createVoicePrompt(deps: {
   owner: () => string | null;
   blocked: () => boolean;
   language: () => string | null;
-  interrupted: () => void;
+  interrupted: (message?: string) => void;
 }) {
   const store = createStore<VoicePromptState | null>(null);
   let session: string | null = null;
   let serial: Promise<unknown> = Promise.resolve();
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const expired = VOICE_ANSWER_ENDED;
+  const endedError = (thrown: unknown) => {
+    const error = toCallError(thrown).error;
+    return (
+      error.message === expired ||
+      error.message === "no such dictation (it was stopped, cancelled or ended)" ||
+      (error.code === "callbackRefused" && error.message === "Answer on the card.")
+    );
+  };
   const enabled = () =>
     deps.accessibility?.store.get().voiceAnswers === true &&
     deps.accessibility.store.get().readPrompts !== "never" &&
@@ -45,6 +65,18 @@ export function createVoicePrompt(deps: {
     if (current !== null)
       void deps.speech({ op: "promptCancel", ticket: current.ticket }).catch(() => undefined);
   };
+  const clearWindow = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  const ended = () => {
+    cancel();
+    deps.interrupted(expired);
+  };
+  const armWindow = (durationMs: number) => {
+    clearWindow();
+    timer = setTimeout(ended, durationMs);
+  };
   const own = async (owner: string | null) => {
     if (owner === session) return serial;
     session = owner;
@@ -56,6 +88,12 @@ export function createVoicePrompt(deps: {
   return {
     store,
     cancel,
+    ended,
+    endOnError(thrown: unknown, active: boolean) {
+      if (!active || !endedError(thrown)) return false;
+      ended();
+      return true;
+    },
     end() {
       cancel();
       void own(null).catch(() => undefined);
@@ -87,11 +125,40 @@ export function createVoicePrompt(deps: {
           r.number === null
             ? "Say no, or answer on the card"
             : `Say allow ${String(r.number)}, or no`;
-        const spoken = text.replace(/ Answer on the card in the chat\.$/, "") + ` ${phrase}.`;
-        store.set({ callbackId, ticket: r.ticket, phrase, text: spoken, ready: false });
+        const entry = deps.core.store.get().sessions[owner];
+        const asks = Object.values(deps.core.store.get().asks);
+        const lead = openPrompts(entry, asks).find((p) => p.callbackId === callbackId)?.lead;
+        const spoken =
+          (lead ?? text.replace(/ Answer on the card in the chat\.$/, "")) + ` ${phrase}.`;
+        const card = callbackEntry(deps.core.store.get(), owner, callbackId);
+        const fallback =
+          card === null ? null : `${approvalQuestionSaid(approvalQuestion(card))} ${phrase}.`;
+        store.set({ callbackId, ticket: r.ticket, phrase, text: spoken, fallback, ready: false });
         return spoken;
       } catch {
         return text;
+      }
+    },
+    /**
+     * Speaks `text` (a card's reading). When Mistral's safety filter refuses a permission prompt's text, the short
+     * fixed prompt is spoken instead (and repeated from then on), so the answer by voice stays possible.
+     */
+    async speak(callbackId: string | undefined, text: string, voice: string | null) {
+      const request = (said: string): SpeechRequest => ({ op: "speak", text: said, voice });
+      try {
+        return await deps.speech(request(text));
+      } catch (thrown) {
+        const current = store.get();
+        if (
+          current === null ||
+          current.callbackId !== callbackId ||
+          current.text !== text ||
+          current.fallback === null ||
+          toCallError(thrown).error.serverCode !== "speechGuardrail"
+        )
+          throw thrown;
+        store.set({ ...current, text: current.fallback });
+        return deps.speech(request(current.fallback));
       }
     },
     played(callbackId: string) {
@@ -108,14 +175,10 @@ export function createVoicePrompt(deps: {
         sampleRate,
         language,
       });
-      if (timer === null)
-        timer = setTimeout(() => {
-          cancel();
-          deps.interrupted();
-        }, 60_000);
+      if (r.kind === "started") armWindow(r.answerWindowMs ?? 60_000);
       return r;
     },
-    async answer(streamId: string): Promise<{ again: string | null; note: string }> {
+    async answer(streamId: string): Promise<{ again: string | null; note: string; said?: string }> {
       const current = store.get();
       if (current === null || !enabled()) return { again: null, note: "Answer on the card." };
       store.set({ ...current, ready: false });
@@ -123,11 +186,22 @@ export function createVoicePrompt(deps: {
         const r = await deps.speech({ op: "promptAnswer", ticket: current.ticket, streamId });
         if (store.get()?.ticket !== current.ticket)
           return { again: null, note: "Answer on the card." };
+        // A miss carries what the core heard ("" when nothing was): said first, like a question card's miss.
+        const heard = r.kind === "promptAnswer" ? r.heard : undefined;
+        const lead = heard === undefined ? "" : heardSentence(heard, false);
+        if (r.kind === "promptAnswer" && r.status === "ended") {
+          cancel();
+          return { again: null, note: expired, said: expired };
+        }
         if (r.kind === "promptAnswer" && (r.status === "retry" || r.status === "repeat")) {
+          clearWindow();
+          const retry =
+            heard === ""
+              ? `${lead} ${current.phrase}.`
+              : `${lead} That was not an answer. ${current.phrase}.`.trim();
           return {
-            again:
-              r.status === "repeat" ? current.text : `That was not an answer. ${current.phrase}.`,
-            note: "",
+            again: r.status === "repeat" ? current.text : retry,
+            note: r.status === "retry" ? lead : "",
           };
         }
         cancel();
@@ -138,9 +212,13 @@ export function createVoicePrompt(deps: {
               ? "Allowed once by voice."
               : r.kind === "promptAnswer" && r.status === "refused"
                 ? "Said No by voice."
-                : "Answer on the card.",
+                : `${lead} Answer on the card.`.trim(),
         };
-      } catch {
+      } catch (thrown) {
+        if (endedError(thrown)) {
+          cancel();
+          return { again: null, note: expired, said: expired };
+        }
         cancel();
         return { again: null, note: "Answer on the card." };
       }

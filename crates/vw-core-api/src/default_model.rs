@@ -1,6 +1,6 @@
 //! Saves the model used by future sessions in Vibe Work's own `VIBE_HOME/config.toml`.
 //!
-//! Vibe 2.26.1 has no session-independent config write RPC: `config/write` and
+//! The pinned Vibe has no session-independent config write RPC: `config/write` and
 //! `config/model/write` require an attached session and also update its pin. The
 //! lobby can read config, so this module admits an offered alias through the
 //! gated lobby read, then edits only the durable `active_model` key. Existing

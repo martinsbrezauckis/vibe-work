@@ -50,7 +50,7 @@ export function BringDialog({
             <Button
               data-testid="git.bring-dialog-prepare"
               type="button"
-              appearance="dialog"
+              variant="primary"
               disabled={busy}
               data-action="bring-ask-vibe"
               onClick={() => {
@@ -66,7 +66,7 @@ export function BringDialog({
               <Button
                 data-testid="git.bring-dialog-bring-in"
                 type="button"
-                appearance="dialog"
+                variant="primary"
                 disabled={busy}
                 data-action="bring-in"
                 onClick={() => void git.bringIn()}

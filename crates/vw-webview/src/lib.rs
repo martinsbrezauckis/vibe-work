@@ -44,6 +44,8 @@ pub mod window_shot;
 
 pub use engine::{PageMenuChoice, TauriEngine};
 pub use media::enable_media_capture;
+pub use page_crash::{PageCrash, on_page_crash};
+pub use person_watch::take_quit_from_pages;
 pub use prepare::prepare_child_views;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics
@@ -57,6 +59,7 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 mod color_scheme;
+mod page_crash;
 mod reload;
 
 mod request_log;

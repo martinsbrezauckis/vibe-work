@@ -8,7 +8,8 @@ export function BrowserDelegationSettings() {
   if (core === null) return null;
   return (
     <div className="check set-row" data-setting="browser-secret-permissions">
-      <span>{TEXT.secretPermissionsTitle}</span>
+      {/* A paragraph: WebKitGTK drops a plain span's text beside a button in a landmark. */}
+      <p>{TEXT.secretPermissionsTitle}</p>
       <Button
         data-testid="settings.browser-delegation-settings-open-settings"
         type="button"

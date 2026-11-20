@@ -89,7 +89,7 @@ impl PreviewService {
                 .ok_or(PreviewError::NothingOpen)?;
             // A Started event can precede the webview switching documents. Its old page may
             // still answer an evaluation, so do not drain until the new document finishes.
-            let mount = if entry.loading || entry.pending_open.is_some() {
+            let mount = if entry.loading() || entry.pending_open.is_some() {
                 None
             } else {
                 entry.ready_mount().cloned()

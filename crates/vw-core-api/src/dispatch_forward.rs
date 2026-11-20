@@ -58,7 +58,7 @@ impl Core {
         if confirmed && asked.is_none() {
             return Err(CoreError::new(
                 ErrorCode::InvalidParams,
-                "a confirmed resume must name its agent; request confirmation with the session's access mode",
+                "a confirmed resume must name its agent; request confirmation with the chat's access mode",
             )
             .with_method(method));
         }
@@ -95,6 +95,7 @@ impl Core {
 
     /// The typed composer switch is the sole route that can use the trusted-window Full access
     /// exception. A raw `call` of the same method must still bring a native confirmation token.
+    #[allow(clippy::too_many_lines)] // one ordered sequence of authority checks; splitting it hides the order
     pub(super) async fn forward_with_access_switch(
         &self,
         origin: Origin,
@@ -110,6 +111,7 @@ impl Core {
             return Ok(reply);
         }
         crate::session_ownership::check_delete(&self.shared, method, &params).await?;
+        crate::desktop_chats::check_open(&self.shared, method, &params)?;
         let _refresh = self.plugin_refresh_lock(method, &params, stop).await?;
         // Under the chat's send lock (`stops.rs`): a Stop's interrupt reaches a turn a checked send started; a Stop
         // since the continuation was scheduled refuses it here, before a stopped chat is reopened (the test that
@@ -204,6 +206,7 @@ impl Core {
             && let Some(id) = params["sessionId"].as_str()
         {
             crate::stop_tree::descendants(&self.shared, id).await?;
+            crate::stops::taken(&self.shared, id);
         }
         crate::session_loops::after(&self.shared, method, &params).await;
         sessions::project_result(&self.shared, method, &params, &mut reply.result);

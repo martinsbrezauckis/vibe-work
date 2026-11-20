@@ -10,7 +10,9 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::{FolderRules, MAX_PLACES, SETTINGS_KEY, agent_text, apply, load, looks_secret, run};
+use super::{
+    FolderRules, MAX_NOTE, MAX_PLACES, SETTINGS_KEY, agent_text, apply, load, looks_secret, run,
+};
 use crate::knowledge_view::{KnowledgeKind, KnowledgePlace, KnowledgeRequest};
 
 /// No folder is excluded, except under `blocked` when given.
@@ -235,6 +237,74 @@ fn rename_and_remove_change_only_the_named_place() {
     assert!(gone.contains("no longer in the list"), "{gone}");
 }
 
+// PREDICT (red before the change): there is no `setNote` request, so a place's note could only be changed by
+// removing and adding the place again (a new id); this does not compile until the request exists.
+#[test]
+fn set_note_changes_or_clears_only_the_note_of_the_named_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let places = apply(
+        &folder_place("Library", dir.path()),
+        add("Drive", KnowledgeKind::Drive, "OneDrive"),
+        &open(),
+    )
+    .unwrap();
+    let id = places[0].id.clone();
+    let noted = apply(
+        &places,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: "  contracts since 2024 ".into(),
+        },
+        &open(),
+    )
+    .unwrap();
+    assert_eq!(noted[0].note.as_deref(), Some("contracts since 2024"));
+    assert_eq!(noted[0].id, id);
+    assert_eq!(noted[0].name, places[0].name);
+    assert_eq!(noted[1], places[1]);
+    // An empty note removes it.
+    let cleared = apply(
+        &noted,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: "   ".into(),
+        },
+        &open(),
+    )
+    .unwrap();
+    assert_eq!(cleared[0].note, None);
+    let secret = apply(
+        &noted,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: "password=hunter2hunter2".into(),
+        },
+        &open(),
+    )
+    .unwrap_err();
+    assert!(secret.contains("looks like a password"), "{secret}");
+    let long = apply(
+        &noted,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: "x".repeat(MAX_NOTE + 1),
+        },
+        &open(),
+    )
+    .unwrap_err();
+    assert!(long.contains("longer than"), "{long}");
+    let gone = apply(
+        &noted,
+        KnowledgeRequest::SetNote {
+            id: "kb-0000".into(),
+            note: "x".into(),
+        },
+        &open(),
+    )
+    .unwrap_err();
+    assert!(gone.contains("no longer in the list"), "{gone}");
+}
+
 #[test]
 fn the_list_is_capped() {
     let full: Vec<KnowledgePlace> = (0..MAX_PLACES)
@@ -272,9 +342,16 @@ fn run_saves_into_settings_and_keeps_other_settings() {
         &open(),
     )
     .unwrap();
+    assert!(places.1, "an add changes the list");
+    let places = places.0;
     let saved: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
     assert_eq!(saved["keepAwake"], false);
     assert_eq!(saved[SETTINGS_KEY][0]["name"], "Library");
+    assert_eq!(
+        run(&settings, KnowledgeRequest::List {}, &open()).unwrap(),
+        (places.clone(), false),
+        "a list changes nothing"
+    );
     assert_eq!(load(&settings), places);
     // A refused request leaves the file as it was.
     let before = std::fs::read(&settings).unwrap();

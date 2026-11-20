@@ -359,3 +359,20 @@ fn fit_message(value: &mut Value, budget: usize) {
         keep /= 2;
     }
 }
+
+#[cfg(test)]
+mod request_refusal_tests {
+    use serde_json::json;
+
+    #[test]
+    fn a_large_page_receipt_keeps_the_host_refusal() {
+        let refusal = json!({"atMs":42,"origin":"http://example.com","target":"10.56.4.13:18115","targetClass":"local-network","reason":"question not answered","message":"Browser request refused by Vibe Work: the question was not answered"});
+        let mut receipt = json!({
+            "networkRequestRefusals": [refusal],
+            "untrustedPageContent": {"text": "page text ".repeat(3_000)},
+        });
+        super::fit(&mut receipt, 4_000);
+        assert_eq!(receipt["networkRequestRefusals"], json!([refusal]));
+        assert!(receipt["size"]["bytes"].as_u64().unwrap_or(u64::MAX) <= 4_000);
+    }
+}

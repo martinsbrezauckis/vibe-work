@@ -1,5 +1,5 @@
 //! Written-out credentials in a server's address, headers and environment never reach the plan or Vibe's config.
-//! Fake values only.
+//! Fake values only. A canonical fixture root keeps OS temp-directory aliases out of these paths.
 
 use super::fs::Disk;
 use super::mcp::Server;
@@ -9,14 +9,15 @@ const VALUE: &str = "fake-credential-value-for-tests-6b1d";
 
 fn home_with(servers: &str) -> (tempfile::TempDir, Homes) {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
+    let root = dir.path().canonicalize().unwrap();
+    let home = root.join("home");
     let path = home.join(".cursor/mcp.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, format!(r#"{{"mcpServers":{{{servers}}}}}"#)).unwrap();
     let homes = Homes {
         home,
         codex_home: None,
-        config_dir: dir.path().join("config"),
+        config_dir: root.join("config"),
         project: None,
     };
     (dir, homes)

@@ -350,7 +350,7 @@ pub(crate) fn approve_without_dialog(callback: &Value) -> bool {
             .and_then(Value::as_str)
             .and_then(|name| name.strip_prefix("mcp_vw."))
             .is_some_and(|name| {
-                ToolSet::of_tool(name).is_some() || crate::chrome_control::gateway::is_tool(name)
+                ToolSet::of_tool(name).is_some() || crate::chrome_control::is_tool(name)
             })
 }
 
@@ -399,7 +399,7 @@ pub(crate) async fn switch(
         if wait && !shared.channels.has_channel(&id) {
             tracing::debug!(
                 session_id = id,
-                "on-demand tools remain pending: the session channel closed; send a new message to apply them"
+                "on-demand tools remain pending: the chat channel closed; send a new message to apply them"
             );
             return Ok(());
         }

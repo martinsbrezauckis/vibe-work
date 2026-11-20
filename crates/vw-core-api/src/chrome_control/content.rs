@@ -180,6 +180,15 @@ fn helper_error(receipt: &Value) -> Option<Value> {
         && error["code"].is_string()
         && error["message"].is_string()
     {
+        // The helper's words for a session that is not active name no cause and no next step.
+        if error["code"] == "CONTROL_SUSPENDED"
+            && error["message"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("Session start must be acknowledged"))
+        {
+            return Some(json!({"code":error["code"],
+                "message":vw_vocabulary::texts::AGENT_BROWSER_NOT_ACTIVE}));
+        }
         return Some(json!({"code":error["code"],"message":error["message"]}));
     }
     let code = receipt.get("error")?["code"].as_str()?;

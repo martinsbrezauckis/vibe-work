@@ -23,6 +23,9 @@ url = { workspace = true }
 # Canary tokens and per-listener credentials (same version as the other crates).
 getrandom = { workspace = true }
 base64 = "0.23"
+# Hex of the per-listener password and its constant-time check (same crates as vw-pages and vw-keyproxy).
+hex = { workspace = true }
+subtle = { workspace = true }
 # The content-rule JSON for macOS webviews (same version as the other crates).
 serde_json = { workspace = true }
 # The user's proxy rules (environment, Windows/macOS system settings, NO_PROXY), the same matcher reqwest uses for

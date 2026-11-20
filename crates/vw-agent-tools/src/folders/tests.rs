@@ -4,6 +4,27 @@
 use super::*;
 
 #[test]
+fn app_settings_containing_developer_permissions_stays_outside_agent_tools() -> std::io::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let cwd = dir.path().join("repo");
+    let app_data = dir.path().join("app-data");
+    std::fs::create_dir_all(&cwd)?;
+    std::fs::create_dir_all(app_data.join("vibe-home"))?;
+    let file = app_data.join("settings.json");
+    std::fs::write(&file, br#"{"developerPermissions":true}"#)?;
+    let layout = Layout::new(&app_data.join("vibe-home"), &cwd)?;
+    let permits = |_: &Path, _: bool| Ok(());
+    for access in [Access::Read, Access::Write, Access::Unknown] {
+        let refusal = layout
+            .check(&file, &cwd, access, &permits)
+            .expect("app settings file must stay protected");
+        assert!(refusal.contains("app data"), "{access:?}: {refusal}");
+    }
+    Ok(())
+}
+
+#[test]
 fn shell_read_of_vibe_home_explains_the_tool_specific_boundary() -> std::io::Result<()> {
     let cwd = std::env::current_dir()?;
     let layout = Layout::new(&cwd.join("vibe-home"), &cwd)?;

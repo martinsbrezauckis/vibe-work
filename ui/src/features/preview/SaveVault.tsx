@@ -211,7 +211,8 @@ export function SaveVault({
           <Button
             data-testid="preview.save-vault-choose-2"
             type="button"
-            appearance="preview"
+            shape="outlined"
+            placement="preview"
             data-vault-save="selection"
             disabled={blocked || disabled || choosing || localChoice !== null}
             title="Save to vault"
@@ -226,7 +227,8 @@ export function SaveVault({
         <Button
           data-testid="preview.save-vault-set-menu-open"
           type="button"
-          appearance={compact ? "icon" : "preview"}
+          appearance={compact ? "icon" : undefined}
+          shape="outlined"
           placement="browser-save"
           data-vault-save="more"
           ref={more}

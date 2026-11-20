@@ -18,18 +18,21 @@ fn chrome_words(id: Fixed) -> String {
         Fixed::InvalidArguments => {
             "Not run: invalid Chrome tool arguments. Use chrome_status for the action's argument schema."
         }
-        Fixed::OpenSessionFirst => "Not run: open a Chrome session in this chat first.",
+        Fixed::OpenSessionFirst => "Not run: open a Chrome browser session in this chat first.",
         Fixed::SelectionFromUser => {
             "Not run: selection is sent by the user from Chrome. Ask the user to use Ask Vibe Work in Chrome's context menu."
         }
         Fixed::OtherChat => {
-            "Not run: this Chrome session belongs to another chat. Open a Chrome session for this chat with chrome_session."
+            "Not run: this Chrome browser session belongs to another chat. Open a Chrome browser session for this chat with chrome_session."
         }
         Fixed::LostConnection => {
-            "Not run: this Chrome session lost its connection to Chrome. Check chrome_status, reconnect the browser if needed, then open a new session with chrome_session."
+            "Not run: this Chrome browser session lost its connection to Chrome. Check chrome_status, reconnect the browser if needed, then open a new browser session with chrome_session."
         }
         Fixed::Stopped => {
-            "Not run: this Chrome session was stopped; open a new one with chrome_session."
+            "Not run: this Chrome browser session was stopped; open a new one with chrome_session."
+        }
+        Fixed::ModeLowered => {
+            "Not run: this Chrome browser session ended because this chat's access mode was lowered; its tabs stay open. Open a new one with chrome_session if the new mode allows the work."
         }
         Fixed::UnknownAction => {
             "Not run: unknown Chrome action. Use chrome_status to find supported actions."
@@ -67,6 +70,14 @@ fn chrome_agents_read_the_expected_refusals() {
     assert_eq!(
         Fixed::Unavailable.text(Browser::Chrome),
         Browser::Chrome.text(vw_vocabulary::texts::CHROME_UNAVAILABLE)
+    );
+}
+
+#[test]
+fn edge_other_chat_refusal_uses_an_edge_browser_session() {
+    assert_eq!(
+        Fixed::OtherChat.text(Browser::Edge),
+        "Not run: this Edge browser session belongs to another chat. Open an Edge browser session for this chat with chrome_session."
     );
 }
 
@@ -128,7 +139,7 @@ fn every_fixed_refusal_has_a_next_step_for_each_browser() {
                     "Use chrome_status"
                 }
                 Fixed::SelectionFromUser => "Ask the user",
-                Fixed::OtherChat | Fixed::Stopped => "chrome_session",
+                Fixed::OtherChat | Fixed::Stopped | Fixed::ModeLowered => "chrome_session",
                 Fixed::LostConnection => "reconnect",
                 Fixed::Unavailable => "Use an available browser",
             };

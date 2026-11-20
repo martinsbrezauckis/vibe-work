@@ -55,6 +55,7 @@ vw-vocabulary = { workspace = true }
 # The attach dialog's files reach the composer as base64 (`picked_files.rs`).
 base64 = { workspace = true }
 serde = { workspace = true }
+vw-browser = { workspace = true }
 vw-host = { workspace = true }
 # The Vibe installer type held for the Vibe update check (`updater::VibeSlot`).
 vw-vibe-install = { workspace = true }
@@ -76,6 +77,9 @@ vw-netguard = { workspace = true }
 vw-debug-api = { workspace = true }
 # Project Pages: the page viewer settings.
 vw-pages = { workspace = true }
+# The updater's HTTP client: the redirect policy that keeps every hop on the channel's package origins
+# (`updater.rs`); the same reqwest as the updater plugin and vw-mistral (one version in the lock file).
+reqwest = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "std"] }
 

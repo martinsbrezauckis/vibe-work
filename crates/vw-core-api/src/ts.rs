@@ -11,10 +11,10 @@ use ts_rs::{Config, TS};
 
 mod declarations;
 use declarations::{
-    callbacks_decls, changes_decls, connectors_decls, core_decls, documents_decls, events_decls,
-    files_decls, git_browser_decls, git_request_decls, instructions_decls, keys_decls,
-    market_decls, push_decls, secrets_decls, sessions_decls, speech_decls, status_decls,
-    terminal_decls, trim_decl_lines, vibe_decls, work_decls, worktrees_decls,
+    callbacks_decls, changes_decls, connectors_decls, core_decls, documents_decls, errors_decls,
+    events_decls, files_decls, git_browser_decls, git_request_decls, instructions_decls,
+    keys_decls, market_decls, push_decls, secrets_decls, sessions_decls, speech_decls,
+    status_decls, terminal_decls, trim_decl_lines, vibe_decls, work_decls, worktrees_decls,
 };
 
 mod feedback;
@@ -172,7 +172,7 @@ fn index_module(header: &str, core: &[String], siblings: &[(&[String], &str)]) -
     let body = body.as_str();
     let mut index = String::from(header);
     index.push_str(
-        "\n/** Any JSON value (Vibe structures the core passes through untyped). */\n\
+        "/** Any JSON value (Vibe structures the core passes through untyped). */\n\
          export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null;\n\n",
     );
     for (decls, module) in siblings {
@@ -189,7 +189,8 @@ fn index_module(header: &str, core: &[String], siblings: &[(&[String], &str)]) -
 /// (terminal types), `keys.ts`, `vibe.ts`, `instructions.ts`, `changes.ts`, `documents.ts`,
 /// `speech.ts`, `preview.ts`, `projects.ts`, `files.ts`, `handbook.ts`, `git.ts`, `network.ts`,
 /// `git_request.ts`, `market.ts`, `work.ts`, `sessions.ts` (session list and tools),
-/// `events.ts` (`CoreEvent`), and `secrets.ts` (project secrets and safety reminders).
+/// `events.ts` (`CoreEvent`), `errors.ts` (`CoreError`, `ErrorCode`, `AlertKind`), and `secrets.ts` (project secrets and
+/// safety reminders).
 /// Each file stays under the 800-line limit.
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -209,6 +210,7 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
     let git = git_decls(&cfg);
     let events = events_decls(&cfg);
     let secrets = secrets_decls(&cfg);
+    let errors = errors_decls(&cfg);
     // Plain modules: only `index` imports from them (their declarations are used nowhere else).
     let plain = [
         (proposal_decls(&cfg), "proposals"),
@@ -301,6 +303,7 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (&events, "events"),
         (&secrets, "secrets"),
         (&git_request, "git_request"),
+        (&errors, "errors"),
     ];
     siblings.extend(
         plain
@@ -321,6 +324,10 @@ pub fn typescript_modules(header: &str) -> Vec<(String, String)> {
         (
             "sessions.ts".to_owned(),
             submodule_with(header, &sessions, &core, &status, "status"),
+        ),
+        (
+            "errors.ts".to_owned(),
+            submodule_with(header, &errors, &core, &preview, "preview"),
         ),
         (
             "preview.ts".to_owned(),

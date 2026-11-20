@@ -1,8 +1,9 @@
 /**
  * Connected browser tabs, using the composer's menu styles: a section heading with the icon close button, then one
- * row per tab (the title as plain menu text, the profile's shown name and address muted below). Rows are buttons, so
- * `.chrome-tabs .it` resets the browser's button look. Once the chat uses a browser profile, tabs of other profiles
- * stay listed but disabled with "Not this chat's profile": a chat keeps its profile. Depends on the composer store and chromeTabs; called by
+ * row per tab (the title as plain menu text, the profile's shown name and address muted below). Rows are the shared
+ * menu-item buttons. Once the chat uses a browser profile, tabs of other profiles
+ * stay listed but disabled while its external connection is live. A released connection allows another selection.
+ * Depends on the composer store and chromeTabs; called by
  * Composer. The menu fits between the chat header and footer, resizing its scrollable list as the window changes.
  * Keyboard: opened from its "Add a browser tab…" button, focus moves into the panel; Escape or the close button
  * closes it and puts focus back on that button.
@@ -19,6 +20,7 @@ import { useComposerState } from "./hooks";
 import { chatProfile, pickChromeTab, sameProfile } from "./chromeTabs";
 import { NEW_CHAT } from "../../state/newChatKey";
 import { useShellState } from "../shell/hooks";
+import { TEXT, wording } from "../../vocabulary";
 
 /** The composer's "Add a browser tab…" button that opens this panel. */
 function triggerOf(panel: HTMLElement | null): HTMLElement | null {
@@ -49,6 +51,8 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
   const newChatOwner = useShellState((s) => s.newChatOwner);
   const owner = sessionId === NEW_CHAT ? newChatOwner : sessionId;
   const bound = chatProfile(view, owner);
+  const selection = view?.chatProfiles?.find((row) => row.sessionId === owner);
+  const pendingRelease = selection?.state === "stopping" || selection?.state === "unconfirmed";
   const element = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<{ up: boolean; maxHeight?: number }>({ up: true });
   const open = picker?.sessionId === sessionId;
@@ -98,14 +102,13 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
   }, [open]);
   if (picker?.sessionId !== sessionId) return null;
   const browser = picker.browser ?? "Chrome";
-  // A tab of another browser cannot join a chat bound to this one: say which browser and profile the chat uses.
+  // A live external connection keeps its exact profile until the core confirms it has ended.
   const usedBy = bound === null ? null : profileBrowser(bound);
-  const boundName = (
-    view?.chatProfiles?.find((row) => row.sessionId === owner)?.name ?? ""
-  ).replace(`${usedBy ?? ""} · `, "");
+  const boundName = (selection?.name ?? "").replace(`${usedBy ?? ""} · `, "");
+  const currentProfile = `${usedBy ?? browser}${boundName ? ` (${boundName})` : ""}`;
   const otherBrowser =
     usedBy !== null && usedBy !== browser
-      ? `This chat uses ${usedBy}${boundName ? ` (${boundName})` : ""}`
+      ? wording(TEXT.browserProfileInUse, { profile: currentProfile })
       : null;
   return (
     <div
@@ -171,7 +174,7 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
         {picker.builtinRows?.map((tab) => (
           <Button
             type="button"
-            appearance="menu-option"
+            appearance="menu"
             key={tab.pageKey}
             data-testid="composer.builtin-tab-pick"
             data-item-id={tab.pageKey}
@@ -185,16 +188,22 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
           </Button>
         ))}
         {picker.rows.map((tab) => {
-          const other = bound !== null && !sameProfile(tab.profileId, bound);
-          const detail = `${tab.profileName} · ${other ? (otherBrowser ?? "Not this chat's profile") : tab.url}`;
-          const reason = other
-            ? (otherBrowser ??
-              `A chat keeps one ${browser} profile. Start a new chat to add a tab from ${tab.profileName}.`)
-            : null;
+          const other =
+            selection?.state !== "unopened" && bound !== null && !sameProfile(tab.profileId, bound);
+          const blocked = other || pendingRelease;
+          const detail = `${tab.profileName} · ${blocked ? (otherBrowser ?? TEXT.browserProfileOther) : tab.url}`;
+          const reason = pendingRelease
+            ? TEXT.browserProfileReleasePending
+            : other
+              ? wording(TEXT.browserProfileReleaseFirst, {
+                  profile: currentProfile,
+                  next: tab.profileName,
+                })
+              : null;
           return (
             <Button
               type="button"
-              appearance="menu-option"
+              appearance="menu"
               data-testid="composer.chrome-tab-pick"
               data-item-id={`${tab.profileId}:${String(tab.tabId)}`}
               key={`${tab.profileId}:${String(tab.tabId)}`}
@@ -202,9 +211,9 @@ export function ChromeTabPicker({ sessionId }: { sessionId: string }): ReactElem
               // same-titled tabs of other profiles or sites sound different. It is in the name, not a description,
               // because WebKitGTK does not expose aria-description to screen readers.
               aria-label={`${tab.title || tab.url}, ${reason === null ? detail : `${tab.profileName} · ${reason}`}`}
-              data-profile={other ? "other" : undefined}
+              data-profile={blocked ? "other" : undefined}
               title={reason ?? undefined}
-              disabled={picker.loading || other}
+              disabled={picker.loading || blocked}
               onClick={() =>
                 void pickChromeTab(
                   app,

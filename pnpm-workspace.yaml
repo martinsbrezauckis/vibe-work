@@ -1,2 +1,9 @@
 packages:
   - ui
+
+# Supply-chain settings (https://pnpm.io/supply-chain-security): a version must be a week old before it can be
+# resolved, a package whose publishing trust went down is refused, and only direct dependencies may come from
+# outside the registry. Installs from the committed lockfile are not affected.
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+blockExoticSubdeps: true

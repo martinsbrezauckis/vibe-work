@@ -158,7 +158,7 @@ pub(crate) fn run(
             }
         }
         shared.emit(crate::CoreEvent::ChromeControl {
-            view: crate::chrome_control::commands::view(shared),
+            view: crate::chrome_control::settings_view(shared),
         });
         BrowserResult::Preferences {
             preferences: shared.browser_settings.view(shared.preview.is_some()),

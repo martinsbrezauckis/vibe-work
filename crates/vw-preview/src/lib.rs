@@ -23,9 +23,15 @@ mod action_overlay;
 pub mod action_tracking;
 mod browse;
 mod cdp_frames;
+mod declarative_source;
+pub use declarative_source::{
+    MAX_ARCHIVE_BYTES, MAX_SOURCE_BYTES, declarative_closed_archive, declarative_closed_source,
+};
 mod compose;
 mod console;
 mod dialogs;
+mod document_journal;
+pub use document_journal::LoadedDocument;
 mod windows;
 pub use windows::{PageWindowAction, PageWindowInfo};
 mod download_tools;
@@ -72,7 +78,7 @@ mod viewport;
 mod visibility;
 
 pub use browse::{LoadState, LoopbackGate, SHOTS_BLOCKED, shots_protected};
-pub use cdp_frames::{CDP_EVENTS, CdpDone, CdpFrames, CdpTransport, FramesDone};
+pub use cdp_frames::{CDP_EVENTS, CLOSED_ROOTS_LINE, CdpDone, CdpFrames, CdpTransport, FramesDone};
 pub use compose::{PixelRect, canvas, crop, fit, paste};
 pub use console::{
     ConsoleEntry, ConsoleLevel, HOST_RING, MAX_RETURNED, MAX_TEXT, PAGE_RING, accessor_name,
@@ -87,8 +93,9 @@ pub use engine::{
 };
 pub use engine_pool::{BrowserSaveGuard, EnginePoolSnapshot, MemoryProbe, effective_browser_cap};
 pub use frames::{
-    DETACHED_FRAME, FrameAnswer, UNREADABLE_FRAME, UNREPORTING_FRAME_REFUSAL,
-    checked_frame_request, detached_aware, main_answer, main_script, validate_frame_point,
+    DETACHED_FRAME, FrameAnswer, NATIVE_SELECT_POPUP_REFUSAL, UNREADABLE_FRAME,
+    UNREPORTING_FRAME_REFUSAL, checked_frame_request, detached_aware, main_answer, main_script,
+    validate_frame_point,
 };
 pub use ids::{LABEL_PREFIX, StorageKey, is_preview_label};
 pub use layout::{DeviceWidth, MIN_SIDE, PARKED_AREA, Placement, Rect, parked, place};

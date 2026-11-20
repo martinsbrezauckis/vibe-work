@@ -381,7 +381,7 @@
   margin-top: 2px;
   color: var(--text-3);
 }
-.plist li[aria-selected="true"] > svg.i {
+.plist li[data-active="true"] > svg.i {
   color: var(--orange);
 }
 .pr-main {

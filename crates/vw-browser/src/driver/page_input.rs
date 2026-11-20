@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 const ACT_RETRY: Duration = Duration::from_secs(2);
+const MENU_OPEN: &str = "a menu or dropdown list is open in Vibe Work's window and only the user can use it, so nothing was sent. Ask the user to close the menu, then try again";
 impl Browser {
     /// Runs the act script, polling moving targets and active entrance animations for at most [`ACT_RETRY`].
     pub(super) async fn page_act(
@@ -54,6 +55,7 @@ impl Browser {
         let mut request = self.input_request(session_id, action, consent, by, &page)?;
         let mut script = scripts::act(&request);
         let allowed = self.dispatch_permission_check(session_id, by);
+        self.refuse_select_with_menu_if(session_id, action).await?;
         let start = tokio::time::Instant::now();
         loop {
             let answer: PageAnswer = self
@@ -138,9 +140,26 @@ impl Browser {
                     ));
                 }
             }
-            return self
+            let finished = self
                 .finish_input(session_id, action, &request, by, answer)
-                .await;
+                .await?;
+            self.refuse_select_with_menu_if(session_id, action).await?;
+            return Ok(finished);
+        }
+    }
+
+    async fn refuse_select_with_menu_if(
+        &self,
+        session_id: &str,
+        action: &Action,
+    ) -> Result<(), ActError> {
+        if !matches!(action, Action::Select { .. }) {
+            return Ok(());
+        }
+        match self.service.select_menu_open(session_id).await {
+            Ok(true) => Err(refused(MENU_OPEN)),
+            Ok(false) => Ok(()),
+            Err(error) => Err(refused(crate::driver::preview_text(&error))),
         }
     }
     fn input_request(
@@ -188,6 +207,7 @@ impl Browser {
                 json!({"text":control.args()["text"],"insert":true,"editor":true});
         }
         request["nativeUser"] = json!(by == Actor::User);
+        request["nativeSelectPopup"] = json!(cfg!(any(target_os = "macos", target_os = "linux")));
         request["allowSend"] = json!(consent.is_none_or(|token| token["allowSend"] != false));
         request["nativeClick"] = json!(
             matches!(action, Action::Pointer { .. } | Action::Hover { .. })

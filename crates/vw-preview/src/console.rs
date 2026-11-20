@@ -77,11 +77,7 @@ pub fn accessor_name() -> String {
         // A fixed fallback still works; the name is a collision guard, not a secret.
         return "__vw_console_fallback".to_owned();
     }
-    let mut name = String::from("__vw_console_");
-    for byte in bytes {
-        let _ = std::fmt::Write::write_fmt(&mut name, format_args!("{byte:02x}"));
-    }
-    name
+    format!("__vw_console_{}", hex::encode(bytes))
 }
 
 /// The initialization script for a mount (main frame only). `accessor` must come from [`accessor_name`].

@@ -2,6 +2,44 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.15 (2026-11-21)
+
+Built for Vibe 3.1.3 on Python 3.14.8.
+
+- **Models** come from Mistral's own list, so new models appear without a Vibe Work update.
+- **Voice chat**: answer the agent's questions by voice, even while you work in another chat.
+- **Voice**: approving a file change by voice now works, and when Vibe Work does not understand your answer it tells you what it heard.
+- **Video recording** of the agent's work in every browser: built-in, Chrome, Edge, Firefox and Safari.
+- **One external browser per chat**, next to the built-in browser: it locks only once the agent uses it, and closing its window ends the session.
+- **Developer permissions** in Settings: the agent can ask Vibe Work to push your branch, with your sign-in staying in the app.
+- **Local network**: when a site tries to reach your computer, the chat shows a card to allow or block it.
+- **Import your setup** from other coding agents.
+- **Safari** now shows the agent's frame with Pause and Stop, like the other browsers.
+- **Pause and Stop from the keyboard** in Chrome and Edge (Ctrl+Shift+9 and Ctrl+Shift+8, Command on a Mac); a page in fullscreen leaves fullscreen while the agent works, so you always see it.
+- **Firefox and Safari** handle embedded frames, drag-and-drop, popups and Stop more reliably.
+- **Stop** ends only the turn you stopped: a scheduled `/loop` run or your next message works normally afterwards.
+- **Windows**: the window stays responsive while the tray menu starts.
+- **Windows**: an incomplete install or update now says so at startup and how to repair it.
+- **Updates and the Vibe download** come only from their own servers; anything else is refused before it starts.
+- **Project secrets** work on a computer without Git.
+- **Chrome and Edge extension 0.1.15**: long pages, scrolling boxes, pages with background workers, long waits and drags work more reliably, and your clicks and keys stay blocked while the agent waits on a page.
+- **Your Firefox**: a page that asks for a username and password signs in with a vault login without stalling the agent.
+- **Windows**: Vibe Work and all its tools start on a fresh Windows without installing extra Microsoft runtimes; if a part of the installation is missing, Vibe Work and the agent say so and the installer repairs it.
+- **If the window stops working** or never comes up at start, Vibe Work reloads or restarts it by itself and tells you; your chats stay.
+- **macOS**: Vibe Work starts faster and its window responds right away.
+- **Linux**: the window stays drawn when you open or close a side panel while the Orca screen reader runs, and voice chat opens the microphone the first time.
+- **Voice chat** shows Listening only once your microphone sends sound, and tells you when it hears nothing.
+- **Knowledge base** settings update live, a cloud drive place picks from your connectors, and each place can get a note.
+- **Screen readers**: the command palette and Linux settings rows read correctly with NVDA and Orca.
+- **Windows**: the title bar follows Vibe Work's dark mode.
+- **Card numbers, PINs and passwords** stay hidden from the agent's page reads, captures and screenshots in every access mode.
+- **Withdrawing a site's vault access** stops a sign-in that is already under way.
+- **Tools > Skills** lists the skills for the selected chat right after a restart, or says why it cannot.
+- **After the update**, chats you set to Mistral Large 4 keep it.
+- **Linux (Wayland)**: when the agent copies text, Vibe Work checks that the clipboard really changed.
+
+Vibe Work needs macOS 14 or later.
+
 ## 0.1.14 (2026-11-18)
 
 Bugfix release. Built for Vibe 3.1.2 on Python 3.14.8.

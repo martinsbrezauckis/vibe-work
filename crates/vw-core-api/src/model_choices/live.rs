@@ -22,9 +22,9 @@ pub(crate) fn admission(method: &str, params: &Value) -> Value {
 }
 
 pub(crate) async fn publish(shared: &Arc<Shared>, id: &str, runtime: Value) {
-    let previous_mode = crate::chrome_control::check::mode(shared, id);
+    let previous_mode = crate::chrome_control::chat_mode(shared, id);
     shared.access.observe_runtime(id, &runtime);
-    crate::chrome_control::check::mode_changed(shared, id, previous_mode.as_deref());
+    crate::chrome_control::mode_changed(shared, id, previous_mode.as_deref());
     shared.model_choices.learn(&runtime);
     let applied = shared.store.apply(vw_session::Notification::new(
         "runtime/updated",
@@ -44,7 +44,6 @@ pub(crate) async fn before(shared: &Arc<Shared>, method: &str, params: &Value) {
         return;
     };
     let choices = &shared.model_choices;
-    let expected = choices.records.get(id).expected();
     let runtime = match super::restore::read(shared, id).await {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -52,6 +51,8 @@ pub(crate) async fn before(shared: &Arc<Shared>, method: &str, params: &Value) {
             return;
         }
     };
+    super::retired::migrate(&choices.records, id, &runtime);
+    let expected = choices.records.get(id).expected();
     let expected = expected.or_else(|| super::restore::unavailable_default(&runtime["config"]));
     let runtime =
         if let Some(choice) = expected.filter(|choice| super::restore::differs(&runtime, choice)) {

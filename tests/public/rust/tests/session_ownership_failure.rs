@@ -105,9 +105,7 @@ fn assert_local_ownership_error(error: &CoreError) {
     assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
     assert_eq!(error.server_code, None, "{error:?}");
     assert!(
-        error
-            .message
-            .starts_with("Could not check session ownership"),
+        error.message.starts_with("Could not check chat ownership"),
         "{}",
         error.message
     );

@@ -18,7 +18,7 @@ export function ConsoleLink() {
       <Button
         data-testid="setup.console-link-open-link"
         type="button"
-        appearance="key-link"
+        appearance="link"
         data-href={VIBE_KEY_URL}
         onClick={() => {
           core?.client.openLink(VIBE_KEY_URL).catch(() => {

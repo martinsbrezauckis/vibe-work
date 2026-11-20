@@ -38,7 +38,7 @@ fn mcp_mode(chrome: bool, package: bool) -> ExitCode {
         (Some(endpoint), Some(credential)) => {
             wire::call(endpoint, credential, tool, args, wire::CALL_TIMEOUT)
         }
-        _ => Err("Vibe Work's tools are not connected in this session (no credential).".to_owned()),
+        _ => Err("Vibe Work's tools are not connected in this chat (no credential).".to_owned()),
     };
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();

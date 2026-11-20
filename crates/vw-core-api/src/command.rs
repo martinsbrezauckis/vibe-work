@@ -495,6 +495,13 @@ pub enum Command {
         /// Scanner operation.
         request: crate::SecretScanRequest,
     },
+    /// Read (`None`) or change (`Some`) the global Developer permissions switch. Only the person in the app
+    /// window can write it; enabling asks through the native confirmation.
+    DeveloperPermissions {
+        #[allow(missing_docs)]
+        // The variant documents the read/write field; keeps the generated TS within its size budget.
+        enabled: Option<bool>,
+    },
     /// Safety reminders: the rules the agent's commands are checked against, switched on
     /// or off, and the user's own rules.
     Safety {

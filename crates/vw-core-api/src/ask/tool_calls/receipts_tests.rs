@@ -187,3 +187,18 @@ async fn one_chats_unreported_receipts_neither_block_other_chats_nor_stay() {
     save(shared, receipt("busy", 1001)).expect("expired receipts leave the queue");
     f.finish().await;
 }
+
+/// PREDICT: a refused call gave only the fixed text, with no hint which argument changed after the decision; the
+/// log now names the differing field paths and never their values.
+#[test]
+fn a_mismatch_names_the_differing_fields_without_values() {
+    let decided = json!({"reason":"r","changes":[{"path":"config.toml","kind":"edit","content":"secret-looking-a"}]});
+    let called = json!({"reason":"r","changes":[{"path":"config.toml","kind":"edit","content":"secret-looking-b","note":null}]});
+    let mut fields = Vec::new();
+    super::differing(&decided, &called, String::new(), &mut fields);
+    assert_eq!(fields, ["/changes/0/content", "/changes/0/note"]);
+    assert!(fields.iter().all(|f| !f.contains("secret-looking")));
+    let mut none = Vec::new();
+    super::differing(&decided, &decided, String::new(), &mut none);
+    assert_eq!(none, Vec::<String>::new());
+}

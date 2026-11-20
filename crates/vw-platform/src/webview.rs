@@ -39,6 +39,10 @@ mod full_clip;
 #[allow(unsafe_code)]
 pub mod full_screen_win;
 mod pdf;
+/// The end of a webview's page process (`WebView2` `ProcessFailed`), for the main window's crash recovery.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod process_failed_win;
 pub mod sharp;
 mod site_data;
 pub use pdf::PdfFile;
@@ -67,6 +71,8 @@ pub mod click_marker_mac;
 pub mod click_marker_win;
 #[cfg(any(windows, test))]
 mod click_marker_win_math;
+/// Content-rule actions per webview (reported natively on macOS only).
+pub mod content_rule_event;
 /// Element full screen off while an agent act runs.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -77,6 +83,10 @@ pub mod request_event;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod request_watch_mac;
+/// The current page as a web archive (macOS 11+), for the protected scan's page-source check.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod web_archive_mac;
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]

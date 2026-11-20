@@ -108,6 +108,8 @@ export interface ComposerState {
   sending: Readonly<Record<string, true>>;
   /** Manual context compaction in progress, cancellable through Stop. */
   compacting: Readonly<Record<string, true>>;
+  /** Turn whose Stop was requested; kept until that turn ends so late browser events cannot revive its controls. */
+  stopRequested: Readonly<Record<string, string>>;
   /** A short message under the composer per session (a refused send, a stale steer). */
   notes: Readonly<Record<string, string>>;
   /** Chats whose plugin reload failed; their note offers a new chat. */
@@ -175,6 +177,7 @@ const EMPTY: ComposerState = {
   pastes: {},
   sending: {},
   compacting: {},
+  stopRequested: {},
   notes: {},
   pluginReloadFailed: {},
   resend: {},
@@ -542,6 +545,12 @@ export function createComposerStore(persist: boolean) {
         compacting: setIn(s.compacting, sessionId, on ? true : undefined),
       }));
     },
+    setStopRequested(sessionId: string, turnId: string | null): void {
+      store.set((s) => ({
+        ...s,
+        stopRequested: setIn(s.stopRequested, sessionId, turnId ?? undefined),
+      }));
+    },
     note(sessionId: string, text: string | null): void {
       store.set((s) => ({
         ...s,
@@ -648,6 +657,7 @@ export function createComposerStore(persist: boolean) {
           literal,
           draftBy,
           compacting,
+          stopRequested,
           pluginReloadFailed,
           tabBrowser,
         } = s;
@@ -664,6 +674,7 @@ export function createComposerStore(persist: boolean) {
           loopsOpen = setIn(loopsOpen, id, undefined);
           notes = setIn(notes, id, undefined);
           compacting = setIn(compacting, id, undefined);
+          stopRequested = setIn(stopRequested, id, undefined);
           pluginReloadFailed = setIn(pluginReloadFailed, id, undefined);
         }
         return {
@@ -681,6 +692,7 @@ export function createComposerStore(persist: boolean) {
           literal,
           draftBy,
           compacting,
+          stopRequested,
           pluginReloadFailed,
         };
       });

@@ -1,6 +1,6 @@
-//! Visual captures below Full access never show a protected field's value: a `browser_read` screenshot, a
+//! Visual captures never show a protected field's value: a `browser_read` screenshot, a
 //! `capture.screenshot`, a GIF frame and a full-page PNG are refused while the page shows a password, PIN or card
-//! value (the shared privateField rule); a Full access chat (the core's delegation) captures as before.
+//! value (the shared privateField rule), including in Full access.
 //! Uses the real browser driver and Chromium pixels; fake values only.
 //!
 //! PREDICT (before the admission check): every capture below succeeds and its pixels show the typed card number
@@ -112,7 +112,7 @@ async fn gif_frames_below_full_access_are_not_taken_while_a_protected_value_show
 }
 
 #[tokio::test]
-async fn masked_empty_and_ordinary_fields_do_not_stop_a_capture_and_full_access_delegates() {
+async fn masked_empty_and_ordinary_fields_do_not_stop_a_capture_but_full_access_still_guards() {
     let rig = Rig::new().await;
     page(
         &rig,
@@ -124,11 +124,11 @@ async fn masked_empty_and_ordinary_fields_do_not_stop_a_capture_and_full_access_
     read_shot(&rig).await.unwrap();
     page(&rig, SHOWN[0]).await;
     rig.browser.set_delegation_authorizer(Arc::new(Full));
-    screenshot(&rig).await.unwrap();
-    read_shot(&rig).await.unwrap();
+    assert_eq!(screenshot(&rig).await.unwrap_err(), protected_shown());
+    assert_eq!(read_shot(&rig).await.unwrap_err(), protected_shown());
     vw_browser::capture::shot::full_page(&rig.browser, SESSION, None)
         .await
-        .unwrap();
+        .unwrap_err();
 }
 
 async fn frame_page(rig: &Rig, inner: &str) {
@@ -207,11 +207,11 @@ async fn a_filled_field_in_a_closed_shadow_root_refuses_captures_below_full_acce
     )
     .await;
     screenshot(&rig).await.unwrap();
-    // Full access delegates the page's data, closed roots included.
+    // PREDICT: Full access skips capture admission, so a visible protected field reaches screenshot pixels.
     closed_root_page(&rig, "<label>PIN <input value=4471></label>").await;
     assert_eq!(screenshot(&rig).await.unwrap_err(), protected_shown());
     rig.browser.set_delegation_authorizer(Arc::new(Full));
-    screenshot(&rig).await.unwrap();
+    assert_eq!(screenshot(&rig).await.unwrap_err(), protected_shown());
 }
 
 /// A host drawn as `display: contents` has no box of its own; its closed root's field still shows.

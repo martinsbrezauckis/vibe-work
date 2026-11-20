@@ -16,7 +16,7 @@ async fn fixture(name: &str, profiles: serde_json::Value) -> crate::Core {
             .join("Profile 1")
             .join("Extensions")
             .join(&chrome.config.extension_id)
-            .join("0.1.3_0"),
+            .join("0.2.3_0"),
     )
     .unwrap();
     std::fs::write(

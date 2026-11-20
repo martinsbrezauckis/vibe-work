@@ -277,8 +277,8 @@ pub(crate) fn cli_home(app: &AppHandle) -> Option<PathBuf> {
     )
 }
 
-/// The OS credential store for the vault's kept key; memory (nothing kept across starts, so the
-/// vault starts locked; logged) when the platform has none, e.g. Linux without a Secret Service.
+/// The OS credential store for the vault's kept key. When the platform has none at start (e.g. Linux without a
+/// Secret Service yet), a store that keeps nothing and opens the OS store as soon as it is there (`remember_late`).
 /// `shared` is ShellX's shared vault folder, whose remembered device keeps ShellX's entry name.
 fn os_device_store(
     shared: Option<&std::path::Path>,
@@ -289,8 +289,19 @@ fn os_device_store(
             None => store,
         }),
         Err(error) => {
-            tracing::warn!(%error, "no OS credential store: the vault cannot stay unlocked across a restart");
-            Arc::new(vw_vault::remember::MemoryDeviceStore::temporary())
+            tracing::warn!(%error, "no OS credential store yet: tried again on use");
+            // Nothing is kept until the system keyring is there; one set up while the app runs is used at once.
+            let shared = shared.map(std::path::Path::to_path_buf);
+            Arc::new(vw_vault::remember_late::LateDeviceStore::new(Box::new(
+                move || {
+                    let store = vw_vault::remember::OsDeviceStore::new()?;
+                    let store = match &shared {
+                        Some(dir) => store.sharing_with_shellx(dir),
+                        None => store,
+                    };
+                    Ok(Arc::new(store) as Arc<dyn vw_vault::remember::DeviceSecretStore>)
+                },
+            )))
         }
     }
 }
@@ -350,7 +361,10 @@ fn product_launch(
         test_api_base: vw_mistral::DEFAULT_API_BASE.to_owned(),
         proxy: vw_keyproxy::ProxyConfig::default(),
         vibe: vibe_installer(app, data),
+        tools_problem: crate::install_notice::tools_problem(app),
     };
+    // A browser helper that cannot start is named in the agent's browser refusals.
+    core.chrome_control.helper_start_problem = crate::install_notice::chrome_problem(app);
     let plan = vw_host::product::plan(inputs, &settings, core);
     for note in &plan.notes {
         tracing::info!("{note}");
@@ -533,6 +547,8 @@ pub fn host_config(app: &AppHandle, confirmer: SharedConfirmer) -> HostConfig {
         tracing::info!(%model, "development image model override");
         core.work.image_model = model;
     }
+    // A debug build with the Safari parts keeps its own helper state folder on macOS (never the signed app's).
+    core.chrome_control.dev_build = DEV_BUILD;
     // Development runs: a Chrome Control package for Set up (debug builds only; user builds ship it in the bundle).
     if let Some(package) = dev_chrome_package(DEV_BUILD, std::env::var_os("VW_DEV_CHROME_PACKAGE"))
     {

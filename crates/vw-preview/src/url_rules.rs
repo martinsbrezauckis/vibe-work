@@ -97,7 +97,7 @@ impl PreviewService {
         let internal = self.inner.internal_ports();
         if internal.is_none() {
             tracing::warn!(
-                "Vibe Work's own ports are unknown: preview URL rules allow only each session's own ports"
+                "Vibe Work's own ports are unknown: preview URL rules allow only each chat's own ports"
             );
         }
         let updates: Vec<(MountId, RulePage, bool)> = {

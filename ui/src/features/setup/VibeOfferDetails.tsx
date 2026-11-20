@@ -21,7 +21,7 @@ function Link({ url, label }: { url: string; label: string }) {
       <Button
         data-testid="setup.vibe-offer-details-open-link"
         type="button"
-        appearance="key-link"
+        appearance="link"
         onClick={() => {
           core?.client.openLink(url).catch(() => {
             setFallback(true);

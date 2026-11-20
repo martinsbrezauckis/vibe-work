@@ -83,6 +83,80 @@ async fn challenge_lifetime_ignores_wall_clock_steps() {
         "forward and backward steps must neither shorten nor extend a challenge"
     );
 }
+
+/// PREDICT: each accepted capture start renews the deadline, while the same ticket stays within its total cap.
+#[tokio::test(start_paused = true)]
+async fn answer_window_rearms_without_extending_the_ticket_past_its_cap() {
+    use std::time::Duration;
+    let core = rig().await;
+    run(
+        &core,
+        Origin::Ui,
+        json!({"op":"promptSession","sessionId":"s"}),
+    )
+    .await
+    .unwrap();
+    let prepared = run(
+        &core,
+        Origin::Ui,
+        json!({"op":"promptPrepare","sessionId":"s","callbackId":"c1"}),
+    )
+    .await
+    .unwrap();
+    let ticket = prepared["result"]["ticket"].as_str().unwrap();
+    let first = tokio::time::Instant::now();
+    {
+        let mut state = core.shared.voice_prompts.lock();
+        let challenge = state.current.as_mut().unwrap();
+        assert_eq!(
+            super::arm_window(challenge, first).unwrap(),
+            Duration::from_secs(60)
+        );
+    }
+    super::watch_deadline(
+        &core.shared,
+        ticket.to_owned(),
+        first + Duration::from_secs(60),
+    );
+    tokio::time::advance(Duration::from_secs(50)).await;
+    {
+        let mut state = core.shared.voice_prompts.lock();
+        let challenge = state.current.as_mut().unwrap();
+        assert_eq!(
+            super::arm_window(challenge, tokio::time::Instant::now()).unwrap(),
+            Duration::from_secs(60)
+        );
+    }
+    tokio::time::advance(Duration::from_secs(59)).await;
+    assert!(super::checked(&core.shared, ticket).is_ok());
+    {
+        let mut state = core.shared.voice_prompts.lock();
+        let challenge = state.current.as_mut().unwrap();
+        assert!(super::defer_for_reprompt(
+            challenge,
+            tokio::time::Instant::now()
+        ));
+    }
+    tokio::time::advance(Duration::from_secs(51)).await;
+    {
+        let mut state = core.shared.voice_prompts.lock();
+        let challenge = state.current.as_mut().unwrap();
+        assert_eq!(
+            super::arm_window(challenge, tokio::time::Instant::now()).unwrap(),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            super::arm_window(challenge, tokio::time::Instant::now())
+                .unwrap_err()
+                .message,
+            "Voice answers for this question ended. Answer on the card in the chat."
+        );
+        assert_eq!(challenge.until, first + Duration::from_secs(180));
+    }
+    tokio::time::advance(Duration::from_secs(21)).await;
+    assert!(super::checked(&core.shared, ticket).is_err());
+    core.shutdown().await;
+}
 #[tokio::test]
 async fn fresh_numbers_require_the_owned_voice_chat_and_never_allow_debug_control() {
     let core = rig().await;

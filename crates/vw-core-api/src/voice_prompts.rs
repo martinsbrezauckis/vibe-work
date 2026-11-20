@@ -4,7 +4,6 @@ use crate::{
     CommandResult, CoreError, ErrorCode, Origin, SpeechRequest, SpeechResult, core::Shared,
 };
 use serde_json::{Value, json};
-use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::{Duration, Instant};
 use vw_ask::{AnsweredBy, Ask, Choice, Surface};
@@ -26,7 +25,8 @@ struct Challenge {
     number: u8,
     allow: bool,
     until: Instant,
-    started: bool,
+    first_started: Option<Instant>,
+    starts: u8,
     misses: u8,
     stream: Option<String>,
     quiet: Option<Arc<vw_preview::AudioQuiet>>,
@@ -40,12 +40,74 @@ impl Prompts {
 fn refused() -> CoreError {
     CoreError::new(ErrorCode::CallbackRefused, "Answer on the card.")
 }
+fn ended() -> CoreError {
+    CoreError::new(
+        ErrorCode::CallbackRefused,
+        "Voice answers for this question ended. Answer on the card in the chat.",
+    )
+}
+fn arm_window(c: &mut Challenge, now: Instant) -> Result<Duration, CoreError> {
+    let first = *c.first_started.get_or_insert(now);
+    let cap = first + Duration::from_secs(180);
+    if c.starts >= 3 || now >= cap || (c.starts > 0 && now >= c.until) {
+        return Err(ended());
+    }
+    c.starts += 1;
+    c.until = std::cmp::min(now + Duration::from_secs(60), cap);
+    Ok(c.until - now)
+}
+fn defer_for_reprompt(c: &mut Challenge, now: Instant) -> bool {
+    let Some(first) = c.first_started else {
+        return false;
+    };
+    if c.starts >= 3 || now >= first + Duration::from_secs(180) {
+        return false;
+    }
+    c.until = std::cmp::min(
+        now + Duration::from_secs(60),
+        first + Duration::from_secs(180),
+    );
+    true
+}
+fn watch_deadline(shared: &Arc<Shared>, ticket: String, deadline: Instant) {
+    let weak = Arc::downgrade(shared);
+    tokio::spawn(async move {
+        tokio::time::sleep_until(deadline).await;
+        if let Some(shared) = weak.upgrade() {
+            let mut state = shared.voice_prompts.lock();
+            let expired = state
+                .current
+                .as_ref()
+                .is_some_and(|c| c.ticket == ticket && Instant::now() >= c.until);
+            let stream = if expired {
+                state.current.take().and_then(|c| c.stream)
+            } else {
+                None
+            };
+            drop(state);
+            if let Some(stream) = stream {
+                shared.dictations.cancel(&stream);
+            }
+        }
+    });
+}
 fn result(result: SpeechResult) -> CommandResult {
     CommandResult::Speech { result }
 }
 fn status(status: &str) -> CommandResult {
     result(SpeechResult::PromptAnswer {
         status: status.into(),
+        heard: None,
+    })
+}
+/// A miss: `status` with the words heard (cut to 200 characters), also written to the local diagnostics log the same
+/// way the window logs a question card's miss (`SpeechRequest::Heard`). Nothing is sent anywhere.
+fn missed(status: &str, text: &str) -> CommandResult {
+    let heard: String = text.trim().chars().take(200).collect();
+    tracing::info!(heard = %heard, "voice answer not understood");
+    result(SpeechResult::PromptAnswer {
+        status: status.into(),
+        heard: Some(heard),
     })
 }
 fn clear(shared: &Shared, ticket: Option<&str>) {
@@ -237,12 +299,7 @@ fn prepare(
     }
     let mut random = [0_u8; 17];
     getrandom::fill(&mut random).map_err(|_| refused())?;
-    let ticket = random[..16]
-        .iter()
-        .fold(String::with_capacity(32), |mut text, byte| {
-            let _ = write!(text, "{byte:02x}");
-            text
-        });
+    let ticket = hex::encode(&random[..16]);
     let mut state = shared.voice_prompts.lock();
     if state.current.is_some() {
         return Err(refused());
@@ -261,29 +318,19 @@ fn prepare(
         number,
         allow,
         until: Instant::now() + Duration::from_secs(120),
-        started: false,
+        first_started: None,
+        starts: 0,
         misses: 0,
         stream: None,
         quiet: None,
         _lease: shared.leases.claim(session)?,
     });
     drop(state);
-    let weak = Arc::downgrade(shared);
-    let watched_ticket = ticket.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        if let Some(shared) = weak.upgrade() {
-            let expired = shared
-                .voice_prompts
-                .lock()
-                .current
-                .as_ref()
-                .is_some_and(|c| c.ticket == watched_ticket && Instant::now() >= c.until);
-            if expired {
-                clear(&shared, Some(&watched_ticket));
-            }
-        }
-    });
+    watch_deadline(
+        shared,
+        ticket.clone(),
+        Instant::now() + Duration::from_secs(120),
+    );
     Ok(result(SpeechResult::Prompt {
         ticket: Some(ticket),
         number: allow.then_some(number),
@@ -324,18 +371,38 @@ async fn decide(
     let c = checked(shared, ticket)?;
     let Some(choice) = vw_ask::voice::answer(text, c.number, c.allow) else {
         if vw_ask::voice::repeat(text) {
+            let mut state = shared.voice_prompts.lock();
+            let Some(current) = state.current.as_mut().filter(|c| c.ticket == ticket) else {
+                return Err(ended());
+            };
+            if !defer_for_reprompt(current, Instant::now()) {
+                drop(state);
+                clear(shared, Some(ticket));
+                return Ok(status("ended"));
+            }
+            let deadline = current.until;
+            drop(state);
+            watch_deadline(shared, ticket.to_owned(), deadline);
             return Ok(status("repeat"));
         }
         let mut state = shared.voice_prompts.lock();
         if let Some(current) = state.current.as_mut().filter(|c| c.ticket == ticket) {
             current.misses += 1;
             if current.misses < 2 {
-                return Ok(status("retry"));
+                if !defer_for_reprompt(current, Instant::now()) {
+                    drop(state);
+                    clear(shared, Some(ticket));
+                    return Ok(status("ended"));
+                }
+                let deadline = current.until;
+                drop(state);
+                watch_deadline(shared, ticket.to_owned(), deadline);
+                return Ok(missed("retry", text));
             }
         }
         drop(state);
         clear(shared, Some(ticket));
-        return Ok(status("card"));
+        return Ok(missed("card", text));
     };
     // Claim this exact challenge under the same lock as cancellation and session changes.
     {
@@ -417,10 +484,15 @@ pub(crate) async fn execute(
             };
             // Native silence may wait for a previous capture's restoration. Recheck this exact card afterward.
             checked(shared, &ticket)?;
-            let started = crate::speech::start(shared, origin, sample_rate, language)?;
+            let mut started = crate::speech::start(shared, origin, sample_rate, language)?;
             if let CommandResult::Speech {
-                result: SpeechResult::Started { stream_id, .. },
-            } = &started
+                result:
+                    SpeechResult::Started {
+                        stream_id,
+                        answer_window_ms,
+                        ..
+                    },
+            } = &mut started
             {
                 let mut state = shared.voice_prompts.lock();
                 let Some(current) = state
@@ -431,20 +503,21 @@ pub(crate) async fn execute(
                     shared.dictations.cancel(stream_id);
                     return Err(refused());
                 };
-                if !current.started {
-                    current.until = Instant::now() + Duration::from_secs(60);
-                    current.started = true;
-                }
+                let window = match arm_window(current, Instant::now()) {
+                    Ok(window) => window,
+                    Err(error) => {
+                        shared.dictations.cancel(stream_id);
+                        drop(state);
+                        clear(shared, Some(&ticket));
+                        return Err(error);
+                    }
+                };
+                *answer_window_ms = Some(u32::try_from(window.as_millis()).unwrap_or(u32::MAX));
                 current.stream = Some(stream_id.clone());
                 current.quiet = quiet;
                 let deadline = current.until;
-                let weak = Arc::downgrade(shared);
-                tokio::spawn(async move {
-                    tokio::time::sleep_until(deadline).await;
-                    if let Some(shared) = weak.upgrade() {
-                        clear(&shared, Some(&ticket));
-                    }
-                });
+                drop(state);
+                watch_deadline(shared, ticket, deadline);
             }
             Ok(started)
         }

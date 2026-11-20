@@ -48,7 +48,7 @@ pub(crate) async fn call(
         .names
         .cwd_of(&shared.store, session_id)
         .map(PathBuf::from)
-        .ok_or_else(|| "this session has no folder Vibe Work knows".to_owned())?;
+        .ok_or_else(|| "this chat has no folder Vibe Work knows".to_owned())?;
     let page = args.get("page").and_then(Value::as_str).map(str::to_owned);
     match tool {
         names::HANDBOOK_ANSWERS => {

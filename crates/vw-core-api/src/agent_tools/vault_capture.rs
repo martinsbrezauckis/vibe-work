@@ -25,7 +25,7 @@ struct Input {
 /// Saving reads the value inside Vibe Work's own browser only. A ref from the user's own browsers is refused with
 /// the next step instead of a generic failure; no value is read for it.
 pub(super) fn check_source(args: &Value) -> Result<(), String> {
-    use crate::chrome_control::agent_browser::Browser;
+    use crate::chrome_control::Browser;
     let browser = match args.get("target").and_then(Value::as_str) {
         None | Some("builtin") => return Ok(()),
         Some("chrome") => Browser::Chrome,

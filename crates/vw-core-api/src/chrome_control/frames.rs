@@ -2,8 +2,8 @@
 //! sessions shows (`control.frame`: working, paused or off, the chat name and the chat's saved colour index) and applies
 //! the person's Pause / Resume clicks the helper reports in its session rows (`personPause`).
 //!
-//! Depends on: the owner pipe (fire-and-forget `chrome_session` `frame`), `work` (the chat's sessions and their
-//! state), the paused-tool module. Called by: the gateway after an agent call, the person's pause routes, turn end,
+//! Depends on: the owner pipe (`chrome_session` `frame`), `work` (the chat's sessions and their
+//! state), the paused-tool module. Called by: the gateway around an agent call, the person's pause routes, turn end,
 //! Stop and the owner's status poll.
 //! Invariants:
 //! - The frame is information, never authority: the app's own checks decide every call; a frame update cannot
@@ -35,10 +35,93 @@ struct Shown {
 #[derive(Default)]
 pub(crate) struct Frames {
     shown: HashMap<String, Shown>,
+    confirmed: HashMap<String, Shown>,
+    deliveries: HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
     seen: HashMap<String, u64>,
     /// Per-chat frame colour index, kept across restarts (`frame_colours`; 0 = the one default colour). Read from
     /// the chats' records folder at first use.
     colours: Option<super::frame_colours::Colours>,
+}
+
+/// Confirm the current chat's controls before its page action can enter the helper queue.
+/// The ordinary sync still handles newly opened sessions and turn-end changes.
+pub(super) async fn before_execute(shared: &Shared, chat: &str, id: &str) -> Result<(), String> {
+    // Direct gateway calls outside a running chat turn have no agent frame to show.
+    if !crate::paused_tools_commands::turn_running(shared, chat) {
+        return Ok(());
+    }
+    let delivery = shared
+        .chrome_control
+        .frames
+        .lock_or_recover()
+        .deliveries
+        .entry(id.to_owned())
+        .or_default()
+        .clone();
+    let _delivery = delivery.lock().await;
+    let wanted = shared.channels.canonical(chat);
+    let sessions = shared.chrome_control.work.lock_or_recover().sessions();
+    let state = sessions
+        .into_iter()
+        .find(|(session, owner, _)| session == id && shared.channels.canonical(owner) == wanted)
+        .map(|(_, _, state)| state)
+        .ok_or(
+            "Not run: this browser session is no longer available. Open a new browser session.",
+        )?;
+    let state = desired(shared, chat, &state);
+    if state == "off" {
+        return Ok(());
+    }
+    let frame_label = label(shared, chat);
+    let next = {
+        let mut frames = shared.chrome_control.frames.lock_or_recover();
+        Shown {
+            state,
+            label: frame_label,
+            colour: frames.colour(colours_dir(shared), chat),
+            ack: frames.seen.get(id).copied().unwrap_or(0),
+        }
+    };
+    if shared
+        .chrome_control
+        .frames
+        .lock_or_recover()
+        .confirmed
+        .get(id)
+        == Some(&next)
+    {
+        return Ok(());
+    }
+    let answer = shared
+        .chrome_control
+        .owner
+        .call(
+            "chrome_session",
+            json!({
+                "action":"frame", "sessionId":id, "state":next.state, "label":next.label,
+                "colour":next.colour, "ackPause":next.ack,
+            }),
+        )
+        .await;
+    let result = answer.value();
+    if result["isError"] == true
+        || result["structuredContent"]["sessionId"] != id
+        || result["structuredContent"]["frame"]["state"] != next.state
+    {
+        return Err("Not run: Vibe Work could not confirm the browser controls. Try the action again after the frame appears.".into());
+    }
+    let sessions = shared.chrome_control.work.lock_or_recover().sessions();
+    let current = sessions
+        .into_iter()
+        .find(|(session, owner, _)| session == id && shared.channels.canonical(owner) == wanted)
+        .map(|(_, _, state)| state);
+    if current.as_deref().map(|state| desired(shared, chat, state)) != Some(next.state) {
+        return Err("Not run: browser access changed while its controls were being shown. Try the action again.".into());
+    }
+    let mut frames = shared.chrome_control.frames.lock_or_recover();
+    frames.shown.insert(id.to_owned(), next.clone());
+    frames.confirmed.insert(id.to_owned(), next);
+    Ok(())
 }
 
 impl Frames {
@@ -160,6 +243,8 @@ pub(crate) fn sync_chat(shared: &Shared, chat: &str) {
             // A stopped session never gets a frame again; nothing was shown means nothing to switch off.
             if matches!(state.as_str(), "stopped" | "stopping" | "disconnected") {
                 frames.shown.remove(&id);
+                frames.confirmed.remove(&id);
+                frames.deliveries.remove(&id);
                 if state == "stopped" {
                     frames.seen.remove(&id);
                 }
@@ -170,6 +255,7 @@ pub(crate) fn sync_chat(shared: &Shared, chat: &str) {
                 continue;
             }
             frames.shown.insert(id.clone(), next.clone());
+            frames.confirmed.remove(&id);
             updates.push((id, next));
         }
     }
@@ -187,6 +273,15 @@ pub(crate) fn sync_chat(shared: &Shared, chat: &str) {
 
 /// The owner's status rows: applies each session's new person Pause / Resume once, then updates the frames.
 pub(crate) fn observe(shared: &Shared, rows: &[Value]) {
+    observe_rows(shared, rows, false);
+}
+
+/// One signed person-frame event; strict identity and current work state are checked in the same work lookup.
+pub(crate) fn observe_control(shared: &Shared, row: &Value) {
+    observe_rows(shared, std::slice::from_ref(row), true);
+}
+
+fn observe_rows(shared: &Shared, rows: &[Value], strict: bool) {
     let mut chats = Vec::new();
     for row in rows {
         let (Some(id), Some(seq), Some(state)) = (
@@ -205,13 +300,36 @@ pub(crate) fn observe(shared: &Shared, rows: &[Value]) {
         }
         let (chat, browser) = {
             let work = shared.chrome_control.work.lock_or_recover();
-            let Some(chat) = work.chat_of(id).map(str::to_owned) else {
+            let Some((_, chat, current_state)) = work
+                .sessions()
+                .into_iter()
+                .find(|(known, _, _)| known == id)
+            else {
                 continue;
             };
-            let browser = work
-                .profile_of(id)
-                .map(super::agent_browser::Browser::from_profile);
-            (chat, browser)
+            if matches!(
+                current_state.as_str(),
+                "stopping" | "stopped" | "disconnected"
+            ) {
+                continue;
+            }
+            let Some(profile) = work.profile_of(id) else {
+                continue;
+            };
+            if strict
+                && (row["clientSessionId"].as_str() != Some(chat.as_str())
+                    || row["profileId"].as_str() != Some(profile)
+                    || !matches!(state, "paused" | "resumed")
+                    || seq == 0
+                    || !matches!(
+                        row["state"].as_str(),
+                        Some("active" | "connecting" | "idle" | "releasing")
+                    ))
+            {
+                continue;
+            }
+            let browser = super::agent_browser::Browser::from_profile(profile);
+            (chat, Some(browser))
         };
         let fresh = {
             let mut frames = shared.chrome_control.frames.lock_or_recover();
@@ -242,6 +360,10 @@ pub(crate) fn observe(shared: &Shared, rows: &[Value]) {
             chats.push(chat);
         }
     }
+    // A rejected or duplicate single notification must not reconcile unrelated frame rows.
+    if strict && chats.is_empty() {
+        return;
+    }
     for chat in chats {
         sync_chat(shared, &chat);
     }
@@ -249,6 +371,12 @@ pub(crate) fn observe(shared: &Shared, rows: &[Value]) {
     let mut frames = shared.chrome_control.frames.lock_or_recover();
     frames
         .shown
+        .retain(|id, _| known.iter().any(|(known, _, _)| known == id));
+    frames
+        .confirmed
+        .retain(|id, _| known.iter().any(|(known, _, _)| known == id));
+    frames
+        .deliveries
         .retain(|id, _| known.iter().any(|(known, _, _)| known == id));
     frames
         .seen

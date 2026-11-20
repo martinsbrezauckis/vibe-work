@@ -43,8 +43,8 @@ pub const DIALOG_PARAMS_MAX_CHARS: usize = 1200;
 /// structured `requester`, never from the wording of its summary).
 pub const DEBUG_API_LINE: &str =
     "An external client (the Debug API), not a click in this window, asks for this.";
-/// The first line of a dialog the agent of a session asked for.
-pub const AGENT_LINE: &str = "The agent of a session, not a click in this window, asks for this.";
+/// The first line of a dialog the agent of a chat asked for.
+pub const AGENT_LINE: &str = "The agent of a chat, not a click in this window, asks for this.";
 
 /// Caller text with hidden characters written as visible escapes. Paragraph breaks are supplied by
 /// the caller; values embedded in prose must be quoted/escaped there rather than becoming instructions.
@@ -126,7 +126,7 @@ fn capture_save_text(params: &serde_json::Value) -> Option<String> {
     };
     Some(format!(
         "Save the {length}-character value you selected in {element} on {page} to your vault as {name}?\n\n\
-         This is for the session {session}.{replacement} The agent never sees the value; it can later ask to use it \
+         This is for the chat {session}.{replacement} The agent never sees the value; it can later ask to use it \
          in a command."
     ))
 }

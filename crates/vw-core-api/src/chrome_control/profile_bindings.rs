@@ -5,12 +5,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
 use vw_platform::sync::LockRecover;
+#[path = "profile_bindings_status.rs"]
+mod status;
+pub(super) use status::{migrate, observe, reconcile_completed_status, session_profile};
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Identity {
     #[serde(default)]
     chat: Option<String>,
     profile: String,
+    owner: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct UncertainOpen {
+    id: Option<String>,
+    profile: Option<String>,
     owner: Option<String>,
 }
 
@@ -26,6 +36,8 @@ pub(super) struct Bindings {
     pub(super) leases: HashMap<String, Vec<super::profile_selection::Release>>,
     #[serde(default)]
     pub(super) ambiguous: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    uncertain_opens: HashMap<String, UncertainOpen>,
     #[serde(skip)]
     generations: HashMap<String, u64>,
     #[serde(skip)]
@@ -89,7 +101,7 @@ impl Bindings {
             .zip(self.owner.as_ref())
             .is_some_and(|(old, current)| old != current)
         {
-            return Err("This profile was paired with another Vibe Work identity; no action ran. Ask the user to reconnect the profile in Settings > Browser, then open the session again.".into());
+            return Err("This profile was paired with another Vibe Work identity; no action ran. Ask the user to reconnect the profile in Settings > Browser, then open the browser session again.".into());
         }
         Ok(())
     }
@@ -97,15 +109,23 @@ impl Bindings {
         if self.storage_unavailable {
             return Err(super::profile_storage::UNREADABLE.into());
         }
+        if self.uncertain_opens.contains_key(chat) {
+            return Err(vw_vocabulary::texts::BROWSER_PROFILE_OPEN_UNCONFIRMED.into());
+        }
         if self.ambiguous.contains_key(chat) {
-            return Err("This older chat used several browser profiles; no action ran. Open the session again so the user can pick one.".into());
+            return Err("This older chat used several browser profiles; no action ran. Open the browser session again so the user can pick one.".into());
         }
         if self.pending.contains_key(chat) {
             return Err("This chat's profile switch is unconfirmed; no action ran. Reconnect the old profile and retry the selection.".into());
         }
         if let Some(identity) = self.chats.get(chat) {
             self.check_owner(identity)?;
-            if !super::profile_ids::same(&identity.profile, profile) {
+            if !super::profile_ids::same(&identity.profile, profile)
+                && self
+                    .leases
+                    .get(chat)
+                    .is_some_and(|leases| !leases.is_empty())
+            {
                 return Err(OTHER_PROFILE.into());
             }
         }
@@ -123,43 +143,107 @@ impl Bindings {
         if let Some(identity) = self.sessions.get(session) {
             self.check_owner(identity)?;
             if identity.chat.as_deref() != Some(chat) {
-                return Err("This browser session could not be confirmed as belonging to this chat. Reconnect this profile before opening a new session.".into());
+                return Err("This browser session could not be confirmed as belonging to this chat. Reconnect this profile before opening a new browser session.".into());
             }
             if !super::profile_ids::same(&identity.profile, profile) {
-                return Err("This browser session is already associated with another profile. Reconnect this profile before opening a new session.".into());
+                return Err("This browser session is already associated with another profile. Reconnect this profile before opening a new browser session.".into());
             }
         }
         Ok(())
     }
 }
 
-/// The refusal of a profile that is not this chat's own.
-const OTHER_PROFILE: &str = "This chat uses another browser profile; no action ran. Continue in this chat's profile, or ask the user to start a new chat for the other profile.";
+/// Internal marker for a cross-profile binding refusal; render it after releasing the saved-binding lock.
+const OTHER_PROFILE: &str = "OTHER_PROFILE";
+
+fn other_profile(chrome: &ChromeControl, chat: &str) -> String {
+    let selected = selected(chrome, chat);
+    let fallback = {
+        let saved = chrome.bindings.lock_or_recover();
+        saved
+            .chats
+            .get(chat)
+            .map(|identity| identity.profile.clone())
+    };
+    let bound = selected.or(fallback);
+    let name = bound.map_or_else(
+        || vw_vocabulary::texts::BROWSER_PROFILE_CURRENT.to_owned(),
+        |id| super::profiles::label(chrome, &id),
+    );
+    vw_vocabulary::texts::BROWSER_PROFILE_AGENT_REFUSAL.replace("{profile}", &name)
+}
+
+/// A saved pick is a preference until an external session has been opened or still needs release.
+pub(super) fn locked(chrome: &ChromeControl, chat: &str) -> bool {
+    let saved = chrome.bindings.lock_or_recover();
+    let saved = saved.uncertain_opens.contains_key(chat)
+        || saved
+            .leases
+            .get(chat)
+            .is_some_and(|leases| !leases.is_empty());
+    saved || !chrome.work.lock_or_recover().releases(chat).is_empty()
+}
+
+pub(super) fn uncertain(chrome: &ChromeControl, chat: &str) -> bool {
+    chrome
+        .bindings
+        .lock_or_recover()
+        .uncertain_opens
+        .contains_key(chat)
+}
+
+pub(super) fn uncertain_chats(chrome: &ChromeControl) -> Vec<String> {
+    chrome
+        .bindings
+        .lock_or_recover()
+        .uncertain_opens
+        .keys()
+        .cloned()
+        .collect()
+}
+
+/// A sent open with an unconfirmed result can have created a live helper session.
+pub(super) fn mark_uncertain(
+    chrome: &ChromeControl,
+    chat: &str,
+    id: Option<&str>,
+    profile: Option<&str>,
+) {
+    let mut saved = chrome.bindings.lock_or_recover();
+    let owner = saved.owner.clone();
+    saved.uncertain_opens.insert(
+        chat.into(),
+        UncertainOpen {
+            id: id.filter(|id| !id.is_empty()).map(str::to_owned),
+            profile: profile
+                .filter(|profile| !profile.is_empty())
+                .map(str::to_owned),
+            owner,
+        },
+    );
+    if let Err(reason) = saved.save(chrome.dir()) {
+        tracing::warn!(%reason, "Uncertain browser open could not be saved");
+    }
+}
 
 /// [`check`] for the agent's own calls: when the chat's profile is the one the person picked on the profile card, the
 /// refusal of another profile names the picked one, so the agent continues there instead of guessing why it was
 /// refused. Person commands keep [`check`]'s text.
 pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> Result<(), String> {
+    let other = other_profile(chrome, chat);
     check(chrome, chat, profile).map_err(|refusal| {
-        if refusal != OTHER_PROFILE {
+        if refusal != other {
             return refusal;
         }
-        let picked = chrome
-            .picked_profiles
-            .lock_or_recover()
-            .get(chat)
-            .cloned();
+        let picked = chrome.picked_profiles.lock_or_recover().get(chat).cloned();
         match picked {
             Some(picked)
                 if selected(chrome, chat)
                     .is_some_and(|bound| super::profile_ids::same(&bound, &picked)) =>
             {
-                let name = chrome
-                    .profiles
-                    .lock_or_recover()
-                    .agent_name(&picked);
+                let name = chrome.profiles.lock_or_recover().agent_name(&picked);
                 format!(
-                    "The user picked {name} for this chat; use it (profileId {picked}). No action ran."
+                    "{refusal} The user picked {name} for this chat; use it (profileId {picked})."
                 )
             }
             _ => refusal,
@@ -169,12 +253,21 @@ pub(super) fn check_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
 
 pub(super) fn check(chrome: &ChromeControl, chat: &str, profile: &str) -> Result<(), String> {
     // Existing single-binding chats retain their exact choice, including legacy raw Chrome UUIDs.
-    if let Some(selected) = chrome.chat_profiles.lock_or_recover().get(chat)
-        && !super::profile_ids::same(selected, profile)
+    let bound = selected(chrome, chat);
+    if let Some(bound) = bound.as_deref()
+        && !super::profile_ids::same(bound, profile)
+        && locked(chrome, chat)
     {
-        return Err(OTHER_PROFILE.into());
+        return Err(other_profile(chrome, chat));
     }
-    chrome.bindings.lock_or_recover().check(chat, profile)
+    let result = chrome.bindings.lock_or_recover().check(chat, profile);
+    result.map_err(|reason| {
+        if reason == OTHER_PROFILE {
+            other_profile(chrome, chat)
+        } else {
+            reason
+        }
+    })
 }
 
 pub(super) fn remember(
@@ -188,29 +281,29 @@ pub(super) fn remember(
     if let Some(session) = session {
         saved.check_session(chat, session, profile)?;
     }
-    let mut next = saved.clone();
     let identity = Identity {
         chat: Some(chat.into()),
         profile: profile.into(),
-        owner: next.owner.clone(),
+        owner: saved.owner.clone(),
     };
     if let Some(id) = session {
-        let leases = next.leases.entry(chat.into()).or_default();
+        let leases = saved.leases.entry(chat.into()).or_default();
         if !leases.iter().any(|lease| lease.id == id) {
             leases.push(super::profile_selection::Release {
                 id: id.into(),
                 profile: profile.into(),
             });
         }
-        next.sessions.insert(id.into(), identity.clone());
+        saved.sessions.insert(id.into(), identity.clone());
     }
-    next.chats.insert(chat.into(), identity);
-    next.save(chrome.dir())?;
-    *saved = next;
+    saved.chats.insert(chat.into(), identity);
     chrome
         .chat_profiles
         .lock_or_recover()
         .insert(chat.into(), profile.into());
+    if let Err(reason) = saved.save(chrome.dir()) {
+        tracing::warn!(%reason, "Browser binding could not be saved after open");
+    }
     Ok(())
 }
 
@@ -220,6 +313,7 @@ pub(super) fn forget(chrome: &ChromeControl, chat: &str) {
     saved.pending.remove(chat);
     saved.ambiguous.remove(chat);
     saved.leases.remove(chat);
+    saved.uncertain_opens.remove(chat);
     if let Err(reason) = saved.save(chrome.dir()) {
         tracing::warn!(%reason, "Browser binding removal could not be saved");
     }
@@ -253,6 +347,9 @@ pub(super) fn begin_change(
     change: super::profile_selection::Change,
 ) -> Result<(), String> {
     let mut saved = chrome.bindings.lock_or_recover();
+    if saved.uncertain_opens.contains_key(chat) {
+        return Err(vw_vocabulary::texts::BROWSER_PROFILE_OPEN_UNCONFIRMED.into());
+    }
     let mut next = saved.clone();
     if !next.pending.contains_key(chat) {
         *next.generations.entry(chat.into()).or_default() += 1;
@@ -280,6 +377,7 @@ pub(super) fn complete_change(
     next.pending.remove(chat);
     next.ambiguous.remove(chat);
     next.leases.remove(chat);
+    next.uncertain_opens.remove(chat);
     next.save(chrome.dir())?;
     *saved = next;
     chrome
@@ -298,106 +396,4 @@ pub(super) fn adopt(chrome: &ChromeControl, old: &str, new: &str) -> Result<(), 
     forget(chrome, old);
     chrome.chat_profiles.lock_or_recover().remove(old);
     Ok(())
-}
-
-/// Migrate the helper's authenticated client-chat sessions, never a page's output or an array position.
-pub(super) fn migrate(chrome: &ChromeControl, chat: &str, status: &Value) -> Result<(), String> {
-    if selected(chrome, chat).is_some() {
-        return Ok(());
-    }
-    let mut by_profile =
-        std::collections::BTreeMap::<String, Vec<super::profile_selection::Release>>::new();
-    for row in status["sessions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|row| row["clientSessionId"] == chat)
-    {
-        let (Some(profile), Some(id)) = (row["profileId"].as_str(), row["sessionId"].as_str())
-        else {
-            continue;
-        };
-        if profile.is_empty() || id.is_empty() {
-            continue;
-        }
-        let releases = by_profile
-            .entry(super::profiles::canonical(profile))
-            .or_default();
-        if row["state"] != "stopped" {
-            releases.push(super::profile_selection::Release {
-                id: id.into(),
-                profile: profile.into(),
-            });
-        }
-    }
-    if by_profile.len() == 1 {
-        let Some((profile, leases)) = by_profile.into_iter().next() else {
-            return Ok(());
-        };
-        remember(chrome, chat, &profile, None)?;
-        for lease in leases {
-            remember(chrome, chat, &profile, Some(&lease.id))?;
-        }
-    } else if by_profile.len() > 1 {
-        let mut saved = chrome.bindings.lock_or_recover();
-        let mut next = saved.clone();
-        next.ambiguous
-            .insert(chat.into(), by_profile.keys().cloned().collect());
-        next.leases
-            .insert(chat.into(), by_profile.into_values().flatten().collect());
-        next.save(chrome.dir())?;
-        *saved = next;
-    }
-    if let Some(profile) = selected(chrome, chat) {
-        check(chrome, chat, &profile)
-    } else {
-        chrome.bindings.lock_or_recover().check(chat, "")
-    }
-}
-
-/// Read-back stopped receipts retire durable release obligations; mere disconnection cannot.
-pub(super) fn acknowledge(chrome: &ChromeControl, rows: &[Value]) {
-    let mut saved = chrome.bindings.lock_or_recover();
-    let mut next = saved.clone();
-    let mut changed = false;
-    for (chat, leases) in &mut next.leases {
-        let before = leases.len();
-        leases.retain(|lease| {
-            !rows.iter().any(|row| {
-                saved.check_session(chat, &lease.id, &lease.profile).is_ok()
-                    && row["sessionId"] == lease.id
-                    && row["profileId"]
-                        .as_str()
-                        .is_some_and(|id| super::profile_ids::same(id, &lease.profile))
-                    && row["state"] == "stopped"
-                    && row["capture"] == "off"
-            })
-        });
-        changed |= before != leases.len();
-    }
-    if changed {
-        if let Err(reason) = next.save(chrome.dir()) {
-            tracing::warn!(%reason, "Browser release receipt could not be saved");
-        } else {
-            *saved = next;
-        }
-    }
-}
-
-/// One owner observation updates the durable identity namespace and its readable profile inventory.
-pub(super) fn observe(chrome: &ChromeControl, data: &Value) {
-    chrome.bindings.lock_or_recover().observe_owner(data);
-    super::profiles::observe(chrome, data);
-}
-
-/// Receipt identity outlives the bounded work display; only authenticated admitted sessions enter this map.
-pub(super) fn session_profile(chrome: &ChromeControl, session: &str) -> Option<String> {
-    let saved = chrome.bindings.lock_or_recover();
-    if saved.storage_unavailable {
-        return None;
-    }
-    saved
-        .sessions
-        .get(session)
-        .map(|identity| identity.profile.clone())
 }

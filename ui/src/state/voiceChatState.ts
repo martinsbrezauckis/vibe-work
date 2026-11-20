@@ -7,7 +7,7 @@ import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
 import type { Toasts } from "./toastStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
-import type { SpeechResult } from "../protocol/core";
+import type { JsonValue, SpeechResult } from "../protocol/core";
 
 /** Where voice chat is. `error`: stopped with a reason, waiting for a press (the mode stays on). */
 export type VoiceChatPhase =
@@ -23,6 +23,15 @@ export interface VoiceChatState {
   phase: VoiceChatPhase;
   /** The microphone is opening (an OS permission prompt may be up). */
   micPending: boolean;
+  /**
+   * Listening, but no sound (a sample other than exact digital silence) has come from the microphone yet. The strip
+   * says Listening only once it has; after `NO_SOUND_MS` without sound voice chat stops and says why.
+   */
+  awaitingSound: boolean;
+  /** The post-pause microphone is still collecting words for the next message. */
+  carryOpen: boolean;
+  /** A spoken reply paused the microphone and this listening stretch resumed it. */
+  resumed: boolean;
   /** Live words of the current listening stretch. */
   partial: string;
   /** What the user said last (sent as a voice turn). */
@@ -47,6 +56,9 @@ export const VOICE_CHAT_OFF: VoiceChatState = {
   owner: null,
   phase: "off",
   micPending: false,
+  awaitingSound: false,
+  carryOpen: false,
+  resumed: false,
   partial: "",
   heard: null,
   endedBy: null,
@@ -74,6 +86,8 @@ export interface VoiceChatDeps {
   onStart: () => void;
   /** A session's title for messages. */
   titleOf: (sessionId: string) => string;
+  /** Sends a card's answer as the card's own buttons do (default: the core's `answerCallback`). */
+  answer?: (sessionId: string, callbackId: string, output: JsonValue) => Promise<boolean>;
   now?: () => number;
 }
 
@@ -86,3 +100,19 @@ export type VoiceChatUtterance = {
   repeat?: boolean;
   ready?: Promise<SpeechResult>;
 };
+
+/** How long after a send voice chat waits for the turn to show before it listens again. */
+export const EXPECT_MS = 15_000;
+/**
+ * How long an opened microphone may send only digital silence before voice chat stops and says so. A working
+ * microphone sends its noise floor within a block; a muted, unplugged-in-software or wrongly routed one sends
+ * zeros or nothing, and the person would otherwise talk to a strip that says Listening.
+ */
+export const NO_SOUND_MS = 4_000;
+/** How long the session must look idle before the microphone opens again. */
+export const LISTEN_SETTLE_MS = 300;
+/**
+ * The pause between two read sentences. Each sentence is its own synthesized clip whose end carries almost no
+ * silence, so without it the next sentence starts sooner than a comma's pause inside one clip.
+ */
+export const SENTENCE_GAP_MS = 300;

@@ -47,7 +47,7 @@ pub enum PreviewRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         url: Option<String>,
-        /// Or a port of this session.
+        /// Or a port of this chat.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         port: Option<u16>,
@@ -178,7 +178,7 @@ pub enum PreviewRequest {
     CopyText {
         /// The owning session.
         session_id: String,
-        /// A web page of this session's Browser tab.
+        /// A web page of this chat's Browser tab.
         tab_id: String,
         /// The element and optional exact selected text.
         target: PickTarget,
@@ -278,7 +278,7 @@ pub enum BusyOption {
 pub struct BusyPortView {
     /// The port.
     pub port: Option<u16>,
-    /// "this session", "another session ('Shop')", "another app (node)", or "unknown (not visible to Vibe Work)".
+    /// "this chat", "another chat ('Shop')", "another app (node)", or "unknown (not visible to Vibe Work)".
     pub holder: String,
     /// The holder's pid, when known.
     pub holder_pid: Option<u32>,

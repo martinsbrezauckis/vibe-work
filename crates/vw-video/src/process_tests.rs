@@ -162,10 +162,17 @@ async fn cancelled_helper_is_killed_and_reaped() {
         None,
     ));
     let started = std::time::Instant::now();
-    while !pidfile.exists() && started.elapsed() < Duration::from_secs(5) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    // The worker creates the file before it writes its pid: wait for the number, not just the file.
+    let mut pid = None;
+    while pid.is_none() && started.elapsed() < Duration::from_secs(5) {
+        pid = std::fs::read_to_string(&pidfile)
+            .ok()
+            .and_then(|text| text.trim().parse().ok());
+        if pid.is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
-    let pid = std::fs::read_to_string(pidfile).unwrap().parse().unwrap();
+    let pid = pid.expect("worker wrote its pid");
     assert!(exists(pid), "worker must start before cancellation");
     task.abort();
     let _ = task.await;

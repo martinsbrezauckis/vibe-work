@@ -76,11 +76,6 @@ pub(super) async fn handle(
     request: axum::extract::Request,
 ) -> Response {
     let path = request.uri().path().to_owned();
-    if path == "/v1/model-catalog"
-        && let Some(catalog) = inner.lock().unwrap().script.model_catalog.clone()
-    {
-        return Json(catalog).into_response();
-    }
     let authorized = {
         let state = inner.lock().unwrap();
         let bearer = request
@@ -96,12 +91,35 @@ pub(super) async fn handle(
                     .is_none_or(|expected| expected == key)
         })
     };
-    if path == "/v1/chat/completions" && !authorized {
+    if matches!(path.as_str(), "/v1/chat/completions" | "/v1/model-catalog") && !authorized {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({"message":"Missing or incorrect model API key"})),
         )
             .into_response();
+    }
+    if path == "/v1/model-catalog" {
+        if request.method() != axum::http::Method::GET {
+            return StatusCode::METHOD_NOT_ALLOWED.into_response();
+        }
+        let mut catalog_request = seen(&path, &Value::Null);
+        catalog_request.query = request.uri().query().map(str::to_owned);
+        use sha2::Digest as _;
+        catalog_request.authorization_sha256 = format!(
+            "{:x}",
+            sha2::Sha256::digest(
+                request
+                    .headers()
+                    .get("authorization")
+                    .map_or(&[][..], |h| h.as_bytes())
+            )
+        );
+        let mut state = inner.lock().unwrap();
+        state.log.push(catalog_request);
+        if let Some(catalog) = state.script.model_catalog.clone() {
+            return Json(catalog).into_response();
+        }
+        return StatusCode::NOT_FOUND.into_response();
     }
     let (parts, body) = request.into_parts();
     let bytes = axum::body::to_bytes(body, 64 * 1024 * 1024)
@@ -116,10 +134,14 @@ pub(super) async fn handle(
             Some(
                 "mistral-large-4"
                     | "mistral-large-4-0"
+                    | "mistral-large-4-0-3"
+                    | "mistral-medium-3.5"
+                    | "mistral-medium-latest"
                     | "mistral-vibe-cli-latest"
                     | "mistral-vibe-cli-fast"
                     | "zai-glm-5-3"
                     | "zai-glm-5-3-flash"
+                    | "zai-glm-5-3-flash-vibe-free"
             )
         )
     {

@@ -84,7 +84,8 @@ export function Viewport({
             <Button
               data-testid="preview.viewport-preview-btn"
               type="button"
-              appearance="preview"
+              shape="outlined"
+              placement="preview"
               onClick={onReload}
             >
               Reload
@@ -110,7 +111,8 @@ export function Viewport({
               <Button
                 data-testid="preview.viewport-preview-btn-2"
                 type="button"
-                appearance="preview"
+                shape="outlined"
+                placement="preview"
                 onClick={onReload}
               >
                 Reload

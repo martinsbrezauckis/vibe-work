@@ -1,10 +1,9 @@
 //! [`super::until_ended`], the wait a running video job or secret capture holds until its chat is stopped, removed
 //! or loses access, on a core without Vibe and with Tokio's clock paused, so any wait shows as elapsed time.
 //!
-//! PREDICT: both waits re-checked their conditions on a 25 ms timer. The Stop, failed-turn and removed-chat cases
-//! then read 25 ms of elapsed time instead of none, and the idle case counts 41 checks in one second instead of at
-//! most five (one at the start and one per [`super::RECHECK`]). A condition no event announces is still seen within
-//! one re-check either way.
+//! PREDICT (event-only waits): the wait also re-checked every 250 ms because the agent access switch, a chat mode
+//! change and a session's tool credentials ending announced nothing. Those three cases then read 250 ms of elapsed
+//! time instead of none, and an idle second counted five checks instead of one.
 use std::{
     future::Future,
     pin::Pin,
@@ -82,18 +81,56 @@ async fn a_removed_chat_ends_the_wait_at_once() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_condition_without_an_event_is_seen_within_one_recheck() {
-    let core = crate::offline_core::start("stop-wait-quiet").await;
+async fn the_agent_access_switch_ends_the_wait_at_once() {
+    let core = crate::offline_core::start("stop-wait-access").await;
+    let shared = &core.shared;
+    let wait = super::until_ended(shared, || crate::agent_access::locked(shared));
+    tokio::pin!(wait);
+    pending(wait.as_mut());
+    let at = Instant::now();
+    crate::agent_access::set(shared, true);
+    wait.await;
+    assert_eq!(at.elapsed(), Duration::ZERO, "the wait ran a timer");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_chat_mode_change_ends_the_wait_at_once() {
+    let core = crate::offline_core::start("stop-wait-mode").await;
+    let shared = &core.shared;
+    shared.access.observe_request(
+        "session/agent/update",
+        "s",
+        &json!({"agentName":"auto-approve"}),
+    );
+    let wait = super::until_ended(shared, || {
+        shared.access.remembered("s").as_deref() != Some("auto-approve")
+    });
+    tokio::pin!(wait);
+    pending(wait.as_mut());
+    let at = Instant::now();
+    let before = shared.access.remembered("s");
+    shared
+        .access
+        .observe_request("session/agent/update", "s", &json!({"agentName":"plan"}));
+    crate::chrome_control::mode_changed(shared, "s", before.as_deref());
+    wait.await;
+    assert_eq!(at.elapsed(), Duration::ZERO, "the wait ran a timer");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_announced_condition_change_ends_the_wait_at_once() {
+    // The tool credentials of a deleted session end in `session_end`, which announces it the same way.
+    let core = crate::offline_core::start("stop-wait-condition").await;
     let shared = &core.shared;
     let ended = AtomicBool::new(false);
     let wait = super::until_ended(shared, || ended.load(Ordering::SeqCst));
     tokio::pin!(wait);
     pending(wait.as_mut());
     let at = Instant::now();
-    // Access or tool registration changed: no Stop event announces it.
     ended.store(true, Ordering::SeqCst);
+    super::conditions_changed(shared);
     wait.await;
-    assert!(at.elapsed() <= super::RECHECK, "{:?}", at.elapsed());
+    assert_eq!(at.elapsed(), Duration::ZERO, "the wait ran a timer");
 }
 
 #[tokio::test(start_paused = true)]
@@ -111,7 +148,7 @@ async fn an_idle_wait_checks_rarely_and_another_chats_stop_does_not_end_it() {
     let idle = tokio::time::timeout(Duration::from_secs(1), wait.as_mut()).await;
     assert!(idle.is_err(), "the wait ended without a Stop");
     let counted = checks.load(Ordering::SeqCst);
-    assert!(counted <= 5, "{counted} checks in one idle second");
+    assert_eq!(counted, 1, "{counted} checks in one idle second");
     super::stopped(shared, "other");
     pending(wait.as_mut());
     super::stopped(shared, "s");

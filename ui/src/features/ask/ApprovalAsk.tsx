@@ -24,7 +24,7 @@ import { useTranscriptUi } from "../transcript/hooks";
 import { approvalEffect, approvalOutput } from "../transcript/model/callbacks";
 import { editDiff, writeDiff } from "../transcript/model/diff";
 import { editPreview } from "../transcript/model/editPreview";
-import { type Obj, detailOf, entryId, obj, str } from "../transcript/model/entries";
+import { type Obj, detailOf, entryId, obj, str, turnIdOf } from "../transcript/model/entries";
 import { DiffView } from "../transcript/rows/DiffView";
 import { ShowAll } from "../transcript/rows/ShowAll";
 import { visibleText, visibleDiff } from "./visibleText";
@@ -87,7 +87,7 @@ function Payload({ entry }: { entry: Obj }): ReactElement | null {
                   <Button
                     data-testid="ask.edit-preview-whole"
                     type="button"
-                    appearance="expander"
+                    appearance="link"
                     onClick={() => {
                       transcript.toggle(wholeKey, true);
                     }}
@@ -158,10 +158,12 @@ export function ApprovalAsk({
   const native = useTranscriptUi((s) => s.native[callbackId]);
   const held = useHeldBy(sessionId) !== null;
   const sourceSession = str(entry["vwSourceSession"]) ?? sessionId;
+  // The header quotes the request that asked (the card's turn), like a question card; without one, the chat title.
   const who = useWho(
     isChromeControl(entry) ? "chrome" : sourceSession === hostSessionId ? "agent" : "subagent",
     hostSessionId,
     sourceSession,
+    turnIdOf(entry),
   );
   const browserName = browserApprovalName(entry);
   const summary = approvalSummary(entry);

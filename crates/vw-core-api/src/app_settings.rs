@@ -51,6 +51,19 @@ pub(crate) fn scan_settings(path: &Path) -> SecretScanSettings {
         .unwrap_or_default()
 }
 
+/// Missing, invalid and older files leave Developer permissions off.
+pub(crate) fn developer_permissions_enabled(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|settings| {
+            settings
+                .get("developerPermissions")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
+}
+
 /// The saved scan switch. Earlier versions also saved `autoRedact` (automatic redaction, removed): it is dropped and
 /// never acts, so such a file keeps its scan setting and other writers can still save. Commands refuse the field.
 fn saved_scan(value: &Value) -> serde_json::Result<SecretScanSettings> {

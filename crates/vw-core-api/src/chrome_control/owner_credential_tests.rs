@@ -1,5 +1,6 @@
 //! Owner-key recovery and browser-local removal/reconnect, using an isolated memory device store and scripted owner.
 use super::*;
+use serde_json::json;
 use std::sync::{Arc, atomic::Ordering};
 
 pub(super) async fn memory_keys(root: &std::path::Path) -> Arc<vw_keys::KeyService> {
@@ -10,9 +11,9 @@ pub(super) async fn keys_without_keyring(root: &std::path::Path) -> Arc<vw_keys:
     keys_with(root, vw_vault::remember::MemoryDeviceStore::temporary()).await
 }
 
-async fn keys_with(
+pub(super) async fn keys_with(
     root: &std::path::Path,
-    store: vw_vault::remember::MemoryDeviceStore,
+    store: impl vw_vault::remember::DeviceSecretStore + 'static,
 ) -> Arc<vw_keys::KeyService> {
     vw_keys::KeyService::start(vw_keys::KeyServiceConfig {
         managed_vault: None,

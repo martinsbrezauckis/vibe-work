@@ -23,7 +23,8 @@
 //! - **Flags:** `--multiplex` (supervisor default) and
 //!   `--additional-builtin-plugin-root <resources>/plugin` (only from the app's own files).
 //! - **Session tools:** the bundled `vw-agent-tools` next to the app executable and the kill guard in our
-//!   `hooks.toml` ([`crate::agent_tools::prepare`]).
+//!   `hooks.toml` ([`crate::agent_tools::prepare`]); when the app found that it cannot start, every tool call is
+//!   refused with that reason instead ([`ProductInputs::tools_problem`]).
 //! - **Containment:** the supervisor's process group, watchdog and ledger (unchanged here).
 //!
 //! Also [`private_data_dir`]: the app's data folder, user-only, never a temp fallback (both build kinds).
@@ -121,6 +122,10 @@ pub struct ProductInputs {
     /// `<local app data>/vibe` with the embedded pin ([`vibe_installer`]); local, not roaming, on Windows (a
     /// ~450 MB install must not travel with a roaming profile).
     pub vibe: vw_vibe_install::VibeInstaller,
+    /// Why the shipped `vw-agent-tools` cannot start, when the app found that before planning (a Windows installed
+    /// copy: the program is missing, or Windows cannot load it). `Some`: every tool call is refused with this reason
+    /// ([`crate::agent_tools::prepare_unavailable`]) instead of failing with a bare exit code.
+    pub tools_problem: Option<String>,
 }
 
 /// The Vibe installer of a user build: `<local_data_dir>/vibe` (Tauri's `app_local_data_dir`: `%LOCALAPPDATA%` on
@@ -172,8 +177,8 @@ pub fn plan(inputs: ProductInputs, settings: &HostSettings, core: &mut CoreConfi
         None
     };
     notes.push(match &cli_session_dir {
-        Some(dir) => format!("sessions shared with the Vibe CLI: {}", dir.display()),
-        None => "sessions kept separate from the Vibe CLI".to_owned(),
+        Some(dir) => format!("chats shared with the Vibe CLI: {}", dir.display()),
+        None => "chats kept separate from the Vibe CLI".to_owned(),
     });
     // The listing names the chat `vibe --continue` resumes only when the CLI holds it (shared folder).
     core.cli_session_dir.clone_from(&cli_session_dir);
@@ -207,13 +212,22 @@ pub fn plan(inputs: ProductInputs, settings: &HostSettings, core: &mut CoreConfi
         notes.push(format!("Chrome Control package: {}", chrome.display()));
     }
     let plugin = plugin_root(&resources);
-    match crate::agent_tools::prepare(
-        &mut supervisor,
-        core,
-        &inputs.data_dir,
-        sidecar,
-        Some(&plugin),
-    ) {
+    let tools = match &inputs.tools_problem {
+        Some(problem) => crate::agent_tools::prepare_unavailable(
+            &mut supervisor,
+            &inputs.data_dir,
+            problem,
+            Some(&plugin),
+        ),
+        None => crate::agent_tools::prepare(
+            &mut supervisor,
+            core,
+            &inputs.data_dir,
+            sidecar,
+            Some(&plugin),
+        ),
+    };
+    match tools {
         Ok(line) => notes.push(line),
         Err(error) => notes.push(format!(
             "agent tools off: hooks.toml could not be updated: {error}"

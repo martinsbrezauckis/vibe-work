@@ -17,6 +17,7 @@ use super::{Core, CoreConfig, CoreStartError, Shared};
 use crate::access::Access;
 use crate::channels::Channels;
 use crate::confirmer::DynConfirmer;
+use crate::developer_permissions::DeveloperPermissions;
 use crate::event::CoreEvent;
 use crate::names::Names;
 use crate::pump;
@@ -143,7 +144,7 @@ fn connect_vibe_install(shared: &Arc<Shared>) {
             if now != extension {
                 extension = now;
                 shared.emit(CoreEvent::ChromeControl {
-                    view: crate::chrome_control::commands::view(&shared),
+                    view: crate::chrome_control::settings_view(&shared),
                 });
             }
         }
@@ -262,14 +263,20 @@ fn prepare_plugins(
 }
 
 /// Publishes the prepared services with fresh per-run state; field order preserves constructor dependencies.
+#[allow(
+    clippy::too_many_lines,
+    reason = "shared service initialization stays together so every per-run state is visible"
+)]
 fn build_shared(state: Startup) -> Shared {
     let config = &state.config;
     let events = &state.events;
     let instructions = &state.instructions;
     Shared {
+        fill_effects: crate::fill_grants::Effects::default(),
         browser_settings: crate::browser_settings::Settings::new(config),
         model_requests: state.model_requests,
         browser_dialogs: Arc::default(),
+        browser_ref_origins: crate::browser_ref_origins::RefOrigins::default(),
         vibe_processes: state.vibe_processes,
         deletes: state.deletes,
         app_context: state.app_context,
@@ -285,6 +292,7 @@ fn build_shared(state: Startup) -> Shared {
         protected_changes: crate::protected_changes::Hub::of(config),
         github_reads: state.github_reads,
         keep_awake: crate::keep_awake::from_config(config),
+        developer_permissions: DeveloperPermissions::new(config.secret_scan_data.as_deref()),
         new_chat: crate::new_chat::Draft::new(config.sessions_dir.as_deref()),
         skills_lock: tokio::sync::Mutex::new(()),
         queue_returns: crate::queue_return::Returns::default(),

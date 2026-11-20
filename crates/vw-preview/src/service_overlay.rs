@@ -24,7 +24,7 @@ impl PreviewService {
         let state = self.inner.lock();
         if state.owner_of(page) != owner {
             return Err(PreviewError::InvalidTab(
-                "page belongs to another session".to_owned(),
+                "page belongs to another chat".to_owned(),
             ));
         }
         let selected = state

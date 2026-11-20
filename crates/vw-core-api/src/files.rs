@@ -108,11 +108,7 @@ fn new_token() -> String {
             .map_or(0, |d| d.as_nanos());
         buf = nanos.to_le_bytes();
     }
-    buf.iter().fold(String::from("f-"), |mut out, b| {
-        use std::fmt::Write as _;
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+    format!("f-{}", hex::encode(buf))
 }
 
 /// The File tab's state in the core.
@@ -447,7 +443,7 @@ impl Core {
                 method: method.to_owned(),
                 requester: requester(origin),
                 summary: format!(
-                    "Open {} from session {} with your default app? A browser runs its scripts with network access.",
+                    "Open {} from chat {} with your default app? A browser runs its scripts with network access.",
                     vw_gate::dialog_quote(&name),
                     vw_gate::dialog_quote(session_id),
                 ),

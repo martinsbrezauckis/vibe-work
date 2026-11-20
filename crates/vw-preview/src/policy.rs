@@ -10,7 +10,7 @@ use vw_netguard::ip::classify;
 pub enum PortOwner {
     /// Attributed to or leased by the asking session.
     ThisSession,
-    /// Attributed to or leased by another session (its display name: "another session ('Shop')").
+    /// Attributed to or leased by another session (its display name: "another chat ('Shop')").
     OtherSession(String),
     /// Another program listens there ("another app (node)").
     OtherApp(String),
@@ -96,7 +96,7 @@ pub enum UrlRefusal {
     #[error("port {0} is Vibe Work's own development server and cannot be opened")]
     AppOrigin(u16),
     /// The port belongs to someone else.
-    #[error("port {port} belongs to {owner}; a session opens only its own ports on this computer")]
+    #[error("port {port} belongs to {owner}; a chat opens only its own ports on this computer")]
     NotThisSession {
         /// The port.
         port: u16,
@@ -105,13 +105,13 @@ pub enum UrlRefusal {
     },
     /// Only inferred to be this session's.
     #[error(
-        "port {0} runs in this session's folder but was not started by Vibe Work and is not leased to this \
-         session; start the server in this session's Terminal to open it"
+        "port {0} runs in this chat's folder but was not started by Vibe Work and is not leased to this \
+         chat; start the server in this chat's Terminal to open it"
     )]
     NotProven(u16),
     /// Nothing of this session is on the port.
     #[error(
-        "port {0} is not one of this session's servers. Start the server in this session's Terminal, then open its address"
+        "port {0} is not one of this chat's servers. Start the server in this chat's Terminal, then open its address"
     )]
     Unattributed(u16),
 }

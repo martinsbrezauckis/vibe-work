@@ -36,7 +36,7 @@ async fn a_picked_tab_carries_the_receiving_chat_with_its_context_read() {
     open_chat(shared, "s", "auto-approve");
     let seen = shared.chrome_control.owner.answering(|_, args| {
         if args.get("_tabContext").is_some() {
-            json!({"structuredContent":{"requestId":"r","status":"completed","data":{"url":"https://example.com/","title":"Example","text":"Hello"}}})
+            json!({"structuredContent":{"requestId":"r","status":"completed","data":{"url":"https://example.com/","title":"Example","text":"Hello"},"agentData":{"url":"https://example.com/","title":"Example","text":"Hello"}}})
         } else {
             json!({"structuredContent":{"tabs":[{"profileId":"p","profileName":"Chrome","tab":{"tabId":7,"title":"Example","url":"https://example.com/"}}]}})
         }
@@ -75,9 +75,11 @@ async fn a_picked_tab_carries_the_receiving_chat_with_its_context_read() {
     core.shutdown().await;
 }
 
-/// PREDICT (before the change): the switch is saved for the next call only; nothing reaches Chrome's live tabs.
+/// The legacy local-network command is still accepted (older callers) but sends nothing: every supported extension
+/// (0.1.7 and later) admits local addresses with the browser's own site permissions, and the view stays enabled and
+/// applied. PREDICT (before the change): each call sent a numbered `_netPolicyChange` to the helper.
 #[tokio::test]
-async fn legacy_network_requests_keep_browser_addresses_enabled() {
+async fn legacy_network_requests_reach_no_helper_and_stay_enabled() {
     let core = core_with_chrome("tab-switch").await;
     let shared = &core.shared;
     let seen = shared
@@ -92,19 +94,9 @@ async fn legacy_network_requests_keep_browser_addresses_enabled() {
         .await
         .unwrap();
     }
-    assert_eq!(
-        calls(&seen),
-        vec![
-            (
-                "chrome_status".to_owned(),
-                json!({"_netPolicyChange":{"localNetwork":true,"generation":1}})
-            ),
-            (
-                "chrome_status".to_owned(),
-                json!({"_netPolicyChange":{"localNetwork":true,"generation":2}})
-            ),
-        ]
-    );
+    assert_eq!(calls(&seen), vec![]);
+    let view = super::commands::view(shared);
+    assert!(view.local_network && view.local_network_applied);
     core.shutdown().await;
 }
 
@@ -309,7 +301,7 @@ async fn picked_context_follows_the_draft_reset_and_first_message() {
     shared.chrome_control.owner.connected_profiles.observe(
         &json!({"profiles":[{"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.6"}]}),
     );
-    let seen = shared.chrome_control.owner.answering(|_, _| json!({"structuredContent":{"requestId":"r","status":"completed","data":{"url":"https://example.com/","title":"Example","text":"Hello"}}}));
+    let seen = shared.chrome_control.owner.answering(|_, _| json!({"structuredContent":{"requestId":"r","status":"completed","data":{"url":"https://example.com/","title":"Example","text":"Hello"},"agentData":{"url":"https://example.com/","title":"Example","text":"Hello"}}}));
     let crate::CommandResult::NewChat { view } = core
         .new_chat(Origin::Ui, crate::NewChatRequest::State {})
         .await

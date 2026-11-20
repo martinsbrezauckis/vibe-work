@@ -140,6 +140,7 @@ export function compactionRows(byName: ReadonlyMap<string, Obj>): CompactionRow[
       : [{ layer, models: layerModels(o["value"]) }];
   });
   const merged = layerModels(field?.["value"]);
+  const catalogAvailable = named.some((layer) => layer.layer === "model_catalog");
   // An administrator's global threshold is forced onto every model (Vibe's admin layer).
   const global = globalThreshold(byName.get("auto_compact_threshold"));
   return [...merged.entries()].flatMap(([alias, model]) => {
@@ -160,6 +161,7 @@ export function compactionRows(byName: ReadonlyMap<string, Obj>): CompactionRow[
     const seeded =
       alias === OWN_LARGE_4.alias &&
       name === OWN_LARGE_4.name &&
+      !catalogAvailable &&
       !global.admin &&
       above === undefined &&
       own !== null

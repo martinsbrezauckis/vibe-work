@@ -532,13 +532,7 @@ pub fn delete_item_when(
     })
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+use vw_platform::wall_clock::unix_ms_signed as now_ms;
 
 /// Builds the next snapshot on the current head and commits it, holding the repository lock for the
 /// whole cycle (Vibe Work writers never race each other). A head moved by another app (ShellX, the

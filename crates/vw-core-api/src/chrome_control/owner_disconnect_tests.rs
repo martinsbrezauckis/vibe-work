@@ -104,7 +104,7 @@ async fn the_shared_helper_refusals_name_no_single_browser() {
 #[test]
 fn busy_browser_refusal_gives_an_agent_retry_step() {
     assert!(
-        include_str!("owner.rs").contains(
+        include_str!("owner_connection.rs").contains(
             "Not run: browser control is busy. Retry this browser action after a moment."
         ),
         "the owner queue refusal must tell the agent how to proceed"

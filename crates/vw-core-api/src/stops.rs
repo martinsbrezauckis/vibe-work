@@ -3,6 +3,8 @@
 //! Uses channel identity and turn events; dispatch and the permission-answer routes call it.
 //! Hook disconnect owns prompt cancellation when a call ends. Explicit Stop closes remaining cards after
 //! Vibe has stopped, so a cancelled card cannot release a sibling hook into another model step.
+//! A person's Stop ends the turn it stopped, not the chat: once that Stop has finished and Vibe took it, a card or
+//! turn start of any other turn (a scheduled loop's run, a queued message, a turn Vibe starts on its own) lifts it.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
@@ -23,6 +25,10 @@ pub(crate) const APPROVAL_ENDED: &str = "This approval ended when the chat was s
 struct Chat {
     generation: u64,
     stopped_by_person: bool,
+    /// The generation the person's latest Stop moved the chat to: a message sent at a generation below it was on its
+    /// way when that Stop came and does not lift it (`sent`). A later failed or interrupted turn raises `generation`
+    /// but not this.
+    stop_generation: u64,
     /// The last failed or interrupted turn counted, so a turn announced again counts once.
     ended: Option<String>,
     /// The turn the last checked app send started, with the generation it was checked under, until that turn ends,
@@ -35,6 +41,65 @@ struct Chat {
     /// `session/compact` forwards in flight, which hold the chat's send lock until Vibe answers
     /// (`dispatch_compaction::stop_lock`: the chat's Stop does not wait for them).
     compacting: usize,
+    /// Stop commands counted for this chat ([`stopped`]) that have not finished ([`finished`]).
+    stopping: usize,
+    /// While the person's Stop holds: the turns it ends (the turn it named or was pointed at, the chat's running
+    /// turn, the turn of the chat's latest card). A late card of one of them closes; at most [`STOPPED_TURNS`].
+    stopped_turns: Vec<String>,
+    /// The chat the person's Stop named, as opposed to the subagents it reached through that chat.
+    aimed: bool,
+    /// The named Stop finished and Vibe took it (the turn was interrupted, none was running, or the channel closed):
+    /// a turn of this chat other than `stopped_turns` started after it, so it lifts the Stop ([`lift`]).
+    settled: bool,
+    /// The turn of the chat's latest card: a Stop also ends a turn whose events have not reached the pump yet.
+    card_turn: Option<String>,
+}
+
+/// The most turns one chat's Stop remembers as stopped (a few per Stop; overlapping Stops add theirs).
+const STOPPED_TURNS: usize = 16;
+
+/// Adds `turn` to the turns a Stop ends, once, keeping the newest [`STOPPED_TURNS`].
+fn note_turn(turns: &mut Vec<String>, turn: Option<&str>) {
+    let Some(turn) = turn.filter(|t| !t.is_empty()) else {
+        return;
+    };
+    if turns.iter().any(|t| t == turn) {
+        return;
+    }
+    if turns.len() == STOPPED_TURNS {
+        turns.remove(0);
+    }
+    turns.push(turn.to_owned());
+}
+
+/// The turn the store shows the chat running.
+fn active_turn(shared: &Shared, id: &str) -> Option<String> {
+    shared.store.view(id).and_then(|view| {
+        view.state["session"]["status"]["activeTurnId"]
+            .as_str()
+            .map(str::to_owned)
+    })
+}
+
+/// Lifts a settled Stop of chat `id` for it and its subagents when `turn` is none of the turns it ended. True when
+/// lifted. A subagent stopped on its own keeps its own Stop.
+fn lift(shared: &Shared, chats: &mut HashMap<String, Chat>, id: &str, turn: &str) -> bool {
+    let Some(chat) = chats.get(id) else {
+        return false;
+    };
+    if !(chat.stopped_by_person && chat.settled) || chat.stopped_turns.iter().any(|t| t == turn) {
+        return false;
+    }
+    for member in crate::stop_tree::family(shared, id) {
+        let chat = chats.entry(member.clone()).or_default();
+        if member != id && chat.aimed {
+            continue;
+        }
+        chat.stopped_by_person = false;
+        chat.aimed = false;
+        chat.settled = false;
+    }
+    true
 }
 
 /// The Stop generation of every chat this core has seen stopped.
@@ -44,8 +109,8 @@ pub(crate) struct Stops {
     /// Woken whenever a `session/compact` forward of any chat starts, so a waiting Stop re-checks at once
     /// (`dispatch_compaction::stop_lock`).
     compaction_started: tokio::sync::Notify,
-    /// Woken whenever a chat's generation rises (a Stop, a failed or interrupted turn) or a chat is removed, so a
-    /// job waiting in [`until_ended`] re-checks at once.
+    /// Woken whenever a chat's generation rises (a Stop, a failed or interrupted turn), a chat is removed or
+    /// [`conditions_changed`] runs, so a job waiting in [`until_ended`] re-checks at once.
     ended: tokio::sync::Notify,
 }
 
@@ -88,14 +153,17 @@ pub(crate) fn compacting(shared: &Shared, session: &str) -> bool {
         .is_some_and(|c| c.compacting > 0)
 }
 
-/// How long [`until_ended`] goes without an event before it checks again: the longest a condition no event announces
-/// (tool registration, agent access, vault permission) goes unseen.
-pub(crate) const RECHECK: std::time::Duration = std::time::Duration::from_millis(250);
+/// Wakes every [`until_ended`] wait to check its conditions again. Called where a job's authority changes without a
+/// Stop generation or a chat removal: the person's agent access switch (`agent_access::set`), a chat mode change
+/// (`chrome_control::mode_changed`) or load (`sessions`), and a session's tool credentials ending (`session_end`).
+pub(crate) fn conditions_changed(shared: &Shared) {
+    shared.stops.ended.notify_waiters();
+}
 
 /// Resolves once `ended()` is true: a running job's wait for its chat to be stopped, removed or to lose what it
-/// runs under (video jobs, secret captures). It checks at once on every generation rise and chat removal of any
-/// chat (registered before each check, so an event between the check and the wait still wakes it), and otherwise
-/// every [`RECHECK`]. Callers check their conditions again after the job, so a late wake never lets a stale result
+/// runs under (video jobs, secret captures). It checks at once on every generation rise, chat removal and
+/// [`conditions_changed`] (registered before each check, so an event between the check and the wait still wakes it);
+/// it has no timer. Callers check their conditions again after the job, so a late wake never lets a stale result
 /// through.
 pub(crate) async fn until_ended(shared: &Shared, ended: impl Fn() -> bool) {
     loop {
@@ -105,10 +173,7 @@ pub(crate) async fn until_ended(shared: &Shared, ended: impl Fn() -> bool) {
         if ended() {
             return;
         }
-        tokio::select! {
-            () = event => {}
-            () = tokio::time::sleep(RECHECK) => {}
-        }
+        event.await;
     }
 }
 
@@ -139,18 +204,62 @@ pub(crate) fn requested(shared: &Shared, command: &Command) -> Vec<String> {
         }
         stopped(shared, id);
     }
+    if let Some(session) = session {
+        let expected = match command {
+            Command::InterruptTurn {
+                expected_turn_id, ..
+            } => Some(expected_turn_id.as_str()),
+            Command::Call { params, .. } => params["expectedTurnId"].as_str(),
+            _ => None,
+        };
+        aim(shared, session, expected);
+    }
     sessions
+}
+
+/// The chat a person's Stop names (its subagents are marked by [`stopped`] only), with the turn it names.
+pub(crate) fn aim(shared: &Shared, session: &str, turn: Option<&str>) {
+    let id = shared.channels.canonical(session);
+    let mut chats = shared.stops.chats();
+    let chat = chats.entry(id).or_default();
+    chat.aimed = true;
+    note_turn(&mut chat.stopped_turns, turn);
+}
+
+/// A turn a running Stop interrupts (the turn its interrupt names after [`retarget`], the root's active turn when
+/// the chat is stopped as a whole, a subagent's turn): its late cards close too.
+pub(crate) fn ends_turn(shared: &Shared, session: &str, turn: &str) {
+    let id = shared.channels.canonical(session);
+    if let Some(chat) = shared.stops.chats().get_mut(&id)
+        && chat.stopping > 0
+    {
+        note_turn(&mut chat.stopped_turns, Some(turn));
+    }
 }
 
 /// Invalidate earlier decisions immediately and stop protected-change work.
 pub(crate) fn stopped(shared: &Shared, session: &str) {
     let id = shared.channels.canonical(session);
+    let active = active_turn(shared, &id);
     // Fence late helper replies before browser cleanup can wait on its own locks.
     {
         let mut chats = shared.stops.chats();
         let chat = chats.entry(id.clone()).or_default();
         chat.generation += 1;
+        if !chat.stopped_by_person {
+            chat.stopped_turns.clear();
+        }
         chat.stopped_by_person = true;
+        chat.stop_generation = chat.generation;
+        chat.stopping += 1;
+        chat.aimed = false;
+        chat.settled = false;
+        let latest = chat.turn.as_ref().map(|(turn, _, _)| turn.clone());
+        let started = chat.started.as_ref().map(|(turn, _)| turn.clone());
+        let card = chat.card_turn.clone();
+        for turn in [active, latest, started, card] {
+            note_turn(&mut chat.stopped_turns, turn.as_deref());
+        }
     }
     shared.stops.ended.notify_waiters();
     // A paused call waiting for the person never runs after Stop.
@@ -168,19 +277,73 @@ pub(crate) fn stopped(shared: &Shared, session: &str) {
     }
 }
 
-/// Settle any remaining prompts after the existing runtime Stop operation has returned.
-pub(crate) fn finished(shared: &Shared, sessions: &[String]) {
+/// Settle any remaining prompts after the existing runtime Stop operation has returned. `took`: Vibe took the Stop
+/// ([`took`]); then a later turn of the named chat lifts it ([`lift`]). A Stop Vibe refused holds until the person's
+/// next message.
+pub(crate) fn finished(shared: &Shared, sessions: &[String], took: bool) {
     for session in sessions {
+        let id = shared.channels.canonical(session);
+        let stopped = {
+            let mut chats = shared.stops.chats();
+            let chat = chats.entry(id.clone()).or_default();
+            chat.stopping = chat.stopping.saturating_sub(1);
+            // A turn that started after Vibe took the interrupt is a new one (a due loop starts as soon as the chat
+            // is idle), so nothing seen since is added to the stopped turns.
+            chat.aimed &= took && chat.stopped_by_person;
+            chat.settled = chat.aimed && chat.stopping == 0;
+            chat.stopped_by_person
+        };
+        // A new turn already lifted the Stop (`taken`): the cards open now are that turn's.
+        if !stopped {
+            continue;
+        }
         shared
             .asks
             .cancel_session(Some(session), "the turn was stopped");
-        let id = shared.channels.canonical(session);
         if id != *session {
             shared
                 .asks
                 .cancel_session(Some(&id), "the turn was stopped");
         }
     }
+}
+
+/// Whether Vibe took a Stop command (`stopping`: the chats it counted, [`requested`]): it answered, or no turn was
+/// running any more and the chat has no subagents (that answer skips stopping them).
+pub(crate) fn took<T>(result: &Result<T, CoreError>, stopping: &[String]) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(error) => {
+            stopping.len() <= 1
+                && error.server_code.as_deref() == Some("conflict")
+                && error.message.contains("No active turn")
+        }
+    }
+}
+
+/// Vibe took the interrupt of the chat the person's Stop named and its subagents were stopped: from now on a turn
+/// of the chat other than the stopped ones is new, even before the Stop command returns.
+pub(crate) fn taken(shared: &Shared, session: &str) {
+    let id = shared.channels.canonical(session);
+    if let Some(chat) = shared.stops.chats().get_mut(&id)
+        && chat.stopped_by_person
+        && chat.aimed
+        && chat.stopping <= 1
+    {
+        chat.settled = true;
+    }
+}
+
+/// A card of `turn` registered for `session` (`stop_tree::cancel_late`, before it decides): a card of a turn other
+/// than the ones the chat's settled Stop ended lifts that Stop; the turn is remembered for the chat's next Stop.
+pub(crate) fn card(shared: &Shared, session: &str, turn: Option<&str>) {
+    let Some(turn) = turn.filter(|t| !t.is_empty()) else {
+        return;
+    };
+    let id = shared.channels.canonical(session);
+    let mut chats = shared.stops.chats();
+    lift(shared, &mut chats, &id, turn);
+    chats.entry(id).or_default().card_turn = Some(turn.to_owned());
 }
 
 /// Native callbacks racing a personal Stop must be cancelled, including a newly registered child.
@@ -237,6 +400,12 @@ pub(crate) fn observe(shared: &Shared, change: &vw_session::Change) {
                         chat.ended = turn_id.map(str::to_owned);
                         rose = true;
                     }
+                }
+                // Any turn of the chat other than the ones its settled Stop ended starts fresh.
+                if status == Some("in_progress")
+                    && let Some(turn) = turn_id
+                {
+                    lift(shared, &mut chats, &id, turn);
                 }
             }
             if rose {
@@ -327,6 +496,14 @@ pub(crate) fn admit(
     expected: Option<u64>,
 ) -> Result<Value, CoreError> {
     let params = retarget(shared, method, params);
+    if method == "turn/interrupt"
+        && let (Some(session), Some(turn)) = (
+            params["sessionId"].as_str(),
+            params["expectedTurnId"].as_str(),
+        )
+    {
+        ends_turn(shared, session, turn);
+    }
     still(shared, expected, method, &params)?;
     Ok(params)
 }
@@ -351,6 +528,15 @@ pub(crate) fn refused_as_stopped(error: &CoreError) -> bool {
 
 /// After a gated send of `method`: a checked `turn/start` (`expected` set) that Vibe accepted started a turn a later
 /// Stop must reach; the person's own `turn/start` means the chat now runs their turn.
+///
+/// The person's own message lifts their Stop also when it is queued (`session/turn/enqueue`: voice chat, and a
+/// message typed while voice chat is on), so the cards of the turn it starts are not closed as late cards of the
+/// stopped one. It lifts it here, when Vibe accepted it, before that turn can ask anything (a card's request can
+/// reach the core before the turn's own events). It lifts only a Stop counted before the message was sent (a Stop
+/// pressed while it was on its way is meant for the turn it starts), and only once the chat no longer shows the
+/// stopped turn running, so a late card of that turn still closes. Any other turn lifts a Stop once that Stop has
+/// settled ([`card`], [`observe`]). A subagent's own Stop stays with that subagent: the parent's message does not
+/// lift it.
 pub(crate) fn sent(
     shared: &Shared,
     expected: Option<u64>,
@@ -361,16 +547,42 @@ pub(crate) fn sent(
 ) {
     let Some(session) = params["sessionId"]
         .as_str()
-        .filter(|_| method == "turn/start")
+        .filter(|_| matches!(method, "turn/start" | "session/turn/enqueue"))
     else {
         return;
     };
     let id = shared.channels.canonical(session);
+    // Read before the chats lock (the order `take_started` uses). Vibe refuses a `turn/start` while a turn runs.
+    let running = method != "turn/start"
+        && shared.store.view(&id).is_some_and(|view| {
+            matches!(
+                view.state["session"]["status"]["type"].as_str(),
+                Some("running" | "blocked")
+            )
+        });
     let mut chats = shared.stops.chats();
-    if expected.is_none() {
+    let stopped_turn_ended = !running
+        || chats
+            .get(&id)
+            .and_then(|chat| chat.turn.as_ref())
+            .is_some_and(|(_, _, done)| *done);
+    let stopped_before_send = chats
+        .get(&id)
+        .is_none_or(|chat| chat.stop_generation <= at_send);
+    if expected.is_none() && stopped_turn_ended && stopped_before_send {
         for member in crate::stop_tree::family(shared, &id) {
-            chats.entry(member).or_default().stopped_by_person = false;
+            let chat = chats.entry(member.clone()).or_default();
+            if member != id && chat.aimed {
+                continue;
+            }
+            chat.stopped_by_person = false;
+            chat.aimed = false;
+            chat.settled = false;
+            chat.stopping = 0;
         }
+    }
+    if method != "turn/start" {
+        return;
     }
     let turn = result.pointer("/turn/id").and_then(Value::as_str);
     if let Some(turn) = turn {
@@ -434,3 +646,7 @@ mod tests;
 #[cfg(test)]
 #[path = "stops_wait_tests.rs"]
 mod wait_tests;
+
+#[cfg(test)]
+#[path = "stops_turn_tests.rs"]
+mod turn_tests;

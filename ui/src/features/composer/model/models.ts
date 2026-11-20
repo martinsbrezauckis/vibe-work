@@ -73,8 +73,7 @@ function choiceOf(value: JsonValue): ModelChoice | null {
 }
 
 /**
- * The configured models, in Vibe's order, with one Large 4 (`state/thinkingLevels`): Mistral's own entry is left out
- * beside ours unless it is the active model.
+ * The configured models, in Vibe's order. Catalog and person-owned rows are both shown.
  */
 export function modelChoices(source: JsonValue | undefined): ModelChoice[] {
   const config = configView(source);

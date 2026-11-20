@@ -36,6 +36,11 @@ const REASONS: Readonly<Record<string, string>> = {
     "Vibe Work could not reach Mistral. Check your internet connection (and any proxy or firewall), then try again.",
   locked: `${VAULT_LOCKED_NOTICE} Type your password to unlock it first.`,
   alreadyExists: "A vault already exists on this computer. Unlock it with its password instead.",
+  vaultOpen: "The vault is open, so there is nothing to set aside.",
+  sharedVault:
+    "This vault is shared with other apps, so Vibe Work does not move it. Nothing was moved.",
+  rememberedVault:
+    "This computer still keeps an unlock key for this vault. A new vault would replace it, and it may be your last way into the old one. Nothing was moved.",
   conflict:
     "Another program changed the vault at the same moment, so nothing was saved. Try again.",
   corrupt:
@@ -64,6 +69,11 @@ const REASONS: Readonly<Record<string, string>> = {
   internal: "Something went wrong inside Vibe Work. Try again.",
   notConfigured: "This run keeps the key in the environment, so there is nothing to set up.",
 };
+
+/** What the person reads after the old vault was set aside, with the folder it is kept in now. */
+export function setAsideNotice(keptAt: string): string {
+  return `The old vault was set aside here: ${keptAt}. Nothing was deleted. Choose a new password and paste your Mistral key again.`;
+}
 
 /** The person's existing OS sign-in, with the platform's own name (the system unlock choice). */
 export function systemUnlockLabel(): string {

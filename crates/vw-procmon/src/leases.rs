@@ -402,12 +402,6 @@ impl PortLeases {
             .unwrap_or_default()
     }
 
-    /// Every leased port, of any session (sorted).
-    #[must_use]
-    pub fn all_ports(&self) -> Vec<u16> {
-        self.lock().holder.keys().copied().collect()
-    }
-
     /// Which session holds `port`, if any.
     #[must_use]
     pub fn holder(&self, port: u16) -> Option<String> {

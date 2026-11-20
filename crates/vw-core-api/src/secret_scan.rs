@@ -142,10 +142,7 @@ impl Drop for ScanState {
 }
 
 fn unavailable() -> CoreError {
-    CoreError::new(
-        ErrorCode::Internal,
-        "The session log checker is unavailable.",
-    )
+    CoreError::new(ErrorCode::Internal, "The chat log checker is unavailable.")
 }
 
 pub(crate) fn publish(shared: &Shared) {
@@ -310,10 +307,7 @@ impl Core {
                     serde_json::Map::from_iter([("secretScan".to_owned(), json!(settings))]),
                 )
                 .map_err(|_| {
-                    CoreError::new(
-                        ErrorCode::Internal,
-                        "Could not save the session log settings.",
-                    )
+                    CoreError::new(ErrorCode::Internal, "Could not save the chat log settings.")
                 })?;
                 let saved = crate::app_settings::scan_settings(&data.join("settings.json"));
                 let mut view = state.view.lock_or_recover();
@@ -335,7 +329,7 @@ impl Core {
                 if !state.view().settings.enabled {
                     return Err(CoreError::new(
                         ErrorCode::InvalidParams,
-                        "Turn on session log scanning first.",
+                        "Turn on chat log scanning first.",
                     ));
                 }
                 state.pending.store(true, Ordering::Release);
@@ -365,6 +359,7 @@ pub(crate) fn note_command(shared: &Shared, command: &Command) {
             | Command::SecretScan {
                 request: SecretScanRequest::Read {}
             }
+            | Command::DeveloperPermissions { enabled: None }
     ) {
         shared.secret_scan.activity();
     }

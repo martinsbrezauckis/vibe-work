@@ -46,7 +46,7 @@ impl PreviewService {
                 return;
             };
             let loads = *entry.loads.borrow();
-            if entry.loading
+            if entry.loading()
                 || entry
                     .favicon
                     .as_ref()
@@ -96,7 +96,7 @@ impl PreviewService {
         }
         let mut state = self.inner.lock();
         if let Some(entry) = state.entries.get_mut(page_key)
-            && !entry.loading
+            && !entry.loading()
             && *entry.loads.borrow() == loads
             && entry.url.as_ref().map(url::Url::as_str) == Some(url.as_str())
             && entry

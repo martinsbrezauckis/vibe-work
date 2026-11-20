@@ -95,16 +95,19 @@ const CLICKING: &str = "clicking the native preview";
 /// click, wheel and keyboard input) becomes [`EngineError::FocusRequired`], the agent's plain "bring it forward"
 /// answer. Every other platform error stays as it is.
 fn focus_required(error: EngineError) -> EngineError {
-    match error {
-        EngineError::Platform(ref text)
-            if text
-                .strip_prefix(CLICKING)
-                .and_then(|reason| reason.strip_prefix(": "))
-                == Some(vw_platform::native_click::NOT_IN_FRONT) =>
-        {
-            EngineError::FocusRequired
+    let reason = match &error {
+        EngineError::Platform(text) => text
+            .strip_prefix(CLICKING)
+            .and_then(|reason| reason.strip_prefix(": ")),
+        _ => None,
+    };
+    match reason {
+        Some(vw_platform::native_click::NOT_IN_FRONT) => EngineError::FocusRequired,
+        // An open menu (macOS): the adapter's own plain sentence, without the internal step name.
+        Some(vw_platform::native_click::MENU_OPEN) => {
+            EngineError::Platform(vw_platform::native_click::MENU_OPEN.to_owned())
         }
-        other => other,
+        _ => error,
     }
 }
 
@@ -169,6 +172,23 @@ mod tests {
             );
         }
         assert!(require_front(true, true).is_ok());
+    }
+
+    // PREDICT (before the fix): fails: no adapter refused for an open menu, so the macOS press waited for the menu and
+    // timed out as "the preview did not answer in time (clicking the native preview)". Now the adapter's plain
+    // sentence reaches the agent without the internal step name.
+    #[test]
+    fn an_open_menu_reaches_the_agent_as_its_own_sentence() {
+        let EngineError::Platform(text) = adapter(vw_platform::native_click::MENU_OPEN) else {
+            panic!("an open menu is not a focus request");
+        };
+        assert_eq!(text, vw_platform::native_click::MENU_OPEN);
+        assert!(
+            text.contains("close the menu")
+                && text.contains("nothing was sent")
+                && !text.contains("with select"),
+            "{text}"
+        );
     }
 
     #[test]

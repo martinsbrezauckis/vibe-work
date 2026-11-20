@@ -52,6 +52,9 @@ impl SkillPlaces {
 
     /// When `copy`'s skill file last changed, in milliseconds since the epoch.
     pub(crate) fn modified_ms(&self, copy: &SkillSummary) -> Option<i64> {
+        if copy.scope == SkillScope::Session {
+            return None;
+        }
         let file = match (copy.source, &copy.registry) {
             // A registry copy without its identity is not one this lookup can place.
             (SkillSource::Builtin | SkillSource::Plugin, _) | (SkillSource::Registry, None) => {
@@ -71,7 +74,7 @@ impl SkillPlaces {
             }
             (SkillSource::Local, None) => {
                 let dirs: &[PathBuf] = match copy.scope {
-                    SkillScope::Builtin => return None,
+                    SkillScope::Builtin | SkillScope::Session => return None,
                     SkillScope::Project => &self.project,
                     SkillScope::Global => &self.global,
                 };

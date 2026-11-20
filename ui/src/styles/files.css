@@ -117,7 +117,7 @@
   margin: 0;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.5;
+  line-height: var(--leading-ui);
   color: var(--text);
   white-space: pre;
 }
@@ -137,7 +137,7 @@
 }
 .file-md {
   font-size: var(--text-md);
-  line-height: 1.55;
+  line-height: var(--leading-copy);
   color: var(--text);
   overflow-wrap: anywhere;
 }

@@ -38,8 +38,7 @@ function asObject(value: JsonValue | undefined): { [key in string]?: JsonValue }
 }
 
 /**
- * Reads the models out of a `config/read` result, with one Large 4 (`thinkingLevels`: Mistral's own entry left out
- * beside ours unless it is the default);
+ * Reads the models out of a `config/read` result, including catalog and person-owned rows;
  * `null` when the shape is not recognised.
  */
 export function parseModels(result: JsonValue): ModelList | null {

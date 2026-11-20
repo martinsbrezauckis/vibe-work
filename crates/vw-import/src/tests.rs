@@ -2,7 +2,7 @@
 //!
 //! PREDICT: before this crate existed nothing here compiled. The plan must list instructions, skills and servers
 //! with their status, name a key without its value, and never ask for a sign-in or secret file (a recording reader
-//! sees every path the scan asks for).
+//! sees every path the scan asks for). A canonical fixture root keeps OS temp-directory aliases out of these paths.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -40,8 +40,9 @@ fn write(path: &Path, text: &str) {
 
 fn fixture() -> (tempfile::TempDir, Homes) {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    let project = dir.path().join("project");
+    let root = dir.path().canonicalize().unwrap();
+    let home = root.join("home");
+    let project = root.join("project");
     // The `~/.claude/` agent.
     write(&home.join(".claude/CLAUDE.md"), "Prefer small commits.\n");
     write(
@@ -83,7 +84,7 @@ fn fixture() -> (tempfile::TempDir, Homes) {
         "approval_policy = \"on-request\"\n[mcp_servers.search]\ncommand = \"uvx\"\nargs = [\"search-mcp\"]\n[mcp_servers.remote]\nurl = \"https://remote.example.com/mcp\"\nenv = { API_KEY = \"$API_KEY\" }\n",
     );
     // OpenCode (JSON with comments).
-    let config = dir.path().join("config");
+    let config = root.join("config");
     write(
         &config.join("opencode/opencode.jsonc"),
         &format!(
@@ -281,6 +282,30 @@ fn codex_opencode_and_cursor_formats_are_read() {
     );
 }
 
+/// PREDICT: a project that stores OpenCode's MCP setup in `.opencode/opencode.json(c)` must show
+/// both its remote servers and its locally launched server in the plan; the local program stays
+/// unavailable for import under the existing project-program rule.
+#[test]
+fn opencode_project_dot_directory_config_is_in_the_plan() {
+    let (_dir, homes) = fixture();
+    let project = homes.project.as_ref().unwrap();
+    write(
+        &project.join(".opencode/opencode.jsonc"),
+        r#"{"mcp":{"project-docs":{"type":"remote","url":"https://docs.example.test/mcp"},"project-runner":{"type":"local","command":["node","server.js"]}}}"#,
+    );
+    write(
+        &project.join(".opencode/opencode.json"),
+        r#"{"mcp":{"project-wiki":{"type":"remote","url":"https://wiki.example.test/mcp"}}}"#,
+    );
+    let rows = scan(&Disk, &homes, &Taken::default());
+    let docs = row(&rows, Agent::OpenCode, Kind::McpServer, "project-docs");
+    assert_eq!(docs.status, Status::Ready, "{docs:?}");
+    let wiki = row(&rows, Agent::OpenCode, Kind::McpServer, "project-wiki");
+    assert_eq!(wiki.status, Status::Ready, "{wiki:?}");
+    let runner = row(&rows, Agent::OpenCode, Kind::McpServer, "project-runner");
+    assert_eq!(runner.status, Status::CantBring, "{runner:?}");
+}
+
 #[test]
 fn names_vibe_work_already_uses_cannot_be_brought_and_changes_show() {
     let (_dir, homes) = fixture();
@@ -422,10 +447,11 @@ fn detect_names_agents_with_a_setup_without_reading_any_file() {
         fs.1.borrow()
     );
     let empty = tempfile::tempdir().unwrap();
+    let empty_root = empty.path().canonicalize().unwrap();
     let only_settings = Homes {
-        home: empty.path().join("home"),
+        home: empty_root.join("home"),
         codex_home: None,
-        config_dir: empty.path().join("config"),
+        config_dir: empty_root.join("config"),
         project: None,
     };
     write(&only_settings.home.join(".claude/settings.json"), "{}");

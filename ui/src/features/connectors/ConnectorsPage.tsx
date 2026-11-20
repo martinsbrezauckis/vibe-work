@@ -16,7 +16,7 @@ import { AddServerDialog } from "./AddServerDialog";
 import { RemoveServerDialog } from "./RemoveServerDialog";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { ConnectorTile } from "./ConnectorTile";
-import { ToolsTabs } from "./ToolsTabs";
+import { ToolsTabs, ToolsTitle } from "./ToolsTabs";
 import { ServerList } from "./ServerList";
 import { SignInBanner } from "./SignInBanner";
 import { useConnectorActions, useConnectors } from "./hooks";
@@ -95,6 +95,7 @@ export function ConnectorsPage(): ReactElement {
   return (
     <div className={`cpage ${selected === null ? "" : "has-detail"}`} data-testid="connectors-page">
       <div className="cmain">
+        <ToolsTitle />
         <ChromeCard />
         <div className="chead">
           <ToolsTabs />

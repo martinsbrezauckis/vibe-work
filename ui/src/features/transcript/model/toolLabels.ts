@@ -1,7 +1,7 @@
 /** Plain labels for Vibe's built-in actions; keeps custom tool identities and command contents intact.
  * Depends on no UI state. Called by permission, transcript and saved-rule wording.
  */
-import { term } from "../../../vocabulary";
+import { TEXT, term } from "../../../vocabulary";
 interface ToolWords {
   name: string;
   permission: string;
@@ -110,6 +110,7 @@ export function toolText(tool: string, text: string, literal: string | null = nu
 }
 
 const APP_ACTIONS: Readonly<Record<string, string>> = {
+  push: TEXT.agentPushToolName,
   session_status: "Read this chat's access mode",
   connectors_list: "List available connectors",
   connector_suggest: "Offer a connector",

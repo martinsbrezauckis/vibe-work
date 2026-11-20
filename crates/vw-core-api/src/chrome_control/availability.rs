@@ -40,6 +40,24 @@ pub(super) fn reason(view: &AddonView, browser: Browser) -> String {
     text
 }
 
+/// The refusal of a call without a connection when the shipped helper cannot start (Safari has its own helper).
+fn helper_refusal(shared: &Shared, browser: Browser) -> Option<Value> {
+    let problem = shared.chrome_control.config.helper_start_problem.as_ref()?;
+    if browser == Browser::Safari {
+        return None;
+    }
+    let answer = super::owner::own(&helper_cannot_start(browser, problem), "OWNER_REQUIRED");
+    Some(json!({"vwMcpResult": answer.into_value()}))
+}
+
+/// The refusal when the shipped helper cannot start on this computer (`problem`: why): which part, and the repair.
+pub(super) fn helper_cannot_start(browser: Browser, problem: &str) -> String {
+    browser.words(&format!(
+        "Not run: {{yourBrowser}} helper (chrome-control.exe) cannot start on this computer ({problem}). Vibe Work is \
+         not installed completely; running the Vibe Work installer again repairs it."
+    ))
+}
+
 /// Whether the helper reports a connected profile now: the owner's record of the helper's latest status answer
 /// (polled every two seconds and on every call's own status read), not anything read from files.
 pub(super) fn live(shared: &Shared, browser: Browser) -> bool {
@@ -73,6 +91,9 @@ fn refusal_for(shared: &Shared, browser: Browser, live: bool, view: &AddonView) 
     if !blocks {
         return None;
     }
+    if let Some(refusal) = helper_refusal(shared, browser) {
+        return Some(refusal);
+    }
     if view.state == AddonState::Connecting && browser.reconnectable(shared) {
         return Some(super::reconnect::retry(browser));
     }
@@ -91,6 +112,10 @@ fn refusal_for(shared: &Shared, browser: Browser, live: bool, view: &AddonView) 
 pub(super) fn gate(shared: &Shared, browser: Browser, live: bool) -> Option<Value> {
     if !shared.chrome_control.config.available() {
         return None;
+    }
+    // A helper that cannot start never connects: say so before the connecting state lets the call wait for it.
+    if !live && let Some(refusal) = helper_refusal(shared, browser) {
+        return Some(refusal);
     }
     let view = addon(shared, browser);
     if view.state == AddonState::Connecting {
@@ -411,5 +436,94 @@ mod tests {
                 .all(|(name, _)| name == "chrome_status")
         );
         core.shutdown().await;
+    }
+}
+
+// PREDICT (helper that cannot start): Windows could not load chrome-control.exe, so the extension never connected and
+// an agent's browser call got the card's words (not set up / not connected), naming neither the helper nor the repair.
+#[cfg(test)]
+mod helper_start_tests {
+    use crate::chrome_control::gateway;
+    use serde_json::json;
+
+    const PROBLEM: &str = "Windows could not load it: error 0xC0000135, a DLL it needs is missing";
+
+    async fn core(label: &str, problem: Option<&str>) -> crate::core::Core {
+        let problem = problem.map(str::to_owned);
+        let core = crate::offline_core::start_with(label, move |config, dir| {
+            config.chrome_control.package = Some(dir.join("package"));
+            config.chrome_control.helper_start_problem = problem;
+        })
+        .await;
+        let _ = core
+            .shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        core.shared.access.observe_request(
+            "session/agent/update",
+            "s",
+            &json!({"agentName":"auto-approve"}),
+        );
+        core.shared
+            .chrome_control
+            .tasks
+            .lock()
+            .unwrap()
+            .insert("t".into(), "s".into());
+        core
+    }
+
+    async fn answers(core: &crate::core::Core) -> Vec<String> {
+        let mut texts = Vec::new();
+        for (tool, args) in [
+            ("chrome_status", json!({"sessionId":"t"})),
+            (
+                "chrome_execute",
+                json!({"sessionId":"t","action":"page.read","args":{}}),
+            ),
+        ] {
+            texts.push(format!(
+                "{:?}",
+                gateway::call(&core.shared, "s", tool, args).await
+            ));
+        }
+        texts
+    }
+
+    #[tokio::test]
+    async fn an_agent_call_names_the_helper_that_cannot_start_and_the_repair() {
+        let expected = format!(
+            "Not run: {} helper (chrome-control.exe) cannot start on this computer ({PROBLEM}). Vibe Work is \
+             not installed completely; running the Vibe Work installer again repairs it.",
+            vw_vocabulary::texts::CHROME_NAME
+        );
+        let core = core("availability-helper-cannot-start", Some(PROBLEM)).await;
+        for text in answers(&core).await {
+            assert!(text.contains(&expected), "{text}");
+        }
+        // Falsifier: the same core without the problem answers with the card's words.
+        let core = core_without().await;
+        for text in answers(&core).await {
+            assert!(!text.contains("chrome-control.exe"), "{text}");
+        }
+    }
+
+    async fn core_without() -> crate::core::Core {
+        core("availability-helper-starts", None).await
+    }
+
+    #[test]
+    fn each_browser_names_its_own_card() {
+        use crate::chrome_control::agent_browser::Browser;
+        assert!(
+            super::helper_cannot_start(Browser::Edge, "x").starts_with(&format!(
+                "Not run: {} helper (chrome-control.exe)",
+                vw_vocabulary::texts::EDGE_NAME
+            ))
+        );
     }
 }

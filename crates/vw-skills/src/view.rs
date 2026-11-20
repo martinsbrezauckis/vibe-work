@@ -18,6 +18,8 @@ pub enum SkillsSource {
     User,
     /// An installed project skill, local or registry.
     Project,
+    /// A skill selected for one chat.
+    Session,
     /// A skill supplied by a plugin.
     Plugin,
     /// A registry listing with no installed copy.
@@ -200,6 +202,7 @@ fn display_source(skill: &SkillSummary) -> SkillsSource {
         (SkillSource::Plugin, _) => SkillsSource::Plugin,
         (SkillSource::Builtin, _) | (_, SkillScope::Builtin) => SkillsSource::Builtin,
         (_, SkillScope::Project) => SkillsSource::Project,
+        (_, SkillScope::Session) => SkillsSource::Session,
         (_, SkillScope::Global) => SkillsSource::User,
     }
 }

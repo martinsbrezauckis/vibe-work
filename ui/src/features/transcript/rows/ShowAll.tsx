@@ -52,7 +52,7 @@ export function ShowAll({
     <Button
       data-testid="transcript.show-all-toggle"
       type="button"
-      appearance="expander"
+      appearance="link"
       aria-label="Show full text"
       title="Show full text"
       onClick={() => {
@@ -72,7 +72,7 @@ export function ShowAll({
         <Button
           data-testid="transcript.show-all-toggle-2"
           type="button"
-          appearance="expander"
+          appearance="link"
           aria-label="Show less text"
           title="Show less text"
           onClick={() => {

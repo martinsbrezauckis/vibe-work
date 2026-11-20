@@ -25,7 +25,7 @@ vault?: VaultChoice,
 /**
  * The first-run choice; later unlocks retain the saved policy.
  */
-unlockMethod?: VaultUnlockMethod, } | { "op": "lockVault", } | { "op": "setLockVaultOnQuit",
+unlockMethod?: VaultUnlockMethod, } | { "op": "lockVault", } | { "op": "setAsideVault", } | { "op": "setLockVaultOnQuit",
 /**
  * On: quitting locks the vault and deletes its kept key.
  */

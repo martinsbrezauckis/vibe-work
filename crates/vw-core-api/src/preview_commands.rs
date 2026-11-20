@@ -237,7 +237,7 @@ async fn layout(
             if service.owner_session_id(&key).as_deref() != Some(owner) {
                 return Err(CoreError::new(
                     ErrorCode::Denied,
-                    "tab does not belong to this session",
+                    "tab does not belong to this chat",
                 ));
             }
             Some(key)
@@ -312,7 +312,7 @@ async fn overlay(
             if service.owner_session_id(&key).as_deref() != Some(session_id.as_str()) {
                 return Err(CoreError::new(
                     ErrorCode::Denied,
-                    "tab does not belong to this session",
+                    "tab does not belong to this chat",
                 ));
             }
             key

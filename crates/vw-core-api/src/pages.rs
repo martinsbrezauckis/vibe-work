@@ -252,7 +252,7 @@ impl Core {
             .ok_or_else(|| {
                 CoreError::new(
                     ErrorCode::NotFound,
-                    "The session's folder is not available. Open the session from the list and try again.",
+                    "The chat's folder is not available. Open the chat from the list and try again.",
                 )
             })
     }

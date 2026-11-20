@@ -24,7 +24,7 @@ a Vibe tag locks the fixed version itself. Because `mistral-vibe`'s own metadata
 `--no-deps`: this file is the complete install set (the check above proves it names every package the wheel
 requires), so nothing is resolved and nothing outside it can be installed. Every package keeps `--require-hashes`.
 
-Usage: python3 -I generate_pin.py --vibe 3.1.2 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+Usage: python3 -I generate_pin.py --vibe 3.1.3 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
 For a dependency-removal-only bump, --reuse-pin <previous pin dir> uses only PyPI: the previous
 requirements hash is checked, every retained dependency (including its marker) must match both published
 releases exactly, and the already-reviewed uv assets are reused. Added or changed dependencies require
@@ -56,13 +56,18 @@ TARGETS = {
     "x86_64-pc-windows-msvc": ("x86_64-pc-windows-msvc.zip", "win_amd64"),
 }
 
+# Published wheel inventory includes architectures beyond the app's shipping targets.
+WHEEL_PLATFORMS = {target: platform for target, (_asset, platform) in TARGETS.items()} | {
+    "x86_64-apple-darwin": "macosx_11_0_x86_64",
+    "aarch64-unknown-linux-gnu": "manylinux_2_28_aarch64",
+}
+
 # Security overrides: package -> (fixed version, the advisories it fixes). Generation fails when an entry is stale
 # (the tag's lock already has that version or a later one) or names a package the lock does not have: remove it then.
 # The fixed release must be a pure-Python wheel (`py3-none-any`, not yanked), so one file serves every target.
 # The OpenTelemetry packages pin each other exactly (sdk==api, proto-http==proto-common==proto, ...), so the
 # advisory in opentelemetry-api moves the whole set Vibe locks to the matching fixed release.
 SECURITY_OVERRIDES = {
-    "soupsieve": ("4.0", "GHSA-mmhr-3c5m-f64f, GHSA-4j63-6c4x-wfg4"),
     "opentelemetry-api": ("1.45.2", "GHSA-mf5v-w3w3-f6cg"),
     "opentelemetry-exporter-http-transport": ("0.66b2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
     "opentelemetry-exporter-otlp-common": ("0.66b2", "with opentelemetry-api, GHSA-mf5v-w3w3-f6cg"),
@@ -228,7 +233,7 @@ def main() -> int:
     export = apply_overrides(export, SECURITY_OVERRIDES, pypi_files)
     overridden = "; ".join(f"{name} {version} ({advisories})" for name, (version, advisories) in SECURITY_OVERRIDES.items())
     wheels = {}
-    for target, (_asset, platform_tag) in TARGETS.items():
+    for target, platform_tag in WHEEL_PLATFORMS.items():
         found = [u for u in pypi["urls"] if u["packagetype"] == "bdist_wheel" and u["filename"].endswith(f"{platform_tag}.whl")]
         if len(found) != 1:
             raise SystemExit(f"expected one mistral-vibe wheel for {platform_tag}, found {len(found)}")

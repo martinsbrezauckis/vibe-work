@@ -232,6 +232,14 @@ function scanCss(file, source) {
       `${file}:${line}: ${match[1]} must be defined in shared tokens.css, not feature CSS`,
     );
   }
+  // Text leading comes from the --leading-* scale (DESIGN.md, Typography). A pixel line height is box geometry (a
+  // badge or a docked toast row) and stays allowed; a bare number is a leading and needs the token.
+  for (const match of clean.matchAll(/(?:^|[;{}])\s*line-height\s*:\s*([^;{}]+)/gm)) {
+    if (/^-?\d*\.?\d+$/.test(match[1].trim()) && Number(match[1]) !== 0)
+      findings.push(
+        `${file}:${clean.slice(0, match.index + match[0].indexOf("line-height")).split("\n").length}: line-height ${match[1].trim()} needs a --leading-* token`,
+      );
+  }
   for (const match of clean.matchAll(/(?:^|[;{}])\s*(border-radius|z-index)\s*:\s*([^;{}]+)/gm)) {
     if (/\d(?:px|%)/.test(match[2]) || (match[1] === "z-index" && /^-?\d/.test(match[2].trim())))
       findings.push(

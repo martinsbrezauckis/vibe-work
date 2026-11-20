@@ -1,28 +1,37 @@
 // A real Chromium page behind the Rust browser test engine's JSON-lines pipe.
 // Depends on the UI's playwright-core installation; called by support/mod.rs.
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { createServer } from "node:net";
 import { installPointGuard } from "./point_guard.mjs";
 import { devtoolsTargets } from "./devtools_targets.mjs";
 
 const { chromium } = createRequire(process.env.VW_BROWSER_UI_PACKAGE)("playwright-core");
 // A raw DevTools connection to the page target (as WebView2's own protocol channel, with flat child sessions),
 // used only when the Rust engine evaluates frames through the production isolated-world registry.
-const debugPort = await new Promise(resolve => { const s = createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+// Chromium binds the DevTools port itself (port 0) and names it in its profile's DevToolsActivePort file. A port
+// picked here and handed over could be taken by a parallel fixture first: Chromium then has no DevTools endpoint and
+// the guard bootstrap below would talk to the other fixture's browser, leaving this page unguarded.
+const profile = mkdtempSync(join(tmpdir(), "vw-browser-fixture-"));
 // Site isolation as WebView2 ships it: cross-site frames run in processes (DevTools sessions) of their own.
 // Exercise the Windows-default middle-button behavior even when this fixture runs on Linux.
-const browser = await chromium.launch({ args: [`--remote-debugging-port=${debugPort}`, "--site-per-process", "--enable-blink-features=MiddleClickAutoscroll"] });
+const context = await chromium.launchPersistentContext(profile, {
+  args: ["--remote-debugging-port=0", "--site-per-process", "--enable-blink-features=MiddleClickAutoscroll"],
+  viewport: { width: 300, height: 200 },
+});
+const debugPort = await activePort(profile);
 let captureDeviceScale = false;
-const page = await browser.newPage({ viewport: { width: 300, height: 200 } });
+// The persistent context's own first page is the fixture's only page.
+const page = context.pages()[0] ?? await context.newPage();
 let raw = null;
 const rawEvents = [];
 const rawPending = new Map();
 let rawNext = 0;
 const rawConnect = async () => {
   if (raw) return raw;
-  // The fixture's only page (Playwright opens no startup window).
+  // The fixture's only page (the persistent context's first page; no other window is opened).
   const pages = (await devtoolsTargets(debugPort)).filter(t => t.type === "page");
   const target = pages.length === 1 ? pages[0] : null;
   if (!target) throw new Error("page target not found");
@@ -70,8 +79,27 @@ const frameFixture = `<title>Embedded login</title><form method="post">
 <label><input id="check" type="checkbox">Fixture checkbox</label>
 <button id="send">Sign in</button></form>
 <iframe src="https://nested.example.test/child"></iframe>`;
-await page.route("**/*", (route) => route.fulfill({
-  body: route.request().url().includes("consent.example.test") ? `<title>Privacy choices</title>
+// A checkout page with synthetic protected values (a test card number, a PIN and a password).
+const protectedFixture = `<title>Checkout</title>
+<label>Card number <input id="card" autocomplete="cc-number" value="4000 0566 5566 5556"></label>
+<label>PIN <input id="pin" value="8812"></label>
+<label>Password <input id="password" type="password" value="PWSENT-4417"></label>`;
+// Child-frame documents the page asked for, handed to the engine's navigation hook as the engines report them.
+const frameNavigations = [];
+const noteFrame = request => {
+  try {
+    if (request.isNavigationRequest() && request.frame().parentFrame()) frameNavigations.push(request.url());
+  } catch { /* a request without a frame */ }
+};
+// Documents the HTML parser builds from the network: `https://declarative.example.test/?html=<source>`.
+const declarative = url => new URL(url).searchParams.get("html") ?? "";
+// Each answered document's source by address, as a WebKit engine's resource log keeps it (op "sources").
+const sources = new Map();
+const keep = (route, body) => { sources.set(route.request().url().split("#")[0], body); return body; };
+await page.route("**/*", (route) => (noteFrame(route.request()), route.fulfill({
+  body: route.request().url().includes("declarative.example.test") ? keep(route, declarative(route.request().url()))
+    : route.request().url().includes("/protected") ? keep(route, protectedFixture)
+    : route.request().url().includes("consent.example.test") ? `<title>Privacy choices</title>
     <div role="dialog" aria-modal="true"><h1>Your privacy choices</h1>
     <p>We and our partners use cookies to support independent journalism.</p>
     <button id="accept">Accept all</button><button id="reject">Reject optional cookies</button>
@@ -82,9 +110,9 @@ await page.route("**/*", (route) => route.fulfill({
       for(const type of ['pointerdown','mousedown','mouseup','click','auxclick','dblclick','contextmenu'])window.addEventListener(type,()=>record(type),true);
       document.querySelector('form').onsubmit=e=>{e.preventDefault();record('submit')};</script>`
     : route.request().url().includes("nested.example.test") ? '<button id="nested">Nested button</button>'
-    : (route.request().url().includes("frame.example.test") || route.request().url().endsWith("/same-frame")) ? frameFixture : fixture,
+    : (route.request().url().includes("frame.example.test") || route.request().url().endsWith("/same-frame")) ? keep(route, frameFixture) : keep(route, fixture),
   contentType: "text/html",
-}));
+})));
 
 let strictEval = null;
 try {
@@ -92,11 +120,15 @@ try {
     try {
       const request = JSON.parse(line);
       let value = null;
+      // The test is done with this fixture: leave the loop so `finally` closes Chromium and removes the profile.
+      if (request.op === "close") break;
       if (request.op === "publicPages") {
         await page.unroute("**/*");
       } else if (request.op === "mount") {
         await page.addInitScript(request.init);
         await page.goto(request.url);
+      } else if (request.op === "sources") {
+        value = request.urls.map(url => sources.get(url.split("#")[0]) ?? null);
       } else if (request.op === "navigate") {
         await page.goto(request.url);
       } else if (request.op === "strictEval") {
@@ -222,6 +254,10 @@ try {
         }
       } else if (request.op === "wheel") {
         await cdp.send("Input.dispatchMouseEvent", {type:"mouseWheel", x:request.x, y:request.y, deltaX:request.delta[0], deltaY:request.delta[1]});
+      } else if (request.op === "reload") {
+        await page.reload();
+      } else if (request.op === "frameNavigations") {
+        value = frameNavigations.splice(0);
       } else if (request.op === "pages") {
         value = page.context().pages().length;
       } else if (request.op === "hover") {
@@ -234,5 +270,23 @@ try {
   }
 } finally {
   guardConnection.close();
-  await browser.close();
+  await context.close();
+  rmSync(profile, { recursive: true, force: true });
+  // Open handles (stdin, the raw DevTools socket) would keep Node alive after the fixture is done.
+  process.exit();
+}
+
+/** The port Chromium bound: the first line of `DevToolsActivePort`, written once its DevTools server listens. */
+async function activePort(dir) {
+  const deadline = performance.now() + 60000;
+  for (;;) {
+    try {
+      const port = Number(readFileSync(join(dir, "DevToolsActivePort"), "utf8").split("\n")[0]);
+      if (Number.isInteger(port) && port > 0) return port;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (performance.now() > deadline) throw new Error("Chromium did not name its DevTools port within 60 s");
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
 }

@@ -64,3 +64,29 @@
 .ext-link.danger {
   color: var(--red);
 }
+/* A menu row (browser menu, capture menu, Chrome tab picker): the action menu's row look (.menu button). */
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover:where(:not(:disabled)),
+.menu-item:focus-visible {
+  background: var(--active);
+  color: var(--text);
+}
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

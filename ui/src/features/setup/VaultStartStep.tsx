@@ -21,6 +21,8 @@ export function VaultStartStep() {
   const { keys } = useApp();
   const available = useKeyUi((s) => s.status?.availableVaults ?? EMPTY);
   const missing = useKeyUi((s) => s.status?.vaultState === "selectedVaultMissing");
+  // After "Forgot the password?": where the old vault is kept now, until the person picks a way on.
+  const notice = useKeyUi((s) => s.notice);
   const [choice, setChoice] = useState<Choice | null>(null);
   const choose = (next: Choice | null) => {
     keys?.clearProblem();
@@ -32,7 +34,7 @@ export function VaultStartStep() {
         <Button
           data-testid="setup.vault-start-step-choose"
           type="button"
-          appearance="key-link"
+          appearance="link"
           onClick={() => {
             choose(null);
           }}
@@ -46,10 +48,16 @@ export function VaultStartStep() {
 
   return (
     <div className="setup-step">
-      {missing && (
-        <p className="key-problem" role="status">
-          Selected vault not found
+      {missing && notice !== null ? (
+        <p className="key-field-hint" role="status" data-testid="setup.vault-set-aside-notice">
+          {notice}
         </p>
+      ) : (
+        missing && (
+          <p className="key-problem" role="status">
+            Selected vault not found
+          </p>
+        )
       )}
       <p>
         Vibe Work keeps your Mistral key and project secrets encrypted in a vault. Their values are
@@ -67,7 +75,6 @@ export function VaultStartStep() {
           className="vault-choice"
           data-testid="setup.vault-start-create"
           aria-label={term("vaultKinds", "vibeWork").tooltip}
-          title={term("vaultKinds", "vibeWork").tooltip}
           onClick={() => {
             choose("create");
           }}
@@ -81,7 +88,6 @@ export function VaultStartStep() {
             className="vault-choice"
             data-testid="setup.vault-start-shellx"
             aria-label={term("vaultKinds", "shellx").tooltip}
-            title={term("vaultKinds", "shellx").tooltip}
             onClick={() => {
               choose("shellx");
             }}
@@ -96,7 +102,6 @@ export function VaultStartStep() {
             className="vault-choice"
             data-testid="setup.vault-start-desktop"
             aria-label={term("vaultKinds", "desktop").tooltip}
-            title={term("vaultKinds", "desktop").tooltip}
             onClick={() => {
               choose("desktop");
             }}
@@ -110,7 +115,7 @@ export function VaultStartStep() {
       <Button
         data-testid="setup.vault-start-step-dismiss"
         type="button"
-        appearance="key-link"
+        appearance="link"
         onClick={() => keys?.dismiss()}
       >
         Not now

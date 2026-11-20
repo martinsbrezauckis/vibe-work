@@ -11,6 +11,7 @@
  * it); a button exists only when its answer is offered, so a key is never bound to an absent button.
  */
 import { browserApprovalName, browserApprovalSummary } from "./browserApproval";
+import { TEXT } from "../../vocabulary";
 import { builtinTool, toolFallback, toolText } from "../transcript/model/toolLabels";
 import type { AskRecord, Command, CoversPart } from "../../protocol/core";
 import { type Decision, approvalEffect, offeredDecisions } from "../transcript/model/callbacks";
@@ -163,6 +164,7 @@ export function approvalQuestion(entry: Obj): string {
   const effect = approvalEffect(entry);
   const kind = str(effect["kind"]);
   const tool = str(effect["toolName"]) ?? "";
+  if (tool === "mcp_vw.push") return TEXT.agentPushQuestion;
   if (tool === "mcp_vw.document_read" && entry["vwToolAsk"] === true)
     return str(obj(effect["display"])?.["summary"]) ?? "Read this document?";
   const browserName = browserApprovalName(entry);

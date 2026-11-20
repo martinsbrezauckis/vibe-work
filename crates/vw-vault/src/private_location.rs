@@ -62,17 +62,7 @@ pub(crate) fn check_path(path: &Path) -> Result<(), VaultError> {
     Ok(())
 }
 
-fn is_link(meta: &std::fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        meta.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        meta.file_type().is_symlink()
-    }
-}
+use vw_platform::link_entry::is_link;
 
 type Manifest = BTreeMap<PathBuf, Option<String>>;
 

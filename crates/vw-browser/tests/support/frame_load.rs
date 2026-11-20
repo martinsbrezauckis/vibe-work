@@ -1,7 +1,8 @@
 //! Frame fixture setup waits for native load events, with pending-frame diagnostics on timeout.
 //! Uses `PageEngine` evaluation; called before browser observation assertions in integration tests.
 use super::PageEngine;
-use serde_json::Value;
+use serde_json::{Value, json};
+use vw_preview::{EngineError, HistoryStep, PageEvent};
 
 impl PageEngine {
     pub async fn eval_frames(&self, script: &str) {
@@ -35,5 +36,41 @@ impl PageEngine {
             };
             self.wait_for_frame(&address, "body").await;
         }
+    }
+
+    /// Hands the child-frame documents the page asked for since the last call to the navigation hook, as the engines
+    /// ask it before a frame document loads. Called before every all-frames evaluation.
+    pub(crate) async fn report_frame_navigations(&self, label: &str) -> Result<(), EngineError> {
+        let urls = self.rpc(json!({"op":"frameNavigations"})).await?;
+        for url in urls.as_array().into_iter().flatten() {
+            if let Some(url) = url.as_str().and_then(|url| url.parse().ok()) {
+                self.hooks().allow_frame_navigation(label, &url);
+            }
+        }
+        Ok(())
+    }
+
+    /// A reload loads the page again, reported to the hooks as the engines report a load; back and forward do
+    /// nothing here.
+    pub(crate) async fn fixture_history(
+        &self,
+        label: String,
+        step: HistoryStep,
+    ) -> Result<(), EngineError> {
+        if !matches!(step, HistoryStep::Reload | HistoryStep::ReloadBypassCache) {
+            return Ok(());
+        }
+        let url = self
+            .rpc(json!({"op":"evaluate","script":"location.href"}))
+            .await?;
+        let url: url::Url = url
+            .as_str()
+            .and_then(|u| u.parse().ok())
+            .ok_or_else(|| EngineError::Platform("no page address".into()))?;
+        self.hooks()
+            .page_event(&label, PageEvent::Started(url.clone()));
+        self.rpc(json!({"op":"reload"})).await?;
+        self.hooks().page_event(&label, PageEvent::Finished(url));
+        Ok(())
     }
 }

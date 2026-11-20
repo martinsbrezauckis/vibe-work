@@ -36,8 +36,11 @@ use crate::repo::LocalRepo;
 
 #[path = "kept_key.rs"]
 mod kept_key;
+#[path = "set_aside.rs"]
+mod set_aside;
 #[path = "vault_unlock.rs"]
 mod unlock;
+pub use set_aside::SET_ASIDE_PREFIX;
 #[path = "unlock_policy.rs"]
 mod unlock_policy;
 use unlock_policy::{keyfile_from_json, unlock_keyfile};

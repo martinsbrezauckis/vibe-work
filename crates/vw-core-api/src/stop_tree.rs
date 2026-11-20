@@ -205,6 +205,7 @@ pub(crate) async fn child(shared: &Shared, session: &str) -> Result<(), CoreErro
             .and_then(|t| t.last())
             .and_then(|t| t["id"].as_str())
             .ok_or_else(|| CoreError::bad_result("session/read", "turns"))?;
+        crate::stops::ends_turn(shared, session, turn);
         let _routing = shared.channels.control_child(session, &parent);
         let result = shared
             .gate
@@ -252,6 +253,7 @@ pub(crate) async fn stop_with<T>(
         if !crate::stops::compacting(shared, &canonical)
             && let Some(turn) = snapshot.state["session"]["status"]["activeTurnId"].as_str()
         {
+            crate::stops::ends_turn(shared, &canonical, turn);
             let result = shared
                 .gate
                 .call(
@@ -311,8 +313,26 @@ pub(crate) async fn interrupt(
     Ok(None)
 }
 
-/// A native card arriving after Stop is cancelled before any surface offers an Allow.
-pub(crate) fn cancel_late(shared: &std::sync::Arc<Shared>, session: &str, owner: &str) -> bool {
+/// [`cancel_late`] for a Vibe card entry, with its `turnId`.
+pub(crate) fn cancel_late_card(
+    shared: &std::sync::Arc<Shared>,
+    session: &str,
+    owner: &str,
+    card: &serde_json::Value,
+) -> bool {
+    cancel_late(shared, session, owner, card["turnId"].as_str())
+}
+
+/// A native card arriving after Stop is cancelled before any surface offers an Allow. A card of a turn other than the
+/// ones a settled Stop ended (`turn`, the card's `turnId`) is a new turn's and lifts that Stop first
+/// (`stops::card`); a subagent's card still closes while its parent's Stop holds.
+pub(crate) fn cancel_late(
+    shared: &std::sync::Arc<Shared>,
+    session: &str,
+    owner: &str,
+    turn: Option<&str>,
+) -> bool {
+    crate::stops::card(shared, session, turn);
     if !crate::stops::personally_stopped(shared, session)
         && !crate::stops::personally_stopped(shared, owner)
     {

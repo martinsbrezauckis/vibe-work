@@ -231,6 +231,14 @@ impl Window {
         self.bounds
     }
     pub(super) fn viewport(&self, url: &str) -> Result<Rect, String> {
+        let found = self.web_areas(url)?;
+        if found.len() != 1 {
+            return Err("Safari did not expose one matching visible web area through Accessibility. Keep the checked page active and read it again.".into());
+        }
+        Ok(found[0])
+    }
+    /// The visible web areas of `url` in this window (their scroll areas), as Accessibility shows them now.
+    pub(super) fn web_areas(&self, url: &str) -> Result<Vec<Rect>, String> {
         self.front()?;
         let mut queue = vec![(self.element.attr("AXChildren")?.list()?, None, 0)];
         let mut visited = 0;
@@ -262,10 +270,7 @@ impl Window {
                 }
             }
         }
-        if found.len() != 1 {
-            return Err("Safari did not expose one matching visible web area through Accessibility. Keep the checked page active and read it again.".into());
-        }
-        Ok(found[0])
+        Ok(found)
     }
 }
 

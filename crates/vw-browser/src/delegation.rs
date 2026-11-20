@@ -61,8 +61,8 @@ pub trait DelegationAuthorizer: Send + Sync {
         true
     }
 
-    /// Whether the page's chat delegates protected field values (Full access). Below it a visual capture is refused
-    /// while the page shows one (`protected_capture`); without an authorizer nothing is delegated.
+    /// Whether the page's chat still holds Full access during a recording. This never overrides
+    /// `protected_capture`: a shown protected value refuses the frame in every mode.
     fn protected_values_delegated(&self, _page_key: &str) -> bool {
         false
     }

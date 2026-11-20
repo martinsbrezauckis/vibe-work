@@ -1,7 +1,8 @@
 //! Exact Vibe deletion targets, inspected and removed through no-follow directory handles.
 //! Depends on cap-std/cap-fs-ext; `session_delete` supplies configured storage and authorized UUIDs.
 //! Refuses every link/reparse point, including ancestors and descendants; never chmods or follows one.
-//! The chat's plugin data folder goes too, but only as a best effort: a link in it leaves it in place.
+//! The chat's plugin data folder goes too, after Vibe's own delete or the core's, but only as a best effort: a link in
+//! it leaves it in place.
 
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -36,7 +37,7 @@ fn refused() -> io::Error {
     )
 }
 
-fn plain(meta: &Metadata) -> io::Result<()> {
+pub(crate) fn plain(meta: &Metadata) -> io::Result<()> {
     #[cfg(windows)]
     let linked = {
         use cap_std::fs::MetadataExt;
@@ -47,7 +48,7 @@ fn plain(meta: &Metadata) -> io::Result<()> {
     if linked { Err(refused()) } else { Ok(()) }
 }
 
-fn child(parent: &Dir, name: &Path) -> io::Result<Dir> {
+pub(crate) fn child(parent: &Dir, name: &Path) -> io::Result<Dir> {
     let meta = parent.symlink_metadata(name)?;
     plain(&meta)?;
     if !meta.is_dir() {
@@ -261,6 +262,18 @@ pub(crate) fn finish(targets: &Targets, id: &str) -> io::Result<()> {
     }
     plugin_data(&dir, id);
     Ok(())
+}
+
+/// After Vibe deleted the chat itself: only the chat's plugin data folder ([`plugin_data`]), in `targets`' storage.
+pub(crate) fn plugin_data_of(targets: &Targets, id: &str) {
+    if !uuid(id) {
+        return;
+    }
+    match root(&targets.save_dir) {
+        Ok(dir) => plugin_data(&dir, id),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(error = %e, "a deleted chat's plugin data was left in place"),
+    }
 }
 
 /// The chat's plugin data (`plugins/data/<id>`: Vibe creates one folder per plugin there and never removes it).

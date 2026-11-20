@@ -309,7 +309,6 @@ fn an_unknown_action_without_a_tier_cannot_offer_the_whole_browser_tool() {
 
 #[test]
 fn builtin_package_discloses_every_executable_action_at_its_tier() {
-    use crate::chrome_control::builtin;
     use vw_ask::chrome::Tier;
     for (tier, example) in [
         (Tier::AcceptEdits, "type"),
@@ -325,7 +324,7 @@ fn builtin_package_discloses_every_executable_action_at_its_tier() {
         };
         let covered: Value = serde_json::from_str(&permissions[0].session_pattern).unwrap();
         for (wire, action) in vw_agent_tools::browser_input::actions() {
-            let needed = builtin::required(&json!({"action":wire}))
+            let needed = crate::chrome_control::builtin_required(&json!({"action":wire}))
                 .expect("every executable action has a tier");
             if needed > Tier::Ask && needed <= tier {
                 assert!(

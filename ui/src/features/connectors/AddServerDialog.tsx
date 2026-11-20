@@ -182,7 +182,7 @@ function Dialog(): ReactElement {
         <Button
           data-testid="connectors.add-server-dialog-btn-primary"
           type="button"
-          appearance="dialog"
+          variant="primary"
           disabled={!ok}
           onClick={add}
         >

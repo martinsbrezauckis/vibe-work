@@ -42,7 +42,7 @@ async fn read_aloud_is_announced_and_reports_nobody_listening() {
         json!({"sessionId": "another", "text": "Hello."}),
     )
     .await;
-    assert!(refused.unwrap_err().contains("this session"));
+    assert!(refused.unwrap_err().contains("this chat"));
     assert!(!sid.is_empty());
     let (_api, client) = common::core::debug_api(&rig.core, &dirs.root).await;
     let debug = client.command(json!({"type":"speech", "request":{"op":"readAloud", "sessionId":sid, "text":"Hello."}})).await;
@@ -156,7 +156,7 @@ async fn explicit_text_is_capped_and_other_sessions_are_refused_without_writing_
         call(&who, "read_aloud", json!({"sessionId":"other"}))
             .await
             .unwrap_err()
-            .contains("this session")
+            .contains("this chat")
     );
     assert_eq!(
         std::fs::read_to_string(settings).unwrap(),

@@ -138,6 +138,36 @@ pub async fn evaluate_main(
     .await
 }
 
+/// Whether the page may hold a closed declarative shadow root the agent world cannot enter: `false` where the world
+/// reads closed roots as open (macOS 27); otherwise the page's web archive (each frame's source as received) decides,
+/// and an archive that cannot be made counts as holding one.
+///
+/// # Errors
+/// The webview is unavailable or no answer in time.
+pub async fn declarative_closed_roots(webview: &Webview<Wry>) -> Result<bool, EngineError> {
+    with_native(
+        webview,
+        "checking the page's sources",
+        SCRIPT_WAIT,
+        move |native, reply| {
+            let view = native.inner();
+            if vw_platform::webview::agent_world_mac::world_opens_closed_roots(view) == Some(true) {
+                let _ = reply.send(Ok(false));
+                return;
+            }
+            vw_platform::webview::web_archive_mac::web_archive(
+                view,
+                Box::new(move |archive| {
+                    let declarative = archive
+                        .map_or(true, |bytes| vw_preview::declarative_closed_archive(&bytes));
+                    let _ = reply.send(Ok(declarative));
+                }),
+            );
+        },
+    )
+    .await
+}
+
 /// macOS 27: runs `script` in each direct child frame, found through JS handles.
 ///
 /// # Errors

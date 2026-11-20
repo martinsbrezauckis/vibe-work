@@ -12,7 +12,7 @@ impl Display for CopyEscape {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "session folder {} resolves outside its copy {}",
+            "chat folder {} resolves outside its copy {}",
             self.cwd.display(),
             self.copy.display()
         )

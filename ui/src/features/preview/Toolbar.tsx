@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { Button } from "../../components/Controls";
 import { IconButton } from "../../components/IconButton";
 import { Selector } from "../../components/Selector";
 import type { DeviceWidth, PreviewView } from "../../protocol/core";
@@ -140,10 +141,10 @@ export function Toolbar({
     title = label,
     needsPage = false,
   ) => (
-    <button
+    <Button
       data-testid={testId}
       type="button"
-      className="browser-menu-item"
+      appearance="menu"
       role="menuitem"
       title={title}
       disabled={disabled}
@@ -157,7 +158,7 @@ export function Toolbar({
       }}
     >
       {label}
-    </button>
+    </Button>
   );
   return (
     <div className="browser-chrome-shell">
@@ -338,30 +339,30 @@ export function Toolbar({
                     )}
                   </>
                 )}
-                <button
+                <Button
                   data-testid="preview.toolbar-set-panel"
                   type="button"
                   role="menuitem"
-                  className="browser-menu-item"
+                  appearance="menu"
                   title="Browser actions"
                   onClick={() => {
                     setPanel("actions");
                   }}
                 >
                   Browser actions
-                </button>
-                <button
+                </Button>
+                <Button
                   data-testid="preview.toolbar-set-panel-2"
                   type="button"
                   role="menuitem"
-                  className="browser-menu-item"
+                  appearance="menu"
                   title={`${TEXT.thisSession}'s servers`}
                   onClick={() => {
                     setPanel("servers");
                   }}
                 >
                   {TEXT.thisSession}'s servers
-                </button>
+                </Button>
                 {webTabId && browser
                   ? item(
                       "preview.close-web-tab",

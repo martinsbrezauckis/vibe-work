@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.2. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.3. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
     "initialize": {
       "params": "InitializeParams",
@@ -656,6 +656,70 @@
     "plugins/local/setEnabled": {
       "params": "PluginsLocalSetEnabledParams",
       "result": "PluginsLocalSetEnabledResponse"
+    },
+    "config/subscribe": {
+      "params": "ConfigSubscribeParams",
+      "result": "EmptyResponse"
+    },
+    "config/telemetry/read": {
+      "params": "TelemetrySettingReadParams",
+      "result": "TelemetrySettingReadResponse"
+    },
+    "config/telemetry/update": {
+      "params": "TelemetrySettingUpdateParams",
+      "result": "TelemetrySettingUpdateResponse"
+    },
+    "goal/clear": {
+      "params": "GoalClearParams",
+      "result": "GoalClearResponse"
+    },
+    "goal/get": {
+      "params": "GoalGetParams",
+      "result": "GoalGetResponse"
+    },
+    "goal/set": {
+      "params": "GoalSetParams",
+      "result": "GoalSetResponse"
+    },
+    "projects/link": {
+      "params": "ProjectsLinkParams",
+      "result": "ProjectMutationResponse"
+    },
+    "projects/retireCloud": {
+      "params": "ProjectsRetireCloudParams",
+      "result": "EmptyResponse"
+    },
+    "projects/setCloud": {
+      "params": "ProjectsSetCloudParams",
+      "result": "ProjectMutationResponse"
+    },
+    "storage/usage/read": {
+      "params": "StorageUsageReadParams",
+      "result": "StorageUsageReadResponse"
+    },
+    "storage/usage/refresh": {
+      "params": "StorageUsageRefreshParams",
+      "result": "StorageUsageRefreshResponse"
+    },
+    "workspace/git/worktrees/auto/update": {
+      "params": "WorkspaceWorktreeAutoUpdateParams",
+      "result": "WorkspaceWorktreeAutoUpdateResponse"
+    },
+    "workspace/trust/folders/add": {
+      "params": "WorkspaceTrustFoldersAddParams",
+      "result": "WorkspaceTrustFoldersResponse"
+    },
+    "workspace/trust/folders/inspect": {
+      "params": "WorkspaceTrustFoldersInspectParams",
+      "result": "WorkspaceTrustFoldersInspectResponse"
+    },
+    "workspace/trust/folders/list": {
+      "params": "WorkspaceTrustFoldersListParams",
+      "result": "WorkspaceTrustFoldersResponse"
+    },
+    "workspace/trust/folders/update": {
+      "params": "WorkspaceTrustFoldersUpdateParams",
+      "result": "WorkspaceTrustFoldersResponse"
     }
   },
   "notifications": {
@@ -684,7 +748,9 @@
     "connector_catalog/authFailed": "ConnectorAuthFailedParams",
     "imports/updated": "ImportJobUpdatedParams",
     "artifacts/created": "ArtifactCreatedParams",
-    "artifacts/updated": "ArtifactUpdatedParams"
+    "artifacts/updated": "ArtifactUpdatedParams",
+    "config/changed": "ConfigChangedParams",
+    "storage/usage/updated": "StorageUsageUpdatedParams"
   },
   "serverRequests": {
     "callback/call": {

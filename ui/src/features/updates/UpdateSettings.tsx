@@ -30,6 +30,20 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
   const { core } = useApp();
   const state = useStore(updates.store, (s) => s);
   const view = state.view;
+  if (!state.available && state.offReason !== null)
+    return (
+      <section data-testid="update-settings">
+        <h3>Updates</h3>
+        <div className="check" data-setting="update-status">
+          <span>
+            Status
+            <span className="d" data-testid="update-status">
+              Update checks are off: {state.offReason.replace(/\.$/, "")}.
+            </span>
+          </span>
+        </div>
+      </section>
+    );
   if (!state.available || view === null) return null;
   const phase = view.phase;
   const busy = ["checking", "downloading", "installing", "restarting"].includes(phase.type);

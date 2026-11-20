@@ -48,7 +48,7 @@
 }
 .docchip-note {
   margin: 0;
-  line-height: 1.4;
+  line-height: var(--leading-helper);
 }
 .docchip.failed .docchip-note {
   color: var(--text);

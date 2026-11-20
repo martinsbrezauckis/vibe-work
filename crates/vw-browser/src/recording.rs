@@ -1,6 +1,9 @@
 //! Bounded action-screenshot GIFs through the guarded native screenshot path; the core saves their bytes.
 //! The action loop collects frames, with explicit omissions and no background capture after Stop.
 use crate::driver::{failed, refused};
+pub use crate::recording_video::{
+    VideoBridge, VideoCommand, VideoFuture, VideoRecordings, VideoReply,
+};
 use crate::{ActError, Actor, Browser};
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -41,6 +44,14 @@ pub(crate) struct Frame {
     pub png: Vec<u8>,
     pub delay: u16,
 }
+impl Recordings {
+    pub(crate) fn has_active(&self, page: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(page)
+    }
+}
 struct Active {
     epoch: u64,
     id: u64,
@@ -78,13 +89,16 @@ impl Browser {
         by: Actor,
     ) -> Result<Value, ActError> {
         if matches!(request, Request::VideoStart | Request::VideoStop) {
-            return Err(refused(
-                "This built-in engine has no supported page-video encoder. Use recording.start and recording.stop for a GIF of action screenshots; it contains no audio or continuous video.",
-            ));
+            return self.record_video(page, request, by).await;
         }
         let bound = self.bind_read(page, by).await.map_err(refused)?;
         bound.check_read_mount().map_err(refused)?;
         if matches!(request, Request::Start) {
+            if self.video.has_active(page) {
+                return Err(refused(
+                    vw_vocabulary::text("browserVideoBeforeGif").unwrap_or_default(),
+                ));
+            }
             {
                 let mut all = self
                     .recordings
@@ -126,10 +140,7 @@ impl Browser {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(page);
-                return Err(failed(format!(
-                    "Action GIF could not capture its first frame: {}. Make the browser tab visible and retry.",
-                    status["reason"]
-                )));
+                return Err(gif_first_frame_error(&status));
             }
             return Ok(
                 json!({"ok":true,"recording":status,"Outcome":"Action GIF started with a captured frame. It records subsequent browser actions, without audio."}),
@@ -247,4 +258,17 @@ fn discarded() -> Value {
 }
 fn status(active: &Active) -> Value {
     json!({"state":"recording","format":"gif","frames":active.frames.len(),"omitted":active.omitted,"reason":active.reason,"maxFrames":MAX_FRAMES,"maxSeconds":120,"audio":false})
+}
+
+/// Why an action GIF did not start: the approved protected-capture refusal alone (final, no other route), or the
+/// first-frame failure with its reason.
+fn gif_first_frame_error(status: &Value) -> ActError {
+    let reason = status["reason"].as_str().unwrap_or_default();
+    if let Some(refusal) = crate::protected_capture::first_frame_refusal(reason) {
+        return refused(refusal);
+    }
+    failed(format!(
+        "Action GIF could not capture its first frame: {}. Make the browser tab visible and retry.",
+        status["reason"]
+    ))
 }

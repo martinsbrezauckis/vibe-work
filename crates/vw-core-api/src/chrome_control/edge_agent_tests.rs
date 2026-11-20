@@ -73,7 +73,7 @@ async fn a_missing_session_does_not_borrow_the_other_connected_browsers_name() {
     .unwrap_err();
     assert_eq!(
         error,
-        "Not run: this Chrome session was stopped; open a new one with chrome_session."
+        "Not run: this Chrome browser session was stopped; open a new one with chrome_session."
     );
     core.shutdown().await;
 }
@@ -198,7 +198,7 @@ pub(super) async fn fixture_with(
 async fn edge_only_status_is_connected_and_names_edge() {
     let core = fixture(
         "edge-agent-status",
-        json!([{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.3"}]),
+        json!([{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.7"}]),
     )
     .await;
     let result = gateway::call(&core.shared, "s", "chrome_status", json!({}))
@@ -333,7 +333,7 @@ async fn chrome_only_status_keeps_the_unscoped_profile() {
 
 #[tokio::test]
 async fn owner_retains_edge_versions_without_erasing_them_on_an_action_reply() {
-    let core = fixture("edge-agent-versions", json!([{"profileId":CHROME,"connected":true,"extensionVersion":"0.1.4"},{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.3"}])).await;
+    let core = fixture("edge-agent-versions", json!([{"profileId":CHROME,"connected":true,"extensionVersion":"0.1.8"},{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.7"}])).await;
     let profiles = core
         .shared
         .chrome_control
@@ -341,7 +341,7 @@ async fn owner_retains_edge_versions_without_erasing_them_on_an_action_reply() {
         .connected_profiles
         .snapshot();
     assert!(
-        profiles.contains(&("edge:p".into(), Some("0.1.3".into()))),
+        profiles.contains(&("edge:p".into(), Some("0.1.7".into()))),
         "{profiles:?}"
     );
     owner::update_pairing(
@@ -361,7 +361,7 @@ async fn owner_retains_edge_versions_without_erasing_them_on_an_action_reply() {
 
 #[tokio::test]
 async fn an_old_edge_extension_blocks_only_edge_and_keeps_the_update_instruction() {
-    let core = fixture("edge-agent-old-version", json!([{"profileId":CHROME,"connected":true,"extensionVersion":"0.1.3"},{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.2"}])).await;
+    let core = fixture("edge-agent-old-version", json!([{"profileId":CHROME,"connected":true,"extensionVersion":"0.1.7"},{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.2"}])).await;
     let chrome = gateway::call(
         &core.shared,
         "s",

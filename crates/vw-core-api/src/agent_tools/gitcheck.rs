@@ -4,7 +4,8 @@
 //!
 //! Vibe's access-mode card is the one ask for ordinary local git changes, including commits,
 //! merges and pulls. Pushes, forge writes and credential commands are
-//! refused. Branch rewrites outside the session's own copy branch are held for the user. **One ask per call (`one_ask`):**
+//! refused. Branch rewrites outside the session's own copy branch are held for the user unless
+//! Developer permissions lets the chat's access mode decide. **One ask per call (`one_ask`):**
 //!   - a bash call (the hook runs before Vibe's card): a yes here is remembered for the call, and the core answers
 //!     Vibe's card for it with that yes (the card is not shown);
 //!   - our own `process_start`/`secret_run` (Vibe's card comes first): when the user approved that card for this
@@ -131,6 +132,11 @@ async fn decide(
     if !found.needs_core() {
         return Ok(());
     }
+    let developer_permissions = shared.developer_permissions.enabled();
+    if let Some((reason, how)) = refused(&found, developer_permissions) {
+        tracing::info!(session, ops = found.ops.len(), decision = how, "git guard");
+        return Err(reason);
+    }
     let worker = shared.clone();
     let id = session.to_owned();
     let folder = cwd.to_path_buf();
@@ -181,15 +187,16 @@ async fn decide(
     .map_err(|e| format!("Not run: Vibe Work could not check this git command ({e})."))?;
     let (found, own_branch, occupied) = reading;
     let own_branch = own_branch.as_deref();
-    let (verdict, how) = if let Some((reason, how)) = refused(&found) {
-        (Err(reason.to_owned()), how)
-    } else if found.needs_identity()
+    let (verdict, how) = if found.needs_identity()
         && let Err(reason) = crate::git_identity_ask::ensure(shared, session, cwd).await
     {
         (Err(reason), "refused (no identity)")
     } else {
-        let mut asks = needs_user(&found, own_branch);
-        asks.extend(occupied);
+        let developer_permissions = shared.developer_permissions.enabled();
+        let mut asks = needs_user(&found, own_branch, developer_permissions);
+        if !developer_permissions {
+            asks.extend(occupied);
+        }
         if asks.is_empty() {
             remember_rename(shared, session, &found, own_branch).await?;
             (Ok(()), "allowed")
@@ -221,17 +228,33 @@ async fn decide(
     verdict
 }
 
-/// The fixed refusals (forge writes, pushes, credentials, an identity the agent sets) and how they are logged.
-fn refused(found: &vw_agent_tools::gitparse::GitScan) -> Option<(&'static str, &'static str)> {
+/// Remote-write and credential refusals and how they are logged.
+fn refused(
+    found: &vw_agent_tools::gitparse::GitScan,
+    developer_permissions: bool,
+) -> Option<(String, &'static str)> {
     if found.forge_write() {
-        Some((GH_WRITE_REASON, "denied (forge write)"))
+        let reason = if developer_permissions {
+            format!(
+                "{GH_WRITE_REASON} {}",
+                vw_vocabulary::texts::PUSH_TOOL_POINTER
+            )
+        } else {
+            GH_WRITE_REASON.to_owned()
+        };
+        Some((reason, "denied (forge write)"))
     } else if found.denied() {
-        Some((PUSH_REASON, "denied (push)"))
+        let reason = if developer_permissions {
+            vw_vocabulary::texts::SHELL_GIT_PUSH_REFUSAL.to_owned()
+        } else {
+            PUSH_REASON.to_owned()
+        };
+        Some((reason, "denied (push)"))
     } else if found.credential_read() {
-        Some((CREDENTIAL_REASON, "denied (credentials)"))
+        Some((CREDENTIAL_REASON.to_owned(), "denied (credentials)"))
     } else if found.identity_set() {
         Some((
-            vw_agent_tools::gitparse::IDENTITY_REASON,
+            vw_agent_tools::gitparse::IDENTITY_REASON.to_owned(),
             "denied (identity)",
         ))
     } else {
@@ -349,9 +372,28 @@ fn own_branch(shared: &Shared, session: &str, cwd: &Path) -> Option<String> {
         .then(|| record.branch.clone())
 }
 
-/// The actions the user has to allow (empty = none): another branch's rewrite, or a shell call whose command text
-/// cannot be read. Ordinary local changes use Vibe's card; refused actions never get here.
-fn needs_user(found: &GitScan, own_branch: Option<&str>) -> Vec<String> {
+/// Actions the user has to allow in this guard (empty = none): another branch's rewrite while
+/// Developer permissions is off, a nonbranch Own operation, or unread command text. Ordinary
+/// local branch changes use Vibe's access-mode card; refused actions never get here.
+fn branch_rewrite(what: &str) -> bool {
+    [
+        "git reset",
+        "git rebase",
+        "git branch",
+        "git update-ref",
+        "git fetch into a local branch",
+        "git checkout -B",
+        "git switch -C",
+    ]
+    .iter()
+    .any(|prefix| what.starts_with(prefix))
+}
+
+fn needs_user(
+    found: &GitScan,
+    own_branch: Option<&str>,
+    developer_permissions: bool,
+) -> Vec<String> {
     let mut asks: Vec<String> = found
         .ops
         .iter()
@@ -359,12 +401,16 @@ fn needs_user(found: &GitScan, own_branch: Option<&str>) -> Vec<String> {
             GitKind::Deny | GitKind::Credential | GitKind::Change | GitKind::Identity => false,
             // A shell call whose command text cannot be read: the user decides, never allowed unseen.
             GitKind::Unread => true,
-            // An explicit target (`git rebase main other`, `git branch -f x`) is held
-            // unless it names the session's branch.
+            // Branch rewrites use the access-mode card with Developer permissions. The parser's
+            // other Own operations (stash drop, worktree remove, symbolic-ref) stay held.
             GitKind::Own => {
-                own_branch.is_none()
-                    || o.elsewhere
-                    || o.name.as_deref().is_some_and(|b| Some(b) != own_branch)
+                if developer_permissions && branch_rewrite(&o.what) {
+                    false
+                } else {
+                    own_branch.is_none()
+                        || o.elsewhere
+                        || o.name.as_deref().is_some_and(|b| Some(b) != own_branch)
+                }
             }
         })
         .map(|o| format!("`{}`", o.what))
@@ -407,7 +453,7 @@ async fn hold(
 
 fn hold_summary(title: &str, command: &str, asks: &[String]) -> String {
     format!(
-        "The agent of the session {} wants to run a Git command that may rewrite a branch outside its own copy. It runs as you.\n\nWhy this was held: {}.\n\nCommand:\n{}",
+        "The agent of the chat {} wants to run a Git command that may rewrite a branch outside its own copy. It runs as you.\n\nWhy this was held: {}.\n\nCommand:\n{}",
         vw_gate::dialog_chat_quote(title),
         asks.iter()
             .map(|reason| vw_gate::dialog_line(reason))
@@ -450,15 +496,68 @@ mod tests {
     use super::*;
     use vw_agent_tools::gitparse::scan;
 
+    // PREDICT: an enabled Developer switch keeps shell pushes refused with an app-tool pointer.
+    #[test]
+    fn developer_permissions_keep_shell_push_denied_with_app_tool_pointer() {
+        for command in [
+            "git push origin topic",
+            "git push --force origin topic",
+            "git credential fill; git push origin topic",
+        ] {
+            let found = scan(command);
+            let (reason, _) = refused(&found, true).expect("shell push remains denied");
+            assert!(reason.contains("push tool"), "{reason}");
+            assert!(reason.contains("Developer permissions"), "{reason}");
+            assert_eq!(refused(&found, false).unwrap().0, PUSH_REASON);
+        }
+        let gh = scan("gh pr merge 12");
+        assert!(refused(&gh, true).unwrap().0.contains("mcp_vw.push"));
+        assert_eq!(refused(&gh, false).unwrap().0, GH_WRITE_REASON);
+    }
+
+    // PREDICT: Developer permissions delegates branch rewrites to the chat mode and keeps other holds.
+    #[test]
+    fn enabled_developer_permissions_route_local_branch_rewrite_to_access_mode() {
+        let rewrite = scan("git branch -f other HEAD~1");
+        assert_ne!(
+            needs_user(&rewrite, Some("vibe/own"), false),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            needs_user(&rewrite, Some("vibe/own"), true),
+            [] as [String; 0]
+        );
+        let elsewhere = scan("git -C /another/repository branch -f other HEAD~1");
+        assert_eq!(
+            needs_user(&elsewhere, Some("vibe/own"), true),
+            [] as [String; 0]
+        );
+        for command in [
+            "git stash drop",
+            "git worktree remove /some/copy",
+            "git symbolic-ref HEAD refs/heads/other",
+        ] {
+            assert!(
+                !needs_user(&scan(command), Some("vibe/own"), true).is_empty(),
+                "{command} stays held"
+            );
+        }
+        let unread = scan("powershell -NoProfile -Command -");
+        assert_ne!(
+            needs_user(&unread, Some("vibe/own"), true),
+            [] as [String; 0]
+        );
+    }
+
     #[test]
     fn powershell_text_that_cannot_be_read_is_held_for_the_user_even_on_the_own_branch() {
         let found = scan("powershell -NoProfile -Command -");
         assert!(found.needs_core(), "{found:?}");
-        assert!(refused(&found).is_none(), "{found:?}");
-        let asks = needs_user(&found, Some("vibe/own"));
+        assert!(refused(&found, false).is_none(), "{found:?}");
+        let asks = needs_user(&found, Some("vibe/own"), false);
         assert_eq!(asks.len(), 1, "{asks:?}");
         assert!(asks[0].contains("standard input"), "{asks:?}");
         let readable = scan("powershell -NoProfile -Command \"git status\"");
-        assert_eq!(needs_user(&readable, None), Vec::<String>::new());
+        assert_eq!(needs_user(&readable, None, false), Vec::<String>::new());
     }
 }

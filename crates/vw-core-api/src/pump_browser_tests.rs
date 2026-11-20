@@ -128,7 +128,7 @@ async fn terminal_snapshots_release_only_their_chats_browser_activity() {
 
 #[tokio::test]
 async fn delayed_initial_snapshot_keeps_connected_browser_sessions_active() {
-    use crate::chrome_control::{commands, gateway, test_support};
+    use crate::chrome_control::{call_tool, settings_view, test_support};
     let core = crate::offline_core::start_with("initial-connected-browser", |config, dir| {
         config.chrome_control.package = Some(dir.join("chrome-package"));
     })
@@ -146,8 +146,8 @@ async fn delayed_initial_snapshot_keeps_connected_browser_sessions_active() {
     test_support::observe_status(
         shared,
         &json!({"profiles":[
-            {"profileId":"chrome:profile","connected":true,"extensionVersion":"0.1.3"},
-            {"profileId":"edge:profile","connected":true,"extensionVersion":"0.1.3"}
+            {"profileId":"chrome:profile","connected":true,"extensionVersion":"0.1.7"},
+            {"profileId":"edge:profile","connected":true,"extensionVersion":"0.1.7"}
         ]}),
     );
     let mut pump = pump(shared);
@@ -167,7 +167,7 @@ async fn delayed_initial_snapshot_keeps_connected_browser_sessions_active() {
             profile,
             &json!({"agentName":"auto-approve"}),
         );
-        gateway::call(
+        call_tool(
             shared,
             profile,
             "chrome_session",
@@ -176,7 +176,7 @@ async fn delayed_initial_snapshot_keeps_connected_browser_sessions_active() {
         .await
         .unwrap();
         assert_eq!(
-            commands::view(shared)
+            settings_view(shared)
                 .work
                 .iter()
                 .find(|row| row.session_id == profile)
@@ -186,7 +186,7 @@ async fn delayed_initial_snapshot_keeps_connected_browser_sessions_active() {
         );
         pump.after_apply(shared, &initial);
         assert_eq!(
-            commands::view(shared)
+            settings_view(shared)
                 .work
                 .iter()
                 .find(|row| row.session_id == profile)

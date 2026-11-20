@@ -57,28 +57,11 @@ pub fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     })
 }
 
-/// Constant-time equality for equal-length inputs; the length itself is public (the token has a
-/// fixed length), so the early length exit leaks nothing.
+/// Constant-time equality for equal-length inputs (`subtle`); inputs of different lengths are unequal at once: the
+/// length itself is public (the token has a fixed length), so that exit leaks nothing.
 #[must_use]
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0_u8, |diff, (x, y)| diff | (x ^ y)) == 0
-}
-
-/// True when the request carries exactly one `Authorization: Bearer <token>` with our token.
-#[must_use]
-pub fn token_present(headers: &HeaderMap, token: &str) -> bool {
-    let mut values = headers.get_all(header::AUTHORIZATION).iter();
-    let (Some(value), None) = (values.next(), values.next()) else {
-        return false;
-    };
-    value
-        .to_str()
-        .ok()
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|given| constant_time_eq(given.as_bytes(), token.as_bytes()))
+    subtle::ConstantTimeEq::ct_eq(a, b).into()
 }
 
 /// True when the request carries exactly one `Authorization: Bearer <token>` that matches the

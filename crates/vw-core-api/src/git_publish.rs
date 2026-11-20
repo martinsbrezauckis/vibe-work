@@ -124,7 +124,7 @@ impl Core {
                 if selected != "." && what == crate::git_view::PreparedKind::UpdateFromBase {
                     return Err(CoreError::new(
                         ErrorCode::Denied,
-                        "Update from base uses the session repository",
+                        "Update from base uses the chat repository",
                     ));
                 }
                 Ok(GitResult::Prepared {
@@ -251,7 +251,7 @@ impl Core {
     pub(crate) async fn bring_plan(&self, place: &Place) -> Result<BringPlanView, CoreError> {
         if place.location != GitLocation::Copy {
             return Err(git_error(vw_git::GitError::Blocked(
-                "Bring into main is for sessions that work in their own copy.".to_owned(),
+                "Bring into main is for chats that work in their own copy.".to_owned(),
             )));
         }
         let (Some(base), Some(branch)) = (place.base.clone(), place.own_branch.clone()) else {

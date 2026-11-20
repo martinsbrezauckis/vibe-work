@@ -15,10 +15,16 @@ pub(crate) struct Identity {
     pub(crate) plain: String,
     main: Option<String>,
     inherit: bool,
+    /// Folders this chat had before its agent moved into another folder of the same project
+    /// ([`Identity::moved_into`]): their records are read with the candidates, and a Never on any of them refuses.
+    denies: Vec<String>,
+    /// True when the folder looks like a linked copy of a project (its `.git` is a file) but git is not installed,
+    /// so the link cannot be checked: the folder counts as its own project (never more access) and Settings says so.
+    pub(crate) link_unverified: bool,
 }
 
 /// All candidate records, retained so even a change that leaves the effective policy unchanged refuses a use.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub(crate) permission: EntryPermission,
     records: Vec<Option<(EntryPermission, i64)>>,
@@ -32,6 +38,46 @@ impl Identity {
         } else {
             &self.plain
         }
+    }
+
+    /// The identity of this session after its folder moved to `folder` (the agent entered or left a linked Git
+    /// worktree), or `None`. The captured project stays the only authority: `folder` must be that project's own
+    /// folder ([`Self::allowed_project`]) or a linked worktree whose Git links point to that project and back
+    /// (`linked_both_ways`, the check a session opened in a linked worktree passes). The project's permissions
+    /// then apply as for a chat opened there; any other folder, an unrelated worktree or a one-way Git link is `None`.
+    pub(crate) fn moved_into(&self, folder: &Path) -> Option<Self> {
+        let project = PathBuf::from(self.allowed_project());
+        let folder = vw_platform::canonical_plain(folder).ok()?;
+        let moved = if folder == project {
+            Self {
+                plain: self.allowed_project().to_owned(),
+                main: None,
+                inherit: false,
+                denies: Vec::new(),
+                link_unverified: false,
+            }
+        } else {
+            let info = vw_worktrees::repo_info::read(&folder).ok()??;
+            let main = vw_platform::canonical_plain(info.main_root()).ok()?;
+            if main != project || !folder.is_dir() || !linked_both_ways(&folder, &main) {
+                return None;
+            }
+            Self {
+                plain: folder.to_string_lossy().into_owned(),
+                main: Some(self.allowed_project().to_owned()),
+                inherit: true,
+                denies: Vec::new(),
+                link_unverified: false,
+            }
+        };
+        // A Never the person set on a folder this chat had still refuses after the move.
+        let mut denies = self.denies.clone();
+        for had in std::iter::once(&self.plain).chain(&self.main) {
+            if *had != moved.plain && moved.main.as_ref() != Some(had) && !denies.contains(had) {
+                denies.push(had.clone());
+            }
+        }
+        Some(Self { denies, ..moved })
     }
 
     /// Reads both candidates, refusing errors and taking User only before any Allowed or site grant.
@@ -51,6 +97,13 @@ impl Identity {
         } else {
             plain.map_or(default, |p| p.0)
         };
+        // Deny-only: read after the candidates so the Allowed record's position stays the same.
+        if !self.denies.is_empty() && self.main.is_none() {
+            records.push(None);
+        }
+        for folder in &self.denies {
+            records.push(keys.own_entry_permission(folder, id).await?);
+        }
         Ok(Policy {
             permission: if records
                 .iter()
@@ -129,13 +182,43 @@ pub(crate) fn registered(shared: &Shared) -> BTreeSet<PathBuf> {
 
 /// Captures both policy candidates. Git's claim alone never grants main-project authority.
 pub(crate) fn capture(folder: &str, registered: &BTreeSet<PathBuf>) -> Result<Identity, String> {
+    capture_with(folder, registered, vw_worktrees::repo_info::read)
+}
+
+/// [`capture`] with the repository reader given (tests stand in for git). Git that is not installed means no git
+/// identity: the folder is its own project, a linked copy then does not inherit its main project's entries (never
+/// more access). Any other git failure (another user's repository, a timeout, a crash) still refuses.
+fn capture_with(
+    folder: &str,
+    registered: &BTreeSet<PathBuf>,
+    read: impl FnOnce(
+        &Path,
+    )
+        -> Result<Option<vw_worktrees::repo_info::RepoInfo>, vw_worktrees::WorktreeError>,
+) -> Result<Identity, String> {
     let plain = vw_platform::canonical_plain(Path::new(folder))
         .map_err(|_| "the project folder could not be resolved".to_owned())?;
     if !plain.is_dir() {
         return Err("the project folder could not be resolved".to_owned());
     }
-    let main = vw_worktrees::repo_info::read(&plain)
-        .map_err(|_| "the project's worktree identity could not be checked".to_owned())?
+    let (info, link_unverified) = match read(&plain) {
+        Ok(info) => (info, false),
+        Err(vw_worktrees::WorktreeError::Git(vw_changes::ChangesError::GitMissing(_))) => {
+            (None, link_text(&plain.join(".git")).is_some())
+        }
+        Err(_) => return Err("the project's worktree identity could not be checked".to_owned()),
+    };
+    // An unchecked linked copy: the main project its link names is read deny-only, so a Never the person set there
+    // still refuses here. It never grants anything (a forged link can only add a refusal).
+    let denies = if link_unverified {
+        claimed_main(&plain)
+            .filter(|main| *main != plain)
+            .map(|main| vec![main.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let main = info
         .map(|info| vw_platform::canonical_plain(info.main_root()))
         .transpose()
         .map_err(|_| "the project's main folder could not be resolved".to_owned())?
@@ -147,7 +230,22 @@ pub(crate) fn capture(folder: &str, registered: &BTreeSet<PathBuf>) -> Result<Id
         plain: plain.to_string_lossy().into_owned(),
         main: main.map(|p| p.to_string_lossy().into_owned()),
         inherit,
+        denies,
+        link_unverified,
     })
+}
+
+/// The main project a linked copy's `.git` file names (`gitdir: <main>/.git/worktrees/<name>`), read by its shape
+/// only: git is not there to confirm it, so callers may use it only to refuse.
+fn claimed_main(plain: &Path) -> Option<PathBuf> {
+    let text = link_text(&plain.join(".git"))?;
+    let admin = resolve_link(plain, text.trim().strip_prefix("gitdir: ")?)?;
+    let worktrees = admin.parent()?;
+    let dot_git = worktrees.parent()?;
+    if worktrees.file_name()? != "worktrees" || dot_git.file_name()? != ".git" {
+        return None;
+    }
+    vw_platform::canonical_plain(dot_git.parent()?).ok()
 }
 
 /// Reads only a regular, small Git link file, never a symlink or arbitrary Git-selected file.
@@ -211,3 +309,11 @@ pub(crate) fn user_project(
 ) -> Result<String, crate::error::CoreError> {
     Ok(user_identity(shared, folder)?.allowed_project().to_owned())
 }
+
+#[cfg(test)]
+#[path = "entry_permissions_moved_tests.rs"]
+mod moved_tests;
+
+#[cfg(test)]
+#[path = "entry_permissions_git_missing_tests.rs"]
+mod git_missing_tests;

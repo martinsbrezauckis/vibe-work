@@ -139,9 +139,20 @@ impl PreviewService {
         let state = self.inner.lock();
         state.entries.get(session_id).map(|e| LoadState {
             loads: *e.loads.borrow(),
-            loading: e.loading,
+            loading: e.loading(),
             url: e.url.as_ref().map(ToString::to_string),
         })
+    }
+
+    /// Announces every loading change and refused navigation of the session (`None`: never opened); a wait subscribes
+    /// before it reads [`Self::load_state`], so a change between the read and the wait still wakes it.
+    #[must_use]
+    pub fn load_changes(&self, session_id: &str) -> Option<tokio::sync::watch::Receiver<u64>> {
+        let state = self.inner.lock();
+        state
+            .entries
+            .get(session_id)
+            .map(|e| e.load_events.subscribe())
     }
 
     /// Refused navigations since the last page-diagnostics reset, oldest first (at most `MAX_REFUSED`).
@@ -183,6 +194,50 @@ impl PreviewService {
             .collect()
     }
 
+    /// Lifetime mark for host-policy page request refusals.
+    #[must_use]
+    pub fn request_refusal_mark(&self, session_id: &str) -> u64 {
+        self.inner
+            .lock()
+            .entries
+            .get(session_id)
+            .map_or(0, |entry| entry.request_refusals_seen)
+    }
+
+    /// Host-owned refusal words after an action mark, with page text excluded.
+    #[must_use]
+    pub fn request_refusals_since(&self, session_id: &str, mark: u64) -> Vec<serde_json::Value> {
+        let state = self.inner.lock();
+        let Some(entry) = state.entries.get(session_id) else {
+            return Vec::new();
+        };
+        let count = usize::try_from(entry.request_refusals_seen.saturating_sub(mark))
+            .unwrap_or(usize::MAX)
+            .min(entry.request_refusals.len());
+        entry
+            .request_refusals
+            .iter()
+            .skip(entry.request_refusals.len() - count)
+            .map(|row| serde_json::json!(row))
+            .collect()
+    }
+
+    /// Host policy refusals for the current document, separate from untrusted page request text.
+    #[must_use]
+    pub fn request_refusals_on_page(&self, session_id: &str) -> Vec<serde_json::Value> {
+        self.inner
+            .lock()
+            .entries
+            .get(session_id)
+            .map_or_else(Vec::new, |entry| {
+                entry
+                    .request_refusals_on_page()
+                    .iter()
+                    .map(|row| serde_json::json!(row))
+                    .collect()
+            })
+    }
+
     /// True when the network guard is proven active for the session's current mount.
     #[must_use]
     pub fn guarded(&self, session_id: &str) -> bool {
@@ -211,6 +266,30 @@ impl PreviewService {
     #[must_use]
     pub fn page_for_mount(&self, label: &str) -> Option<String> {
         self.inner.lock().session_of(label).map(str::to_owned)
+    }
+
+    /// Records a host-owned refusal on its live page; stale or unknown labels never create diagnostics.
+    pub fn note_request_refused(&self, label: &str, host: &str, port: u16, reason: &str) {
+        let mut state = self.inner.lock();
+        if let Some(page) = state.session_of(label).map(str::to_owned)
+            && let Some(entry) = state.entries.get_mut(&page)
+        {
+            entry.note_request_refused(host, port, reason);
+        }
+    }
+
+    /// Records a refusal the guard could not attribute (`labels`: the live mounts of the store) on the pages that
+    /// could have sent it ([`crate::state::State::note_unattributed_refusal`]).
+    pub fn note_unattributed_refusal(
+        &self,
+        labels: &[String],
+        host: &str,
+        port: u16,
+        reason: &str,
+    ) {
+        self.inner
+            .lock()
+            .note_unattributed_refusal(labels, host, port, reason);
     }
 
     /// Reports final native navigation refusals to the core without copying URLs or request values.
@@ -327,7 +406,7 @@ impl PreviewService {
         let entry = state
             .entries
             .get(session_id)
-            .ok_or_else(|| "this session has no preview open".to_owned())?;
+            .ok_or_else(|| "this chat has no preview open".to_owned())?;
         let mount = entry
             .ready_mount()
             .filter(|m| m.page == accessor)
@@ -464,10 +543,10 @@ impl PreviewService {
         let entry = state
             .entries
             .get(session_id)
-            .ok_or_else(|| "this session has no preview open".to_owned())?;
+            .ok_or_else(|| "this chat has no preview open".to_owned())?;
         let mount = entry
             .ready_mount()
-            .ok_or_else(|| "this session's page is not shown".to_owned())?;
+            .ok_or_else(|| "this chat's page is not shown".to_owned())?;
         self.inner
             .policy
             .fetch_navigation(url, &entry.allowed, mount.class, entry.mount_lan_host())
@@ -553,4 +632,46 @@ async fn resolve_media_host(
         return Err(format!("{host} has no address"));
     }
     Ok(answers)
+}
+
+impl crate::state::State {
+    /// Records a refusal the guard could not attribute (`labels`: the live mounts of the store) on the pages that
+    /// could have sent it. "Several pages, sender unknown": every page of the store, whatever its site's answer (an
+    /// allowed page's request is refused too while another open site is undecided, and an engine that tunnels plain
+    /// http names no sender at all). A reason naming a site: the pages of the chat whose page has that site.
+    pub(crate) fn note_unattributed_refusal(
+        &mut self,
+        labels: &[String],
+        host: &str,
+        port: u16,
+        reason: &str,
+    ) {
+        let unanswered = reason.starts_with(crate::local_access::UNANSWERED_TEXT);
+        let mut pages: Vec<String> = labels
+            .iter()
+            .filter_map(|label| self.session_of(label).map(str::to_owned))
+            .collect();
+        pages.sort_unstable();
+        pages.dedup();
+        let chats: std::collections::BTreeSet<String> = pages
+            .iter()
+            .filter(|page| {
+                unanswered
+                    || self
+                        .entries
+                        .get(*page)
+                        .and_then(|entry| entry.url.as_ref())
+                        .and_then(crate::local_access::site_of)
+                        .is_some_and(|site| reason.starts_with(&format!("{site} ")))
+            })
+            .map(|page| self.owner_of(page))
+            .collect();
+        for page in pages {
+            if chats.contains(&self.owner_of(&page))
+                && let Some(entry) = self.entries.get_mut(&page)
+            {
+                entry.note_request_refused_by(host, port, reason, false);
+            }
+        }
+    }
 }

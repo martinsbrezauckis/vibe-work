@@ -80,6 +80,8 @@ pub const ACTS: &[(&str, VaultAccess)] = &[
     ("keys.createVault", VaultAccess::UserOnly),
     ("keys.unlockVault", VaultAccess::UserOnly),
     ("keys.lockVault", VaultAccess::UserOnly),
+    // Moves the locked private vault aside for a new one (forgotten password): the person's alone, in the window.
+    ("keys.setAsideVault", VaultAccess::UserOnly),
     // Whether the vault's key stays on this computer across a quit: a vault setting, the user's alone (the status
     // read above carries it).
     ("keys.setLockVaultOnQuit", VaultAccess::UserOnly),

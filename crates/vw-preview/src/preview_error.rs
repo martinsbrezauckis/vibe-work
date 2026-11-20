@@ -7,7 +7,7 @@ use crate::engine::EngineError;
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PreviewError {
     /// Nothing is open in this session's preview.
-    #[error("this session has no preview open (open one first)")]
+    #[error("this chat has no preview open (open one first)")]
     NothingOpen,
     /// A hidden native webview can return a blank PNG even though its page is loaded.
     #[error("Not run: {0}")]
@@ -25,7 +25,7 @@ pub enum PreviewError {
     #[error("{0}")]
     Image(String),
     /// The external browser cap has no free engine.
-    #[error("Not run: the browser is busy with another session; try again when it is free")]
+    #[error("Not run: the browser is busy with another chat; try again when it is free")]
     BrowserBusy,
     /// The pool setting is invalid.
     #[error("browser pool setting: {0}")]

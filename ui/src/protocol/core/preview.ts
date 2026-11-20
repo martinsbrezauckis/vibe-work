@@ -20,7 +20,7 @@ sessionId: string,
  */
 url?: string,
 /**
- * Or a port of this session.
+ * Or a port of this chat.
  */
 port?: number,
 /**
@@ -136,7 +136,7 @@ tabId?: string, } | { "op": "copyText",
  */
 sessionId: string,
 /**
- * A web page of this session's Browser tab.
+ * A web page of this chat's Browser tab.
  */
 tabId: string,
 /**
@@ -271,7 +271,7 @@ export type BusyPortView = {
  */
 port: number | null,
 /**
- * "this session", "another session ('Shop')", "another app (node)", or "unknown (not visible to Vibe Work)".
+ * "this chat", "another chat ('Shop')", "another app (node)", or "unknown (not visible to Vibe Work)".
  */
 holder: string,
 /**

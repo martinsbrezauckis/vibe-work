@@ -217,6 +217,7 @@ pub(crate) async fn deleted(shared: &Shared, id: &str) {
     // The deleted session's MCP credential stops working at once.
     if let Some(tools) = &shared.agent_tools {
         tools.session_deleted(id);
+        crate::stops::conditions_changed(shared);
     }
     // A deleted session's terminals stop with it, before the store forgets it.
     crate::terminals::close_session(shared, id).await;

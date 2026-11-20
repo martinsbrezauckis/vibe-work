@@ -159,7 +159,7 @@ pub(crate) fn temp_suffix() -> String {
             .map_or(0, |d| d.as_nanos());
         bytes.copy_from_slice(&nanos.to_le_bytes()[..8]);
     }
-    format!("{}-{}", std::process::id(), crate::pin::hex(&bytes))
+    format!("{}-{}", std::process::id(), hex::encode(bytes))
 }
 
 /// Makes the rename durable: `fsync` of the folder on Unix.

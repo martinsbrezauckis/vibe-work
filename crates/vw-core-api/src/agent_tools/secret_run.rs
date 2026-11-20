@@ -106,7 +106,7 @@ pub(crate) async fn call(
 ) -> Result<Value, String> {
     crate::agent_access::check_for(shared, "vibe-work/secretRun", session_id)?;
     if shared.store.view(session_id).is_none() {
-        return Err("this session is not open in Vibe Work right now".to_owned());
+        return Err("this chat is not open in Vibe Work right now".to_owned());
     }
     match tool {
         names::SECRET_LIST => list(shared, session_id).await,
@@ -184,22 +184,21 @@ pub(crate) async fn visible_logins(
     Ok(visible)
 }
 
-/// The session-open project identity; no Git metadata or live session folder can broaden it.
+/// The session-open project identity; no Git metadata or live session folder can broaden it. A chat whose agent
+/// entered a linked worktree of that same project (or went back to the project folder) keeps the project's
+/// identity (`Identity::moved_into`); any other folder is refused.
 pub(crate) fn permission_project_of(
     shared: &Shared,
     session_id: &str,
     folders: &[PathBuf],
 ) -> Result<crate::entry_permissions::Identity, String> {
     let identity = shared.entry_projects.get(session_id)?;
-    if folders
-        .first()
-        .is_none_or(|folder| *folder != Path::new(&identity.plain))
-    {
-        return Err(
-            "this session's folder no longer matches its captured project identity".to_owned(),
-        );
+    let moved = || "this chat's folder no longer matches its captured project identity".to_owned();
+    let folder = folders.first().ok_or_else(moved)?;
+    if *folder == Path::new(&identity.plain) {
+        return Ok(identity);
     }
-    Ok(identity)
+    identity.moved_into(folder).ok_or_else(moved)
 }
 
 async fn list(shared: &Arc<Shared>, session_id: &str) -> Result<Value, String> {
@@ -326,7 +325,7 @@ pub(super) async fn prepare(
     let spec = secretspec::parse(args)?;
     if tools.secret_runs.open_of(session_id) >= MAX_OPEN {
         return Err(format!(
-            "this session already has {MAX_OPEN} secret_run commands running; collect them with \
+            "this chat already has {MAX_OPEN} secret_run commands running; collect them with \
              secret_run_status first"
         ));
     }
@@ -418,6 +417,7 @@ async fn checked_job(
         policy_project,
         dialog,
         env,
+        checked: std::sync::atomic::AtomicBool::new(false),
     };
     Ok((id, job))
 }
@@ -507,4 +507,6 @@ struct Job {
     project: String,
     policy_project: crate::entry_permissions::Identity,
     dialog: ConfirmationRequest,
+    /// Set by the first permission check of this request (`consent`).
+    checked: std::sync::atomic::AtomicBool,
 }

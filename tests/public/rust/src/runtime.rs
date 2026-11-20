@@ -55,8 +55,17 @@ pub fn checked(server: &Path) -> Result<Runtime, String> {
 fn selected_version(explicit: bool, candidate: Option<&str>) -> Result<&str, String> {
     match candidate {
         None => Ok(PIN.trim()),
-        Some(version @ ("3.0.4" | "3.1.0" | "3.1.1" | "3.1.2")) if explicit => Ok(version),
-        _ => Err("VW_TEST_VIBE_CANDIDATE requires an explicit server and an audited version (3.0.4, 3.1.0, 3.1.1 or 3.1.2)".into()),
+        Some(version)
+            if explicit
+                && (version == PIN.trim()
+                    || matches!(version, "3.0.4" | "3.1.0" | "3.1.1" | "3.1.2")) =>
+        {
+            Ok(version)
+        }
+        _ => Err(format!(
+            "VW_TEST_VIBE_CANDIDATE requires an explicit server and an audited version (3.0.4, 3.1.0, 3.1.1, 3.1.2 or {})",
+            PIN.trim()
+        )),
     }
 }
 
@@ -153,6 +162,10 @@ mod tests {
     #[test]
     fn candidate_requires_explicit_selection_and_still_checks_the_installed_version() {
         assert_eq!(selected_version(true, None).unwrap(), PIN.trim());
+        assert_eq!(
+            selected_version(true, Some(PIN.trim())).unwrap(),
+            PIN.trim()
+        );
         assert_eq!(selected_version(true, Some("3.1.0")).unwrap(), "3.1.0");
         assert!(selected_version(false, Some("3.1.0")).is_err());
         assert_eq!(selected_version(true, Some("3.1.1")).unwrap(), "3.1.1");

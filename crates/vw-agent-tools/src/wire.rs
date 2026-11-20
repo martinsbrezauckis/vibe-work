@@ -70,7 +70,9 @@ pub mod tools {
     pub const PORT_LEASE: &str = "port_lease";
     /// Start a long-running process (dev server) that survives the app.
     pub const PROCESS_START: &str = "process_start";
-    /// Stop one of this session's processes.
+    /// Ask the app to push a local branch using app-held credentials.
+    pub const PUSH: &str = "push";
+    /// Stop one of this chat's processes.
     pub const PROCESS_STOP: &str = "process_stop";
     /// Restart a process started with `process_start`.
     pub const PROCESS_RESTART: &str = "process_restart";
@@ -188,7 +190,7 @@ pub mod tools {
     }
 
     /// Every tool a session credential may call.
-    pub const SESSION_TOOLS: [&str; 36 + cfg!(feature = "video") as usize + 2] = [
+    pub const SESSION_TOOLS: [&str; 36 + cfg!(feature = "video") as usize + 3] = [
         #[cfg(feature = "video")]
         "video_frames",
         SESSION_STATUS,
@@ -198,6 +200,7 @@ pub mod tools {
         PROCESSES_LIST,
         PORT_LEASE,
         PROCESS_START,
+        PUSH,
         PROCESS_STOP,
         PROCESS_RESTART,
         PREVIEW_LIST,
@@ -379,7 +382,11 @@ fn read_answer_until(
 }
 
 fn unconfirmed_process(tool: &str, reason: String) -> String {
-    if matches!(tool, tools::PROCESS_START | tools::PROCESS_RESTART) {
+    if tool == tools::PUSH {
+        format!(
+            "{UNKNOWN_OUTCOME} the push may have completed: {reason}. Call push with pushId: \"latest\" to collect this chat's saved outcome before requesting another push. Never retry with force."
+        )
+    } else if matches!(tool, tools::PROCESS_START | tools::PROCESS_RESTART) {
         format!(
             "{UNKNOWN_OUTCOME} could not confirm {tool}: {reason}. The process may have started; call processes_list to check its pid and readiness before repeating the request."
         )

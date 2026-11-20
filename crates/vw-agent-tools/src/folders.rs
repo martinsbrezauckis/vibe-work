@@ -223,7 +223,7 @@ impl Layout {
             && data_entry_named(&real, data, "sessions")
         {
             return Some(format!(
-                "Not run: Vibe Work's own session data ({}); the agent does not change it. {own}",
+                "Not run: Vibe Work's own chat data ({}); the agent does not change it. {own}",
                 shown::shown(&joined)
             ));
         }
@@ -232,7 +232,7 @@ impl Layout {
             return match app_data::copy_permit(self, &copy, is_own, permits) {
                 Ok(()) => None,
                 Err(why) => Some(format!(
-                    "Not run: a session copy you cannot use now ({}): {}. {own}",
+                    "Not run: a chat copy you cannot use now ({}): {}. {own}",
                     shown::shown(&joined),
                     why.trim_end_matches('.')
                 )),
@@ -243,14 +243,14 @@ impl Layout {
             || real.parent() == Some(self.worktrees.as_path())
         {
             return Some(format!(
-                "Not run: the sessions' copies ({}); Vibe Work gives each session its own copy. {own} Search and \
+                "Not run: the chats' copies ({}); Vibe Work gives each chat its own copy. {own} Search and \
                  work only inside it.",
                 shown::shown(&joined)
             ));
         }
         if access != Access::Read && real.starts_with(&self.vibe_home) {
             return Some(format!(
-                "Not run: Vibe Work's own configuration and session data, the Vibe home ({}); this tool cannot read or \
+                "Not run: Vibe Work's own configuration and chat data, the Vibe home ({}); this tool cannot read or \
                  change it. {own} Read skills with the skill tool or read_file. To change files there, propose the change with propose_protected_change; the user reviews it.",
                 shown::shown(&joined)
             ));

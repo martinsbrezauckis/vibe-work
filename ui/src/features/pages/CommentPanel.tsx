@@ -41,7 +41,8 @@ function Row({
         <Button
           data-testid="pages.comment-panel-send"
           type="button"
-          appearance="page"
+          shape="outlined"
+          placement="page"
           onClick={() => {
             send(comment);
           }}
@@ -115,7 +116,8 @@ export function CommentPanel({
             <Button
               data-testid="pages.comment-panel-save"
               type="button"
-              appearance="page"
+              shape="outlined"
+              placement="page"
               variant="primary"
               disabled={text.trim() === ""}
               onClick={() => {
@@ -127,7 +129,8 @@ export function CommentPanel({
             <Button
               data-testid="pages.comment-panel-save-2"
               type="button"
-              appearance="page"
+              shape="outlined"
+              placement="page"
               disabled={text.trim() === ""}
               onClick={() => {
                 void saveText(false);
@@ -138,7 +141,8 @@ export function CommentPanel({
             <Button
               data-testid="pages.comment-panel-set-text-2"
               type="button"
-              appearance="page"
+              shape="outlined"
+              placement="page"
               onClick={() => {
                 setText("");
                 cancel();

@@ -104,7 +104,7 @@ pub enum CallbackFault {
         id: String,
     },
     /// The callback belongs to another session.
-    #[error("callback {id} belongs to a different session")]
+    #[error("callback {id} belongs to a different chat")]
     WrongSession {
         /// The callback id.
         id: String,

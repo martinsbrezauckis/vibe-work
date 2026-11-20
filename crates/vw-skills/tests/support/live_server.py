@@ -5,6 +5,7 @@ hook rejects Internet sockets before Vibe imports; no model turn is submitted.
 """
 
 import importlib.metadata
+import os
 import socket
 import sys
 
@@ -14,7 +15,7 @@ def deny_network(event, args):
         raise PermissionError("Internet sockets disabled for the skills live test")
 
 
-assert importlib.metadata.version("mistral-vibe") == "3.1.2"
+assert importlib.metadata.version("mistral-vibe") == os.environ["VW_TEST_VIBE_PIN"]
 sys.addaudithook(deny_network)
 # Import only after the audit hook is active.
 importlib.import_module("vibe.app_server.stdio").main()

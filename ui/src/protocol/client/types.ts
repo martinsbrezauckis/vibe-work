@@ -121,6 +121,11 @@ export interface UpdateView {
 export interface UpdatesClient {
   /** Starts the view stream (the current view first). `false`: this build has no update channel. */
   subscribe(onView: (view: UpdateView) => void): Promise<boolean>;
+  /**
+   * Why a build that carries an update channel makes no update check (the refused channel's plain text); `null` for
+   * a build without a channel. Absent in clients that cannot know it.
+   */
+  offReason?(): Promise<string | null>;
   /** Checks now. Resolves when the check (and an automatic download) finished. */
   check(): Promise<void>;
   /** Downloads the offered update (the window's click; a `ui/updates download` request clicks it). */
@@ -348,6 +353,8 @@ export interface DesktopClient {
   quit(): Promise<void>;
   /** Moves the OS keyboard focus to the app's own window content (out of a native page view beside a prompt). */
   focusApp?: () => Promise<void>;
+  /** Draws the native title bar dark or light like the app's theme (Windows; other hosts ignore it). */
+  titleBar?: (dark: boolean) => Promise<void>;
   /** Receives actual closes and synchronizes the user's notification preference. */
   subscribe(onClose: () => void, notifications: boolean): Promise<() => void>;
 }

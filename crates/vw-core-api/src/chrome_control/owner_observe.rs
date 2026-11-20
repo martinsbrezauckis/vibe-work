@@ -32,6 +32,9 @@ pub(in crate::chrome_control) fn observe(shared: &Weak<Shared>, message: &Value)
     if message["method"] == "notifications/owner/pairingApproval" {
         super::super::pairing_approval::observe(&shared, &message["params"]);
     }
+    if message["method"] == "notifications/owner/frameControl" {
+        super::super::frames::observe_control(&shared, &message["params"]);
+    }
     if message["method"] == "notifications/client/selection" {
         let changed = shared
             .chrome_control
@@ -217,6 +220,15 @@ pub(in crate::chrome_control) fn update_work(
     let Some(rows) = result["structuredContent"]["sessions"].as_array() else {
         return;
     };
+    let data = &result["structuredContent"];
+    if result["isError"] == true || data["status"] == "unknown" || data["error"].is_object() {
+        return;
+    }
+    // Gateway opens and person handovers hold this lock through their durable binding update.
+    // Defer an older status rather than observing it between `remember` and `work.open`.
+    let Ok(_binding) = shared.chrome_control.binding_changes.try_lock() else {
+        return;
+    };
     let mut tasks = shared.chrome_control.tasks.lock_or_recover();
     let mut work = shared.chrome_control.work.lock_or_recover();
     // A live session the helper reports stopped without Vibe Work asking: the person's Stop in Chrome.
@@ -224,10 +236,52 @@ pub(in crate::chrome_control) fn update_work(
     let changed = work.observe(rows, &mut tasks, started);
     drop(work);
     drop(tasks);
-    super::super::profile_bindings::acknowledge(&shared.chrome_control, rows);
+    // Only the authenticated helper's complete client status can prove that a task has gone away.
+    // An action reply or a malformed inventory may contain a partial `sessions` array.
+    let complete = data["version"] == 1
+        && data["clientId"] == "vibework-owner"
+        && data["profiles"].as_array().is_some_and(|profiles| {
+            profiles.iter().all(|profile| {
+                profile["profileId"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty())
+            })
+        })
+        && rows.iter().all(|row| {
+            row["sessionId"].as_str().is_some_and(|id| !id.is_empty())
+                && row["profileId"].as_str().is_some_and(|id| !id.is_empty())
+                && matches!(
+                    row["state"].as_str(),
+                    Some(
+                        "active"
+                            | "connecting"
+                            | "idle"
+                            | "releasing"
+                            | "stopping"
+                            | "stopped"
+                            | "disconnected"
+                    )
+                )
+        });
+    let mut window_closed = Vec::new();
+    let released = complete
+        && super::super::profile_bindings::reconcile_completed_status(
+            &shared.chrome_control,
+            rows,
+            &mut window_closed,
+        );
+    for (chat, profile) in window_closed {
+        let browser = super::super::agent_browser::Browser::from_profile(&profile);
+        let message = vw_vocabulary::texts::BROWSER_PROFILE_WINDOW_CLOSED
+            .replace("{browser}", browser.name());
+        let _ = shared.store.apply(vw_session::Notification::new(
+            "warning",
+            json!({"sessionId":chat,"warning":{"code":"browser_window_closed","message":message}}),
+        ));
+    }
     super::super::person_stop::received(&shared, &stopped);
     super::super::frames::observe(&shared, rows);
-    if changed {
+    if changed || released {
         publish(&shared);
     }
 }

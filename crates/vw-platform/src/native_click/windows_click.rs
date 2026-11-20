@@ -1,12 +1,8 @@
 //! Win32 message delivery to the visible `WebView2` child HWND selected from the controller's own host window.
 //! Depends on: `WebView2` controller and Win32 window APIs. Called by: `native_click` on Tauri's UI thread.
 
-use crate::sync::LockRecover;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
-use super::ClickReply;
-use webview2_com::ExecuteScriptCompletedHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{ClientToScreen, ScreenToClient};
@@ -14,7 +10,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GA_ROOT, GetAncestor, GetClientRect, GetForegroundWindow, IsChild, IsIconic, IsWindowVisible,
     PostMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WindowFromPoint,
 };
-use windows::core::HSTRING;
 
 /// Posts a left-button click only to the browser child under a point in this controller's host `HWND`.
 ///
@@ -42,63 +37,6 @@ pub fn click(
             ));
         }
         Ok(())
-    }
-}
-
-/// Evaluates the final page guard through `WebView2`; its COM completion runs on the same UI thread as input.
-pub fn click_checked(
-    controller: &ICoreWebView2Controller,
-    point: (f64, f64),
-    script: &str,
-    sent: Arc<AtomicBool>,
-    allowed: super::ClickPermission,
-    reply: ClickReply,
-) {
-    let controller_for_callback = controller.clone();
-    let reply = Arc::new(Mutex::new(Some(reply)));
-    // SAFETY: Tauri handed us the live controller on WebView2's UI thread. Its completion also runs there.
-    let core = unsafe { controller.CoreWebView2() };
-    let Ok(core) = core else {
-        if let Some(reply) = reply.lock_or_recover().take() {
-            let _ = reply.send(Err("Not run: WebView2 is unavailable".to_owned()));
-        }
-        return;
-    };
-    let callback_reply = reply.clone();
-    let handler = ExecuteScriptCompletedHandler::create(Box::new(move |status, answer| {
-        let Some(reply) = callback_reply.lock_or_recover().take() else {
-            return Ok(());
-        };
-        if reply.is_closed() {
-            return Ok(());
-        }
-        let result = status
-            .map_err(|e| format!("Not run: final page validation failed: {e}"))
-            .and_then(|()| {
-                if super::validation_is_true(&answer) {
-                    if reply.is_closed() {
-                        return Err("Not run: native click was canceled".to_owned());
-                    }
-                    if allowed.as_ref().is_some_and(|allowed| !allowed()) {
-                        Err("Not run: browser permission changed before native input".to_owned())
-                    } else {
-                        click(&controller_for_callback, point, &sent)
-                    }
-                } else {
-                    Err("Not run: the page target changed before native input".to_owned())
-                }
-            });
-        let _ = reply.send(result);
-        Ok(())
-    }));
-    // SAFETY: ExecuteScript is called on the controller's UI thread; handler owns all callback state.
-    let started = unsafe { core.ExecuteScript(&HSTRING::from(script), &handler) };
-    if let Err(error) = started
-        && let Some(reply) = reply.lock_or_recover().take()
-    {
-        let _ = reply.send(Err(format!(
-            "Not run: final page validation could not start: {error}"
-        )));
     }
 }
 

@@ -18,6 +18,8 @@ pub(crate) enum Fixed {
     LostConnection,
     /// This chat's session was stopped and is not retained.
     Stopped,
+    /// This chat's session ended because the chat's access mode was lowered.
+    ModeLowered,
     /// The action is not in the browser action catalog.
     UnknownAction,
     /// The browser package is not part of this installation.
@@ -27,13 +29,14 @@ pub(crate) enum Fixed {
 impl Fixed {
     /// Every id, for tests that walk the full set.
     #[cfg(test)]
-    pub(super) const ALL: [Fixed; 8] = [
+    pub(super) const ALL: [Fixed; 9] = [
         Fixed::InvalidArguments,
         Fixed::OpenSessionFirst,
         Fixed::SelectionFromUser,
         Fixed::OtherChat,
         Fixed::LostConnection,
         Fixed::Stopped,
+        Fixed::ModeLowered,
         Fixed::UnknownAction,
         Fixed::Unavailable,
     ];
@@ -43,7 +46,9 @@ impl Fixed {
             Self::InvalidArguments => {
                 "Not run: invalid {browser} tool arguments. Use chrome_status for the action's argument schema."
             }
-            Self::OpenSessionFirst => "Not run: open a {browser} session in this chat first.",
+            Self::OpenSessionFirst => {
+                "Not run: open {article} {browser} browser session in this chat first."
+            }
             // Hidden Firefox page sharing (firefox_sharing::PAGE_SHARING_AVAILABLE) has no working Ask Vibe Work menu.
             Self::SelectionFromUser
                 if browser == Browser::Firefox
@@ -55,13 +60,16 @@ impl Fixed {
                 "Not run: selection is sent by the user from {browser}. Ask the user to use Ask Vibe Work in {browser}'s context menu."
             }
             Self::OtherChat => {
-                "Not run: this {browser} session belongs to another chat. Open a {browser} session for this chat with chrome_session."
+                "Not run: this {browser} browser session belongs to another chat. Open {article} {browser} browser session for this chat with chrome_session."
             }
             Self::LostConnection => {
-                "Not run: this {browser} session lost its connection to {browser}. Check chrome_status, reconnect the browser if needed, then open a new session with chrome_session."
+                "Not run: this {browser} browser session lost its connection to {browser}. Check chrome_status, reconnect the browser if needed, then open a new browser session with chrome_session."
             }
             Self::Stopped => {
-                "Not run: this {browser} session was stopped; open a new one with chrome_session."
+                "Not run: this {browser} browser session was stopped; open a new one with chrome_session."
+            }
+            Self::ModeLowered => {
+                "Not run: this {browser} browser session ended because this chat's access mode was lowered; its tabs stay open. Open a new one with chrome_session if the new mode allows the work."
             }
             Self::UnknownAction => {
                 "Not run: unknown {browser} action. Use chrome_status to find supported actions."

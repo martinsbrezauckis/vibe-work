@@ -319,7 +319,7 @@ fn deleted_folder(folder: &Path) -> bool {
 /// The person's next step for a chat still bound to a removed identity.
 pub(super) fn removed_message(chrome: &super::ChromeControl, id: &str) -> String {
     format!(
-        "{} was removed; no action ran. Open the session again so the user can pick another profile, or ask the user to reconnect this profile.",
+        "{} was removed; no action ran. Open the browser session again so the user can pick another profile, or ask the user to reconnect this profile.",
         profiles::label(chrome, id)
     )
 }

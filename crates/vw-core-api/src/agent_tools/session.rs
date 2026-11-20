@@ -1,4 +1,4 @@
-//! Small shared pieces of the agent tools: a session's folders, the "inside the session folder" check, owner
+//! Small shared pieces of the agent tools: a session's folders, the "inside the chat folder" check, owner
 //! names for refusals, URLs of listeners and the ports of a process tree.
 //!
 //! Depends on: vw-procmon, `core::Shared`, `processes` (session contexts), `names`. Called by: `tools`,
@@ -32,7 +32,7 @@ pub(crate) fn folders(shared: &Shared, session_id: &str) -> Result<Vec<PathBuf>,
     }
     let contexts = crate::processes::contexts(&shared.store);
     let Some(context) = contexts.into_iter().find(|c| c.session_id == session_id) else {
-        return Err("this session is not open in Vibe Work right now".to_owned());
+        return Err("this chat is not open in Vibe Work right now".to_owned());
     };
     let folders: Vec<PathBuf> = context
         .folders
@@ -40,7 +40,7 @@ pub(crate) fn folders(shared: &Shared, session_id: &str) -> Result<Vec<PathBuf>,
         .map(|f| vw_platform::canonical_plain(f).unwrap_or_else(|_| f.clone()))
         .collect();
     if folders.is_empty() {
-        return Err("this session has no folder".to_owned());
+        return Err("this chat has no folder".to_owned());
     }
     Ok(folders)
 }
@@ -48,7 +48,7 @@ pub(crate) fn folders(shared: &Shared, session_id: &str) -> Result<Vec<PathBuf>,
 /// `path` (relative to the first folder, or absolute) resolved and checked to lie inside one of `folders`.
 pub(crate) fn inside(folders: &[PathBuf], path: Option<&str>) -> Result<PathBuf, String> {
     let Some(first) = folders.first() else {
-        return Err("this session has no folder".to_owned());
+        return Err("this chat has no folder".to_owned());
     };
     let Some(path) = path.filter(|p| !p.trim().is_empty()) else {
         return Ok(first.clone());
@@ -69,22 +69,24 @@ pub(crate) fn inside(folders: &[PathBuf], path: Option<&str>) -> Result<PathBuf,
         Ok(resolved)
     } else {
         Err(format!(
-            "folder {path} is outside this session's folder. Choose a folder inside it"
+            "folder {path} is outside this chat's folder. Choose a folder inside it"
         ))
     }
 }
 
-/// Another session's visible name for refusals. Always says "another"
-/// (session titles can look alike, so the agent needs an unambiguous process owner).
-pub(crate) fn session_name(shared: &Shared, session_id: &str) -> String {
+/// Another chat's visible name for refusals (the kill guard's reasons, port and preview owners), which the person
+/// reads in a dialog and the agent in its refusal: the vocabulary's "chat" (a "session" in the kill guard could also be
+/// read as the OS process session it reasons about). Always says "another" (chat titles can look alike, so the agent
+/// needs an unambiguous owner).
+pub(crate) fn chat_name(shared: &Shared, session_id: &str) -> String {
     let title = shared.names.display_title(&shared.store, session_id);
-    format!("another session ('{title}')")
+    format!("another chat ('{title}')")
 }
 
-/// "session 'Shop'" / "another app (node)" / "another app".
+/// "another chat ('Shop')" / "another app (node)" / "another app".
 pub(crate) fn owner_text(shared: &Shared, owner: &Owner) -> String {
     match owner {
-        Owner::Session { session_id } => session_name(shared, session_id),
+        Owner::Session { session_id } => chat_name(shared, session_id),
         Owner::OtherApp {
             name: Some(name), ..
         } => format!("another app ({name})"),
@@ -100,8 +102,8 @@ pub(crate) fn refusal_text(shared: &Shared, refusal: &StopRefusal) -> String {
             owner_text(shared, owner)
         ),
         StopRefusal::NotProven { pid, .. } => format!(
-            "pid {pid} was not started by this session or one of its terminals, so it \
-             was not stopped. Use this session's controls to stop its own background programs"
+            "pid {pid} was not started by this chat or one of its terminals, so it \
+             was not stopped. Use this chat's controls to stop its own background programs"
         ),
         other => format!("{other}; it was not stopped"),
     }

@@ -1,7 +1,7 @@
 //! App preview "Annotate this page" obeys the protected-value visual-capture admission (`vw_browser::Browser::admit_capture`):
-//! below Full access (Ask, Accept edits) a page showing a password, PIN or card value omits the crop picture and returns
-//! the shared Capture-menu refusal in `crop_left_out` while preserving the element/box note and coordinates; Full access,
-//! safe/masked pages, and an independent second Full-access chat still receive the crop. Uses an offline core and a
+//! a page showing a password, PIN or card value omits the crop picture in every access mode and returns
+//! the shared Capture-menu refusal in `crop_left_out` while preserving the element/box note and coordinates;
+//! safe/masked pages still receive the crop. Uses an offline core and a
 //! windowless engine.
 //!
 //! PREDICT (before the admission): `BrowserRequest::Annotate` below Full access returns `crop_png_base64: Some(...)`
@@ -287,14 +287,17 @@ async fn annotate_crop_follows_protected_value_admission_across_modes_and_chats(
     assert_eq!(ask_protected.rect.width, 100);
     assert_eq!(engine.shots.load(Ordering::SeqCst), shots_before);
 
-    // Concurrent second chat in Full access (auto-approve) keeps the crop even while its page also shows a secret.
+    // A concurrent second chat in Full access also withholds its protected crop.
     engine.set_shown(chat_b, true);
     focus_chat(&core, chat_b).await;
     let shots_before = engine.shots.load(Ordering::SeqCst);
     let full_protected = run_annotate(&core, chat_b, Some("element")).await;
-    assert!(full_protected.crop_png_base64.is_some());
-    assert!(full_protected.crop_left_out.is_none());
-    assert_eq!(engine.shots.load(Ordering::SeqCst), shots_before + 1);
+    assert!(full_protected.crop_png_base64.is_none());
+    assert_eq!(
+        full_protected.crop_left_out.as_deref(),
+        Some(vw_browser::protected_shown().as_str())
+    );
+    assert_eq!(engine.shots.load(Ordering::SeqCst), shots_before);
 
     // Accept edits (accept-edits) is also below Full access -> no crop (box mode included).
     core.shared

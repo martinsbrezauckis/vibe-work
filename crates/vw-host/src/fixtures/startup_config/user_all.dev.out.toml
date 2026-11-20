@@ -1,4 +1,3 @@
-# Vibe Work: unsupported experimental features stay off.
 # Vibe Work: Vibe checks HTTPS certificates with your system's certificate store, not the copy bundled with
 # Vibe's Python packages, which can lag behind removed certificate authorities.
 enable_system_trust_store = true
@@ -7,16 +6,17 @@ enable_system_trust_store = true
 # (Your own commits: the Commit dialog's credit switch, per project.)
 include_commit_signature = false
 
+# Vibe Work: unsupported experimental features stay off.
 # my config
 active_model = "devstral"
 tool_paths = []
 experimental_enable_tab_status = false
 default_agent = "accept-edits"
 experimental_enable_registry_skills = true
+experimental_enable_model_catalog = true
 experimental_enable_mistral_mcp_connector = false
 experimental_local_runtime_session_api = false
 experimental_enable_document_library_connector = false
-experimental_enable_model_catalog = false
 experimental_enable_local_projects = false
 enable_pr_monitoring = false
 
@@ -31,7 +31,7 @@ name = "devstral"
 provider = "mistral"
 alias = "devstral"
 
-# Vibe Work: session titles are written by Mistral Medium 3.5, whatever model a session uses.
-# Write title = "active" to title sessions with their own model instead.
+# Vibe Work: each chat's own model writes its session title.
+# Name a model alias here to title every chat with that model instead.
 [utility_models]
-title = "mistral-medium-3.5"
+title = "active"

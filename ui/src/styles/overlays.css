@@ -52,7 +52,7 @@
   cursor: pointer;
   color: var(--text-2);
 }
-.plist li[aria-selected="true"] {
+.plist li[data-active="true"] {
   background: var(--active);
   color: var(--text);
 }
@@ -127,9 +127,15 @@
   padding: 8px 0;
   font-size: var(--text-md);
 }
-.check > span {
+.check > span,
+.check > p {
   /* The text column may shrink and wrap so the control column keeps its natural width. */
   min-width: 0;
+}
+/* A row's words as a paragraph: WebKitGTK exposes a paragraph's text, but drops a plain span's text beside a button
+   in a landmark. It looks the same as the span. */
+.check > p {
+  margin: 0;
 }
 .check .d {
   color: var(--text-3);
@@ -381,4 +387,8 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+/* The forgotten-password dialog's body has several paragraphs: a row's space between them. */
+.forgot-password-dialog section p + p {
+  margin-top: var(--space-row-block);
 }

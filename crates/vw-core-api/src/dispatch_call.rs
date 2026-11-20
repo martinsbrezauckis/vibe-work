@@ -19,6 +19,12 @@ pub(crate) struct Sending<'a> {
 
 impl Core {
     pub(crate) async fn send_call(&self, sending: Sending<'_>) -> Result<Reply, CoreError> {
+        let method = sending.method;
+        // A Desktop chat the folder check missed still never shows Vibe's raw validation text.
+        (self.send_raw(sending).await).map_err(|e| crate::desktop_chats::friendly(method, e))
+    }
+
+    async fn send_raw(&self, sending: Sending<'_>) -> Result<Reply, CoreError> {
         let Sending {
             method,
             params,

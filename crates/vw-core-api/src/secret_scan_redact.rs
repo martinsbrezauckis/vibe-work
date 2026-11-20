@@ -50,7 +50,7 @@ impl Worker {
             .ok_or_else(|| {
                 CoreError::new(
                     ErrorCode::NotFound,
-                    "The session log finding is no longer available.",
+                    "The chat log finding is no longer available.",
                 )
             })?;
         if finding.state == SecretLeakState::Removed {
@@ -181,7 +181,7 @@ impl Worker {
         for path in paths {
             if !inside_log_folder(&folder, path) {
                 return Err(failure(
-                    "The saved finding is outside the configured session log folder.",
+                    "The saved finding is outside the configured chat log folder.",
                 ));
             }
         }
@@ -272,7 +272,7 @@ impl Worker {
             reports.insert(
                 path.clone(),
                 vw_logscan::scan_files(vec![path.clone()], owned(secrets))
-                    .map_err(|_| failure("Could not recheck the session log."))?,
+                    .map_err(|_| failure("Could not recheck the chat log."))?,
             );
         }
         if changed {

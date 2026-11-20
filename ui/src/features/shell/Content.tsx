@@ -14,7 +14,7 @@
  */
 import { FoldChatButton } from "./WindowStrips";
 import { TEXT } from "../../vocabulary";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 
 import { BrandMark } from "../../components/BrandMark";
 import { Icon } from "../../components/Icon";
@@ -211,8 +211,19 @@ export function Content() {
     ) : null;
   // Ctrl F finds in the open conversation or the File tab (pages over the work view have their own).
   useFindKeys(page !== null || covered);
+  // A page opened while focus was in the work view it covers (or nowhere): focus moves to the work area, so it is
+  // never left on inert, hidden content (Orca kept its reading position on the removed chat). Focus elsewhere stays.
+  const main = useRef<HTMLElement>(null);
+  const base = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (page === null) return;
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body || base.current?.contains(focused))
+      main.current?.focus({ preventScroll: true });
+  }, [page]);
   return (
     <main
+      ref={main}
       className={`content${page === null ? "" : " has-page"}`}
       id="content"
       aria-label="Work area"
@@ -221,7 +232,7 @@ export function Content() {
       tabIndex={-1}
     >
       <CoveredByPage.Provider value={page !== null}>
-        <div className="content-base" inert={page !== null}>
+        <div className="content-base" inert={page !== null} ref={base}>
           {covered ? (
             <>
               <div />

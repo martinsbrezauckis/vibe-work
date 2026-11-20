@@ -60,7 +60,7 @@ export function DocPreview(): ReactElement | null {
           <Button
             data-testid="composer.doc-preview-set-all"
             type="button"
-            appearance="expander"
+            appearance="link"
             title="Show all document text"
             aria-label="Show all document text"
             onClick={() => {

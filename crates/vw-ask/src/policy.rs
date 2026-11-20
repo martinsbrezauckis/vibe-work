@@ -59,6 +59,7 @@ const NATIVE: &[&str] = &[
     "vibe-work/fillLogin",
     "vibe-work/providerConsent",
     "vibe-work/gitPush",
+    "vibe-work/developerPermissions",
     "vibe-work/gitBringIn",
     "vibe-work/gitPullRequest",
     "vibe-work/worktreeStart",
@@ -91,10 +92,6 @@ const VAULT: &[&str] = &[
     "vibe-work/useModelKey",
     "chrome/control/fill",
 ];
-/// Every `(policy key, Settings control id)` pair an "Always" answer may set (see [`Policy::always_setting`]).
-pub fn always_settings() -> impl Iterator<Item = (&'static str, &'static str)> {
-    ALWAYS_SETTINGS.iter().copied()
-}
 /// Every known policy key; unknown runtime methods still fail closed as native asks.
 pub fn policies() -> impl Iterator<Item = &'static str> {
     NATIVE.iter().copied().chain([
@@ -122,6 +119,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
         "vibe-work/secretRun" => "this use of a secret",
         "vibe-work/fillLogin" => "this saved login",
         "vibe-work/providerConsent" => "this account access",
+        "vibe-work/developerPermissions" => vw_vocabulary::texts::DEVELOPER_PERMISSIONS_NAME,
         "chrome/control/pair" => "this browser connection",
         "vibe-work/localNetworkAccess" => "this site's access to your local network",
         // The canonical "New chat" name lives in the shared vocabulary.
@@ -138,7 +136,10 @@ pub fn policy(kind: &str) -> Option<Policy> {
         person_only: VAULT.contains(&key)
             || matches!(
                 key,
-                "vault_save" | "chrome/control/pair" | "vibe-work/localNetworkAccess"
+                "vault_save"
+                    | "chrome/control/pair"
+                    | "vibe-work/localNetworkAccess"
+                    | "vibe-work/developerPermissions"
             ),
         always_setting: ALWAYS_SETTINGS
             .iter()
@@ -149,6 +150,16 @@ pub fn policy(kind: &str) -> Option<Policy> {
 
 #[cfg(test)]
 mod tests {
+    // PREDICT: Developer permissions is a native, person-only decision with no lasting answer.
+    #[test]
+    fn developer_permissions_requires_the_person_in_the_native_window() {
+        let policy =
+            super::policy("vibe-work/developerPermissions").expect("explicit developer policy");
+        assert_eq!(policy.surface, crate::Surface::Native);
+        assert!(policy.person_only);
+        assert_eq!(policy.always_setting, None);
+    }
+
     #[test]
     fn retired_transfers_and_experimental_moves_have_no_permission_surface() {
         for method in [

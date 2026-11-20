@@ -145,7 +145,7 @@ name: string,
  */
 description: string,
 /**
- * Display origin: builtin, user, project, plugin, catalog; absent if ambiguous.
+ * Display origin: builtin, user, project, session, plugin, catalog; absent if ambiguous.
  */
 source: string | null,
 /**

@@ -1,5 +1,6 @@
 //! Tools skills operations through vw-skills and the selected session's actual runtime.
-//! Without a selected chat, uses a disposable helper in the picked folder; gate forwarding owns transport.
+//! Without a selected chat, or when the selected chat has no live channel, uses a disposable helper in the picked
+//! folder or the chat's own folder; gate forwarding owns transport.
 use crate::command::Origin;
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
@@ -191,11 +192,19 @@ impl Core {
         if mutation {
             self.skills_check_idle(&folder).await?;
         }
-        if let Some(id) = request.session_id.as_deref() {
+        if let Some(id) = request
+            .session_id
+            .as_deref()
+            .filter(|id| self.shared.channels.has_channel(id))
+        {
             // Keep session-only trust, extra roots, agent overrides and pinned plugins exactly
             // as the selected runtime sees them. Never dispose of the person's own chat.
             return self.skills_in(origin, id, &folder, request.action).await;
         }
+        // No selected chat, or one without a live runtime (closed after being idle, or from an earlier run):
+        // Vibe answers runtime reads for a closed chat with empty lists, and reopening it could restart its
+        // unfinished work. A short-lived helper in the chat's folder reads (and changes) what that folder's chats
+        // load; the closed chat picks the change up when it is next opened.
         let id = self
             .start_helper_chat_in(origin, "Skills were not changed", &folder)
             .await?;

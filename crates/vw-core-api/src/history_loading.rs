@@ -104,7 +104,7 @@ async fn page(shared: &Shared, id: &str, request: &HistoryRequest) -> Result<Pag
     #[cfg(feature = "video")]
     crate::video_projection::apply(shared, &mut reply);
     crate::edit_preview::project(shared, &mut reply);
-    crate::chrome_control::approval::project(shared, &mut reply);
+    crate::chrome_control::project_approvals(shared, &mut reply);
     crate::paused_tools_gate::mark_held_calls(shared, &mut reply);
     let Value::Array(items) = reply["items"].take() else {
         return Err("history page has no items".into());

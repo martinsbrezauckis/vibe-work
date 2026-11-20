@@ -143,7 +143,7 @@
   align-items: center;
   gap: 4px;
 }
-.session-list-header > .btn-primary {
+.session-list-header > .tb-btn.primary {
   flex: 1;
 }
 .window-strip {

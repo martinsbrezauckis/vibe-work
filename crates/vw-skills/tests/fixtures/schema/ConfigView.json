@@ -12,6 +12,11 @@
       "title": "Askconfirmationonexit",
       "type": "boolean"
     },
+    "autoWorktree": {
+      "default": false,
+      "title": "Autoworktree",
+      "type": "boolean"
+    },
     "autocopyToClipboard": {
       "title": "Autocopytoclipboard",
       "type": "boolean"
@@ -19,6 +24,11 @@
     "awaitingExperimentModel": {
       "default": false,
       "title": "Awaitingexperimentmodel",
+      "type": "boolean"
+    },
+    "crashReportsEnabled": {
+      "default": false,
+      "title": "Crashreportsenabled",
       "type": "boolean"
     },
     "cursorBlink": {
@@ -68,23 +78,23 @@
       "title": "Enablesystemtruststore",
       "type": "boolean"
     },
-    "enableTelemetry": {
-      "default": true,
-      "title": "Enabletelemetry",
-      "type": "boolean"
-    },
     "enableUpdateChecks": {
       "title": "Enableupdatechecks",
       "type": "boolean"
     },
     "experimentalEnableLocalProjects": {
-      "default": false,
+      "default": true,
       "title": "Experimentalenablelocalprojects",
       "type": "boolean"
     },
     "experimentalEnableRegistrySkills": {
       "default": false,
       "title": "Experimentalenableregistryskills",
+      "type": "boolean"
+    },
+    "experimentalEnableStorageUsage": {
+      "default": false,
+      "title": "Experimentalenablestorageusage",
       "type": "boolean"
     },
     "experimentalEnableTabStatus": {
@@ -122,8 +132,9 @@
       "title": "Narratorenabled",
       "type": "boolean"
     },
-    "showGreeting": {
-      "title": "Showgreeting",
+    "showDangerousDirectoryWarning": {
+      "default": true,
+      "title": "Showdangerousdirectorywarning",
       "type": "boolean"
     },
     "showSubagentStatusList": {
@@ -186,7 +197,6 @@
     "theme",
     "logLevel",
     "disableWelcomeBannerAnimation",
-    "showGreeting",
     "autocopyToClipboard",
     "fileWatcherForAutocomplete",
     "askConfirmationOnExit",

@@ -4,14 +4,13 @@
  *   cargo run -p vw-core-api --features ts --bin gen-core-ts -- --write
  * scripts/public/check.sh fails when this file and the Rust types disagree.
  */
-
 /** Any JSON value (Vibe structures the core passes through untyped). */
 export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null;
 
 import type { SessionSnapshot, SessionRowView, SessionToolsRequest, SessionToolsResult, SearchRequest, SearchResult } from "./sessions";
 import type { AnomalyReport, CoreStatus, ProcessesRequest, ProcessesResult } from "./status";
 import type { ChangesRequest, ChangesResult, LineCommentsRequest, LineCommentsResult } from "./changes";
-import type { PreviewRequest, PreviewResult, CaptureBlock } from "./preview";
+import type { PreviewRequest, PreviewResult } from "./preview";
 import type { BrowserRequest, BrowserResult } from "./browser";
 import type { PagesRequest, PagesResult } from "./pages";
 import type { WorktreesRequest, WorktreesResult } from "./worktrees";
@@ -54,6 +53,7 @@ export type * from "./files";
 export type * from "./events";
 export type * from "./secrets";
 export type * from "./git_request";
+export type * from "./errors";
 export type * from "./proposals";
 export type * from "./terminal";
 export type * from "./keys";
@@ -439,7 +439,7 @@ request: NewChatRequest, } | { "type": "secretScan",
 /**
  * Scanner operation.
  */
-request: SecretScanRequest, } | { "type": "safety",
+request: SecretScanRequest, } | { "type": "developerPermissions", enabled: boolean | null, } | { "type": "safety",
 /**
  * What to do.
  */
@@ -538,7 +538,11 @@ keys: Array<MistralKeyView>, } | { "type": "keyTest",
 /**
  * Models the key can use.
  */
-modelCount: number, } | { "type": "vibeKeys",
+modelCount: number, } | { "type": "vaultSetAside",
+/**
+ * The folder the old vault is kept in now.
+ */
+keptAt: string, } | { "type": "vibeKeys",
 /**
  * Where Vibe itself holds a key (no values).
  */
@@ -703,7 +707,11 @@ view: SecretScanView,
 /**
  * File paths for Developer error detail only; absent from finding events and the bell.
  */
-fileErrors: Array<string>, } | { "type": "safety",
+fileErrors: Array<string>, } | { "type": "developerPermissions",
+/**
+ * Whether the person enabled developer operations.
+ */
+enabled: boolean, } | { "type": "safety",
 /**
  * The safety settings after the request.
  */
@@ -720,35 +728,6 @@ result: SessionToolsResult, } | { "type": "search",
  * The search's answer.
  */
 result: SearchResult, };
-
-export type CoreError = {
-/**
- * Stable screenshot refusal for the Capture menu; agent guidance remains in `message`.
- */
-captureBlock?: CaptureBlock,
-/**
- * What kind of failure.
- */
-code: ErrorCode,
-/**
- * Human-readable description.
- */
-message: string,
-/**
- * The JSON-RPC method involved, when there is one.
- */
-method: string | null,
-/**
- * For `confirmationRequired`: what the native dialog would ask.
- */
-summary: string | null,
-/**
- * For `serverError`: Vibe's own error code (`not_found`, `stale_turn`, ...); for `keyService`:
- * the key service's reason word.
- */
-serverCode: string | null, };
-
-export type ErrorCode = "denied" | "invalidParams" | "confirmationRequired" | "confirmationRejected" | "confirmationDeclined" | "confirmationNotApplicable" | "callbackRefused" | "notFound" | "invalidCommand" | "serverUnavailable" | "timeout" | "serverError" | "internal" | "accessModeUnverified" | "sessionStuck" | "cancelled" | "keyService" | "stale" | "confirmDeletes" | "vibeInstall";
 
 export type Origin = "ui" | "debug-api";
 
@@ -789,5 +768,3 @@ version: number | null,
  * Unix milliseconds after which the click is refused (ask the window for a fresh offer).
  */
 expiresAt: number, };
-
-export type AlertKind = "bypassToolPermissions" | "resyncPaused" | "accessModeLowered" | "accessModeUnverified" | "turnsInterrupted" | "reopenFailed" | "modelChoiceNotRestored" | "temporaryCleanupFailed" | "temporaryCleanupRecovered" | "remoteFileCleanupFailed" | "libraryListPartial" | "pluginReloadFailed" | "networkSettingsRejected" | "toolsUnavailable" | "browserPairingFailed";

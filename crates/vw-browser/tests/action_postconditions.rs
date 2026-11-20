@@ -5,6 +5,7 @@
 mod support;
 
 use serde_json::{Value, json};
+use std::sync::atomic::Ordering;
 use support::{Rig, SESSION};
 use vw_browser::{Action, Actor, NavFuture, Navigate, Outcome, ReadOptions};
 
@@ -19,6 +20,25 @@ async fn controls() -> Rig {
     let rig = Rig::new().await;
     install_controls(&rig).await;
     rig
+}
+
+// PREDICT: an open native select menu is invisible to the current DOM value check, so the agent
+// reports Beta although closing that menu can restore Alpha without a change event.
+#[tokio::test]
+async fn select_refuses_an_open_native_menu_before_changing_the_page() {
+    let rig = controls().await;
+    rig.engine.select_menu_open.store(true, Ordering::Relaxed);
+    let error = act(&rig, "Choice", json!({"action":"select", "value":"Beta"}))
+        .await
+        .expect_err("an open native menu cannot yield a settled select receipt");
+    assert_eq!(error.outcome, Outcome::Refused);
+    assert!(error.text.contains("only the user can use it"), "{error:?}");
+    assert_eq!(
+        rig.engine
+            .eval("document.querySelector('#select').value")
+            .await,
+        "a"
+    );
 }
 
 async fn install_controls(rig: &Rig) {

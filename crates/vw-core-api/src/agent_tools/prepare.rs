@@ -13,6 +13,11 @@ pub(crate) async fn prepare(
     tool: &str,
     args: &mut Value,
 ) -> Result<Option<Execution>, String> {
+    if tool == names::PUSH {
+        return super::push_tool::prepare(shared, owner, source, call, args)
+            .await
+            .map(Some);
+    }
     // A browser hook may retain a checked receipt while awaiting consent; keep that future off the listener stack.
     Box::pin(prepare_inner(shared, owner, source, call, tool, args)).await
 }
@@ -32,8 +37,8 @@ async fn prepare_inner(
     }
     // Without the Chrome package the check below refuses every Chrome tool with "not in this version" first.
     if tool == "chrome_execute" && shared.chrome_control.config.available() {
-        let browser = crate::chrome_control::agent_browser::selected(shared, owner, tool, args);
-        crate::chrome_control::gateway::validate_execute_args(args, browser)?;
+        let browser = crate::chrome_control::selected_browser(shared, owner, tool, args);
+        crate::chrome_control::validate_execute_args(args, browser)?;
     }
     if tool == names::SECRET_CAPTURE_COMMAND {
         return super::secret_capture::prepare(shared, owner, args)
@@ -56,7 +61,7 @@ async fn prepare_inner(
             .map(Some);
     }
     if names::CHROME_TOOLS.contains(&tool) {
-        let decision = crate::chrome_control::check::check(
+        let decision = crate::chrome_control::check_request(
             shared,
             &json!({"sessionId":source,"parentSessionId":owner,"toolName":format!("mcp_vw.{tool}"),"toolInput":args}),
         );
@@ -67,23 +72,16 @@ async fn prepare_inner(
                 .into());
         }
     }
-    if tool == "chrome_execute" && crate::chrome_control::read_consent::needed(shared, owner, args)
-    {
-        return crate::chrome_control::read_consent::prepare(
-            shared,
-            owner,
-            source,
-            call,
-            args.clone(),
-        )
-        .await
-        .map(Some);
+    if tool == "chrome_execute" && crate::chrome_control::read_consent_needed(shared, owner, args) {
+        return crate::chrome_control::prepare_read(shared, owner, source, call, args.clone())
+            .await
+            .map(Some);
     }
     if tool == "chrome_execute"
-        && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
-        && crate::chrome_control::interaction_consent::checks(args)
+        && crate::chrome_control::chat_mode(shared, owner).as_deref() == Some("ask")
+        && crate::chrome_control::interaction_checked(args)
     {
-        return crate::chrome_control::interaction_consent::prepare(
+        return crate::chrome_control::prepare_interaction(
             shared,
             owner,
             source,
@@ -96,22 +94,22 @@ async fn prepare_inner(
     }
     if tool == "chrome_execute"
         && args["steps"].as_array().is_some_and(|steps| {
-            crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+            crate::chrome_control::chat_mode(shared, owner).as_deref() == Some("ask")
                 || steps.iter().any(|step| {
                     ["auth.fill", "auth.basic"]
                         .contains(&step["action"].as_str().unwrap_or_default())
-                        || crate::chrome_control::read_consent::needed(shared, owner, step)
+                        || crate::chrome_control::read_consent_needed(shared, owner, step)
                 })
         })
     {
-        return crate::chrome_control::batch::prepare(shared, owner, source, call, args.clone())
+        return crate::chrome_control::prepare_batch(shared, owner, source, call, args.clone())
             .await
             .map(Some);
     }
     if tool == "chrome_execute"
         && ["auth.fill", "auth.basic"].contains(&args["action"].as_str().unwrap_or_default())
     {
-        return crate::chrome_control::login::prepare(shared, owner, args.clone(), None)
+        return crate::chrome_control::prepare_login(shared, owner, args.clone(), None)
             .await
             .map(Some);
     }

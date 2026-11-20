@@ -54,9 +54,9 @@ pub(super) fn check_full(
 ) -> Result<(), String> {
     let mode = shared.access.remembered(owner);
     if tool == "browser_act" {
-        crate::chrome_control::builtin::check_full(mode.as_deref(), args)
+        crate::chrome_control::builtin_check_full(mode.as_deref(), args)
     } else {
-        crate::chrome_control::check::check_full(shared, owner, tool, args)
+        crate::chrome_control::check_full(shared, owner, tool, args)
     }
 }
 pub(super) fn admit(

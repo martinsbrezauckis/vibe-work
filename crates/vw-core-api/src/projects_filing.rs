@@ -325,6 +325,19 @@ pub(crate) fn inherit_hint(shared: &Shared, source: &str) -> Option<Hint> {
     })
 }
 
+/// The chats of one sweep page to file, read as the chat listing reads them: titles with vault-value parts withheld
+/// in the name cache (`title_guard`), and chats made in Vibe Desktop left out (`desktop_chats`: Vibe Work hides
+/// them, so they make no project; one already filed counts as gone and leaves with the sweep's second strike).
+pub(crate) async fn page_seen(shared: &Shared, items: Vec<Value>) -> Vec<Seen> {
+    let mut items =
+        crate::desktop_chats::hide(shared.deletes.save_dir().to_path_buf(), items).await;
+    for item in &mut items {
+        crate::title_guard::withhold_in(shared, item);
+    }
+    shared.names.note_listing(&items);
+    items.iter().filter_map(|i| seen_of(shared, i)).collect()
+}
+
 /// Reads every page of Vibe's session list (archived included) and reconciles; see the module invariants.
 ///
 /// # Errors
@@ -345,20 +358,15 @@ pub(crate) async fn sweep(shared: &Shared) -> Result<(), CoreError> {
             shared.gate.call("session/list", params, None),
         )
         .await
-        .map_err(|_| CoreError::new(ErrorCode::Timeout, "the session list did not answer"))?
+        .map_err(|_| CoreError::new(ErrorCode::Timeout, "the chat list did not answer"))?
         .map_err(|e| CoreError::from_gate("session/list", &e))?;
-        let mut items = reply
+        let items = reply
             .result
             .get("items")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        // The name cache keeps titles with vault-value parts withheld (`title_guard`).
-        for item in &mut items {
-            crate::title_guard::withhold_in(shared, item);
-        }
-        shared.names.note_listing(&items);
-        listed.extend(items.iter().filter_map(|i| seen_of(shared, i)));
+        listed.extend(page_seen(shared, items).await);
         cursor = reply
             .result
             .get("nextCursor")

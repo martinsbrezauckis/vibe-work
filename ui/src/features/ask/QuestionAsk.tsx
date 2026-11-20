@@ -17,7 +17,7 @@ import {
   questionOutput,
   questionsOf,
 } from "../transcript/model/callbacks";
-import { type Obj, entryId, str } from "../transcript/model/entries";
+import { type Obj, entryId, str, turnIdOf } from "../transcript/model/entries";
 import { optionKey } from "./AnswerOptions";
 import { AskCard } from "./AskCard";
 import { QuestionField } from "./QuestionField";
@@ -48,7 +48,12 @@ export function QuestionAsk({
   const sending = useTranscriptUi((s) => s.sending[callbackId] === true);
   const problem = useTranscriptUi((s) => s.problems[callbackId]);
   const held = useHeldBy(sessionId) !== null;
-  const who = useWho(sessionId === hostSessionId ? "agent" : "subagent", hostSessionId, sessionId);
+  const who = useWho(
+    sessionId === hostSessionId ? "agent" : "subagent",
+    hostSessionId,
+    sessionId,
+    turnIdOf(entry),
+  );
   const focusInside = useCardClose(!offered && !sending, hostSessionId, null);
   const disabled = held || !offered || sending || problem?.kind === "refused";
   const output = questionOutput(questions, picks);
@@ -101,7 +106,7 @@ export function QuestionAsk({
           <Button
             data-testid="transcript.question-card-send"
             type="button"
-            appearance="choice"
+            shape="outlined"
             variant="primary"
             // Named by its visible word ("Click Submit" for voice control); the tooltip says more.
             title="Submit answers"
@@ -115,7 +120,7 @@ export function QuestionAsk({
           <Button
             data-testid="transcript.question-card-send-2"
             type="button"
-            appearance="choice"
+            shape="outlined"
             title="Skip questions"
             disabled={disabled}
             onClick={() => {

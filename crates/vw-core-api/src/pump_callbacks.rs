@@ -31,7 +31,7 @@ pub(crate) fn callback_handler(
         #[cfg(feature = "video")]
         crate::video_projection::apply(&shared, &mut request.params);
         crate::edit_preview::project(&shared, &mut request.params);
-        crate::chrome_control::approval::project(&shared, &mut request.params);
+        crate::chrome_control::project_approvals(&shared, &mut request.params);
         if let Err(error) = crate::agent_tools::shell_commands::verified(&request.params) {
             return std::future::ready(Err(error));
         }
@@ -55,7 +55,7 @@ pub(crate) fn callback_handler(
             );
             return std::future::ready(Err(HandlerError::new(
                 ProtocolErrorCode::InvalidParams,
-                "callback for a session of another channel",
+                "callback for a chat of another channel",
             )));
         }
         // A subagent's card (its child session has no channel) is answered on the channel it came on, and
@@ -76,7 +76,7 @@ pub(crate) fn callback_handler(
                 let owner = subagent
                     .as_ref()
                     .map_or_else(|| session_id.clone(), |s| s.parent_session_id.clone());
-                if crate::stop_tree::cancel_late(&shared, &session_id, &owner)
+                if crate::stop_tree::cancel_late_card(&shared, &session_id, &owner, &entry)
                     || crate::ask::tool_calls::dispatch_transport(&shared, &entry, &owner)
                 {
                     return std::future::ready(Ok(
@@ -181,7 +181,7 @@ impl Carried {
             Self::ReadAloud => "read-aloud playback policy",
             Self::OwnSkillRead => "reading a shipped skill reference",
             Self::OnDemand => "turning tools on for the chat",
-            Self::Grant(_) => "session grant",
+            Self::Grant(_) => "chat grant",
         }
     }
     /// The ask record: a grant's answer is `Allowed { Session, Grant }` (the audit row "Allowed for this session

@@ -55,7 +55,7 @@ export function PrDialog({
           <Button
             data-testid="git.pr-dialog-create-pr"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={!can}
             data-action="pr-create"
             onClick={() => void git.createPr()}

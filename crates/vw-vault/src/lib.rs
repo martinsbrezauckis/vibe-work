@@ -40,6 +40,7 @@ pub mod mistral_key;
 pub mod private_location;
 pub mod project_secret;
 pub mod remember;
+pub mod remember_late;
 mod remember_rename;
 pub mod repo;
 mod secret;
@@ -48,9 +49,9 @@ pub mod shellx_profile;
 mod stored_secret;
 mod vault;
 
-pub use error::VaultError;
+pub use error::{SetAsideRefusal, VaultError};
 pub use secret::SecretString;
-pub use vault::{Vault, VaultConfig, VaultKind, VaultStatus};
+pub use vault::{SET_ASIDE_PREFIX, Vault, VaultConfig, VaultKind, VaultStatus};
 /// Generates a password with the vendored vault core's operating-system randomness.
 pub use vault_core::password::generate_password;
 

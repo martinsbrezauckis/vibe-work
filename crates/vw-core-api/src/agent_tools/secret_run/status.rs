@@ -3,7 +3,7 @@
 use super::{AgentTools, Run, RunState, Value, WAIT, json, terminal};
 
 const NOT_FOUND: &str =
-    "secret_run request not found in this session (completed requests are kept 15 minutes)";
+    "secret_run request not found in this chat (completed requests are kept 15 minutes)";
 
 /// Waits up to WAIT for a running command to finish.
 pub(super) async fn wait(tools: &AgentTools, session_id: &str, id: &str) -> Result<Value, String> {

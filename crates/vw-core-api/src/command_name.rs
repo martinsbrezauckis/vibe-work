@@ -70,6 +70,7 @@ impl Command {
             Self::Knowledge { .. } => "knowledge",
             Self::NewChat { .. } => "newChat",
             Self::SecretScan { .. } => "secretScan",
+            Self::DeveloperPermissions { .. } => "developerPermissions",
             Self::Safety { .. } => "safety",
             Self::Network { .. } => "network",
             Self::PickFolder { .. } => "pickFolder",

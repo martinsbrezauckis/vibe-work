@@ -13,8 +13,8 @@ async fn both(name: &str) -> crate::Core {
     let core = fixture(
         name,
         json!([
-            {"profileId":CHROME,"connected":true,"extensionVersion":"0.1.3"},
-            {"profileId":EDGE,"connected":true,"extensionVersion":"0.1.3"}
+            {"profileId":CHROME,"connected":true,"extensionVersion":"0.2.3"},
+            {"profileId":EDGE,"connected":true,"extensionVersion":"0.2.3"}
         ]),
     )
     .await;
@@ -118,7 +118,8 @@ async fn calls_by_id_keep_both_browsers_and_their_own_refusals() {
         assert_eq!(
             refused,
             format!(
-                "Not run: this {browser} session belongs to another chat. Open a {browser} session for this chat with chrome_session."
+                "Not run: this {browser} browser session belongs to another chat. Open {} {browser} browser session for this chat with chrome_session.",
+                if browser == "Edge" { "an" } else { "a" }
             )
         );
     }

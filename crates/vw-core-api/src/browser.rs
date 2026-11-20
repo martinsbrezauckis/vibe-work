@@ -211,7 +211,7 @@ async fn capture_result(
     let owner = hub(shared)?
         .service
         .owner_session_id(session_id)
-        .ok_or_else(|| CoreError::new(ErrorCode::Denied, "browser page has no session owner"))?;
+        .ok_or_else(|| CoreError::new(ErrorCode::Denied, "browser page has no owning chat"))?;
     if shared.store.view(&owner).is_none() {
         return Err(CoreError::not_loaded(&owner));
     }
@@ -235,6 +235,7 @@ pub(crate) fn act_error(error: &ActError) -> CoreError {
     };
     let mut result = CoreError::new(code, error.text.clone());
     result.capture_block = error.capture_block;
+    result.protected_values_withheld = error.protected_values_withheld;
     result
 }
 
@@ -347,7 +348,7 @@ impl Core {
                             .into(),
                     ));
                 }
-                crate::chrome_control::builtin_share::queue(shared, &page_key, false).await?;
+                crate::chrome_control::queue_builtin_share(shared, &page_key, false).await?;
                 BrowserResult::Done {}
             }
             BrowserRequest::Permissions {} => crate::browser_delegation::settings(shared, None)?,

@@ -132,7 +132,7 @@ impl Browser {
         };
         let result = tokio::select! {
             biased;
-            _ = cancel.changed() => Err(ActError { capture_block: None, outcome: Outcome::Stopped,
+            _ = cancel.changed() => Err(ActError { capture_block: None, protected_values_withheld: None, outcome: Outcome::Stopped,
                 text: "The pending native click was canceled before completion.".to_owned() }),
             result = tokio::time::timeout(FOCUS_WAIT, work) => result.unwrap_or_else(|_| Err(refused(
                 "Not run: the window did not come to the front within 60 seconds; the pending click was canceled."

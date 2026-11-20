@@ -246,7 +246,7 @@ impl Browser {
         let before = self
             .captures()
             .before(session_id)
-            .ok_or("there is no before shot in this session")?;
+            .ok_or("there is no before shot in this chat")?;
         let full = shot::full_page(self, session_id, Some(before.method)).await?;
         let w = run.folder.write("after.png", &full.png, PNG_CAP)?;
         let earlier = run.folder.read("before.png", PNG_CAP)?;

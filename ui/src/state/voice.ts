@@ -9,6 +9,7 @@
  */
 import { createWebAudioPlayer, type Player, withOutputCheck } from "../features/voice/audioPlayer";
 import { type PrepareCapture, prepareCapture } from "../features/voice/pcmCapture";
+import type { JsonValue } from "../protocol/core";
 import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
 import { createDictation } from "./dictation";
@@ -33,6 +34,8 @@ export function createVoice(deps: {
   player?: Player;
   /** Live key readiness; omitted for development without a key service. */
   canUseKey?: () => boolean;
+  /** Sends a card's answer as the card's own buttons do (the transcript's answer path). */
+  answer?: (sessionId: string, callbackId: string, output: JsonValue) => Promise<boolean>;
 }) {
   const settings = createVoiceSettings(deps.persist);
   const accessibility = deps.accessibility ?? createAccessibility(deps.persist);
@@ -47,16 +50,17 @@ export function createVoice(deps: {
     );
   };
   const player = withOutputCheck(deps.player ?? createWebAudioPlayer(), outputAvailable);
-  const prepare = deps.prepare ?? prepareCapture;
-  const dictationPrepare =
-    deps.prepare ?? (detectMac() ? () => prepareCapture({ processing: false }) : prepare);
+  // macOS: Apple's voice processing (what echo cancellation and noise suppression turn on in WebKit) attenuates
+  // or silences the input, the start of speech most of all, so dictation and voice chat both record raw there.
+  const prepare =
+    deps.prepare ?? (detectMac() ? () => prepareCapture({ processing: false }) : prepareCapture);
   let narration: ReturnType<typeof createNarration> | null = null;
   let voiceChat: ReturnType<typeof createVoiceChat> | null = null;
   const dictation = createDictation({
     core: deps.core,
     composer: deps.composer,
     settings,
-    prepare: dictationPrepare,
+    prepare,
     canUseKey: deps.canUseKey,
     onStart: () => {
       narration?.stopAll();
@@ -83,6 +87,7 @@ export function createVoice(deps: {
     prepare,
     player,
     canUseKey: deps.canUseKey,
+    ...(deps.answer === undefined ? {} : { answer: deps.answer }),
     dictating: () => dictation.busy(),
     onStart: () => {
       narration?.stopAll();

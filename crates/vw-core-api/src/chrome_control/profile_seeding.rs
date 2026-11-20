@@ -121,6 +121,29 @@ fn closed_windows(shared: &Shared, browser: Browser) -> Value {
     }
 }
 
+/// The refusal of an open that names another profile than the person's default in a chat with no profile yet: the
+/// person's default decides a new chat's profile and the agent never moves the chat to another one. A requested value
+/// that is no profile of this browser (a name instead of an ID) is named as unknown.
+fn not_default(shared: &Shared, requested: &str, default_id: &str, browser: Browser) -> String {
+    let chrome = &shared.chrome_control;
+    let known = profiles::agent_view(shared).iter().any(|row| {
+        browser.owns_profile(&row.profile_id) && profile_ids::same(&row.profile_id, requested)
+    });
+    let default = format!("{} [{default_id}]", profiles::label(chrome, default_id));
+    if known {
+        let name = profiles::label(chrome, requested);
+        format!(
+            "{name} is not the default for new chats, and an agent cannot move a new chat to another profile; no action ran. Open with the default {default}, or ask the user to make {name} the default profile in Settings > Browser."
+        )
+    } else {
+        format!(
+            "{} is not a known {} profile ID; no action ran. Use an exact profileId from chrome_status: the default for new chats is {default}.",
+            requested.chars().take(80).collect::<String>(),
+            browser.short_name()
+        )
+    }
+}
+
 pub(super) fn resolve(
     shared: &Shared,
     chat: &str,
@@ -144,13 +167,19 @@ pub(super) fn resolve(
         return resolve(shared, chat, args, status);
     }
     let bound = chrome.chat_profiles.lock_or_recover().get(chat).cloned();
-    let selected = if let Some(bound) = bound {
+    let can_override_pick = bound.is_some() && !super::profile_bindings::locked(chrome, chat);
+    let preferred = bound.as_ref().filter(|bound| {
+        !can_override_pick
+            || profile_ids::same(bound, &requested)
+            || shorthand && browser.owns_profile(bound)
+    });
+    let selected = if let Some(bound) = preferred.cloned() {
         super::profile_bindings::check(chrome, chat, &bound)?;
         if !shorthand && !profile_ids::same(&bound, &requested) {
             return super::profile_bindings::check(chrome, chat, &requested);
         }
         if shorthand && !browser.owns_profile(&bound) {
-            return Err("This chat uses another browser profile; no action ran. Continue in this chat's profile, or ask the user to start a new chat for the other profile.".into());
+            return super::profile_bindings::check(chrome, chat, &requested);
         }
         bound
     } else {
@@ -165,7 +194,9 @@ pub(super) fn resolve(
                     super::ProfileState::Offline | super::ProfileState::ExtensionMissing
                 )
         });
-        if let Some(default) = closed_default.filter(|_| mine.iter().any(|row| row.eligible)) {
+        if let Some(default) =
+            closed_default.filter(|_| !can_override_pick && mine.iter().any(|row| row.eligible))
+        {
             // The person chose this default; another connected profile never stands in for it. With nothing
             // connected the open goes on below and the browser start brings its profiles back.
             return Err(format!(
@@ -176,14 +207,14 @@ pub(super) fn resolve(
         let choices: Vec<_> = mine.into_iter().filter(|row| row.eligible).collect();
         let choice = choices
             .iter()
-            .find(|row| row.is_default)
+            .find(|row| {
+                can_override_pick && !shorthand && profile_ids::same(&row.profile_id, &requested)
+            })
+            .or_else(|| choices.iter().find(|row| row.is_default))
             .or_else(|| (choices.len() == 1).then(|| &choices[0]));
         if let Some(choice) = choice {
             if !shorthand && !profile_ids::same(&choice.profile_id, &requested) {
-                return Err(format!(
-                    "{} is the default for new chats; no action ran. Use its profile ID, or ask the user to change the default profile in Settings > Browser.",
-                    profiles::label(chrome, &choice.profile_id)
-                ));
+                return Err(not_default(shared, &requested, &choice.profile_id, browser));
             }
             choice.profile_id.clone()
         } else if choices.len() > 1 {
@@ -199,7 +230,7 @@ pub(super) fn resolve(
                 .collect::<Vec<_>>()
                 .join(", ");
             return Err(format!(
-                "Several {} profiles are available: {names}. No action ran. Open the session again so the user can pick one, or ask the user to choose a default profile in Settings > Browser.",
+                "Several {} profiles are available: {names}. No action ran. Open the browser session again so the user can pick one, or ask the user to choose a default profile in Settings > Browser.",
                 browser.short_name()
             ));
         } else {

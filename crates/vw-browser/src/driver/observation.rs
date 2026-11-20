@@ -49,6 +49,10 @@ impl Browser {
 
         let bound = self.bind_read(session_id, by).await?;
         let (mut model, verdict, snapshot) = bound.observe(session_id, options).await?;
+        // A field this read withholds marks its site: raw scripts and raw data reads stay off there.
+        if model.observed_refs().any(|item| item.redacted.is_some()) {
+            self.remember_site_of(&model.url, crate::protected_origins::Why::Seen);
+        }
         let mut host = self.host(session_id);
         if clamped {
             host["outputLimit"] =
@@ -145,6 +149,7 @@ impl Browser {
             loads,
             console: console0,
             refused: refused0,
+            request_refused: request_refused0,
         } = base;
         let before = Self::receipt_baseline(before, reference.as_deref());
         self.await_action_navigation(session_id, action, loads, refused0)
@@ -175,19 +180,10 @@ impl Browser {
             .into_iter()
             .map(|(url, reason)| json!({"url": url, "reason": reason}))
             .collect();
-        let errors: Vec<Value> = match console0 {
-            Some(mark) => self
-                .service
-                .console_since(session_id, mark)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|e| e.level == vw_preview::ConsoleLevel::Error || e.level.is_page_error())
-                .take(5)
-                .map(|e| json!(e.text.chars().take(300).collect::<String>()))
-                .collect(),
-            None => Vec::new(),
-        };
+        let request_refusals = self
+            .service
+            .request_refusals_since(session_id, request_refused0);
+        let errors = self.console_errors_since(session_id, console0).await;
         receipt["snapshot"] = json!(snapshot);
         // The receipt is a delta (ShellX's shape): a first look at a page carries the compact observation (refs, text
         // preview); later receipts carry what changed and only the refs that are new.
@@ -206,6 +202,10 @@ impl Browser {
         content["changed"] = changed;
         if !refused_now.is_empty() {
             content["refusedNavigations"] = json!(refused_now);
+        }
+        if !request_refusals.is_empty() {
+            // Host-owned policy evidence, outside page-controlled text. The inline result fitter keeps this list.
+            receipt["networkRequestRefusals"] = json!(request_refusals);
         }
         if !dialogs.is_empty() {
             content["dialogsAnswered"] = json!(dialogs);
@@ -241,5 +241,20 @@ impl Browser {
         receipt["note"] = json!(observe::UNTRUSTED_NOTE);
         observe::fit(&mut receipt, observe::READ_BUDGET);
         Ok(receipt)
+    }
+
+    async fn console_errors_since(&self, session_id: &str, mark: Option<u64>) -> Vec<Value> {
+        let Some(mark) = mark else {
+            return Vec::new();
+        };
+        self.service
+            .console_since(session_id, mark)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.level == vw_preview::ConsoleLevel::Error || e.level.is_page_error())
+            .take(5)
+            .map(|e| json!(e.text.chars().take(300).collect::<String>()))
+            .collect()
     }
 }

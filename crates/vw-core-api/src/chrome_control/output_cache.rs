@@ -152,7 +152,7 @@ pub(super) fn resume(
     let cursor = request["args"]["cursor"].as_str()?;
     let suffix = cursor.strip_prefix(PREFIX)?;
     Some((|| {
-        let invalid = "Frozen app receipt expired or does not belong to this session. Make a fresh read; do not replay writes.";
+        let invalid = "Frozen app receipt expired or does not belong to this chat. Make a fresh read; do not replay writes.";
         if request["action"] != "page.read"
             || request["args"]
                 .as_object()
@@ -202,6 +202,29 @@ pub(super) fn resume(
         super::output::sync_text(&mut result);
         Ok(json!({"vwMcpResult":result}))
     })())
+}
+
+/// The references of a browser answer (`vwMcpResult`) for [`crate::browser_ref_origins`]: those of the whole frozen read
+/// when the answer is a page of one (its continuation names the entry; a frozen page carries the read's JSON as text,
+/// where no `ref` field is visible), else the `ref` fields the answer shows.
+pub(super) fn read_refs(
+    shared: &Shared,
+    chat: &str,
+    answer: &Value,
+) -> std::collections::BTreeSet<String> {
+    let frozen = answer["structuredContent"]["continuation"]["args"]["cursor"]
+        .as_str()
+        .and_then(|cursor| cursor.strip_prefix(PREFIX))
+        .and_then(|suffix| suffix.rsplit_once(':'))
+        .and_then(|(id, _)| {
+            let cache = shared.chrome_control.output_cache.lock_or_recover();
+            let entry = cache
+                .entries
+                .iter()
+                .find(|entry| entry.id == id && entry.chat == chat)?;
+            serde_json::from_str::<Value>(&entry.encoded).ok()
+        });
+    crate::browser_ref_origins::refs_in(frozen.as_ref().unwrap_or(answer))
 }
 
 fn save(shared: &Shared, chat: &str, request: &Value, body: &Value) -> Value {

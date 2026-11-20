@@ -36,7 +36,7 @@ impl CaptureCommand {
     pub(crate) async fn values(&self) -> Result<Vec<(String, SecretString)>, String> {
         let values = self.job.checked_values(&self.permission).await?;
         if !values.is_empty() {
-            self.job.log(self.permission.approval.as_str());
+            self.job.log(Job::approval(&self.permission).as_str());
         }
         Ok(values)
     }

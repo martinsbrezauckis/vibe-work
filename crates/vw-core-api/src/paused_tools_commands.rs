@@ -51,12 +51,12 @@ pub(crate) fn run(
             if shared.paused_tools.pause(&chat, BROWSER, place) {
                 // The turn may have ended between the check above and the pause.
                 turn_finished(shared, &chat);
-                crate::chrome_control::frames::sync_chat(shared, &chat);
+                crate::chrome_control::sync_frames(shared, &chat);
             }
         }
         PausedToolsRequest::Resume { .. } => {
             if shared.paused_tools.resume(&chat, None) {
-                crate::chrome_control::frames::sync_chat(shared, &chat);
+                crate::chrome_control::sync_frames(shared, &chat);
                 crate::browser_input_block::sync(shared, &chat);
             }
         }
@@ -118,7 +118,7 @@ pub(crate) fn note_command(shared: &Arc<Shared>, command: &Command) {
     };
     let chat = shared.channels.canonical(session);
     if shared.paused_tools.resume(&chat, None) {
-        crate::chrome_control::frames::sync_chat(shared, &chat);
+        crate::chrome_control::sync_frames(shared, &chat);
         crate::browser_input_block::sync(shared, &chat);
     }
 }

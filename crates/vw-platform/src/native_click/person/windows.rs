@@ -6,7 +6,8 @@
 //!
 //! While the view is blocked (the agent control frame's input block, rule in `block`), the hooks swallow the person's
 //! presses and wheel over the view, the releases of swallowed presses, and keys (not Tab, Alt or Windows-key
-//! shortcuts) while the keyboard focus is a window inside the view; pointer motion is never swallowed (a low-level hook that drops motion freezes the
+//! shortcuts) while the keyboard focus is a window inside the view; the app's Quit shortcut (Ctrl+Q) pressed while the
+//! keyboard focus is inside a view never reaches the page and asks the app to quit; pointer motion is never swallowed (a low-level hook that drops motion freezes the
 //! cursor). Our own posted input never reaches the hooks, so the agent's input always passes.
 //!
 //! Depends on: Win32 hooks and window queries, the `WebView2` controller (bounds, host window). Called by
@@ -20,8 +21,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_RBUTTON,
-    VK_RWIN, VK_TAB, VK_XBUTTON1, VK_XBUTTON2,
+    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MBUTTON,
+    VK_MENU, VK_RBUTTON, VK_RWIN, VK_SHIFT, VK_TAB, VK_XBUTTON1, VK_XBUTTON2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GA_ROOT, GUITHREADINFO, GetAncestor, GetCursorPos,
@@ -188,17 +189,25 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 || code == u32::from(VK_RWIN.0)
                 || down(VK_LWIN)
                 || down(VK_RWIN);
-            let input = super::block::Input::Key {
+            // The virtual key follows the keyboard layout, as the app's own Ctrl+Q does.
+            let quit = code == u32::from(b'Q')
+                && !shortcut
+                && down(VK_CONTROL)
+                && !down(VK_SHIFT)
+                && !down(VK_MENU)
+                && super::block::takes_quit();
+            let input = |quit| super::block::Input::Key {
                 code: (code << 16)
                     | key.scanCode
                     | (u32::from(key.flags.contains(LLKHF_EXTENDED)) << 15),
                 tab: code == u32::from(VK_TAB.0),
                 shortcut,
+                quit,
                 press,
             };
             // SAFETY: reads only the foreground window.
             let active = unsafe { GetForegroundWindow() };
-            let mut swallowed = false;
+            let (mut swallowed, mut quits) = (false, None);
             let mut watched = WATCHED.lock_or_recover();
             watched.retain_mut(|entry| {
                 // SAFETY: queries the owning top-level window; a stale handle yields no matching window.
@@ -206,13 +215,19 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 if host != active {
                     return true;
                 }
-                let blocked = (entry.blocked)() && focus_inside(entry.host, &entry.bounds);
-                if super::block::swallow(blocked, input, &mut entry.held) {
+                let inside = focus_inside(entry.host, &entry.bounds);
+                let input = input(quit && inside);
+                if super::block::swallow((entry.blocked)() && inside, input, &mut entry.held) {
                     swallowed = true;
+                    quits = quits.or(Some(input));
                     return true;
                 }
                 (entry.observed)(press)
             });
+            drop(watched);
+            if let Some(input) = quits {
+                super::block::quit_pressed(input);
+            }
             if swallowed {
                 return LRESULT(1);
             }

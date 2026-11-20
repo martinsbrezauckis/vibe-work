@@ -68,6 +68,7 @@ mod read;
 pub mod receipt;
 pub mod recording;
 mod recording_gif;
+mod recording_video;
 mod refs;
 pub mod screenshot_area;
 pub mod scripts;
@@ -114,5 +115,7 @@ mod color_scheme;
 mod viewport;
 
 mod page_scripts;
+pub mod protected_origins;
+mod script_reach;
 
 mod network;

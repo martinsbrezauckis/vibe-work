@@ -126,7 +126,7 @@ impl CoreSubscription {
                 #[cfg(feature = "video")]
                 crate::video_projection::apply(&shared, &mut snapshot.state);
                 crate::edit_preview::project(&shared, &mut snapshot.state);
-                crate::chrome_control::approval::project(&shared, &mut snapshot.state);
+                crate::chrome_control::project_approvals(&shared, &mut snapshot.state);
                 crate::paused_tools_gate::mark_held_calls(&shared, &mut snapshot.state);
                 shared
                     .protected_changes

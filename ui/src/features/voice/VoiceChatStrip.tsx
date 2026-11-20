@@ -11,7 +11,8 @@ import { type ReactElement, useEffect } from "react";
 import { announce } from "../../state/announcer";
 
 import { useApp } from "../shell/AppContext";
-import { useVoiceChat, useVoicePrompt, useVoiceSettings } from "./hooks";
+import { TEXT } from "../../vocabulary";
+import { useVoiceChat, useVoicePrompt, useVoiceQuestion, useVoiceSettings } from "./hooks";
 
 /** The strip for `sessionId`, or nothing. */
 export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactElement | null {
@@ -20,9 +21,13 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
   const phase = useVoiceChat((s) => s.phase);
   const partial = useVoiceChat((s) => s.partial);
   const micPending = useVoiceChat((s) => s.micPending);
+  const awaitingSound = useVoiceChat((s) => s.awaitingSound);
+  const carryOpen = useVoiceChat((s) => s.carryOpen);
+  const resumed = useVoiceChat((s) => s.resumed);
   const note = useVoiceChat((s) => s.note);
   const error = useVoiceChat((s) => s.error);
   const phrase = useVoicePrompt((s) => s?.phrase);
+  const asked = useVoiceQuestion((s) => s?.listening === true);
   const auto = useVoiceSettings((s) => s.voiceChatAutoEnd);
   // Said once: an error. Not the loop's phases or the live words (Vibe Work's own voice is talking with the person,
   // and the microphone would hear the screen reader).
@@ -31,17 +36,26 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
     if (said !== "") announce(said, { assertive: true });
   }, [said]);
   if (voice === null || !mine) return null;
-  const text =
-    phase === "listening"
+  const text = carryOpen
+    ? "Listening while Vibe works. Your words will be the next message."
+    : phase === "listening"
       ? micPending
         ? "Opening the microphone…"
-        : phrase !== undefined
-          ? `Listening for your answer: ${phrase}.`
-          : partial !== ""
-            ? partial
-            : auto
-              ? "Listening. Speak, then pause or press the voice button."
-              : "Listening. Speak, then press the voice button."
+        : awaitingSound
+          ? "Waiting for sound from the microphone…"
+          : phrase !== undefined
+            ? `Listening for your answer: ${phrase}.`
+            : partial !== ""
+              ? partial
+              : asked
+                ? TEXT.voiceQuestionListening
+                : resumed
+                  ? auto
+                    ? "Listening again. Speak, then pause or press the voice button."
+                    : "Listening again. Speak, then press the voice button."
+                  : auto
+                    ? "Listening. Speak, then pause or press the voice button."
+                    : "Listening. Speak, then press the voice button."
       : phase === "sending"
         ? partial !== ""
           ? partial
@@ -51,7 +65,7 @@ export function VoiceChatStrip({ sessionId }: { sessionId: string }): ReactEleme
           : phase === "waiting"
             ? "Vibe is waiting for your answer on the card in the chat."
             : phase === "speaking"
-              ? "Reading the answer aloud."
+              ? "Vibe is answering. Listening resumes after the answer."
               : (error ?? "Voice chat stopped for a moment.");
   const extra = phase === "error" ? null : (error ?? note);
   return (

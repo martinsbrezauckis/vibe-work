@@ -5,7 +5,7 @@
   margin: 8px 0 0;
   padding-left: 18px;
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: var(--leading-ui);
 }
 .lib-ask {
   margin: 16px 0 6px;
@@ -44,7 +44,7 @@
 .lib-answer-text {
   white-space: pre-wrap;
   font-size: var(--text-md);
-  line-height: 1.55;
+  line-height: var(--leading-copy);
   margin: 0 0 10px;
 }
 .lib-sources {
@@ -188,7 +188,10 @@
   border-radius: var(--radius-md);
   padding: 10px 12px;
 }
-@media (max-width: 900px) {
+/* The list and the detail stack when the work area (not the window) is too narrow for both: an open side panel
+   narrows it as much as a small window does. Below 760 px the detail column would be squeezed under the room its
+   "Used by" select and each document's buttons need. */
+@container (max-width: 760px) {
   .lib-columns {
     grid-template-columns: minmax(0, 1fr);
   }

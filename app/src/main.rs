@@ -5,6 +5,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() -> std::process::ExitCode {
+    // Before any child program starts: a missing DLL gives a status code, not a blocking system error box.
+    vw_platform::process_command::fail_without_error_boxes();
     #[cfg(windows)]
     if std::env::args_os().any(|arg| arg == "--clear-install-credentials") {
         let result = dirs::data_dir()

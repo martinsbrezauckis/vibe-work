@@ -4,6 +4,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+#[path = "setup_manifest.rs"]
+mod manifest;
+use manifest::{manifest_for, manifest_path, registry_delete, windows_native_path};
+#[path = "setup_view.rs"]
+mod view_impl;
+pub(crate) use view_impl::view;
+pub(super) use view_impl::view_for;
+#[path = "setup_helper_package.rs"]
+mod helper_package;
+pub(super) use helper_package::{check_helper_pin, host_manifest, open_helper, packaged_helper};
+#[path = "setup_owner_texts.rs"]
+mod owner_texts;
+pub(super) use owner_texts::{
+    keyring_unavailable, owner_read_failed, owner_read_text, owner_store_failed, owner_store_text,
+};
 
 /// Chrome Control's native messaging host name (the helper registers under it; the extension connects to it).
 pub const HOST_NAME: &str = "com.vibework.chrome_control";
@@ -34,6 +49,8 @@ pub struct ChromeControlConfig {
     pub browser_detection: vw_platform::browser::Detection,
     /// Browser-local permission failures; reset only after successful setup or removal.
     pub setup_problems: SetupProblems,
+    /// The last Connect's one-time line about a stale registration it replaced.
+    pub setup_notice: SetupNotice,
     #[cfg(test)]
     pub(crate) macos: Option<bool>,
     #[cfg(test)]
@@ -57,6 +74,9 @@ pub struct ChromeControlConfig {
     pub extension_id: String,
     /// The user's home folder for Chrome's per-user places; `None` = this user's real home. Tests give a scratch one.
     pub user_home: Option<PathBuf>,
+    /// The app is a development (debug) build. On macOS such a build that carries the Safari parts keeps the helper
+    /// state in its own folder, never the installed, signed app's. Release builds leave it `false`.
+    pub dev_build: bool,
     /// Windows native-host registry root. Defaults to Chrome's per-user key; tests use a disposable root.
     pub windows_registry_root: String,
     /// Edge per-user registration root; used only with the optional browser module.
@@ -75,6 +95,10 @@ pub struct ChromeControlConfig {
     pub firefox_addon_sha256: Option<String>,
     /// The bundled signed add-on file (`firefox-addon/vibe-work.xpi` in the resources); `None` without a pin.
     pub firefox_addon: Option<PathBuf>,
+    /// Why the shipped helper cannot start on this computer (Windows refuses to load it, found once by the app at
+    /// startup); `None`: it starts, or it was not checked. While set, an agent's browser call that finds no connection
+    /// is refused with this reason instead of the card's.
+    pub helper_start_problem: Option<String>,
 }
 
 impl Default for ChromeControlConfig {
@@ -82,6 +106,7 @@ impl Default for ChromeControlConfig {
         Self {
             browser_detection: vw_platform::browser::Detection::default(),
             setup_problems: SetupProblems::default(),
+            setup_notice: SetupNotice::default(),
             #[cfg(test)]
             macos: None,
             #[cfg(test)]
@@ -98,6 +123,7 @@ impl Default for ChromeControlConfig {
             helper_cdhash: option_env!("VW_CHROME_HELPER_CDHASH").map(str::to_owned),
             extension_id: EXTENSION_ID.to_owned(),
             user_home: None,
+            dev_build: false,
             windows_registry_root: r"HKCU\Software\Google\Chrome\NativeMessagingHosts".to_owned(),
             edge_registry_root: r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts".to_owned(),
             launcher: None,
@@ -107,6 +133,7 @@ impl Default for ChromeControlConfig {
             firefox_addon_sha256: option_env!("VW_FIREFOX_ADDON_SHA256").map(str::to_owned),
             firefox_addon: None,
             firefox_registry_root: r"HKCU\Software\Mozilla\NativeMessagingHosts".to_owned(),
+            helper_start_problem: None,
         }
     }
 }
@@ -159,6 +186,7 @@ impl std::fmt::Debug for ChromeControlConfig {
             .field("package", &self.package)
             .field("extension_id", &self.extension_id)
             .field("user_home", &self.user_home)
+            .field("dev_build", &self.dev_build)
             .field("windows_registry_root", &self.windows_registry_root)
             .finish_non_exhaustive()
     }
@@ -283,6 +311,9 @@ const RECEIPT: &str = "setup.json";
 #[path = "setup_problem.rs"]
 mod problem;
 pub use problem::SetupProblems;
+#[path = "setup_prior.rs"]
+mod prior;
+pub use prior::SetupNotice;
 
 #[path = "setup_files.rs"]
 pub(super) mod files;
@@ -377,136 +408,6 @@ fn profiles_with(
     found
 }
 
-/// The status Settings shows.
-pub(crate) fn view(
-    config: &ChromeControlConfig,
-    state: Option<&Path>,
-    vibe_home: &Path,
-) -> ChromeSetupView {
-    view_for(config, state, vibe_home, "Google Chrome")
-}
-
-pub(super) fn view_for(
-    config: &ChromeControlConfig,
-    state: Option<&Path>,
-    _vibe_home: &Path,
-    browser: &str,
-) -> ChromeSetupView {
-    if !config.available() {
-        return ChromeSetupView {
-            state: SetupState::Absent,
-            package: false,
-            browsers: Vec::new(),
-            profiles: Vec::new(),
-            store_url: String::new(),
-            store_review: false,
-            pairing_state: super::PairingState::Unknown,
-            pairing: ABSENT.to_owned(),
-            fingerprint: None,
-            browser_issue: None,
-            install_state: None,
-            states: None,
-            addon: Some(super::addon::view(
-                super::addon::AddonState::Unavailable,
-                ABSENT,
-            )),
-            extension_left: None,
-            extension_restart: None,
-            profile_names_refused: None,
-        };
-    }
-    let receipt = state
-        .and_then(|state| read_receipt(config, state))
-        .filter(|receipt| {
-            receipt.browsers.iter().any(|name| name == browser)
-                && state.is_some_and(|state| selection::selected(config, state, receipt, browser))
-        });
-    let profiles: Vec<String> = user_data(config, state, browser)
-        .iter()
-        .flat_map(|dir| profiles_with(config, dir, &config.extension_id))
-        .collect();
-    let package = packaged_helper(config);
-    let blocked = problem::blocked(config, state, browser);
-    let repair_failed = blocked
-        || package.is_ok()
-            && state.is_some_and(|state| needs_repair(config, state, browser, receipt.is_some()));
-    ChromeSetupView {
-        state: match (&receipt, profiles.is_empty()) {
-            (Some(_), _) if repair_failed => SetupState::RepairRequired,
-            (None, _) => SetupState::NotSetUp,
-            (Some(_), true) => SetupState::WaitingForExtension,
-            (Some(_), false) => SetupState::ExtensionAdded,
-        },
-        package: package.is_ok(),
-        browsers: receipt
-            .map(|r| {
-                r.browsers
-                    .into_iter()
-                    .filter(|name| name == browser)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        profiles,
-        store_url: store_url(&config.extension_id),
-        store_review: false,
-        pairing_state: super::PairingState::Unknown,
-        pairing: if repair_failed {
-            "Helper setup required".into()
-        } else {
-            package
-                .err()
-                .unwrap_or_else(|| vw_vocabulary::texts::CHROME_NOT_CONNECTED.to_owned())
-        },
-        fingerprint: None,
-        browser_issue: match browser {
-            "Google Chrome" => super::browser::issue(config),
-            "Microsoft Edge" => {
-                super::browser::issue_for(config, vw_platform::browser::Browser::Edge)
-            }
-            _ => None,
-        },
-        install_state: if config.is_macos() {
-            Some("store".into())
-        } else {
-            (browser == "Google Chrome")
-                .then(|| state.and_then(|state| super::extension_install::status(config, state)))
-                .flatten()
-        },
-        states: None,
-        // A refused attempt stays visible without retrying it on every status poll.
-        addon: (blocked || problem::blocked(config, state, browser)).then(|| {
-            super::addon::view_for(
-                super::addon::AddonState::AccessBlocked,
-                "",
-                if browser == "Microsoft Edge" {
-                    super::agent_browser::Browser::Edge
-                } else {
-                    super::agent_browser::Browser::Chrome
-                },
-            )
-        }),
-        extension_left: None,
-        extension_restart: None,
-        profile_names_refused: None,
-    }
-}
-
-fn needs_repair(
-    config: &ChromeControlConfig,
-    state: &Path,
-    browser: &str,
-    receipted: bool,
-) -> bool {
-    if config.is_macos() {
-        // Every command renders both cards. A status read must not touch the other browser.
-        receipted
-            && (problem::repair_failed(config, state, browser)
-                || registration::check_helper(config, state).is_err())
-    } else {
-        repair_registrations(config, state, Some(browser)).is_err()
-    }
-}
-
 /// Only this browser's registered folders. Receipt identities take precedence over known vendor paths.
 pub(super) fn user_data(
     config: &ChromeControlConfig,
@@ -519,51 +420,14 @@ pub(super) fn user_data(
         .unwrap_or_default()
 }
 
-/// Reads the helper once and checks the release pin before copying or starting it.
-pub(super) fn packaged_helper(config: &ChromeControlConfig) -> Result<(PathBuf, Vec<u8>), String> {
-    use std::io::Read;
-    let (mut opened, path) = open_helper(config)?;
-    let mut bytes = Vec::new();
-    opened
-        .file()
-        .read_to_end(&mut bytes)
-        .map_err(|_| missing_helper())?;
-    check_helper_pin(config, &bytes)?;
-    Ok((path, bytes))
-}
-
-fn missing_helper() -> String {
-    vw_vocabulary::texts::CHROME_PACKAGE_MISSING.to_owned()
-}
-
-pub(super) fn open_helper(
-    config: &ChromeControlConfig,
-) -> Result<(vw_platform::checked_executable::CheckedExecutable, PathBuf), String> {
-    let package = config.package.as_ref().ok_or_else(|| ABSENT.to_owned())?;
-    let path = package.join("bin").join(helper_name());
-    let opened = vw_platform::checked_executable::CheckedExecutable::open(&path)
-        .map_err(|_| missing_helper())?;
-    Ok((opened, path))
-}
-
-pub(super) fn check_helper_pin(config: &ChromeControlConfig, bytes: &[u8]) -> Result<(), String> {
-    use sha2::{Digest, Sha256};
-    match config.helper_sha256.as_deref() {
-        Some(pin) if format!("{:x}", Sha256::digest(bytes)) == pin => {}
-        None if cfg!(debug_assertions) => {}
-        _ => {
-            return Err(vw_vocabulary::texts::CHROME_PACKAGE_CHANGED.to_owned());
-        }
-    }
-    Ok(())
-}
-
 /// What was made so far, undone in reverse when a later step fails.
 #[derive(Default)]
 struct Made {
     files: Vec<PathBuf>,
     keys: Vec<(String, PathBuf)>,
     written: Vec<(PathBuf, Vec<u8>)>,
+    /// The line about a stale registration this setup replaced, published only when the whole setup succeeds.
+    notice: Option<String>,
 }
 
 impl Made {
@@ -591,95 +455,8 @@ fn write_file(
     Ok(())
 }
 
-/// The native messaging manifest for the helper at `helper`.
-pub(super) fn host_manifest(helper: &Path, extension_id: &str) -> Vec<u8> {
-    let helper = if cfg!(windows) {
-        PathBuf::from(windows_native_path(helper))
-    } else {
-        helper.to_path_buf()
-    };
-    let manifest = serde_json::json!({
-        "name": HOST_NAME,
-        "description": format!("{STORE_LISTING_NAME} extension helper"),
-        "path": helper,
-        "type": "stdio",
-        "allowed_origins": [format!("chrome-extension://{extension_id}/")],
-    });
-    serde_json::to_vec_pretty(&manifest).unwrap_or_default()
-}
-
 #[path = "setup_install.rs"]
 mod installing;
-
-/// Whether the owner identity failed for lack of a usable system keyring.
-pub(super) fn keyring_unavailable(error: &vw_keys::KeyError) -> bool {
-    matches!(
-        error,
-        vw_keys::KeyError::Vault(vw_vault::VaultError::Remember(_))
-    )
-}
-
-/// Why the owner identity could not be stored, for the person: an unavailable system keyring is named with the next
-/// step (the identity must stay readable while the vault is locked, so the vault password cannot stand in for it).
-/// A vocabulary template: the caller words `{yourBrowser}` ([`super::agent_browser::Browser::words`]).
-pub(super) fn owner_store_failed(error: &vw_keys::KeyError) -> &'static str {
-    if keyring_unavailable(error) {
-        vw_vocabulary::texts::CHROME_OWNER_STORE_UNAVAILABLE
-    } else {
-        vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED
-    }
-}
-
-/// Why the owner identity could not be read: without a system keyring (the app's fallback store holds nothing) the
-/// keyring is named with its next step, as when storing it; any other failure keeps the plain read text.
-pub(super) fn owner_read_failed(error: &vw_keys::KeyError) -> &'static str {
-    if keyring_unavailable(error) {
-        owner_store_failed(error)
-    } else {
-        vw_vocabulary::texts::CHROME_OWNER_READ_FAILED
-    }
-}
-
-/// [`owner_read_failed`] worded for `browser`.
-pub(super) fn owner_read_text(
-    browser: super::agent_browser::Browser,
-    error: &vw_keys::KeyError,
-) -> String {
-    browser.words(owner_read_failed(error))
-}
-
-/// [`owner_store_failed`] worded for `browser`.
-pub(super) fn owner_store_text(
-    browser: super::agent_browser::Browser,
-    error: &vw_keys::KeyError,
-) -> String {
-    browser.words(owner_store_failed(error))
-}
-
-/// PREDICT (written before the change): every failure to store the owner identity read "Could not store Your
-/// Chrome's owner identity. Nothing was changed." with no cause and no way forward, also when the system keyring
-/// (Linux: no default Secret Service collection) was the cause.
-#[cfg(test)]
-mod owner_store_text_tests {
-    #[test]
-    fn an_unavailable_keyring_is_named_with_the_next_step() {
-        let keyring = vw_keys::KeyError::Vault(vw_vault::remember::store_failure(
-            "Couldn't access platform storage: SS error: result not returned from SS API".into(),
-        ));
-        let text = super::owner_store_failed(&keyring);
-        assert!(
-            text.contains("system keyring") && text.contains("Secret Service"),
-            "{text}"
-        );
-        assert!(text.contains("Set up or unlock the system keyring, then choose Connect again."));
-        assert!(text.contains("Nothing was changed.") && !text.contains("SS error"));
-        let other = vw_keys::KeyError::Vault(vw_vault::VaultError::Locked);
-        assert_eq!(
-            super::owner_store_failed(&other),
-            vw_vocabulary::texts::CHROME_OWNER_STORE_FAILED
-        );
-    }
-}
 
 #[cfg(test)]
 pub(crate) use installing::install;
@@ -704,27 +481,17 @@ pub(super) fn open_store_for(config: &ChromeControlConfig, edge: bool) -> Result
     super::browser::open_edge(config, &store_url(&config.extension_id))
 }
 
-fn registry_set(key: &str, file: &Path) -> Result<(), String> {
-    super::extension_registry::host(
+/// Registers `file` under `key`; `stale` is the exact value [`prior::check`] found naming a missing file.
+fn registry_set(
+    key: &str,
+    file: &Path,
+    stale: Option<&prior::Stale>,
+) -> Result<super::extension_registry::HostOutcome, String> {
+    super::extension_registry::host_replacing(
         key,
         &windows_native_path(file),
         false,
-        &super::extension_registry::Native,
-    )
-}
-
-// Native messaging expects backslashes even when a configured root uses forward slashes.
-fn windows_native_path(file: &Path) -> String {
-    file.to_string_lossy().replace('/', "\\")
-}
-
-fn registry_delete(key: &str, file: &Path) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Ok(());
-    }
-    super::extension_registry::remove_host(
-        key,
-        &windows_native_path(file),
+        stale.and_then(|s| s.registry_value.as_deref()),
         &super::extension_registry::Native,
     )
 }
@@ -733,26 +500,13 @@ fn registry_delete(key: &str, file: &Path) -> Result<(), String> {
 #[path = "setup_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "setup_registry_tests.rs"]
+mod registry_tests;
+
 #[path = "setup_edge.rs"]
 mod edge;
 pub(super) use edge::register_edge;
 
 #[path = "setup_firefox.rs"]
 pub(super) mod firefox;
-
-fn manifest_for(helper: &Path, config: &ChromeControlConfig, browser: &str) -> Vec<u8> {
-    if browser == "Mozilla Firefox" {
-        firefox::manifest(helper)
-    } else {
-        host_manifest(helper, &config.extension_id)
-    }
-}
-fn manifest_path(state: &Path, browser: &str) -> PathBuf {
-    state
-        .join(if browser == "Mozilla Firefox" {
-            "firefox-host"
-        } else {
-            "host"
-        })
-        .join(format!("{HOST_NAME}.json"))
-}

@@ -98,6 +98,18 @@ fn controlled(hub: &crate::previews::PreviewHub, owner: &str) -> bool {
         .any(|page| hub.browser.sessions().controlled(&page))
 }
 
+/// Whether the person paused or stopped this page's browser; a video worker uses the same handoff rule as the frame.
+pub(crate) fn person_has_browser(shared: &Shared, page: &str) -> bool {
+    let Some(hub) = shared.preview.as_ref() else {
+        return true;
+    };
+    let Some(owner) = hub.service.owner_session_id(page) else {
+        return true;
+    };
+    let chat = shared.channels.canonical(&owner);
+    shared.paused_tools.is_paused(&chat, BROWSER) || hub.browser.sessions().stopped(page)
+}
+
 /// Reads the facts of `owner`'s browser (its app preview and every web tab) and sets or lifts the block.
 pub(crate) fn sync(shared: &Shared, owner: &str) {
     let Some(hub) = shared.preview.as_ref() else {

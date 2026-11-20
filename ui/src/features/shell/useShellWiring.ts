@@ -104,6 +104,31 @@ export function useShellWiring(): void {
     document.documentElement.dataset["theme"] = theme;
   }, [theme]);
 
+  // The native title bar (Windows) follows the app's theme, not only the system's. The window manager redraws it
+  // from the system theme when that changes, so the app's theme is sent again a moment later.
+  useEffect(() => {
+    const titleBar = app.core?.client.desktop?.titleBar;
+    if (titleBar === undefined) return;
+    const send = () => {
+      void titleBar(theme === "dark").catch(() => undefined);
+    };
+    send();
+    const system =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const again = () => {
+      clearTimeout(timer);
+      timer = setTimeout(send, 250);
+    };
+    system?.addEventListener("change", again);
+    return () => {
+      clearTimeout(timer);
+      system?.removeEventListener("change", again);
+    };
+  }, [app, theme]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && app.uiControl.walkthrough.store.get().phase === "running") {

@@ -20,3 +20,5 @@ Vibe Work's skills (the `skill` tool loads them) and app facts:
 New copies have no installed dependencies; their setup hint names the install command. A copy's base is the branch it was made from, not Vibe's guessed "Main branch". A file whose header says GENERATED or "do not edit" comes from a generator.
 
 Vibe Work's own Vibe home is `$VIBE_HOME` (the environment variable), not `~/.vibe`. User skills live in `$VIBE_HOME/skills`, not `~/.vibe/skills`; upstream examples use the CLI home. `propose_protected_change` takes paths relative to this home, e.g. `skills/<name>/SKILL.md`.
+
+If a result says Vibe Work is not installed completely, tell the user that and that running the Vibe Work installer again repairs it.

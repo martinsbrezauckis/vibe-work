@@ -1,0 +1,428 @@
+//! Install, enable and reconnect recovery: Chrome's own records, version labels, and the steps each card names.
+use super::tests::{never_probed, ready};
+use super::*;
+
+/// Chrome's own records (Windows, Chrome 156, the extension added through the per-user registration), trimmed to
+/// the fields Chrome changes: a new external install it holds for the person's consent, and the same install after
+/// the person enabled it and later turned it off on `chrome://extensions` (then quit and reopened Chrome).
+#[test]
+fn real_preferences_tell_a_new_external_install_from_one_the_person_turned_off() {
+    use super::super::probe::{Prober, profiles};
+    const ID: &str = "gnlamocfdabihichplpepjpehlbafhng";
+    let new_install = serde_json::json!({"ack_prompt_count": 1, "creation_flags": 9, "disable_reasons": [8192],
+        "from_webstore": true, "location": 6, "path": format!("{ID}\\0.2.3_0"), "was_installed_by_default": false});
+    let turned_off = serde_json::json!({"ack_external": true, "creation_flags": 9, "disable_reasons": [1],
+        "from_webstore": true, "location": 6, "path": format!("{ID}\\0.2.3_0"), "was_installed_by_default": false});
+    let root = std::env::temp_dir().join(format!("chrome-addon-real-{}", std::process::id()));
+    for (name, entry, expected) in [
+        (
+            "new external install",
+            new_install,
+            AddonState::EnableInChrome,
+        ),
+        (
+            "turned off by the user",
+            turned_off,
+            AddonState::TurnedOffInChrome,
+        ),
+    ] {
+        let _ = std::fs::remove_dir_all(&root);
+        let profile = root.join("Profile 1");
+        std::fs::create_dir_all(profile.join("Extensions").join(ID).join("0.2.3_0")).unwrap();
+        let prefs = serde_json::json!({"extensions": {"settings": {ID: entry}}});
+        std::fs::write(profile.join("Secure Preferences"), prefs.to_string()).unwrap();
+        let facts = Facts {
+            install_state: Some("external".into()),
+            ..ready()
+        };
+        let found = state(&facts, || {
+            Prober::default().probe(profiles(&root, ID), ID, std::time::Instant::now())
+        });
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(found, expected, "{name}");
+    }
+}
+
+#[test]
+fn external_install_keeps_enable_while_chrome_copies_and_waits() {
+    let mut facts = Facts {
+        install_state: Some("external".into()),
+        extension_folder: false,
+        ..ready()
+    };
+    // Before copy, +2 s folder, +4..11 s preferences lag, then disabled until Enable.
+    for (seconds, folder, probe) in [
+        (0, false, Probe::Unknown),
+        (2, true, Probe::Unknown),
+        (4, true, Probe::NotOff),
+        (7, true, Probe::Unknown),
+        (11, true, Probe::AwaitingEnable),
+    ] {
+        facts.extension_folder = folder;
+        assert_eq!(
+            state(&facts, || probe),
+            AddonState::EnableInChrome,
+            "at +{seconds}s"
+        );
+    }
+    facts.waiting = true;
+    assert_eq!(state(&facts, never_probed), AddonState::NotPaired);
+    facts.waiting = false;
+    facts.connected = true;
+    assert_eq!(state(&facts, never_probed), AddonState::Connected);
+}
+
+#[test]
+fn turning_on_waits_for_a_live_profile_while_chrome_is_open() {
+    let mut facts = Facts {
+        paired_once: true,
+        chrome_running: true,
+        enabled: false,
+        ..ready()
+    };
+    assert_eq!(state(&facts, never_probed), AddonState::SwitchedOff);
+    facts.enabled = true;
+    for seconds in [0, 1] {
+        assert_eq!(
+            state(&facts, || Probe::NotOff),
+            AddonState::Connecting,
+            "at +{seconds}s"
+        );
+    }
+    facts.connected = true;
+    assert_eq!(state(&facts, never_probed), AddonState::Connected);
+    facts.connected = false;
+    facts.chrome_running = false;
+    assert_eq!(state(&facts, || Probe::NotOff), AddonState::ChromeClosed);
+    facts.chrome_running = true;
+    facts.extension_folder = false;
+    assert_eq!(
+        state(&facts, || Probe::Unknown),
+        AddonState::ExtensionNotInstalled
+    );
+}
+
+#[test]
+fn chrome_steps_say_where_to_click_and_how_to_restart() {
+    let enable = view(AddonState::EnableInChrome, "");
+    let restart = view(AddonState::RestartChrome, "");
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            enable.step.as_deref(),
+            Some("Click Action required → New extension added (Vibe Work).")
+        );
+        assert_eq!(
+            restart.step.as_deref(),
+            Some("Quit Chrome with Cmd+Q and open it again.")
+        );
+    } else {
+        assert_eq!(
+            enable.step.as_deref(),
+            Some("Click Enable extension in Chrome.")
+        );
+        assert_eq!(
+            restart.step.as_deref(),
+            Some("Close every Chrome window and open it again.")
+        );
+    }
+}
+
+#[test]
+fn update_label_follows_the_connected_profile_and_disconnected_oldest_profile() {
+    let root = std::env::temp_dir().join(format!("addon-versions-{}", std::process::id()));
+    let profiles = [root.join("Profile A"), root.join("Profile 1")];
+    for (profile, version) in profiles.iter().zip(["0.2.3_0", "0.2.6_0"]) {
+        std::fs::create_dir_all(profile.join("Extensions/id").join(version)).unwrap();
+    }
+    for (connected, live, expected) in [
+        (
+            true,
+            vec![("A".into(), Some("0.2.3".into()))],
+            AddonState::UpdateNeeded,
+        ),
+        (
+            true,
+            vec![("B".into(), Some("0.2.6".into()))],
+            AddonState::Connected,
+        ),
+        (false, vec![], AddonState::UpdateNeeded),
+    ] {
+        let facts = Facts {
+            connected,
+            installed_version: installed_version(
+                &super::super::setup::ChromeControlConfig {
+                    macos: Some(false),
+                    ..super::super::setup::ChromeControlConfig::default()
+                },
+                &profiles,
+                "id",
+                connected,
+                &live,
+            ),
+            min_version: Some("0.2.6".into()),
+            ..ready()
+        };
+        assert_eq!(state(&facts, || Probe::NotOff), expected, "live={live:?}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_profile_versions_follow_status_and_clear_on_disconnect() {
+    let profiles = ConnectedProfiles::default();
+    for (a, b, expected) in [(true, false, "A"), (false, true, "B")] {
+        profiles.observe(&serde_json::json!({"profiles":[
+            {"profileId":"A","connected":a,"extensionVersion":"0.2.3"},
+            {"profileId":"B","connected":b,"extensionVersion":"0.2.6"}
+        ]}));
+        assert_eq!(profiles.snapshot().len(), 1);
+        assert_eq!(profiles.snapshot()[0].0, expected);
+    }
+    profiles.clear();
+    assert_eq!(profiles.snapshot(), Vec::<(String, Option<String>)>::new());
+    profiles.observe(&serde_json::json!({"profiles":[{"profileId":"unknown","connected":true}]}));
+    assert_eq!(profiles.snapshot(), vec![("unknown".into(), None)]);
+    assert_eq!(
+        installed_version(
+            &super::super::setup::ChromeControlConfig::default(),
+            &[],
+            "id",
+            true,
+            &profiles.snapshot()
+        ),
+        None
+    );
+    profiles.observe(&serde_json::json!({"profiles":[]}));
+    assert_eq!(profiles.snapshot(), Vec::<(String, Option<String>)>::new());
+}
+#[test]
+fn a_disabled_extension_overrides_a_stale_connecting_phase() {
+    let facts = Facts {
+        paired_once: true,
+        connecting: true,
+        extension_folder: true,
+        ..ready()
+    };
+    assert_eq!(state(&facts, || Probe::Off), AddonState::TurnedOffInChrome);
+    assert_eq!(
+        state(
+            &Facts {
+                connected: true,
+                ..facts
+            },
+            || panic!("live connection wins")
+        ),
+        AddonState::Connected
+    );
+}
+
+#[test]
+fn a_missing_browser_is_diagnosed_before_setup_and_never_offers_connect() {
+    let facts = Facts {
+        set_up: false,
+        browser_issue: Some(BrowserIssue::Missing),
+        ..ready()
+    };
+    let state = state(&facts, never_probed);
+    assert_eq!(state, AddonState::ChromeMissing);
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let view = view_for(state, "", browser);
+        assert_eq!(view.action, None);
+        assert!(view.label.contains("is not installed"));
+        assert!(view.step.as_deref().unwrap().starts_with("Install "));
+        assert!(
+            !view
+                .instruction
+                .contains(vw_vocabulary::texts::CONNECTOR_CONNECT)
+        );
+        assert!(!super::super::availability::reason(&view, browser).contains("addon_suggest"));
+    }
+}
+
+#[test]
+fn a_lost_connection_retries_before_asking_for_a_browser_restart() {
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let mut view = view_for(AddonState::Connecting, "", browser);
+        reconnecting_for(&mut view, true, browser);
+        assert_eq!(
+            view.instruction,
+            browser.words("{browser}'s Vibe Work connection was lost and is reconnecting automatically. Retry this step in a few seconds. Only if the connection stays down, ask the user to open {browser}'s Extensions page and turn on Vibe Work if it is off (clicking Re-enable if {browser} asks), or restart {browser} if it is already on.")
+        );
+    }
+}
+
+#[test]
+fn first_disconnect_recovery_works_even_before_preferences_record_the_extension_is_off() {
+    let facts = Facts {
+        paired_once: true,
+        connecting: true,
+        chrome_running: true,
+        ..ready()
+    };
+    for probe in [Probe::Unknown, Probe::NotOff, Probe::Off] {
+        let state = state(&facts, || probe);
+        for browser in [
+            super::super::agent_browser::Browser::Chrome,
+            super::super::agent_browser::Browser::Edge,
+        ] {
+            let mut view = view_for(state, "", browser);
+            reconnecting_for(&mut view, true, browser);
+            assert_eq!(view.label, browser.words("Turn on in {browser}"));
+            assert!(view.instruction.contains("Extensions page"));
+            assert!(!view.instruction.contains("icon"));
+            assert!(!view.instruction.contains("Check connection"));
+        }
+    }
+}
+
+/// PREDICT (written before the fix): fails. Chrome turns the extension off when a newer version asks for more
+/// permissions and keeps it off until the person clicks Re-enable in Chrome's own dialog. The "Turn on" card has no
+/// step at all when Chrome's files say the extension is off, and the reconnecting card (the only one macOS can show,
+/// because the app does not read Chrome's files there) says only "Open Chrome extensions → Vibe Work"; neither card
+/// nor the agent's instruction names Re-enable.
+#[test]
+fn a_turned_off_extension_names_chromes_re_enable_step() {
+    for browser in [
+        super::super::agent_browser::Browser::Chrome,
+        super::super::agent_browser::Browser::Edge,
+    ] {
+        let expected = browser.words(
+            "Open {browser} extensions → Vibe Work and turn it on. If {browser} asks for new permissions, click Re-enable.",
+        );
+        let off = view_for(AddonState::TurnedOffInChrome, "", browser);
+        assert_eq!(
+            off.step.as_deref(),
+            Some(expected.as_str()),
+            "{browser:?} off"
+        );
+        assert!(off.instruction.contains("Re-enable"), "{}", off.instruction);
+        let mut lost = view_for(AddonState::Connecting, "", browser);
+        reconnecting_for(&mut lost, true, browser);
+        assert_eq!(
+            lost.step.as_deref(),
+            Some(expected.as_str()),
+            "{browser:?} lost"
+        );
+        assert!(
+            lost.instruction.contains("Re-enable"),
+            "{}",
+            lost.instruction
+        );
+    }
+}
+
+/// After the person removed every pairing in Settings, the card offers Connect (a new pairing) whether the helper
+/// reports the extension as connecting or Chrome is simply running; Chrome's own "off" and "asks to enable" still
+/// decide, and a waiting pairing request is still "Pair in Chrome".
+#[test]
+fn a_removed_pairing_offers_connect_unless_chrome_says_otherwise() {
+    use AddonState as S;
+    let removed = Facts {
+        removed: true,
+        paired_once: true,
+        ..ready()
+    };
+    for facts in [
+        Facts {
+            connecting: true,
+            ..removed.clone()
+        },
+        Facts {
+            chrome_running: true,
+            ..removed.clone()
+        },
+        // Chrome is closed: an earlier pairing (`paired_once`) never reads "Connected when Chrome is open" here.
+        removed.clone(),
+    ] {
+        for (probe, expected) in [
+            (Probe::Unknown, S::NotConnected),
+            (Probe::NotOff, S::NotConnected),
+            (Probe::Off, S::TurnedOffInChrome),
+            (Probe::AwaitingEnable, S::EnableInChrome),
+        ] {
+            let found = state(&facts, || probe);
+            assert_eq!(found, expected, "{facts:?} {probe:?}");
+            let mut card = view(found, "");
+            reconnecting(&mut card, false);
+            if expected == S::NotConnected {
+                assert_eq!(card.label, "Not connected");
+                assert_eq!(card.action, Some(AddonAction::Connect));
+            }
+        }
+    }
+    let waiting = Facts {
+        waiting: true,
+        ..removed.clone()
+    };
+    assert_eq!(state(&waiting, never_probed), S::NotPaired);
+    // Connect cannot help while the helper is down: its own states still decide.
+    let helper_down = Facts {
+        helper_up: false,
+        ..removed
+    };
+    assert_eq!(state(&helper_down, never_probed), S::HelperNotRunning);
+    let other_helper = Facts {
+        helper_conflict: true,
+        ..helper_down
+    };
+    assert_eq!(state(&other_helper, never_probed), S::OtherHelperRunning);
+}
+
+/// While another Vibe Work helper holds the connection, Settings > Browser shows a step the person can follow.
+///
+/// PREDICT (written before the fix): fails. The step names a process ("end the chrome-control process", "end
+/// chrome-control in Task Manager / Activity Monitor") that a person does not know, and does not say that the
+/// connection then comes back by itself, so the person does not know whether to click anything afterwards. After the
+/// fix the step says, in person words for this system, to quit the other Vibe Work copy (or restart the computer when
+/// none is open) and that Vibe Work then connects by itself.
+#[test]
+fn another_running_helper_card_says_what_to_do_in_person_words() {
+    let card = view(AddonState::OtherHelperRunning, "");
+    let step = card.step.unwrap_or_default();
+    for process_word in [
+        "chrome-control",
+        "process",
+        "Task Manager",
+        "Activity Monitor",
+    ] {
+        assert!(!step.contains(process_word), "{step}");
+    }
+    assert!(step.contains("the other Vibe Work copy"), "{step}");
+    assert!(step.contains("restart"), "{step}");
+    assert!(
+        step.ends_with("Vibe Work then connects by itself."),
+        "{step}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(step.starts_with("Quit the other Vibe Work copy"), "{step}");
+        assert!(step.contains("restart the Mac"), "{step}");
+    } else if cfg!(windows) {
+        assert!(step.starts_with("Close the other Vibe Work copy"), "{step}");
+    } else {
+        assert!(step.starts_with("Quit the other Vibe Work copy"), "{step}");
+    }
+    // The same advice after a setting is saved while the other helper holds the connection (shown in Settings).
+    let saved = super::super::switches::OTHER_HELPER_STEP;
+    assert!(
+        saved.starts_with("Another Vibe Work browser helper is still running"),
+        "{saved}"
+    );
+    for process_word in [
+        "chrome-control",
+        "process",
+        "Task Manager",
+        "Activity Monitor",
+    ] {
+        assert!(!saved.contains(process_word), "{saved}");
+    }
+    assert!(
+        saved.ends_with("Vibe Work then connects by itself."),
+        "{saved}"
+    );
+}

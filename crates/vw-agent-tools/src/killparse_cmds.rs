@@ -44,8 +44,20 @@ fn signal(text: &str) -> bool {
     ) || text.parse::<u8>().is_ok_and(|n| n <= 64)
 }
 
+/// `kill -0` (also `-s 0`, `-n 0`, `--signal=0`) sends no signal: it only checks that the pids exist, so it stops
+/// nothing and the kill guard has nothing to ask (cleanup A11: asking the person "may stop processes" for a probe
+/// told them something untrue). Fail closed: only when every later word is a target, not another option
+/// (`kill -0 -9 1` is read the usual way, since shells differ on what the second option means).
+fn signal_zero(args: &[&str]) -> bool {
+    let (["-0" | "--signal=0", rest @ ..] | ["-s" | "-n" | "--signal", "0", rest @ ..]) = args
+    else {
+        return false;
+    };
+    !rest.is_empty() && rest.iter().all(|word| !word.starts_with('-'))
+}
+
 pub(crate) fn kill(args: &[&str], out: &mut KillScan) {
-    if args == ["-l"] {
+    if args == ["-l"] || signal_zero(args) {
         return;
     }
     if args

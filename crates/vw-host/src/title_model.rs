@@ -1,22 +1,15 @@
-//! The model Vibe writes session titles with: Vibe Work's own `VIBE_HOME/config.toml`
-//! gets `[utility_models] title = "mistral-medium-3.5"` unless it already names a title model.
+//! The model Vibe writes session titles with: Vibe Work's own `VIBE_HOME/config.toml` gets
+//! `[utility_models] title = "active"` unless it already names a title model, so each chat's own model (the one the
+//! person picked from Mistral's model list) writes its title.
 //!
-//! Why: Vibe Work names the title model, so session titles come from one known model whatever model a session
-//! runs: Mistral Medium 3.5, which answers Vibe's title request (Vibe 3 samples it at the model entry's temperature,
-//! 1.0 for Medium 3.5; 2.26.1 sent greedy `temperature = 0`). Without a `[utility_models]` title model Vibe writes
-//! titles with the session's active model.
+//! Why: Vibe Work names no model of its own here. A model name chosen by the app breaks when Mistral renames or
+//! retires that model; `active` is Vibe's selector for the session's active model and follows whatever the chat uses.
+//! Without any `[utility_models]` title Vibe would pick a model itself (a fast model it probes for, else the active
+//! one); `active` keeps the title on the model the person chose.
 //!
-//! Why this and not `top_p` on the model entry: a model's `top_p` applies to the session's answers, not to the
-//! title request, so it would not change titles, and it would change the sampling of every normal answer on that
-//! model. Settings' per-model "Sampling (top p)" row therefore stays what it says: it applies to answers, not to
-//! titles.
-//!
-//! What it changes: only which model writes titles. Medium 3.5 is Vibe's built-in default model (always listed
-//! unless the user's `allowed_models` hides it; then Vibe warns and falls back to the active model, as before) and
-//! is a Mistral model, so titles go to the same provider as any Mistral session. A user who wants titles from the
-//! session's own model writes `title = "active"`; any title model the user names is left as it is.
-//!
-//! Revisit this default on each Vibe update.
+//! Earlier versions wrote `title = "mistral-medium-3.5"`. That exact app seed is replaced by `active` once
+//! ([`MIGRATION`] marker in the managed home); after the marker a title model the person names, including that one,
+//! is kept. Vibe rewrites the config without comments, so the seed is recognised by its exact value only.
 //!
 //! Depends on: `toml` (parsing only; the file is edited as text so the user's comments and layout stay).
 //! Called by: [`crate::launch::ProductLaunch`] and [`crate::launch::DevLaunch`] before the server starts.
@@ -25,20 +18,31 @@
 //!   the config).
 //! - A file that is not valid TOML, or that writes `utility_models` as dotted keys or an inline table, is left
 //!   byte-identical (Skipped).
-//! - The edit is checked before it is written: the new file must parse, name our title model, and equal the old
-//!   file's data plus that one key. The write goes through a temporary file and a rename, together with the other
-//!   startup fixes ([`crate::startup_config`]).
+//! - The edit is checked before it is written: the new file must parse, name the title model, and equal the old
+//!   file's data plus (or with) that one key. The write goes through a temporary file and a rename, together with the
+//!   other startup fixes ([`crate::startup_config`]).
 
 use std::path::Path;
 
 use toml::{Table, Value};
 
-/// The title model alias we set: Vibe's built-in default model, Mistral Medium 3.5 (`vibe_schema.py`
-/// `DEFAULT_ACTIVE_MODEL_CONFIG`), which accepts Vibe's title request (2.26.1's greedy one too).
-pub const TITLE_MODEL_ALIAS: &str = "mistral-medium-3.5";
+/// The title model we set: Vibe's selector for the session's active model (`ACTIVE_MODEL_SELECTOR`).
+pub const TITLE_MODEL_ALIAS: &str = "active";
+
+/// The title model earlier versions wrote; replaced by [`TITLE_MODEL_ALIAS`] once.
+pub const OLD_SEED_ALIAS: &str = "mistral-medium-3.5";
+
+/// App-owned marker in the managed home (outside the config Vibe rewrites): the old seed was replaced once.
+pub const MIGRATION: &str = ".vw-title-model-active-v1";
 
 /// The lines written above the added table (English, no paths; they ship into the user's config).
 const NOTE: [&str; 2] = [
+    "# Vibe Work: each chat's own model writes its session title.",
+    "# Name a model alias here to title every chat with that model instead.",
+];
+
+/// The notes earlier versions wrote beside [`OLD_SEED_ALIAS`]; removed with it.
+const OLD_NOTE: [&str; 2] = [
     "# Vibe Work: session titles are written by Mistral Medium 3.5, whatever model a session uses.",
     "# Write title = \"active\" to title sessions with their own model instead.",
 ];
@@ -46,8 +50,10 @@ const NOTE: [&str; 2] = [
 /// What [`ensure`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TitleModel {
-    /// `title = "mistral-medium-3.5"` was added (a new `[utility_models]` table, or a key in the existing one).
+    /// `title = "active"` was added (a new `[utility_models]` table, or a key in the existing one).
     Added,
+    /// The earlier app seed `title = "mistral-medium-3.5"` was replaced by `title = "active"` (once).
+    Migrated,
     /// The config already names a title model (the user's, or ours from an earlier start): left as it is.
     Kept(String),
     /// Left unchanged, with the reason (not valid TOML, or a `utility_models` layout we do not edit).
@@ -60,6 +66,9 @@ impl TitleModel {
     pub fn log_line(&self) -> String {
         match self {
             Self::Added => format!("session titles: title model set to {TITLE_MODEL_ALIAS}"),
+            Self::Migrated => format!(
+                "session titles: earlier app title model {OLD_SEED_ALIAS} replaced by {TITLE_MODEL_ALIAS}"
+            ),
             Self::Kept(alias) => format!("session titles: config names {alias:?}, kept"),
             Self::Skipped(why) => format!("session titles: config not changed ({why})"),
         }
@@ -76,25 +85,146 @@ impl TitleModel {
 pub fn ensure(vibe_home: &Path) -> Result<TitleModel, String> {
     let mut draft = crate::startup_config::Draft::open(vibe_home)
         .map_err(|e| format!("{}: {e}", vibe_home.join("config.toml").display()))?;
-    let staged = draft.apply(|text, _| edit(text), TitleModel::Skipped);
-    draft.commit().settle(staged, TitleModel::Skipped)
+    let pending = migration_pending(vibe_home)?;
+    let staged = draft.apply(|text, _| edit(text, pending), TitleModel::Skipped);
+    let written = draft.commit();
+    let outcome = written.settle(staged, TitleModel::Skipped)?;
+    finish(vibe_home, pending, &outcome, written.landed())?;
+    Ok(outcome)
 }
 
-/// This step's edit for [`crate::startup_config`]: [`with_title_model`], or our missing notes restored beside our
-/// own title model.
-pub(crate) fn edit(existing: &str) -> (Option<String>, TitleModel) {
-    match with_title_model(existing) {
+/// Whether the one-time replacement of the old seed is still to run (its marker is absent).
+///
+/// # Errors
+/// The marker could not be checked.
+pub(crate) fn migration_pending(vibe_home: &Path) -> Result<bool, String> {
+    let marker = vibe_home.join(MIGRATION);
+    marker
+        .try_exists()
+        .map(|exists| !exists)
+        .map_err(|e| format!("{}: {e}", marker.display()))
+}
+
+/// Records the one-time replacement once the file holds this step's result (written, or nothing to write) and the
+/// step was not skipped: a refused, failed or invalid config must not consume it.
+///
+/// # Errors
+/// The marker could not be written.
+pub(crate) fn finish(
+    vibe_home: &Path,
+    pending: bool,
+    outcome: &TitleModel,
+    landed: bool,
+) -> Result<(), String> {
+    if !pending || !landed || matches!(outcome, TitleModel::Skipped(_)) {
+        return Ok(());
+    }
+    let marker = vibe_home.join(MIGRATION);
+    std::fs::write(&marker, b"1\n").map_err(|e| format!("{}: {e}", marker.display()))
+}
+
+/// This step's edit for [`crate::startup_config`]: [`with_title_model`], the old seed replaced (only while
+/// `migrate`), or our missing notes restored beside our own title model. The earlier version's notes are replaced
+/// by ours in place whatever the outcome (they name a model the app no longer sets).
+pub(crate) fn edit(existing: &str, migrate: bool) -> (Option<String>, TitleModel) {
+    let renoted = renoted(existing);
+    let text = renoted.as_deref().unwrap_or(existing);
+    let (edited, outcome) = match with_title_model(text) {
         Ok(text) => (Some(text), TitleModel::Added),
+        Err(TitleModel::Kept(alias)) if migrate && alias == OLD_SEED_ALIAS => {
+            let Some(text) = without_old_seed(text) else {
+                let why = "the earlier title model line could not be replaced";
+                return (None, TitleModel::Skipped(why.to_owned()));
+            };
+            (Some(text), TitleModel::Migrated)
+        }
+        Err(outcome @ TitleModel::Skipped(_)) => return (None, outcome),
         Err(outcome) => {
             let notes = if matches!(&outcome, TitleModel::Kept(alias) if alias == TITLE_MODEL_ALIAS)
             {
-                crate::config_comments::restored(existing, Some("[utility_models]"), "title", &NOTE)
+                crate::config_comments::restored(text, Some("[utility_models]"), "title", &NOTE)
             } else {
                 None
             };
             (notes, outcome)
         }
+    };
+    (edited.or(renoted), outcome)
+}
+
+/// `existing` with each line of the earlier [`OLD_NOTE`] replaced by the matching line of [`NOTE`] (comments only;
+/// the data is unchanged), or `None` when it holds none.
+fn renoted(existing: &str) -> Option<String> {
+    let mut out = String::with_capacity(existing.len());
+    let mut changed = false;
+    for line in existing.split_inclusive('\n') {
+        let bare = line.trim_end_matches(['\r', '\n']);
+        if let Some(i) = OLD_NOTE.iter().position(|old| *old == bare) {
+            out.push_str(NOTE[i]);
+            out.push_str(&line[bare.len()..]);
+            changed = true;
+        } else {
+            out.push_str(line);
+        }
     }
+    changed.then_some(out)
+}
+
+/// `existing` with the old seed's line in `[utility_models]` replaced by `title = "active"`, then our notes restored
+/// when missing; `None` when the line is not found or the result would change anything else.
+fn without_old_seed(existing: &str) -> Option<String> {
+    let before: Table = existing.parse().ok()?;
+    let newline = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut out = String::with_capacity(existing.len());
+    let mut in_table = false;
+    let mut replaced = false;
+    for line in existing.split_inclusive('\n') {
+        let bare = line.trim_end_matches(['\r', '\n']);
+        if bare.trim_start().starts_with('[') {
+            in_table = is_header(line);
+        } else if in_table && !replaced && is_old_seed_line(bare) {
+            out.push_str("title = \"");
+            out.push_str(TITLE_MODEL_ALIAS);
+            out.push('"');
+            // A comment of the person's own stays; the earlier app comment names the old model and goes.
+            if let Some((_, comment)) = bare.split_once('#')
+                && !comment.trim_start().starts_with("added by Vibe Work")
+            {
+                out.push_str(" #");
+                out.push_str(comment);
+            }
+            out.push_str(if line.ends_with('\n') { newline } else { "" });
+            replaced = true;
+            continue;
+        }
+        out.push_str(line);
+    }
+    if !replaced {
+        return None;
+    }
+    let out = crate::config_comments::restored(&out, Some("[utility_models]"), "title", &NOTE)
+        .unwrap_or(out);
+    let mut expected = before;
+    if let Some(Value::Table(utility)) = expected.get_mut("utility_models") {
+        utility.insert("title".into(), Value::String(TITLE_MODEL_ALIAS.into()));
+    }
+    (out.parse::<Table>().ok()? == expected).then_some(out)
+}
+
+/// Whether `line` is the `title` key holding exactly the old seed (any spacing, any trailing comment).
+fn is_old_seed_line(line: &str) -> bool {
+    let Some((key, rest)) = line.split_once('=') else {
+        return false;
+    };
+    if key.trim() != "title" {
+        return false;
+    }
+    let value = rest.split('#').next().unwrap_or_default().trim();
+    value == format!("\"{OLD_SEED_ALIAS}\"") || value == format!("'{OLD_SEED_ALIAS}'")
 }
 
 /// The config text with our title model added, or the outcome when nothing is to be written. Pure (the tests and
@@ -177,7 +307,7 @@ fn insert_after_header(existing: &str, key: &str, newline: &str) -> Option<Strin
                 out.push_str(newline);
             }
             out.push_str(key);
-            out.push_str("  # added by Vibe Work: session titles by Mistral Medium 3.5");
+            out.push_str("  # added by Vibe Work: each chat's own model writes its title");
             out.push_str(newline);
             done = true;
         }

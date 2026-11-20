@@ -68,6 +68,7 @@ fn the_rest_of_the_allowlist_is_unchanged() {
             ("POST", "/v1/chat/completions", api, ""),
             ("GET", "/v1/models", api, ""),
             ("GET", "/v1/models/{}", api, ""),
+            ("GET", "/v1/model-catalog", api, ""),
             ("GET", "/v1/skills", api, ""),
             ("GET", "/v1/skills/{}", api, ""),
             ("GET", "/v1/skills/{}/versions", api, ""),

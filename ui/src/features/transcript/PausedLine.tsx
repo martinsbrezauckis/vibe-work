@@ -13,8 +13,11 @@ import { type ReactElement, useEffect } from "react";
 import { Button } from "../../components/Controls";
 import { announce } from "../../state/announcer";
 import { usePausedTools } from "../../state/usePausedTools";
+import { useStore } from "../../state/createStore";
 import { TEXT, wording } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
+import { useCoreState } from "../shell/hooks";
+import { runningTurnId } from "../composer/model/session";
 
 /** What the line says: waiting (a browser call is held) or paused (nothing held yet). Words: the vocabulary file. */
 export function pausedLineText(waiting: boolean, place: string): string {
@@ -25,7 +28,11 @@ export function pausedLineText(waiting: boolean, place: string): string {
 export function PausedLine({ sessionId }: { sessionId: string }): ReactElement | null {
   const app = useApp();
   const paused = usePausedTools(app.core, sessionId);
-  const browser = paused.browser;
+  const entry = useCoreState((s) => s.sessions[sessionId]);
+  const turnId = runningTurnId(entry?.state ?? null, entry?.session);
+  const stopRequested = useStore(app.composer.store, (s) => s.stopRequested[sessionId]);
+  const stopping = stopRequested !== undefined && (turnId === null || stopRequested === turnId);
+  const browser = stopping ? null : paused.browser;
   const text = browser === null ? null : pausedLineText(browser.waiting, browser.place);
   useEffect(() => {
     if (text !== null) announce(text);

@@ -98,7 +98,7 @@ pub enum StopRefusal {
         pid: u32,
     },
     /// Attributed to someone else.
-    #[error("pid {pid} does not belong to this session")]
+    #[error("pid {pid} does not belong to this chat")]
     #[serde(rename_all = "camelCase")]
     NotThisSession {
         /// The pid.
@@ -108,7 +108,7 @@ pub enum StopRefusal {
     },
     /// Attributed to the session only by inference (cwd, parent), not proven started by this app or the
     /// agent: a session may not stop it; the user may, after confirming.
-    #[error("pid {pid} is not proven to be this session's (started outside Vibe Work?)")]
+    #[error("pid {pid} is not proven to be this chat's (started outside Vibe Work?)")]
     #[serde(rename_all = "camelCase")]
     NotProven {
         /// The pid.
@@ -132,7 +132,7 @@ pub enum StopRefusal {
         pid: u32,
     },
     /// A member of its group is not ours to stop.
-    #[error("process group of pid {pid} also holds pid {member}, which is not this session's")]
+    #[error("process group of pid {pid} also holds pid {member}, which is not this chat's")]
     #[serde(rename_all = "camelCase")]
     GroupShared {
         /// The pid.

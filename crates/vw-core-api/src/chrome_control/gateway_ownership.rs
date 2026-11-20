@@ -75,13 +75,15 @@ fn refusal(
             (
                 chat == session,
                 work.state_of(task, chat).unwrap_or_default().to_owned(),
+                work.lowered(task),
             )
         })
     };
     match shown {
-        Some((true, state)) if state == "disconnected" => Fixed::LostConnection.text(browser),
-        Some((true, _)) => Fixed::Stopped.text(browser),
-        Some((false, _)) => Fixed::OtherChat.text(browser),
+        Some((true, state, _)) if state == "disconnected" => Fixed::LostConnection.text(browser),
+        Some((true, _, true)) => Fixed::ModeLowered.text(browser),
+        Some((true, _, false)) => Fixed::Stopped.text(browser),
+        Some((false, _, _)) => Fixed::OtherChat.text(browser),
         // After an app restart an opaque old ID has no browser binding. The browser that
         // happens to be connected or selected in this chat cannot name that missing session.
         None => {

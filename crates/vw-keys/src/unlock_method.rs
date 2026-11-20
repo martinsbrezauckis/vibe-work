@@ -5,7 +5,7 @@
 use super::{KeyService, blocking};
 use crate::{KeyError, UnlockMethod};
 use std::sync::{Arc, atomic::Ordering};
-use vw_vault::{SecretString, VaultError, VaultKind};
+use vw_vault::{SecretString, VaultError, VaultKind, VaultStatus};
 
 impl KeyService {
     /// The current unlock choice (old installs default to system sign-in).
@@ -42,7 +42,11 @@ impl KeyService {
         method: Option<UnlockMethod>,
     ) -> Result<(), KeyError> {
         let _change = self.unlock_change.lock().await;
-        if self.vault.selected_vault()?.is_some() {
+        // A chosen vault whose folder is gone does not block a new one: the vault layer replaces that choice only
+        // when the creation succeeds, and refuses when another vault is present.
+        if self.vault.selected_vault()?.is_some()
+            && self.vault.status()? != VaultStatus::SelectedVaultMissing
+        {
             return Err(VaultError::AlreadyExists.into());
         }
         if let Some(method) = method {
@@ -92,6 +96,20 @@ impl KeyService {
         self.network_unlocked().await;
         self.refresh_key().await;
         Ok(())
+    }
+
+    /// Sets the locked private vault aside after the person confirmed they forgot its password (one folder rename,
+    /// nothing deleted; `vw_vault` module `set_aside`). Returns where the old vault is kept now. Afterwards the
+    /// status is "selected vault missing", so setup offers a new vault.
+    /// # Errors
+    /// The vault's refusal (open, shared, kept unlock key) or the rename's I/O error; then nothing moved.
+    pub async fn set_aside_vault(&self) -> Result<std::path::PathBuf, KeyError> {
+        let _change = self.unlock_change.lock().await;
+        let vault = Arc::clone(&self.vault);
+        let kept = blocking(move || vault.set_aside()).await??;
+        self.refresh_key().await;
+        self.changed();
+        Ok(kept)
     }
 
     /// Tries the existing kept key only when the person's policy allows it.

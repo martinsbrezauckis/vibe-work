@@ -3,7 +3,7 @@
 use super::{escalation, owner};
 use crate::ask::tool_calls::receipts::Execution;
 use crate::{
-    browser_fill::{self, LoginWriter},
+    browser_fill::{self, FillEffect, LoginWriter},
     core::Shared,
 };
 use serde_json::{Value, json};
@@ -16,6 +16,15 @@ struct ChromeLoginWriter {
     session: String,
     args: Value,
     consent: Option<super::read_consent::Consent>,
+    batch_grant_id: Option<String>,
+    #[cfg(test)]
+    pause_before_effect: Option<Arc<WritePause>>,
+}
+
+#[cfg(test)]
+struct WritePause {
+    reached: tokio::sync::watch::Sender<bool>,
+    resume: tokio::sync::watch::Receiver<bool>,
 }
 
 fn write_failure(action: &str) -> &'static str {
@@ -32,9 +41,18 @@ impl LoginWriter for ChromeLoginWriter {
         _target: &FillTarget,
         login: &vw_keys::Login,
         value: &str,
+        effect: &FillEffect<'_>,
     ) -> Result<Value, String> {
         let shared = self.shared.upgrade().ok_or("Vibe Work closed.")?;
         let session = self.session.as_str();
+        let helper_session = self.args["sessionId"]
+            .as_str()
+            .ok_or("A browser session is required")?;
+        let operation = shared
+            .chrome_control
+            .external_video
+            .operation(helper_session);
+        let _operation_guard = operation.lock().await;
         super::gateway::validate_session(&shared, session, "chrome_execute", &self.args)?;
         crate::agent_access::check_for(&shared, browser_fill::METHOD, session)?;
         if shared.store.view(session).is_none()
@@ -62,13 +80,45 @@ impl LoginWriter for ChromeLoginWriter {
         // The write is checked in Chrome under the chat's network rule like every other call (escalation::send):
         // without it, Chrome judged a sign-in page on the local network with the switch off.
         super::network::prepare(&shared, session, &mut args).await?;
-        // Only the helper's answer can be a fill receipt; the core's own failure (connection lost) is no fill.
-        let owner::Answer::Helper(result) = shared
+        #[cfg(test)]
+        if let Some(pause) = &self.pause_before_effect {
+            pause.reached.send_replace(true);
+            let mut resume = pause.resume.clone();
+            resume
+                .wait_for(|ready| *ready)
+                .await
+                .map_err(|_| "fill interrupted")?;
+        }
+        let mut permit = effect.enter().await?;
+        if self
+            .batch_grant_id
+            .as_deref()
+            .is_some_and(|id| !shared.ask_grants.contains(id))
+        {
+            return Err(crate::ask::tool_calls::REVOKED_BROWSER_GRANT.to_owned());
+        }
+        permit.dispatched();
+        // Only a confirmed helper answer can be a fill receipt; a lost answer leaves the effect unconfirmed.
+        let answer = shared
             .chrome_control
             .owner
             .call("chrome_execute", args)
-            .await
-        else {
+            .await;
+        let settled = match &answer {
+            owner::Answer::Helper(result) => {
+                result["structuredContent"]["status"] == "completed"
+                    && result["structuredContent"]["data"]["filled"] == true
+                    || result["structuredContent"]["error"]["details"]["noEffect"] == true
+            }
+            owner::Answer::Own(result) => matches!(
+                result["structuredContent"]["error"]["code"].as_str(),
+                Some("OWNER_REQUIRED" | "OWNER_CLOSED" | "BUSY")
+            ),
+        };
+        if settled {
+            permit.settled();
+        }
+        let owner::Answer::Helper(result) = answer else {
             return Err(write_failure(action).to_owned());
         };
         if result["structuredContent"]["status"] != "completed"
@@ -114,8 +164,18 @@ pub(super) async fn send(
 pub(crate) async fn prepare(
     shared: &Arc<Shared>,
     session: &str,
+    args: Value,
+    consent: Option<super::read_consent::Consent>,
+) -> Result<Execution, String> {
+    prepare_with_grant(shared, session, args, consent, None).await
+}
+
+pub(super) async fn prepare_with_grant(
+    shared: &Arc<Shared>,
+    session: &str,
     mut args: Value,
     consent: Option<super::read_consent::Consent>,
+    batch_grant_id: Option<&str>,
 ) -> Result<Execution, String> {
     let browser = super::agent_browser::selected(shared, session, "chrome_execute", &args);
     super::gateway::validate_public_args(&args, browser)?;
@@ -184,6 +244,9 @@ pub(crate) async fn prepare(
         session: session.to_owned(),
         args,
         consent,
+        batch_grant_id: batch_grant_id.map(str::to_owned),
+        #[cfg(test)]
+        pause_before_effect: None,
     };
     let current_args = writer.args.clone();
     let current_session = session.to_owned();
@@ -216,6 +279,242 @@ pub(crate) async fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PREDICT: a completed revoke must keep a paused writer out of the helper, while a helper
+    /// call already holding the effect lane must finish before revoke can report Done.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the fixture, dispatch pause and revoke ordering form one browser writer test"
+    )]
+    async fn revoked_grant_stops_chrome_edge_and_waits_for_dispatched_helper() {
+        let root = std::env::temp_dir().join(format!("chrome-fill-revoke-{}", std::process::id()));
+        let keys = browser_fill::tests::memory_keys(&root).await;
+        keys.create_vault(vw_vault::SecretString::new(
+            "chrome fill fixture passphrase",
+        ))
+        .await
+        .unwrap();
+        let site = "https://10.20.30.6:4443";
+        let login = keys
+            .store_login(
+                "Demo".into(),
+                site.into(),
+                "survey-user".into(),
+                vw_vault::SecretString::new("fixture-password-0123"),
+            )
+            .await
+            .unwrap()
+            .login;
+        let configured_keys = keys.clone();
+        let core = crate::offline_core::start_with("chrome-fill-revoke", move |config, dir| {
+            config.keys = Some(configured_keys);
+            config.chrome_control.package = Some(dir.join("chrome-package"));
+        })
+        .await;
+        let shared = &core.shared;
+        let _ = shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        shared.access.observe_request(
+            "session/agent/update",
+            "s",
+            &json!({"agentName":"auto-approve"}),
+        );
+        shared
+            .chrome_control
+            .tasks
+            .lock()
+            .unwrap()
+            .insert("t".into(), "s".into());
+        let (at_helper, helper_arrived) = std::sync::mpsc::sync_channel(1);
+        let (release_helper, helper_release) = std::sync::mpsc::sync_channel(1);
+        let revoke_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let late_writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let helper_done = revoke_done.clone();
+        let helper_late_writes = late_writes.clone();
+        let seen = super::super::test_support::answering(shared, move |name, _| {
+            if name == "chrome_execute" {
+                at_helper.send(()).unwrap();
+                helper_release
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                if helper_done.load(std::sync::atomic::Ordering::SeqCst) {
+                    helper_late_writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            json!({"structuredContent":{"operationId":"op","status":"completed","data":{"filled":true}}})
+        });
+        crate::fill_grants::grant_always(
+            shared,
+            &login.id,
+            &login.name,
+            site,
+            crate::fill_grants::now_ms(),
+        )
+        .await
+        .unwrap();
+        let decided = crate::fill_grants::now_ms();
+        let target = FillTarget {
+            reference: "frame-field".into(),
+            role: LoginRole::Password,
+            origin: site.into(),
+            host: "10.20.30.6".into(),
+            label: "password".into(),
+        };
+        let (reached, mut at_effect) = tokio::sync::watch::channel(false);
+        let (resume, release) = tokio::sync::watch::channel(false);
+        let writer = ChromeLoginWriter {
+            shared: Arc::downgrade(shared),
+            session: "s".into(),
+            consent: None,
+            batch_grant_id: None,
+            args: json!({"sessionId":"t","action":"auth.fill",
+                "args":{"ref":"frame-field","login":"Demo","tabId":7}}),
+            pause_before_effect: Some(Arc::new(WritePause {
+                reached,
+                resume: release,
+            })),
+        };
+        let active_shared = shared.clone();
+        let active_login = login.clone();
+        let active_target = target.clone();
+        let fill = tokio::spawn(async move {
+            let effect = FillEffect::new(&active_shared, &active_login.id, site, "grant", decided);
+            writer
+                .write(
+                    &active_target,
+                    &active_login,
+                    "fixture-password-0123",
+                    &effect,
+                )
+                .await
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            at_effect.wait_for(|ready| *ready),
+        )
+        .await
+        .expect("the Chrome/Edge writer reached its final effect gate")
+        .unwrap();
+        crate::secrets::execute(
+            shared,
+            crate::SecretsRequest::Revoke {
+                grant_id: vw_vault::fill_grant::id_for(&login.id, site),
+            },
+        )
+        .await
+        .unwrap();
+        resume.send_replace(true);
+        let error = fill.await.unwrap().unwrap_err();
+        assert!(error.contains("the user withdrew vault access"), "{error}");
+        let writer = ChromeLoginWriter {
+            shared: Arc::downgrade(shared),
+            session: "s".into(),
+            consent: None,
+            batch_grant_id: None,
+            args: json!({"sessionId":"t","action":"auth.basic",
+                "args":{"url":site,"login":"Demo","tabId":8}}),
+            pause_before_effect: None,
+        };
+        let effect = FillEffect::new(shared, &login.id, site, "grant", decided);
+        let error = writer
+            .write(&target, &login, "fixture-password-0123", &effect)
+            .await
+            .unwrap_err();
+        assert!(error.contains("the user withdrew vault access"), "{error}");
+        assert!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .all(|(name, _)| name != "chrome_execute"),
+            "a revoked fill reached the helper"
+        );
+        let grant_id = vw_vault::fill_grant::id_for(&login.id, site);
+        let prior = keys.fill_grant(grant_id.clone()).await.unwrap().unwrap();
+        crate::fill_grants::grant_always(
+            shared,
+            &login.id,
+            &login.name,
+            site,
+            prior.revoked_ms.saturating_add(1),
+        )
+        .await
+        .unwrap();
+        let decided = keys
+            .fill_grant(grant_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .granted_ms
+            .saturating_add(1);
+        let writer = ChromeLoginWriter {
+            shared: Arc::downgrade(shared),
+            session: "s".into(),
+            consent: None,
+            batch_grant_id: None,
+            args: json!({"sessionId":"t","action":"auth.fill",
+                "args":{"ref":"frame-field","login":"Demo","tabId":9}}),
+            pause_before_effect: None,
+        };
+        let active_shared = shared.clone();
+        let active_login = login.clone();
+        let active_target = target.clone();
+        let fill = tokio::spawn(async move {
+            let effect = FillEffect::new(&active_shared, &active_login.id, site, "grant", decided);
+            writer
+                .write(
+                    &active_target,
+                    &active_login,
+                    "fixture-password-0123",
+                    &effect,
+                )
+                .await
+        });
+        tokio::task::spawn_blocking(move || {
+            helper_arrived
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the helper received the fill before revoke");
+        })
+        .await
+        .unwrap();
+        let active_shared = shared.clone();
+        let grant_id = vw_vault::fill_grant::id_for(&login.id, site);
+        let done = revoke_done.clone();
+        let mut revoke = tokio::spawn(async move {
+            let result =
+                crate::secrets::execute(&active_shared, crate::SecretsRequest::Revoke { grant_id })
+                    .await;
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            result
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut revoke)
+                .await
+                .is_err(),
+            "revoke reported done while the helper held an admitted fill"
+        );
+        release_helper.send(()).unwrap();
+        fill.await.unwrap().unwrap();
+        revoke.await.unwrap().unwrap();
+        assert_eq!(late_writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter(|(name, _)| name == "chrome_execute")
+                .count(),
+            1,
+            "only the admitted fill reached the helper"
+        );
+        core.shutdown().await;
+        keys.shutdown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn a_basic_sign_in_without_a_new_challenge_names_possible_browser_reuse() {
@@ -255,11 +554,10 @@ mod tests {
         core.shutdown().await;
     }
 
-    /// Seen in a survey run: with the local-network switch on, every vault fill on a LAN sign-in page failed "Login
-    /// fill did not complete": the consent was given, but the write reached Chrome without the chat's network rule,
-    /// so Chrome refused it as `LOCAL_NETWORK`. PREDICT (before the change): the write carries no `_netPolicy`.
+    /// A vault fill on a LAN sign-in page reaches the helper as a plain write: every supported extension (0.1.7 and
+    /// later) admits local addresses with the browser's own site permissions, so no legacy network rule goes with it.
     #[tokio::test]
-    async fn the_fill_write_carries_the_chats_network_rule() {
+    async fn the_fill_write_reaches_a_lan_page_without_a_network_rule() {
         let core = crate::offline_core::start_with("chrome-fill-net", |config, dir| {
             config.chrome_control.package = Some(dir.join("chrome-package"));
         })
@@ -283,16 +581,17 @@ mod tests {
             .lock()
             .unwrap()
             .insert("t".into(), "s".into());
-        shared.chrome_control.set_local_network(true);
         let seen = super::super::test_support::answering(shared, |_, _| {
             json!({"isError":false,"content":[{"type":"text","text":"filled"}],
                 "structuredContent":{"operationId":"op","status":"completed","data":{"filled":true}}})
         });
-        let writer = ChromeLoginWriter {
+        let mut writer = ChromeLoginWriter {
             shared: Arc::downgrade(shared),
             session: "s".into(),
             consent: None,
+            batch_grant_id: None,
             args: json!({"sessionId":"t","action":"auth.fill","args":{"ref":"field","login":"Demo"}}),
+            pause_before_effect: None,
         };
         let target = FillTarget {
             reference: "field".into(),
@@ -312,7 +611,11 @@ mod tests {
             own: true,
             updated_ms: 0,
         };
-        writer.write(&target, &login, "survey-user").await.unwrap();
+        let effect = FillEffect::new(shared, &login.id, &target.origin, "username", 0);
+        writer
+            .write(&target, &login, "survey-user", &effect)
+            .await
+            .unwrap();
         let sent = seen
             .lock()
             .unwrap()
@@ -320,7 +623,40 @@ mod tests {
             .find(|(tool, _)| tool == "chrome_execute")
             .cloned()
             .unwrap();
-        assert_eq!(sent.1["_netPolicy"]["localNetwork"], true, "{}", sent.1);
+        assert_eq!(sent.1["action"], "auth.fill", "{}", sent.1);
+        assert!(sent.1.get("_netPolicy").is_none(), "{}", sent.1);
+        let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+            "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","action":"auth.fill","args":{"ref":"field","login":"Demo"}}},
+            "requiredPermissions":[]}});
+        shared.ask_grants.note_callback(
+            "chat-grant",
+            "s",
+            "s",
+            crate::ask::grants::scope_of(&card),
+        );
+        let grant = shared
+            .ask_grants
+            .keep(
+                shared.ask_grants.claim("chat-grant").unwrap(),
+                vw_ask::AnsweredBy::Person,
+                1,
+            )
+            .unwrap();
+        writer.batch_grant_id = Some(grant.id.clone());
+        assert!(shared.ask_grants.remove(&grant.id));
+        let refusal = writer
+            .write(&target, &login, "survey-user", &effect)
+            .await
+            .unwrap_err();
+        assert_eq!(refusal, crate::ask::tool_calls::REVOKED_BROWSER_GRANT);
+        assert_eq!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter(|(tool, _)| tool == "chrome_execute")
+                .count(),
+            1
+        );
         core.shutdown().await;
     }
 }

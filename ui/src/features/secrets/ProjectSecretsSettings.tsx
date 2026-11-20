@@ -202,6 +202,11 @@ export function ProjectSecretsSettings() {
           {TEXT.agentPausedNotice}
         </p>
       )}
+      {list?.projectNote !== undefined && (
+        <p className="key-line" role="status">
+          {list.projectNote}
+        </p>
+      )}
       <div className="vault-entry-list" aria-label="Entries">
         {showModel && (
           <MistralKeyRow

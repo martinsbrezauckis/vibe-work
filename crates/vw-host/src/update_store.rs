@@ -44,13 +44,7 @@ pub struct UpdateStore {
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    Sha256::digest(bytes)
-        .iter()
-        .fold(String::with_capacity(64), |mut out, byte| {
-            let _ = write!(out, "{byte:02x}");
-            out
-        })
+    hex::encode(Sha256::digest(bytes))
 }
 
 impl UpdateStore {

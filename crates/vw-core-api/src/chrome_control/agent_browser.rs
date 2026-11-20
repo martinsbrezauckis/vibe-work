@@ -116,6 +116,7 @@ impl Browser {
                 },
             )
             .replace("{browser}", self.short_name())
+            .replace("{article}", if self == Self::Edge { "an" } else { "a" })
             .replace("{yourBrowser}", self.name())
     }
     /// `text` with vocabulary setup texts worded for this browser; other text is unchanged

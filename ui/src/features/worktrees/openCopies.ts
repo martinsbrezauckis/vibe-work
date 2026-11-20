@@ -5,15 +5,16 @@
  */
 import type { App } from "../shell/AppContext";
 import { goHome } from "../shell/home";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 /** Opens and focuses the copies list after refreshing its count. */
 export async function openCopies(app: App): Promise<void> {
   goHome(app);
   app.shell.actions.selectSession(null);
   await app.worktrees?.loadOrphans();
-  requestAnimationFrame(() => {
-    const list = document.querySelector<HTMLElement>('[data-worktree="orphans"]');
-    list?.scrollIntoView({ block: "center" });
-    list?.focus({ preventScroll: true });
+  focusWhenMounted({
+    find: () => document.querySelector<HTMLElement>('[data-worktree="orphans"]'),
+    center: true,
+    preventScroll: true,
   });
 }

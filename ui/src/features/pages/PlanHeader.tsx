@@ -76,7 +76,8 @@ export function PlanHeader({
           <Button
             data-testid="pages.plan-header-ask-update"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={() => {
               askUpdate(mismatch);
             }}

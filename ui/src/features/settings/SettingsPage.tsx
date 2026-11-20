@@ -12,7 +12,7 @@
  * menu or an open inline form; Ctrl F focuses
  * the search inside Settings.
  */
-import { type ReactElement, useEffect, useRef } from "react";
+import { type ReactElement, Suspense, lazy, useEffect, useRef } from "react";
 import { announce } from "../../state/announcer";
 import { openHit } from "./openHit";
 import { useSettingsDescriptions } from "./useSettingsDescriptions";
@@ -37,6 +37,7 @@ import { AccessibilitySettings } from "./AccessibilitySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CliSharingSettings } from "./CliSharingSettings";
 import { KeepAwakeSettings } from "./KeepAwakeSettings";
+import { KeyboardShortcutsSetting } from "./KeyboardShortcutsSetting";
 import { SendToSettings } from "./SendToSettings";
 import { CopiesSettings } from "./CopiesSettings";
 import { ImportSettings } from "./ImportSettings";
@@ -44,7 +45,6 @@ import { GitSettings } from "./GitSettings";
 import { DeveloperSettings } from "./DeveloperSettings";
 import { ErrorDetailSetting } from "./ErrorDetailSetting";
 import { InstructionsSettings } from "./InstructionsSettings";
-import { KnowledgeSettings } from "./KnowledgeSettings";
 import { MistralLinks } from "./MistralLinkRows";
 import { NetworkSettings } from "./NetworkSettings";
 import { PrivacySettings } from "./PrivacySettings";
@@ -62,6 +62,11 @@ import { useOfferedCategories } from "./availability";
 import { chromeAvailable } from "./chrome/chromeRows";
 import { searchSettings } from "./catalog";
 
+// Loaded when the category opens: its forms and the connector picker stay out of the window's first paint.
+const KnowledgeSettings = lazy(() =>
+  import("./KnowledgeSettings").then((m) => ({ default: m.KnowledgeSettings })),
+);
+
 /** The sections each category shows, in order. */
 function sections(category: string): ReactElement {
   switch (category) {
@@ -71,6 +76,7 @@ function sections(category: string): ReactElement {
           <CliSharingSettings />
           <ErrorDetailSetting />
           <SaveBeforeSendSetting />
+          <KeyboardShortcutsSetting />
           <KeepAwakeSettings />
           <SendToSettings />
           {/* The two Git cards stay together: author details, then session copies. */}
@@ -136,7 +142,11 @@ function sections(category: string): ReactElement {
         </>
       );
     case "knowledge":
-      return <KnowledgeSettings />;
+      return (
+        <Suspense fallback={null}>
+          <KnowledgeSettings />
+        </Suspense>
+      );
     case "voice":
       return <VoiceSettings />;
     case "notifications":

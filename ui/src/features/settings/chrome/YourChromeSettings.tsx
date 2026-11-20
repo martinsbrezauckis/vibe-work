@@ -109,7 +109,7 @@ export function YourChromeSettings({
       ) : null}
       {(setUp || firefox) && !removeRequired ? (
         <SettingsRow data-setting={`${prefix}-control-remove`}>
-          <span>Remove from Vibe Work</span>
+          <p>Remove from Vibe Work</p>
           <Button
             data-testid={`settings.${prefix}-remove-open`}
             aria-label={`Remove ${browserTitle(browser)} from Vibe Work`}

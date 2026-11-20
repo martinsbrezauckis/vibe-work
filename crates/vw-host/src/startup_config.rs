@@ -1,9 +1,11 @@
 //! Vibe Work's startup fixes to its own `VIBE_HOME/config.toml`, applied as one all-or-nothing write.
 //!
-//! The steps edit the text in memory, in launch order: the Large 4 entry ([`crate::default_model`], product launch
-//! only), extension paths ([`crate::extension_paths`]), the session-title model ([`crate::title_model`]), the commit
-//! credit line ([`crate::commit_signature`]), the system trust store ([`crate::trust_store`]) and the experiment pins
-//! ([`crate::experiment_pins`]). Each step sees the text the steps before it produced, so the result equals running
+//! The steps edit the text in memory, in launch order: the experiment and catalog defaults
+//! ([`crate::experiment_pins`]), the Large 4 offline fallback and catalog cleanup
+//! ([`crate::default_model`]; catalog-off product launch or first catalog-on launch in either mode),
+//! extension paths ([`crate::extension_paths`]), the session-title model ([`crate::title_model`]), the commit
+//! credit line ([`crate::commit_signature`]) and the system trust store ([`crate::trust_store`]).
+//! Each step sees the text the steps before it produced, so the result equals running
 //! them one after another on the file.
 //!
 //! The file is read once and written at most once ([`Draft`]):
@@ -220,7 +222,7 @@ fn write_config(path: &Path, bytes: &[u8], replace: bool) -> io::Result<()> {
     }
 }
 
-/// The product launch's startup fixes, Large 4 entry first; each outcome is logged.
+/// The product launch's startup fixes, catalog policy before model cleanup; each outcome is logged.
 ///
 /// # Errors
 /// The I/O error when the config cannot be read, or when the Large 4 entry's own change could not be written. A
@@ -251,11 +253,27 @@ pub(crate) fn prepare(
             return Ok(());
         }
     };
-    let model =
-        product.then(|| draft.apply(crate::default_model::edit, |_| ModelDefaults::Unchanged));
+    let pins = crate::experiment_pins::stage(&mut draft, vibe_home);
+    let catalog_on = draft
+        .text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|config| config.get("experimental_enable_model_catalog")?.as_bool())
+        == Some(true);
+    let model = (if catalog_on {
+        pins.catalog_first_launch()
+    } else {
+        product
+    })
+    .then(|| draft.apply(crate::default_model::edit, |_| ModelDefaults::Unchanged));
     let paths = draft.apply(|text, _| crate::extension_paths::edit(text), Err);
+    // An unreadable marker skips only the one-time replacement; the step still adds a missing title model.
+    let title_pending = crate::title_model::migration_pending(vibe_home).unwrap_or_else(|error| {
+        tracing::warn!(%error, "session titles: migration marker could not be checked");
+        false
+    });
     let title = draft.apply(
-        |text, _| crate::title_model::edit(text),
+        |text, _| crate::title_model::edit(text, title_pending),
         TitleModel::Skipped,
     );
     let signature = draft.apply(
@@ -266,10 +284,16 @@ pub(crate) fn prepare(
         |text, _| crate::trust_store::edit(text),
         TrustStore::Skipped,
     );
-    let pins = crate::experiment_pins::stage(&mut draft, vibe_home);
     let written = draft.commit_with(write);
     crate::extension_paths::log(written.settle(paths, Err).and_then(|outcome| outcome));
-    crate::startup_config_log::title_model(written.settle(title, TitleModel::Skipped));
+    let title = written.settle(title, TitleModel::Skipped);
+    if let Ok(outcome) = &title
+        && let Err(error) =
+            crate::title_model::finish(vibe_home, title_pending, outcome, written.landed())
+    {
+        tracing::warn!(%error, "session titles: migration marker could not be written");
+    }
+    crate::startup_config_log::title_model(title);
     crate::startup_config_log::commit_signature(
         written.settle(signature, CommitSignature::Skipped),
     );

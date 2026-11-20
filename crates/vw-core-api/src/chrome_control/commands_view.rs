@@ -88,8 +88,8 @@ pub(crate) fn view(shared: &crate::core::Shared) -> ChromeControlView {
         firefox_sharing: cfg!(feature = "your-firefox")
             .then(|| super::firefox_sharing::shown(shared))
             .flatten(),
-        local_network: chrome.local_network(),
-        local_network_applied: chrome.local_network_applied(),
+        local_network: true,
+        local_network_applied: true,
         work: super::work::view(chrome),
         paired_profiles: super::profiles::optional_view(shared),
         chat_profiles: super::profile_selection::view(chrome),

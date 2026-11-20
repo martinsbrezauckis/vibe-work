@@ -65,7 +65,7 @@ async fn upgraded(name: &str, scoped: bool) -> crate::Core {
         if tool == "chrome_session" {
             json!({"structuredContent":{"sessionId":"task","profileId":profile,"state":"active"}})
         } else {
-            json!({"structuredContent":{"status":"completed","requestId":"context","data":{"title":"Saved tab","text":"Context","url":"https://8.8.8.8/"}}})
+            json!({"structuredContent":{"status":"completed","requestId":"context","data":{"title":"Saved tab","text":"Context","url":"https://8.8.8.8/"},"agentData":{"title":"Saved tab","text":"Context","url":"https://8.8.8.8/"}}})
         }
     });
     owner::update_pairing(&Arc::downgrade(shared), &status);

@@ -22,6 +22,7 @@ const SOURCES: Readonly<Record<string, string>> = {
   builtin: "Built-in",
   user: "Yours",
   project: term("workNames", "projectTab").name,
+  session: TEXT.thisSession,
   plugin: "Plugin",
   catalog: "Catalog",
 };

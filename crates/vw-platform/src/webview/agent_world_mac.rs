@@ -306,6 +306,13 @@ pub fn remove_agent_initializer(webview: *mut c_void, source: &str) -> Result<()
     Ok(())
 }
 
+/// Whether `webview`'s installed agent world reads closed shadow roots as open (`None`: no world installed).
+#[must_use]
+pub fn world_opens_closed_roots(webview: *mut c_void) -> Option<bool> {
+    let key = webview as usize;
+    WORLDS.with(|w| w.borrow().get(&key).map(|i| i.facts.closed_shadow_roots()))
+}
+
 /// Forgets a closed webview's world (`WebKit` releases the scripts with the webview).
 pub fn forget_agent_world(webview: *mut c_void) {
     WORLDS.with(|w| w.borrow_mut().remove(&(webview as usize)));

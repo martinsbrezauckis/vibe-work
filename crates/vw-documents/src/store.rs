@@ -14,7 +14,6 @@
 //! (a document whose text would pass the budget is not kept); a file over [`MAX_FILE_BYTES`] is refused before it is
 //! read in full; ids are random.
 
-use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -184,10 +183,7 @@ fn new_id() -> String {
             .unwrap_or(0)
             .to_le_bytes();
     }
-    buf.iter().fold(String::from("doc-"), |mut id, b| {
-        let _ = write!(id, "{b:02x}");
-        id
-    })
+    format!("doc-{}", hex::encode(buf))
 }
 
 fn file_name(path: &Path) -> String {
@@ -355,7 +351,7 @@ impl DocumentStore {
                 Ok(path.clone())
             } else {
                 Err(StoreError::Wrong(
-                    "This attachment belongs to a different session.",
+                    "This attachment belongs to a different chat.",
                 ))
             };
         }

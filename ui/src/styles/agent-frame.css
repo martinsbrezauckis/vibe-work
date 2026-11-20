@@ -16,6 +16,18 @@
   padding: 0;
   border: 0;
 }
+/* Reserved while the Browser panel shows the chat: the same outer height as a shown line (its margins, padding and
+   border around one 30 px control row), empty and invisible, so the native page keeps its place before, during and
+   after every turn. The native page cannot be overlaid, so the line's space is reserved instead. */
+.agent-frame-line[data-state="off"][data-reserved] {
+  visibility: hidden;
+  margin: 4px auto;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  /* border box: one 30 px control row + 8 px padding + 2 px border */
+  min-height: calc(var(--control-height-small) + 10px);
+}
 .agent-frame-line {
   align-self: center;
   display: inline-flex;

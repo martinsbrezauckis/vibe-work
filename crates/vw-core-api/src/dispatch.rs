@@ -73,7 +73,11 @@ impl Core {
             Err(error) => Err(error),
         }
         .map_err(|error| self.not_installed_reason(error));
-        crate::stops::finished(&self.shared, &stopping);
+        crate::stops::finished(
+            &self.shared,
+            &stopping,
+            crate::stops::took(&result, &stopping),
+        );
         if let Err(error) = &result {
             self.note_failure(origin, name, error);
         }
@@ -275,6 +279,9 @@ impl Core {
             Command::Knowledge { request } => self.knowledge(request).await,
             Command::NewChat { request } => self.new_chat(origin, request).await,
             Command::SecretScan { request } => self.secret_scan(request).await,
+            Command::DeveloperPermissions { enabled } => {
+                self.developer_permissions(origin, enabled).await
+            }
             Command::ListSessions {
                 limit,
                 cursor,

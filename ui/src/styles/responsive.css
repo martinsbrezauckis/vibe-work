@@ -1,10 +1,11 @@
 /*
- * Narrow-window rules: the side panel and the session list become overlay drawers (<= 899 px), the
+ * Narrow-window rules: the session list becomes an overlay drawer (<= 899 px) and so does the side panel when the
+ * chat and the panel do not both fit beside each other (< 796 px), the
  * rail and long title-bar labels drop away (<= 640 px). The toast fallback lives in the
  * existing status bar, so drawers keep the same bounds while feedback appears.
  * Container width follows remembered text zoom as well as window resizing.
  */
-/* Narrow windows: the panel is an overlay drawer and the list hides; phones also lose the rail. */
+/* Narrow windows: the list hides and the panel is an overlay drawer unless it docks (below); phones also lose the rail. */
 @container window (max-width: 899px) {
   .body,
   .body.has-panel,
@@ -27,6 +28,18 @@
   }
   .column {
     visibility: hidden;
+  }
+  /* Room for the chat's minimum beside the panel (computeLayout's DOCK_MIN, 796 px): the panel takes its own track
+     and the chat column narrows with it, so a page lays out in what the person sees instead of running on under an
+     overlay. `--pw` is already clamped to leave the chat 380 px. */
+  .body.has-panel.panel-docked,
+  .body.no-col.has-panel.panel-docked {
+    grid-template-columns: 56px 0 minmax(0, 1fr) var(--pw);
+  }
+  .body.has-panel.panel-docked .panel {
+    position: relative;
+    width: auto;
+    box-shadow: none;
   }
 }
 @container window (max-width: 640px) {

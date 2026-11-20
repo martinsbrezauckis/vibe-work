@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "vw",
-  "version": "0.1.14",
-  "description": "Vibe Work's built-in plugin: how the agent uses the app's session tools.",
+  "version": "0.1.15",
+  "description": "Vibe Work's built-in plugin: how the agent uses the app's chat tools.",
   "extensions": {
     "ai.mistral.vibe": {
       "schemaVersion": 1,

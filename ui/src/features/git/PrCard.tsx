@@ -77,7 +77,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
           <Button
             data-testid="git.pr-card-open"
             type="button"
-            appearance="key-link"
+            appearance="link"
             title={host(view.openUrl)}
             onClick={() => {
               open(view.openUrl);
@@ -97,7 +97,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
         <Button
           data-testid="git.pr-card-open-2"
           type="button"
-          appearance="key-link"
+          appearance="link"
           placement="pr-title"
           title={host(card.url)}
           onClick={() => {
@@ -154,7 +154,7 @@ export function PrCard({ git, sessionId }: { git: Git; sessionId: string }): Rea
                 <Button
                   data-testid="git.pr-card-open-3"
                   type="button"
-                  appearance="key-link"
+                  appearance="link"
                   title={host(item.url)}
                   onClick={() => {
                     open(item.url);

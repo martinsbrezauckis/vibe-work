@@ -54,8 +54,12 @@ impl GuardContext {
                 let (tell, open) = watch::channel(None);
                 pending.insert(site.to_owned(), open.clone());
                 let confirmation = question(shared, site, session, request);
-                let (shared, pending, site) =
-                    (shared.clone(), self.pending.clone(), site.to_owned());
+                let (shared, pending, site, session) = (
+                    shared.clone(),
+                    self.pending.clone(),
+                    site.to_owned(),
+                    session.to_owned(),
+                );
                 tokio::spawn(async move {
                     let given =
                         tokio::time::timeout(ASK_WAIT, shared.confirmer.confirm(&confirmation))
@@ -76,6 +80,9 @@ impl GuardContext {
                         // An open Settings > Browser list reads the answers again, as after a change made there.
                         shared.emit(crate::event::CoreEvent::BrowserChanged { session_id: None });
                     }
+                    if given.is_none() {
+                        timed_out(&shared, &site, &session);
+                    }
                     pending.lock_or_recover().remove(&site);
                     tell.send_replace(Some(given));
                 });
@@ -91,6 +98,23 @@ impl GuardContext {
         .ok()
         .and_then(|given| (*given).flatten())
     }
+}
+
+/// A bounded native question ended with no answer. Keep the site visible in Settings and tell the chat once for
+/// this question, even when a page's no-cors fetch would otherwise make the refusal look like an opaque response.
+fn timed_out(shared: &Shared, site: &str, session: &str) {
+    let Some(hub) = &shared.preview else { return };
+    if hub.service.note_timed_out(site, session).is_empty() {
+        return;
+    }
+    shared.emit(crate::event::CoreEvent::BrowserChanged { session_id: None });
+    shared.emit(crate::event::CoreEvent::Alert {
+        session_id: Some(session.to_owned()),
+        kind: crate::event::AlertKind::LocalNetworkUnanswered,
+        message: format!(
+            "A request from {site} to your local network was refused because the question was not answered."
+        ),
+    });
 }
 
 /// The native question for `site` (plain words, behaviour only).
@@ -111,10 +135,17 @@ fn question(
         method: LOCAL_NETWORK_DIALOG_METHOD.to_owned(),
         summary: format!(
             "{} wants to look for and connect to apps and devices on this computer or your local network (it asked \
-             for {place}, port {}).\n\nAllow it only if you trust this site. Vibe Work remembers your answer for this \
-             site.\n\nChat: {}",
+             for {place}, port {}).\n\n{}Allow it only if you trust this site. Vibe Work remembers your answer for \
+             this site.\n\nChat: {}",
             vw_gate::dialog_quote(site),
             request.port,
+            // A request known to speak TLS (`LocalRequest::tls`) to a plain-HTTP local server fails even after Allow: said before
+            // the answer.
+            if request.tls {
+                format!("{}\n\n", vw_vocabulary::texts::LOCAL_NETWORK_HTTPS)
+            } else {
+                String::new()
+            },
             vw_gate::dialog_chat_quote(&shared.names.confirmation_title(&shared.store, session)),
         ),
         params: serde_json::json!({ "sessionId": session, "site": site }),
@@ -124,6 +155,24 @@ fn question(
     }
 }
 impl PageContext for GuardContext {
+    fn refused(&self, key: Option<&str>, host: &str, port: u16, reason: &str) {
+        if let Some(key) = key
+            && let Some(shared) = self.shared.upgrade()
+            && let Some(hub) = &shared.preview
+        {
+            hub.service.note_request_refused(key, host, port, reason);
+        }
+    }
+
+    fn refused_unattributed(&self, keys: &[String], host: &str, port: u16, reason: &str) {
+        if let Some(shared) = self.shared.upgrade()
+            && let Some(hub) = &shared.preview
+        {
+            hub.service
+                .note_unattributed_refusal(keys, host, port, reason);
+        }
+    }
+
     fn connected(&self, key: &str, host: &str, port: u16, addresses: &[std::net::SocketAddr]) {
         if let Some(shared) = self.shared.upgrade()
             && let Some(hub) = &shared.preview
@@ -168,6 +217,10 @@ impl PageContext for GuardContext {
                 match hub.service.local_access(keys, request) {
                     LocalVerdict::Allow => return Ok(()),
                     LocalVerdict::Refuse(reason) => return Err(reason),
+                    LocalVerdict::Unanswered { reason, sites } => {
+                        unanswered(&shared, &sites);
+                        return Err(reason);
+                    }
                     LocalVerdict::Ask { site, session } => {
                         if self.ask(&shared, &site, &session, request).await.is_none() {
                             return Err(format!(
@@ -179,6 +232,35 @@ impl PageContext for GuardContext {
             }
             Err(closed())
         })
+    }
+}
+
+/// Lists the undecided candidates of an unattributed request for the person (Settings > Browser) and tells each chat
+/// once per new candidate set (the bell): nothing is guessed and no site is allowed by default.
+fn unanswered(shared: &Arc<Shared>, sites: &[(String, String)]) {
+    let Some(hub) = &shared.preview else {
+        return;
+    };
+    let new = hub.service.note_unanswered(sites);
+    if new.is_empty() {
+        return;
+    }
+    shared.emit(crate::event::CoreEvent::BrowserChanged { session_id: None });
+    let mut chats: Vec<&str> = new.iter().map(|(_, chat)| chat.as_str()).collect();
+    chats.sort_unstable();
+    chats.dedup();
+    for chat in chats {
+        let names: Vec<&str> = new
+            .iter()
+            .filter(|(_, c)| c == chat)
+            .map(|(site, _)| site.as_str())
+            .collect();
+        shared.emit(crate::event::CoreEvent::Alert {
+            session_id: Some(chat.to_owned()),
+            kind: crate::event::AlertKind::LocalNetworkUnanswered,
+            message: vw_vocabulary::texts::LOCAL_NETWORK_UNANSWERED
+                .replace("{sites}", &names.join(", ")),
+        });
     }
 }
 
@@ -215,6 +297,17 @@ pub(crate) async fn sites(
             .site_answers()
             .into_iter()
             .map(|(site, answer)| crate::browser_view::LocalNetworkSite { site, answer })
+            .collect(),
+        unanswered: service
+            .waiting_sites()
+            .into_iter()
+            .map(
+                |(site, session_id, asked)| crate::browser_view::UnansweredSite {
+                    site,
+                    session_id,
+                    asked,
+                },
+            )
             .collect(),
     })
 }
@@ -329,3 +422,7 @@ pub(crate) fn refresh_network_guard(shared: &Shared) {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "browser_guard_tests.rs"]
+mod tests;

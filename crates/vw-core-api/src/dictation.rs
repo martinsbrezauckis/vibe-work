@@ -131,7 +131,6 @@ pub(crate) struct Dictations {
 }
 
 fn random_id() -> String {
-    use std::fmt::Write as _;
     let mut buf = [0_u8; 16];
     // Ids are not a permission (either origin may act on any stream); without an OS random source the time keeps
     // them unique.
@@ -141,10 +140,7 @@ fn random_id() -> String {
             .map_or(0, |d| d.as_nanos());
         buf = nanos.to_le_bytes();
     }
-    buf.iter().fold(String::from("dict-"), |mut id, b| {
-        let _ = write!(id, "{b:02x}");
-        id
-    })
+    format!("dict-{}", hex::encode(buf))
 }
 
 impl Dictations {

@@ -1,12 +1,13 @@
 /**
  * Unlocks the selected vault with one password. During first run `choice` is the user's explicit
  * choice; later the persisted core selection supplies the kind and cannot be switched here.
- * Depends on: AppContext, useKeys, fields. Called by: SetupScreen, VaultStartStep.
+ * Depends on: AppContext, useKeys, fields, ForgotPassword. Called by: SetupScreen, VaultStartStep.
  * Invariants: the password is cleared on submit. First selection offers the unlock policy; later unlocks keep it.
  */
 import { Button } from "../../components/Controls";
 import { useRef, useState } from "react";
 
+import { ForgotPassword } from "./ForgotPassword";
 import { VaultUnlockChoice } from "./VaultUnlockChoice";
 import type { VaultChoice, VaultUnlockMethod } from "../../protocol/core";
 import { vaultName } from "../../state/keyText";
@@ -69,11 +70,12 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         />
       )}
       <Problem text={problem?.text ?? null} />
+      <ForgotPassword />
       <div className="key-actions">
         <Button
           data-testid="setup.unlock-step-btn-primary"
           type="submit"
-          appearance="dialog"
+          variant="primary"
           disabled={busy}
         >
           {busy ? "Unlocking…" : "Unlock"}

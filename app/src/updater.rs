@@ -2,7 +2,10 @@
 //! accepted update channel (`vw_host::updates::channel`: pubkey, https or test-only loopback endpoints,
 //! `requireSignedVersion`), and hands the plugin to the host's update flow (`vw_host::update_flow`), which owns
 //! the policy: notify, download, then ask. This file is the Tauri side only:
-//! - [`PluginBackend`]: check / download / install with the plugin's `Update`;
+//! - [`PluginBackend`]: check / download / install with the plugin's `Update`; the package address the
+//!   announcement names and every redirect hop of an updater request must be one of the channel's package origins
+//!   (`vw_host::update_origin`) before the request is sent, otherwise nothing is requested and the download fails
+//!   with the plain refusal;
 //! - [`AppHooks`]: the OS notification and the relaunch after an install (core shut down first);
 //! - Windows: the installer copies earlier updates left in the temp folder are removed a while after start;
 //! - [`UpdatesHandle`]: the manager as Tauri state for the commands;
@@ -30,14 +33,20 @@ use vw_host::update_flow::{
     BoxFuture, InstallMode, Offer, Progress, UpdateBackend, UpdateConfig, UpdateHooks,
     UpdateManager, UpdateNotice,
 };
+use vw_host::update_origin::{OriginRefused, PackageOrigins, REFUSED, is_refusal};
 use vw_host::updates::{UpdatesOff, channel};
 use vw_platform::{NotificationRequest, Notifier};
 
+#[cfg(test)]
+mod origin_tests;
 #[cfg(test)]
 mod selection_tests;
 
 /// How long after start the check runs (the window and Vibe come first).
 const CHECK_DELAY: Duration = Duration::from_secs(15);
+
+/// Most redirect hops an updater request follows (reqwest's own default).
+const MAX_REDIRECTS: usize = 10;
 
 /// The run's Vibe installer (set by the startup when it builds the product launch), for the Vibe update check that
 /// runs with every app update check. Empty in development builds (they start their own server).
@@ -52,6 +61,27 @@ impl UpdatesHandle {
     /// The manager, when this build has an update channel and the app has started.
     pub fn get(&self) -> Option<&UpdateManager> {
         self.0.get()
+    }
+}
+
+/// Why this build makes no update check although it carries an update channel: the channel was refused
+/// (`vw_host::updates::UpdatesOff::Invalid`). `None` for a build without a channel (development builds) and for an
+/// accepted one. Settings shows it after "Update checks are off: ", so a refused channel is never silent.
+#[derive(Default)]
+pub struct UpdatesRefused(pub Option<String>);
+
+/// [`UpdatesRefused`] for the build's `plugins.updater` value.
+#[must_use]
+pub fn refusal(updater: Option<&serde_json::Value>) -> UpdatesRefused {
+    match channel(updater) {
+        // The release-server rule in the person's words; the log keeps the rule's own line.
+        Err(UpdatesOff::Invalid(reason)) if reason == vw_host::updates::ENDPOINT_NOT_RELEASE => {
+            UpdatesRefused(Some(
+                "this copy's update address is not Vibe Work's release server".to_owned(),
+            ))
+        }
+        Err(error @ UpdatesOff::Invalid(_)) => UpdatesRefused(Some(error.to_string())),
+        Ok(_) | Err(UpdatesOff::NotConfigured) => UpdatesRefused(None),
     }
 }
 
@@ -108,6 +138,9 @@ pub fn start<R: Runtime>(
         Arc::new(PluginBackend {
             app: app.clone(),
             cached: Arc::new(Mutex::new(None)),
+            origins: Arc::new(PackageOrigins::for_channel(
+                app.config().plugins.0.get("updater"),
+            )),
         }),
         Arc::new(AppHooks { app: app.clone() }),
     );
@@ -191,6 +224,8 @@ fn attach_vibe_check<R: Runtime>(app: &AppHandle<R>, manager: &UpdateManager) {
 struct PluginBackend<R: Runtime> {
     app: AppHandle<R>,
     cached: Arc<Mutex<Option<Update>>>,
+    /// Where this channel's updater requests may go (the release hosts, or a test channel's own loopback origin).
+    origins: Arc<PackageOrigins>,
 }
 
 fn matches_offer(update: &Update, offer: &Offer) -> bool {
@@ -316,14 +351,51 @@ fn os_too_old(update: &Update) -> Result<Option<vw_host::update_os::OsTooOld>, S
     Ok(found)
 }
 
+/// The redirect policy of every updater request: a hop outside `origins` ends the request with [`OriginRefused`]
+/// before that hop is requested; at most [`MAX_REDIRECTS`] hops.
+fn redirect_policy(origins: Arc<PackageOrigins>) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if !origins.allows(attempt.url()) {
+            tracing::warn!(
+                host = attempt.url().host_str().unwrap_or_default(),
+                "update: a redirect outside the release hosts was refused; it was not requested"
+            );
+            attempt.error(OriginRefused)
+        } else if attempt.previous().len() > MAX_REDIRECTS {
+            attempt.error("too many redirects")
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
+/// A plugin failure in plain words: a refused address is [`REFUSED`], anything else the plugin's own text.
+fn plain(error: &tauri_plugin_updater::Error) -> String {
+    if is_refusal(error) {
+        REFUSED.to_owned()
+    } else {
+        error.to_string()
+    }
+}
+
 /// The updater, with the core shut down before a Windows installer takes the process (the plugin runs
-/// `on_before_exit` only there; on Linux and macOS the flow's `restart` hook does the shutdown).
-fn build_updater<R: Runtime>(app: &AppHandle<R>) -> Result<tauri_plugin_updater::Updater, String> {
+/// `on_before_exit` only there; on Linux and macOS the flow's `restart` hook does the shutdown). Its client follows
+/// redirects only inside `origins` (the plugin builds the client for the check and again for the download from
+/// this configuration; the `Update` a check returns keeps it).
+fn build_updater<R: Runtime>(
+    app: &AppHandle<R>,
+    origins: &Arc<PackageOrigins>,
+) -> Result<tauri_plugin_updater::Updater, String> {
     let exit_app = app.clone();
+    let origins = origins.clone();
     app.updater_builder()
         // The proxy and certificates saved in Settings > Network (the same reqwest as vw-mistral's, one version in the
         // lock file); with none saved the plugin keeps the system proxy settings it was built with.
-        .configure_client(|builder| vw_mistral::network::current().apply(builder))
+        .configure_client(move |builder| {
+            vw_mistral::network::current()
+                .apply(builder)
+                .redirect(redirect_policy(origins.clone()))
+        })
         .on_before_exit(move || {
             shut_down_core(&exit_app);
             exit_app.cleanup_before_exit();
@@ -345,11 +417,12 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
     fn check(&self) -> BoxFuture<Result<Option<Offer>, String>> {
         let app = self.app.clone();
         let cached = self.cached.clone();
+        let origins = self.origins.clone();
         Box::pin(async move {
-            let found = build_updater(&app)?
+            let found = build_updater(&app, &origins)?
                 .check()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| plain(&e))?;
             let offer = found.as_ref().map(offer_of).transpose()?;
             *cached.lock().unwrap_or_else(PoisonError::into_inner) = found;
             Ok(offer)
@@ -358,6 +431,7 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
 
     fn download(&self, offer: Offer, progress: Progress) -> BoxFuture<Result<Vec<u8>, String>> {
         let cached = self.cached.clone();
+        let origins = self.origins.clone();
         Box::pin(async move {
             let update = cached
                 .lock()
@@ -365,6 +439,15 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
                 .clone()
                 .filter(|update| matches_offer(update, &offer))
                 .ok_or("the update server's announcement changed; check again")?;
+            // The announcement is not signed as a whole: its package address is checked before any request.
+            if !origins.allows(&update.download_url) {
+                tracing::warn!(
+                    host = update.download_url.host_str().unwrap_or_default(),
+                    scheme = update.download_url.scheme(),
+                    "update: the package address is outside the release hosts; nothing was requested"
+                );
+                return Err(REFUSED.to_owned());
+            }
             let received = Mutex::new(0_u64);
             update
                 .download(
@@ -376,13 +459,14 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
                     || {},
                 )
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| plain(&e))
         })
     }
 
     fn install(&self, offer: Offer, package: Vec<u8>) -> BoxFuture<Result<(), String>> {
         let app = self.app.clone();
         let cached = self.cached.clone();
+        let origins = self.origins.clone();
         Box::pin(async move {
             // After a restart the plugin's `Update` is gone: ask the server again and require the same
             // announcement (the package on disk was verified for exactly this version and signature).
@@ -393,10 +477,10 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
                 .filter(|update| matches_offer(update, &offer));
             let update = match held {
                 Some(update) => update,
-                None => build_updater(&app)?
+                None => build_updater(&app, &origins)?
                     .check()
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| plain(&e))?
                     .filter(|update| matches_offer(update, &offer))
                     .ok_or("the update server no longer offers this version; check again")?,
             };

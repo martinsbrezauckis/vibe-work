@@ -1,6 +1,6 @@
 //! `preview_screenshot` returns App preview pixels only through the built-in browser's protected-value admission:
-//! below Full access a page that shows a password, PIN or card value is refused with the same text as every other
-//! visual capture; Full access still receives the image. Uses an offline core and a windowless engine whose page
+//! a page that shows a password, PIN or card value is refused in every access mode with the same text as every other
+//! visual capture. Uses an offline core and a windowless engine whose page
 //! script answers stand in for the shared privateField rule (its own behaviour is covered by vw-browser's
 //! protected capture tests on real pixels).
 //!
@@ -161,7 +161,7 @@ async fn app_preview_screenshot_below_full_access_is_refused_while_a_protected_v
 }
 
 #[tokio::test]
-async fn app_preview_screenshot_in_full_access_returns_the_image() {
+async fn app_preview_screenshot_in_full_access_withholds_a_shown_value() {
     let engine = Arc::new(Engine::default());
     let core = core("preview-shot-full", engine.clone()).await;
     core.shared
@@ -169,8 +169,10 @@ async fn app_preview_screenshot_in_full_access_returns_the_image() {
         .observe_runtime(CHAT, &json!({"activeAgent":{"name":"auto-approve"}}));
 
     engine.shown.store(true, Ordering::SeqCst);
-    let answer = screenshot(&core).await.unwrap();
-    assert!(answer[wire::IMAGE_KEY]["data"].is_string(), "{answer}");
+    assert_eq!(
+        screenshot(&core).await.unwrap_err(),
+        vw_browser::protected_shown()
+    );
 
     core.shutdown().await;
 }

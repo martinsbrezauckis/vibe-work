@@ -1,18 +1,20 @@
-//! The user's own Push: the network operation initiated by the user. The core asks the
-//! native confirmation (naming the remote, its address and the branch) before it calls [`push`].
+//! User Push and app-mediated agent push. The core confirms the destination according to the caller's policy
+//! before executing the bound plan. User Push uses [`push`]; agent pushes use [`push_local_branch`].
 //!
 //! Credentials are the user's own: the runner's `Publish` profile keeps the system and global config
 //! (credential helpers, `core.sshCommand`, Git Credential Manager, osxkeychain) and the ssh agent; the
 //! repository's own config may not name any program for it ([`crate::programs::check`] with `Publish`), and
 //! `--receive-pack` is pinned so a repository cannot pick the program a local or file remote runs. We never
-//! store a token. Hooks do not run (no `pre-push`, so Git LFS objects are not uploaded: [`uses_lfs`] lets the
-//! dialog say so first). Never a force push.
+//! store a token. Client hooks do not run, so Git LFS objects are not uploaded. Agent local receivers also use
+//! a credential-free runner, checked repository config and a fixed receiver with hooks disabled. Network server
+//! hooks remain the server's behavior. Never a force push.
 //!
 //! Depends on: vw-changes (runner), `programs`, `state`, `forge`, `error`. Called by: vw-core-api.
-//! Invariants: the branch is pushed under its own name to the named remote; the upstream is set when the
-//! branch has none; the push sends the confirmed commit id itself (`<sha>:refs/heads/<branch>`), and only while
-//! the branch, its commit and the remote's address are still what the user confirmed.
+//! Invariants: an agent branch is pushed under its own name; User Push may follow a configured upstream alias.
+//! A missing upstream is set. The push sends the confirmed commit id (`<sha>:refs/heads/<branch>`) only while the
+//! local tip and remote address still match the plan. User Push also requires that branch to remain checked out.
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -26,6 +28,13 @@ use crate::state::{self, BranchState};
 
 /// Longest a push may take (big first pushes over slow links).
 const PUSH_TIMEOUT: Duration = Duration::from_secs(600);
+
+#[cfg(unix)]
+const LOCAL_RECEIVE_PACK: &str =
+    "git -c core.hooksPath=/dev/null -c gc.auto=0 -c maintenance.auto=false receive-pack";
+#[cfg(windows)]
+const LOCAL_RECEIVE_PACK: &str =
+    "git -c core.hooksPath=NUL -c gc.auto=0 -c maintenance.auto=false receive-pack";
 
 /// What a push will do, for the confirmation and the dialog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +136,100 @@ pub fn plan(root: &Path, state: &BranchState, remote: Option<&str>) -> Result<Pu
     })
 }
 
+/// Plans an app-owned push of a local branch under its own name. A named branch need not be
+/// checked out. With no remote, its upstream remote wins, then the Push button's usual default.
+///
+/// # Errors
+/// Missing local branch or remote, unsafe repository programs, or a failed Git read.
+pub fn plan_local_branch(
+    root: &Path,
+    state: &BranchState,
+    remote: Option<&str>,
+    branch: Option<&str>,
+) -> Result<PushPlan, GitError> {
+    let branch = branch
+        .or_else(|| state.branch())
+        .ok_or_else(|| GitError::Blocked("Choose a local branch to push.".into()))?;
+    if !names::valid_ref_name(branch) {
+        return Err(GitError::Blocked(
+            "The local branch name cannot be used.".into(),
+        ));
+    }
+    let commit = state::read(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "-q",
+            &format!("refs/heads/{branch}^{{commit}}"),
+        ],
+    )?
+    .ok_or_else(|| GitError::NotFound(format!("There is no committed local branch {branch}.")))?;
+    let upstream_remote = state::read(
+        root,
+        &["config", "--get", &format!("branch.{branch}.remote")],
+    )?;
+    let upstream_merge = state::read(
+        root,
+        &["config", "--get", &format!("branch.{branch}.merge")],
+    )?;
+    let upstream = upstream_remote
+        .as_deref()
+        .zip(upstream_merge.as_deref())
+        .filter(|(name, merge)| {
+            names::valid_remote_name(name)
+                && merge
+                    .strip_prefix("refs/heads/")
+                    .is_some_and(names::valid_ref_name)
+        });
+    let target = match remote {
+        Some(name) => state
+            .remotes
+            .iter()
+            .find(|r| r.name == name)
+            .ok_or_else(|| GitError::NotFound(format!("There is no remote called {name}.")))?,
+        None => upstream
+            .and_then(|(name, _)| state.remotes.iter().find(|r| r.name == name))
+            .or_else(|| state.default_remote())
+            .ok_or_else(|| {
+                GitError::Blocked(if state.remotes.is_empty() {
+                    "This repository has no remote to push to. Add one in your git tool (git remote add origin <address>).".into()
+                } else {
+                    "This repository has several remotes and none is called origin: choose one.".into()
+                })
+            })?,
+    };
+    programs::check(root, Purpose::Publish)?;
+    if !target.pushable {
+        return Err(GitError::Blocked(format!(
+            "Vibe Work pushes only to https, ssh, git and local addresses; {} points to {}.",
+            target.name,
+            target.url_note()
+        )));
+    }
+    let push_target = resolved_target(root, &target.name)?;
+    let tracking = format!("refs/remotes/{}/{branch}", target.name);
+    let commits = if state::read(root, &["rev-parse", "--verify", "-q", &tracking])?.is_some() {
+        state::counts(root, &tracking, &commit)?.0
+    } else {
+        let remotes = format!("--remotes={}", target.name);
+        state::read(root, &["rev-list", "--count", &commit, "--not", &remotes])?
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
+    Ok(PushPlan {
+        remote: target.name.clone(),
+        url: push_target.clone(),
+        branch: branch.to_owned(),
+        remote_branch: branch.to_owned(),
+        commit,
+        commits,
+        first_push: upstream.is_none_or(|(name, _)| name != target.name.as_str()),
+        lfs: uses_lfs_at(root, &format!("refs/heads/{branch}"))?,
+        target: push_target,
+    })
+}
+
 /// Git resolves pushInsteadOf/insteadOf once, using the Publish configuration just as `push` does.
 fn resolved_target(root: &Path, remote: &str) -> Result<String, GitError> {
     let bytes = Call::new(root, Index::User)
@@ -160,13 +263,62 @@ fn resolved_target(root: &Path, remote: &str) -> Result<String, GitError> {
     Ok(address.to_owned())
 }
 
+/// A local push address needs no Git login. Its receiver runs on this computer, so its own
+/// repository configuration must pass the same program check before `receive-pack` starts.
+fn local_destination(root: &Path, address: &str) -> Result<Option<std::path::PathBuf>, GitError> {
+    let path = if address.starts_with("file://") {
+        let url = url::Url::parse(address)
+            .map_err(|_| GitError::Blocked("The local push address is invalid.".into()))?;
+        if url.query().is_some() {
+            return Err(GitError::Blocked(
+                "The local push address must not contain a query.".into(),
+            ));
+        }
+        url.to_file_path()
+            .map_err(|()| GitError::Blocked("The file push address is not a local path.".into()))?
+    } else if address.contains("://") {
+        return Ok(None);
+    } else {
+        let path = Path::new(address);
+        #[cfg(windows)]
+        if address.as_bytes().get(1) == Some(&b':') && !path.is_absolute() {
+            return Err(GitError::Blocked(
+                "The local push address must be an absolute drive path.".into(),
+            ));
+        }
+        // Git treats `host:path` as scp-style only when no path separator precedes `:`.
+        // Thus `nested/remote:bare` and explicit relative paths stay local.
+        let scp_style = address.find(':').is_some_and(|colon| {
+            !(address[..colon].contains('/') || cfg!(windows) && address[..colon].contains('\\'))
+        });
+        if !path.is_absolute() && scp_style {
+            return Ok(None);
+        }
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        }
+    };
+    std::fs::canonicalize(&path).map(Some).map_err(|error| {
+        GitError::Blocked(format!("The local push address cannot be opened: {error}."))
+    })
+}
+
 /// True when the repository's `.gitattributes` at `HEAD` sends files through the LFS filter.
 ///
 /// # Errors
 /// git failures.
 pub fn uses_lfs(root: &Path) -> Result<bool, GitError> {
-    let attributes =
-        state::read(root, &["cat-file", "-p", "HEAD:.gitattributes"])?.unwrap_or_default();
+    uses_lfs_at(root, "HEAD")
+}
+
+fn uses_lfs_at(root: &Path, revision: &str) -> Result<bool, GitError> {
+    let attributes = state::read(
+        root,
+        &["cat-file", "-p", &format!("{revision}:.gitattributes")],
+    )?
+    .unwrap_or_default();
     Ok(attributes.contains("filter=lfs"))
 }
 
@@ -195,16 +347,42 @@ pub fn describe(plan: &PushPlan) -> String {
 /// `Stale` (`HEAD` moved), `Blocked` (program check), `Rejected` (the remote or the credentials said no:
 /// git's words, with a plain sentence for a non-fast-forward), git failures.
 pub fn push(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
-    // Exactly what was confirmed (trap 7): the same branch checked out, at the same commit, to the same
-    // address; anything else is refused, nothing is pushed.
+    push_bound(root, plan, true)
+}
+
+/// Pushes a previously planned local branch without checking it out. The remote ref must retain
+/// the local branch's own name, and the branch tip and destination are checked again.
+///
+/// # Errors
+/// A stale plan, unsafe repository setting, or a rejected Git push.
+pub fn push_local_branch(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
+    if plan.remote_branch != plan.branch {
+        return Err(GitError::Blocked(
+            "An agent push must use the local branch's own name on the remote.".into(),
+        ));
+    }
+    push_bound(root, plan, false)
+}
+
+fn push_bound(root: &Path, plan: &PushPlan, require_head: bool) -> Result<String, GitError> {
+    // The confirmed local tip and remote address must still match. The user's Push also binds HEAD.
     let changed = || {
-        GitError::Stale(
-            "This changed since you confirmed the push — review again (press Push again)."
-                .to_owned(),
-        )
+        GitError::Stale(if require_head {
+            "This changed since you confirmed the push. Review it again (press Push again).".into()
+        } else {
+            "This branch or remote changed since the push was approved. Review it again.".into()
+        })
     };
-    let head = state::read(root, &["rev-parse", "--verify", "-q", "HEAD^{commit}"])?;
-    let current = state::read(root, &["symbolic-ref", "-q", "--short", "HEAD"])?;
+    let head = if require_head {
+        state::read(root, &["rev-parse", "--verify", "-q", "HEAD^{commit}"])?
+    } else {
+        None
+    };
+    let current = if require_head {
+        state::read(root, &["symbolic-ref", "-q", "--short", "HEAD"])?
+    } else {
+        None
+    };
     let tip = state::read(
         root,
         &[
@@ -214,9 +392,10 @@ pub fn push(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
             &format!("refs/heads/{}^{{commit}}", plan.branch),
         ],
     )?;
-    if head.as_deref() != Some(plan.commit.as_str())
-        || tip.as_deref() != Some(plan.commit.as_str())
-        || current.as_deref() != Some(plan.branch.as_str())
+    if tip.as_deref() != Some(plan.commit.as_str())
+        || require_head
+            && (head.as_deref() != Some(plan.commit.as_str())
+                || current.as_deref() != Some(plan.branch.as_str()))
     {
         return Err(changed());
     }
@@ -239,42 +418,85 @@ pub fn push(root: &Path, plan: &PushPlan) -> Result<String, GitError> {
     if !(plan.commit.len() >= 40 && plan.commit.chars().all(|c| c.is_ascii_hexdigit())) {
         return Err(changed());
     }
+    let local = if require_head {
+        None
+    } else {
+        local_destination(root, &plan.target)?
+    };
+    if let Some(destination) = &local {
+        programs::check(destination, Purpose::Publish)?;
+    }
     let refspec = format!("{}:refs/heads/{}", plan.commit, plan.remote_branch);
-    let out = Call::new(root, Index::User)
-        .profile(Profile::Publish)
-        .args([
+    let call = Call::new(root, Index::User);
+    let call = if local.is_some() {
+        // A local receiver can execute in this OS account. It receives no Git login environment;
+        // its own hooks are disabled by the fixed receive-pack command, even if its config names them.
+        call.profile(Profile::Worktree)
+            .args(["-c", "protocol.file.allow=always"])
+            .args([
+                "push",
+                "--porcelain",
+                &format!("--receive-pack={LOCAL_RECEIVE_PACK}"),
+                "--no-verify",
+                "--no-follow-tags",
+                "--recurse-submodules=no",
+            ])
+    } else {
+        call.profile(Profile::Publish).args([
             "push",
             "--porcelain",
             "--receive-pack=git-receive-pack",
             "--no-verify",
+            // Only the confirmed ref leaves: a repository's or the person's push.followTags / push.recurseSubmodules
+            // must not add tags or submodule pushes the card never named.
+            "--no-follow-tags",
+            "--recurse-submodules=no",
         ])
+    };
+    let out = call
         // `--` first: nothing after it can be read as an option.
         .args(["--", plan.remote.as_str(), refspec.as_str()])
         .timeout(PUSH_TIMEOUT)
         .output()?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.ok() {
-        // Record the confirmed remote tip and the upstream on a first push (what `--set-upstream` writes).
-        let tracking = format!("refs/remotes/{}/{}", plan.remote, plan.remote_branch);
-        Call::new(root, Index::User)
-            .args([
-                "update-ref",
-                "-m",
-                "vibe-work: push",
-                &tracking,
-                &plan.commit,
-            ])
-            .timeout(std::time::Duration::from_secs(10))
-            .run()?;
-        if plan.first_push {
-            set_upstream(root, plan)?;
-        }
-        return Ok(format!(
-            "Pushed {} to {} ({}).",
-            plan.branch, plan.remote, plan.url
-        ));
+        return Ok(record_pushed(root, plan));
     }
     Err(GitError::Rejected(rejection(&stdout, &out.stderr)))
+}
+
+/// Records a confirmed remote success; local bookkeeping failures remain explicit warnings.
+fn record_pushed(root: &Path, plan: &PushPlan) -> String {
+    let tracking = format!("refs/remotes/{}/{}", plan.remote, plan.remote_branch);
+    let tracking_result = Call::new(root, Index::User)
+        .args([
+            "update-ref",
+            "-m",
+            "vibe-work: push",
+            &tracking,
+            &plan.commit,
+        ])
+        .timeout(Duration::from_secs(10))
+        .run();
+    let upstream_result = if plan.first_push {
+        set_upstream(root, plan)
+    } else {
+        Ok(())
+    };
+    let mut result = format!("Pushed {} to {} ({}).", plan.branch, plan.remote, plan.url);
+    if let Err(error) = tracking_result {
+        let _ = write!(
+            result,
+            " The push succeeded, but the local tracking ref was not updated: {error}."
+        );
+    }
+    if let Err(error) = upstream_result {
+        let _ = write!(
+            result,
+            " The push succeeded, but the local upstream was not set: {error}."
+        );
+    }
+    result
 }
 
 /// Records the upstream of `plan.branch` as `plan.remote`/`plan.remote_branch` (`branch.<b>.remote/merge`).
@@ -302,7 +524,7 @@ pub fn rejection(stdout: &str, stderr: &str) -> String {
     if both.contains("[rejected]")
         && (both.contains("non-fast-forward") || both.contains("fetch first"))
     {
-        return "The server has changes this branch does not have, so nothing was pushed (Vibe Work never \
+        return "The server has changes this branch does not have (non-fast-forward), so nothing was pushed (Vibe Work never \
                 overwrites the server). Get those changes first: ask Vibe to update this branch from the server, or use \
                 your own git tool."
             .to_owned();

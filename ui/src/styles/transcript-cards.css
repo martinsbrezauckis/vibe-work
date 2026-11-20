@@ -293,7 +293,7 @@
 .diff {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.65;
+  line-height: var(--leading-reading);
   overflow-x: auto;
 }
 .diff .fh {
@@ -383,7 +383,7 @@
   overflow-x: auto;
   font-family: var(--font-mono);
   font-size: var(--text-base);
-  line-height: 1.55;
+  line-height: var(--leading-copy);
 }
 .syn-token-keyword {
   color: var(--syn-keyword);

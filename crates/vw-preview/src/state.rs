@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use url::Url;
 
-use crate::console::{ConsoleEntry, HOST_RING};
+use crate::console::{ConsoleEntry, ConsoleLevel, HOST_RING};
 use crate::downloads::{DownloadView, MAX_LISTED};
 use crate::layout::{DeviceWidth, Rect};
 
@@ -160,6 +160,22 @@ pub(crate) struct Mount {
     pub(crate) rules_offered: Option<vw_netguard::rules::RulePage>,
 }
 
+/// Host policy evidence for one refused browser request. Page URL paths, query values and bodies are excluded.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RequestRefusal {
+    pub(crate) at_ms: u64,
+    pub(crate) origin: Option<String>,
+    pub(crate) target: String,
+    pub(crate) target_class: &'static str,
+    pub(crate) reason: &'static str,
+    pub(crate) message: String,
+    /// `false` when the request did not say which open page sent it: the refusal is listed on every page that could
+    /// have (absent when the page is known).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sender_known: Option<bool>,
+}
+
 /// One session's preview.
 pub(crate) struct Entry {
     pub(crate) local_document: Option<Url>,
@@ -169,7 +185,11 @@ pub(crate) struct Entry {
     pub(crate) title: Option<String>,
     /// Document-load epoch and normalized PNG icon; `None` pixels means an observed icon was inaccessible.
     pub(crate) favicon: Option<(u64, Option<String>)>,
-    pub(crate) loading: bool,
+    /// Whether the page is loading; written only through [`Entry::set_loading`] so every change is announced.
+    loading: bool,
+    /// Ticks on every loading change and every refused navigation (`Service::load_changes`), so a wait for a load
+    /// to start, end or be refused wakes at once instead of polling.
+    pub(crate) load_events: watch::Sender<u64>,
     /// Set only by a successful ownership/listener re-check of the current local URL.
     pub(crate) server_status: Option<PreviewServerState>,
     /// The URL requested by `open` until that navigation finishes; older page events cannot complete its wait.
@@ -210,6 +230,12 @@ pub(crate) struct Entry {
     pub(crate) refused_why: VecDeque<(String, String)>,
     /// Lifetime refusal count; action receipts must also see repeated refusals of the same URL.
     pub(crate) refusals_seen: u64,
+    /// Host-policy request refusals, retained across a page switch so the action that caused one still reports it.
+    pub(crate) request_refusals: VecDeque<RequestRefusal>,
+    /// Lifetime mark for an action's host-policy refusals.
+    pub(crate) request_refusals_seen: u64,
+    /// The first host-policy refusal still belonging to the current document.
+    pub(crate) request_refusals_page_mark: u64,
     /// What the engine refused during agent acts, per `ActRefusal` (lifetime counts, for the act's receipt).
     pub(crate) act_refusals: [u64; crate::act_refusals::ActRefusal::COUNT],
     /// The last recorded refusal, until the other hook reports the same navigation (one record per refusal).
@@ -249,6 +275,7 @@ impl Entry {
             title: None,
             favicon: None,
             loading: false,
+            load_events: watch::Sender::new(0),
             server_status: None,
             local_document: None,
             pending_open: None,
@@ -274,6 +301,9 @@ impl Entry {
             refused: VecDeque::new(),
             refused_why: VecDeque::new(),
             refusals_seen: 0,
+            request_refusals: VecDeque::new(),
+            request_refusals_seen: 0,
+            request_refusals_page_mark: 0,
             act_refusals: [0; crate::act_refusals::ActRefusal::COUNT],
             refusal_mark: None,
             guarded: false,
@@ -360,6 +390,21 @@ impl Entry {
         false
     }
 
+    /// Whether the page is loading.
+    pub(crate) fn loading(&self) -> bool {
+        self.loading
+    }
+
+    /// Sets whether the page is loading and announces it to load waits.
+    pub(crate) fn set_loading(&mut self, loading: bool) {
+        self.loading = loading;
+        self.announce_load_event();
+    }
+
+    fn announce_load_event(&mut self) {
+        self.load_events.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
     pub(crate) fn note_refused(&mut self, url: &str, reason: &str) {
         if Url::parse(url).is_ok_and(|url| crate::policy::embedded_document(&url)) {
             return;
@@ -367,6 +412,7 @@ impl Entry {
         let url: String = url.chars().take(200).collect();
         self.refused.push_back(url.clone());
         self.refusals_seen = self.refusals_seen.saturating_add(1);
+        self.announce_load_event();
         while self.refused.len() > MAX_REFUSED {
             self.refused.pop_front();
         }
@@ -377,12 +423,105 @@ impl Entry {
         }
     }
 
+    /// A host-policy refusal of a page request. Its reason contains no URL path or body; keep it with the
+    /// current page's console so both console.read and an action's console delta report even an opaque fetch.
+    pub(crate) fn note_request_refused(&mut self, host: &str, port: u16, reason: &str) {
+        self.note_request_refused_by(host, port, reason, true);
+    }
+
+    /// [`Self::note_request_refused`]; `sender_known` false: one of several pages could have sent it.
+    pub(crate) fn note_request_refused_by(
+        &mut self,
+        host: &str,
+        port: u16,
+        reason: &str,
+        sender_known: bool,
+    ) {
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        let text = format!(
+            "Browser request refused by Vibe Work: {}",
+            reason.chars().take(300).collect::<String>()
+        );
+        let decision = if reason.contains("is blocked from reaching")
+            || reason.contains("blocked by the user")
+        {
+            "blocked by the user"
+        } else if reason.contains("the question was not answered") {
+            "question not answered"
+        } else if reason.starts_with(crate::local_access::UNANSWERED_TEXT) {
+            "sender unknown"
+        } else {
+            "policy"
+        };
+        // Local Network Access names the asking site's origin in its own fixed reason. The top-level
+        // page URL is not reliable when a cross-site frame made the request, so never infer from it.
+        let origin = [
+            " is blocked from reaching",
+            " may not reach this computer or the local network: the question was not answered",
+        ]
+        .iter()
+        .find_map(|suffix| reason.split_once(suffix).map(|(site, _)| site))
+        .and_then(|site| url::Url::parse(site).ok())
+        .map(|url| url.origin().ascii_serialization());
+        let target_class = if reason.contains("own network address on macOS") {
+            "own-address"
+        } else if reason.contains("local network") {
+            "local-network"
+        } else {
+            "policy"
+        };
+        let target = if host.contains(':') {
+            format!("[{host}]:{port}")
+        } else {
+            format!("{host}:{port}")
+        };
+        self.request_refusals_seen = self.request_refusals_seen.saturating_add(1);
+        self.request_refusals.push_back(RequestRefusal {
+            at_ms,
+            origin,
+            target,
+            target_class,
+            reason: decision,
+            message: text.clone(),
+            sender_known: (!sender_known).then_some(false),
+        });
+        while self.request_refusals.len() > MAX_REFUSED {
+            self.request_refusals.pop_front();
+        }
+        self.push_console(vec![ConsoleEntry {
+            level: ConsoleLevel::Error,
+            text,
+            url: String::new(),
+            at_ms,
+        }]);
+    }
+
+    /// Current document's host refusals for network.list, with older documents excluded.
+    pub(crate) fn request_refusals_on_page(&self) -> Vec<RequestRefusal> {
+        let count = usize::try_from(
+            self.request_refusals_seen
+                .saturating_sub(self.request_refusals_page_mark),
+        )
+        .unwrap_or(usize::MAX)
+        .min(self.request_refusals.len());
+        self.request_refusals
+            .iter()
+            .skip(self.request_refusals.len() - count)
+            .cloned()
+            .collect()
+    }
+
     /// A new page starts (or the preview closes): the console and the refusals belong to the page before it.
     /// `refusals_seen` stays, so an action's receipt still sees a refusal its own click caused.
     pub(crate) fn reset_console(&mut self) {
         self.console.clear();
         self.refused.clear();
         self.refused_why.clear();
+        self.request_refusals_page_mark = self.request_refusals_seen;
         self.console_dropped = 0;
         self.console_epoch = self.console_epoch.wrapping_add(1);
     }
@@ -411,11 +550,14 @@ impl Entry {
     }
 
     pub(crate) fn view(&self, shown: bool) -> PreviewView {
-        let state = match (self.ready_mount(), shown) {
+        // A page being opened (loading before its mount exists) or whose mount the engine is still creating is
+        // starting, not paused: only an entry whose engine was released (no mount, nothing loading) is suspended.
+        let running = self.mount.is_some() || self.loading;
+        let state = match (running, shown) {
             _ if self.server_status.is_some() => PreviewState::Stopped,
-            (Some(_), true) => PreviewState::Live,
-            (Some(_), false) => PreviewState::Hidden,
-            (None, _) => PreviewState::Suspended,
+            (true, true) => PreviewState::Live,
+            (true, false) => PreviewState::Hidden,
+            (false, _) => PreviewState::Suspended,
         };
         PreviewView {
             session_id: self.session_id.clone(),

@@ -63,7 +63,8 @@ export function Hub({
           <Button
             data-testid="pages.hub-ask-create"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             variant="primary"
             onClick={(event) => {
               askCreate(event.nativeEvent.isTrusted);
@@ -115,7 +116,8 @@ export function Hub({
           <Button
             data-testid="pages.hub-pages-btn-2"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={askFix}
           >
             Ask Vibe to fix the handbook
@@ -132,7 +134,8 @@ export function Hub({
           <Button
             data-testid="pages.hub-set-show-findings"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             aria-expanded={showFindings}
             onClick={() => {
               setShowFindings(!showFindings);
@@ -145,7 +148,8 @@ export function Hub({
           <Button
             data-testid="pages.hub-pages-btn-3"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={askFix}
           >
             Ask Vibe to fix them

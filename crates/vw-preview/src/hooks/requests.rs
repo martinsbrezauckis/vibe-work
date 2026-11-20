@@ -9,10 +9,10 @@ use super::Hooks;
 use crate::policy::{Destination, PageClass};
 use url::Url;
 impl Hooks {
-    pub(super) fn request_pre(&self, label: &str, url: &Url) -> Result<(), ()> {
+    pub(super) fn request_pre(&self, label: &str, url: &Url) -> Result<(), Option<String>> {
         {
             let state = self.0.lock();
-            let session = state.session_of(label).ok_or(())?;
+            let session = state.session_of(label).ok_or(None)?;
             if state
                 .entries
                 .get(session)
@@ -33,9 +33,9 @@ impl Hooks {
             }
             _ => {}
         }
-        let destination = self.0.policy.classify(&probe).map_err(|_| ())?;
+        let destination = self.0.policy.classify(&probe).map_err(|_| None)?;
         if self.own_address_internal_port(&probe) {
-            return Err(());
+            return Err(None);
         }
         self.local_barrier(label, destination)
     }
@@ -57,7 +57,7 @@ impl Hooks {
     }
 
     /// Local Network Access for one webview's request to an address literal (module docs).
-    fn local_barrier(&self, label: &str, destination: Destination) -> Result<(), ()> {
+    fn local_barrier(&self, label: &str, destination: Destination) -> Result<(), Option<String>> {
         let internal = self.0.internal_ports();
         let lan = match destination {
             Destination::Loopback { port } => {
@@ -65,7 +65,7 @@ impl Hooks {
                     .as_ref()
                     .is_some_and(|internal| internal.contains(&port))
                 {
-                    return Err(());
+                    return Err(None);
                 }
                 None
             }
@@ -73,8 +73,8 @@ impl Hooks {
             Destination::Blank | Destination::Public | Destination::Canary => return Ok(()),
         };
         let state = self.0.lock();
-        let session = state.session_of(label).ok_or(())?;
-        let entry = state.entries.get(session).ok_or(())?;
+        let session = state.session_of(label).ok_or(None)?;
+        let entry = state.entries.get(session).ok_or(None)?;
         let pinned_app =
             state.tabs.contains_key(session) && !state.page_owners.contains_key(session);
         if pinned_app {
@@ -85,7 +85,7 @@ impl Hooks {
                 {
                     Ok(())
                 }
-                _ => Err(()),
+                _ => Err(None),
             };
         }
         if entry.mount_class() != PageClass::Web {
@@ -93,15 +93,21 @@ impl Hooks {
         }
         let site = entry.url.as_ref().and_then(crate::local_access::site_of);
         drop(state);
-        let blocked = site.is_some_and(|site| {
+        let blocked = site.filter(|site| {
             self.0
                 .site_answers
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get(&site)
+                .get(site)
                 == Some(crate::local_access::SiteAnswer::Block)
         });
-        if blocked { Err(()) } else { Ok(()) }
+        if let Some(site) = blocked {
+            Err(Some(format!(
+                "local network access for {site} is blocked by the user"
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 

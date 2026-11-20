@@ -11,10 +11,8 @@
 //! - `config/model/write` accepts a model alias Vibe reported in `runtime/read`, a non-blank
 //!   provider level, or both, with `sessionOnly: true`; chat picks never write the user default.
 //! - Making `auto-approve` the default profile is an escalation (needs a native confirmation).
-//! - The two privacy switches (`/enable_telemetry`, `/experiments/enable`) take a
-//!   boolean. Turning one OFF is free (less data leaves the machine). Turning one ON, and removing
-//!   the key (which falls back to Vibe's default, ON), is an escalation: it needs a native
-//!   confirmation, so neither the Debug API nor a page can switch data sharing on silently.
+//! - The two privacy switches (`/enable_telemetry`, `/experiments/enable`) accept only OFF.
+//!   Enabling one or removing its key is refused because the guarded runtime disables data sharing.
 
 use std::collections::HashSet;
 
@@ -31,7 +29,7 @@ enum KeyType {
     Theme,
     DefaultAgent,
     ActiveModel,
-    /// A data-sharing switch: off is free, on (or removing the key) is an escalation.
+    /// A managed data-sharing switch: only off is allowed.
     Privacy,
     /// Seconds, 0 to 3600 (`api_stream_idle_timeout`, 0 = off).
     Seconds,
@@ -44,7 +42,7 @@ enum KeyType {
 const CONFIG_KEYS: &[(&str, KeyType)] = &[
     ("/theme", KeyType::Theme),
     ("/disable_welcome_banner_animation", KeyType::Bool),
-    ("/show_greeting", KeyType::Bool),
+    ("/show_dangerous_directory_warning", KeyType::Bool),
     ("/autocopy_to_clipboard", KeyType::Bool),
     ("/file_watcher_for_autocomplete", KeyType::Bool),
     ("/ask_confirmation_on_exit", KeyType::Bool),
@@ -63,9 +61,6 @@ const CONFIG_KEYS: &[(&str, KeyType)] = &[
     ("/enable_telemetry", KeyType::Privacy),
     ("/experiments/enable", KeyType::Privacy),
 ];
-
-/// What the confirmation dialog says when a data-sharing switch is turned on.
-const PRIVACY_ON: &str = "Turn on data sharing with Mistral: usage telemetry and the experiments that decide which features you get";
 
 /// Most ops in one `config/write`.
 const MAX_OPS: usize = 16;
@@ -151,8 +146,10 @@ fn check_op(
             if map.get("value").is_some() {
                 return Err(invalid(method, "`remove` takes no value"));
             }
-            // Removing a privacy key falls back to Vibe's default, which is ON.
-            Ok(matches!(value_kind, KeyType::Privacy).then(|| PRIVACY_ON.to_owned()))
+            if matches!(value_kind, KeyType::Privacy) {
+                return Err(policy(method, "data sharing is disabled by Vibe Work"));
+            }
+            Ok(None)
         }
         Some("set") => {
             let value = map
@@ -174,7 +171,8 @@ fn check_value(
     match kind {
         KeyType::Bool => value.is_boolean().then_some(None).ok_or_else(bad),
         KeyType::Privacy => match value.as_bool() {
-            Some(on) => Ok(on.then(|| PRIVACY_ON.to_owned())),
+            Some(false) => Ok(None),
+            Some(true) => Err(policy(method, "data sharing is disabled by Vibe Work")),
             None => Err(bad()),
         },
         KeyType::Theme => {
@@ -188,7 +186,7 @@ fn check_value(
         KeyType::DefaultAgent => match value.as_str() {
             Some(name) if is_profile(name) => Ok(escalates(name).then(|| {
                 format!(
-                    "Make {} the default access mode: new sessions would run every tool without asking",
+                    "Make {} the default access mode: new chats would run every tool without asking",
                     vw_vocabulary::label("accessModes", "auto-approve")
                 )
             })),

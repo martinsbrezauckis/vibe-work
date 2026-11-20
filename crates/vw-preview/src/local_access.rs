@@ -160,6 +160,53 @@ pub enum LocalVerdict {
         /// The chat (owner session) whose page asks.
         session: String,
     },
+    /// Refused with `reason`: the request does not say which page sent it and several sites could have, so nobody
+    /// is asked by guess. `sites` are the undecided sites that could have sent it, each with its chat: the person
+    /// may answer them (Settings > Browser, the chat's card); none is allowed by default.
+    Unanswered {
+        /// Why it was refused.
+        reason: String,
+        /// The undecided candidates: (site, chat).
+        sites: Vec<(String, String)>,
+    },
+}
+
+/// The refusal of a request that does not say which of several open sites sent it.
+pub const UNANSWERED_TEXT: &str = "several web pages are open in the browser and this request does not say which one \
+    sent it; allow the site you meant in Settings > Browser to let it reach this computer or the local network";
+
+/// Sites refused and waiting for the person's answer, per (site, chat), each with why: `true` when the site's own
+/// question was shown and not answered, `false` when a request did not say which open page sent it.
+#[derive(Debug, Default)]
+pub(crate) struct Waiting(std::collections::BTreeMap<(String, String), bool>);
+
+impl Waiting {
+    /// Records `pair`; `true` when it is new, or newly `asked` (its own question has now gone unanswered too).
+    pub(crate) fn note(&mut self, pair: &(String, String), asked: bool) -> bool {
+        match self.0.get_mut(pair) {
+            Some(known) if asked && !*known => {
+                *known = true;
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.0.insert(pair.clone(), asked);
+                true
+            }
+        }
+    }
+
+    /// Ends the wait of `site` in every chat (the person answered it).
+    pub(crate) fn forget(&mut self, site: &str) {
+        self.0.retain(|(waiting, _), _| waiting != site);
+    }
+
+    /// Every (site, chat, asked), sorted by site and chat.
+    pub(crate) fn list(&self) -> impl Iterator<Item = (String, String, bool)> + '_ {
+        self.0
+            .iter()
+            .map(|((site, chat), asked)| (site.clone(), chat.clone(), *asked))
+    }
 }
 
 /// One live mount on the asking store, as the verdict sees it.
@@ -371,8 +418,10 @@ fn decide(
             } => match answer(site) {
                 Some(SiteAnswer::Allow) => {}
                 Some(SiteAnswer::Block) => return LocalVerdict::Refuse(blocked_text(site)),
+                // Kept per chat: every chat's web pages share one store, and each chat with the site open must
+                // list it for the person's answer (its card shows only its own sites).
                 None => {
-                    if !undecided.iter().any(|(s, _)| s == site) {
+                    if !undecided.iter().any(|(s, c)| s == site && c == session) {
                         undecided.push((site, session));
                     }
                 }
@@ -381,17 +430,33 @@ fn decide(
     }
     let sites: std::collections::BTreeSet<&str> =
         requesters.iter().filter_map(|m| m.site()).collect();
+    let undecided_sites: std::collections::BTreeSet<&str> =
+        undecided.iter().map(|(site, _)| *site).collect();
     match undecided.as_slice() {
         [] => LocalVerdict::Allow,
-        [(site, session)] if known || sites.len() == 1 => LocalVerdict::Ask {
-            site: (*site).to_owned(),
-            session: (*session).to_owned(),
+        [(site, session), ..] if undecided_sites.len() == 1 && (known || sites.len() == 1) => {
+            LocalVerdict::Ask {
+                site: (*site).to_owned(),
+                session: (*session).to_owned(),
+            }
+        }
+        _ => LocalVerdict::Unanswered {
+            reason: UNANSWERED_TEXT.to_owned(),
+            sites: undecided
+                .iter()
+                .map(|(site, session)| ((*site).to_owned(), (*session).to_owned()))
+                .collect(),
         },
-        _ => LocalVerdict::Refuse(
-            "several web pages are open in the browser and this request does not say which one sent it; allow \
-             the site first to let it reach this computer or the local network"
-                .to_owned(),
-        ),
+    }
+}
+
+/// A timed-out question ends the site's automatic ask cycle until the person changes its Settings row.
+fn after_timed_out(verdict: LocalVerdict, timed_out: impl Fn(&str) -> bool) -> LocalVerdict {
+    match verdict {
+        LocalVerdict::Ask { site, .. } if timed_out(&site) => LocalVerdict::Refuse(format!(
+            "{site} may not reach this computer or the local network: the question was not answered"
+        )),
+        other => other,
     }
 }
 
@@ -405,12 +470,23 @@ impl PreviewService {
         let (labels, mut members): (Vec<String>, Vec<Member>) =
             self.local_members(keys).into_iter().unzip();
         let decide = |members: &[Member]| {
-            let answers = self
+            let (verdict, navigation) = {
+                let answers = self
+                    .inner
+                    .site_answers
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                verdict_with(members, request, |site| answers.get(site))
+            };
+            let timed_out = self
                 .inner
-                .site_answers
+                .timed_out_sites
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            verdict_with(members, request, |site| answers.get(site))
+            (
+                after_timed_out(verdict, |site| timed_out.contains(site)),
+                navigation,
+            )
         };
         let (verdict, navigation) = decide(&members);
         let Some(i) = navigation else {
@@ -445,14 +521,60 @@ impl PreviewService {
         decide(&members).0
     }
 
-    /// The remembered answer for `site` (origin text).
+    /// Records the undecided candidates of an unattributed request ([`LocalVerdict::Unanswered`]) for the person's
+    /// answer, per (site, chat). Returns the ones not recorded before (a repeated request returns none: one card and
+    /// one notice each).
     #[must_use]
-    pub fn site_answer(&self, site: &str) -> Option<SiteAnswer> {
+    pub fn note_unanswered(&self, sites: &[(String, String)]) -> Vec<(String, String)> {
+        self.note_waiting(sites, false)
+    }
+
+    /// Records a bounded question's expiry and refuses later automatic retries for this site.
+    pub fn note_timed_out(&self, site: &str, session: &str) -> Vec<(String, String)> {
         self.inner
-            .site_answers
+            .timed_out_sites
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(site)
+            .insert(site.to_owned());
+        self.note_waiting(&[(site.to_owned(), session.to_owned())], true)
+    }
+
+    fn note_waiting(&self, sites: &[(String, String)], asked: bool) -> Vec<(String, String)> {
+        let answered = self.site_answers();
+        let mut waiting = self
+            .inner
+            .unanswered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        sites
+            .iter()
+            .filter(|(site, _)| !answered.iter().any(|(s, _)| s == site))
+            .filter(|pair| waiting.note(pair, asked))
+            .cloned()
+            .collect()
+    }
+
+    /// The sites still waiting for the person's answer ([`Self::note_unanswered`]), each with its chat.
+    #[must_use]
+    pub fn unanswered_sites(&self) -> Vec<(String, String)> {
+        self.waiting_sites()
+            .into_iter()
+            .map(|(site, chat, _)| (site, chat))
+            .collect()
+    }
+
+    /// [`Self::unanswered_sites`], each with `asked`: `true` when the site's own question was shown and not
+    /// answered, `false` when a request did not say which open page sent it.
+    #[must_use]
+    pub fn waiting_sites(&self) -> Vec<(String, String, bool)> {
+        let answered = self.site_answers();
+        self.inner
+            .unanswered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .list()
+            .filter(|(site, _, _)| !answered.iter().any(|(s, _)| s == site))
+            .collect()
     }
 
     /// Every remembered answer, by site.
@@ -480,6 +602,16 @@ impl PreviewService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set(&site, answer)?;
+        self.inner
+            .timed_out_sites
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&site);
+        self.inner
+            .unanswered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget(&site);
         tracing::info!(%site, ?answer, "browser local network answer changed");
         Ok(site)
     }
@@ -508,7 +640,7 @@ impl PreviewService {
                         Member::Public {
                             site,
                             session: state.owner_of(session),
-                            loaded: !entry.loading,
+                            loaded: !entry.loading(),
                             navigating: entry
                                 .navigation_target
                                 .as_ref()

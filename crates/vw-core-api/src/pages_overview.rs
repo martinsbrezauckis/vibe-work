@@ -102,7 +102,7 @@ impl Core {
         let folder = known_project(&known, project).ok_or_else(|| {
             CoreError::new(
                 ErrorCode::NotFound,
-                "this folder is not one of Vibe Work's projects (only folders of known sessions)",
+                "this folder is not one of Vibe Work's projects (only folders of known chats)",
             )
         })?;
         let owned = service.clone();

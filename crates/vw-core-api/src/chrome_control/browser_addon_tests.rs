@@ -107,7 +107,7 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
     let data = [home.join("chrome-data"), home.join("edge-data")];
     for ((dir, version), off) in data
         .iter()
-        .zip([chrome_version, Some("0.1.4")])
+        .zip([chrome_version, Some("0.2.4")])
         .zip([chrome_off, edge_off])
     {
         let _ = std::fs::remove_dir_all(dir);
@@ -169,7 +169,7 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
         );
         assert_eq!(
             serde_json::to_value(&e).unwrap()["extensionVersion"],
-            "0.1.4"
+            "0.2.4"
         );
         if edge_off {
             assert_eq!(e.label, "Turn on in Edge");
@@ -185,7 +185,7 @@ async fn disconnected(name: &str, chrome_version: Option<&str>, chrome_off: bool
             );
             assert_eq!(
                 refusal["vwMcpResult"]["structuredContent"]["addon"]["extensionVersion"],
-                "0.1.4"
+                "0.2.4"
             );
         }
     }
@@ -241,13 +241,13 @@ async fn version_prefers_the_paired_profile_else_the_highest_in_this_browser() {
     let core = fixture(
         "browser-version-selection",
         json!([
-            {"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.3"}
+            {"profileId":"chrome:p","connected":true,"extensionVersion":"0.2.3"}
         ]),
     )
     .await;
     let chrome = &core.shared.chrome_control;
     let data = chrome.config.user_home.as_ref().unwrap().join("versions");
-    for (name, version) in [("Profile 1", "0.1.3"), ("Profile 2", "0.1.9")] {
+    for (name, version) in [("Profile 1", "0.2.3"), ("Profile 2", "0.2.9")] {
         std::fs::create_dir_all(
             data.join(name)
                 .join("Extensions")
@@ -264,12 +264,12 @@ async fn version_prefers_the_paired_profile_else_the_highest_in_this_browser() {
     .unwrap();
     assert_eq!(
         super::installation::version(&core.shared, Browser::Chrome).as_deref(),
-        Some("0.1.3")
+        Some("0.2.3")
     );
     chrome.owner.connected_profiles.clear();
     assert_eq!(
         super::installation::version(&core.shared, Browser::Chrome).as_deref(),
-        Some("0.1.9")
+        Some("0.2.9")
     );
     assert_eq!(
         super::installation::version(&core.shared, Browser::Edge),
@@ -285,12 +285,12 @@ async fn only_edge_installed_and_turned_off() {
 
 #[tokio::test]
 async fn chrome_turned_off_and_edge_enabled() {
-    disconnected("only-chrome-off", Some("0.1.3"), true, false).await;
+    disconnected("only-chrome-off", Some("0.2.3"), true, false).await;
 }
 
 #[tokio::test]
 async fn both_browsers_turned_off_keep_their_own_versions() {
-    disconnected("both-browsers-off", Some("0.1.3"), true, true).await;
+    disconnected("both-browsers-off", Some("0.2.3"), true, true).await;
 }
 
 #[tokio::test]
@@ -298,8 +298,8 @@ async fn status_reports_both_browser_versions_even_when_one_is_not_selected() {
     let core = fixture(
         "browser-status-versions",
         json!([
-            {"profileId":"chrome:p","connected":true,"extensionVersion":"0.1.3"},
-            {"profileId":"edge:p","connected":true,"extensionVersion":"0.1.4"}
+            {"profileId":"chrome:p","connected":true,"extensionVersion":"0.2.3"},
+            {"profileId":"edge:p","connected":true,"extensionVersion":"0.2.4"}
         ]),
     )
     .await;
@@ -308,11 +308,11 @@ async fn status_reports_both_browser_versions_even_when_one_is_not_selected() {
         .unwrap();
     let body = &answer["vwMcpResult"]["structuredContent"];
     let selected = body.get("untrustedPageContent").unwrap_or(body);
-    assert_eq!(selected["addon"]["extensionVersion"], "0.1.3");
+    assert_eq!(selected["addon"]["extensionVersion"], "0.2.3");
     assert_eq!(body["addons"][0]["stateCode"], "connected");
-    assert_eq!(body["addons"][0]["extensionVersion"], "0.1.3");
+    assert_eq!(body["addons"][0]["extensionVersion"], "0.2.3");
     assert_eq!(body["addons"][1]["stateCode"], "connected");
-    assert_eq!(body["addons"][1]["extensionVersion"], "0.1.4");
+    assert_eq!(body["addons"][1]["extensionVersion"], "0.2.4");
     core.shutdown().await;
 }
 

@@ -69,7 +69,7 @@ pub(crate) struct Leases {
 fn failure(error: impl std::fmt::Display) -> CoreError {
     CoreError::new(
         ErrorCode::Internal,
-        format!("Could not check session ownership: {error}"),
+        format!("Could not check chat ownership: {error}"),
     )
 }
 

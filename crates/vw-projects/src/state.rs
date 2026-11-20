@@ -4,7 +4,9 @@
 //! Depends on: `model`, `names`, getrandom (ids). Called by: `store`, the private tests.
 //! Invariants:
 //! - `delete` only re-files members to `None`; no operation removes a member except `forget` (Vibe deleted the
-//!   session) and the second strike of `sweep`.
+//!   session) and the second strike of `sweep`, which also removes an automatic project it left without chats.
+//! - Counts and listing follow the chats that really exist: a member a complete sweep missed does not count, and an
+//!   automatic project whose every member was missed is not listed (`live_member_count`, `listed`).
 //! - A session is filed once, at first sight; later sightings never change its project.
 //! - Projects keep the user's order; a new session's auto project and a user-created project go to the top, an auto
 //!   project for an old session seen in a listing goes to the end (Vibe lists newest first, so the first run keeps the
@@ -43,16 +45,12 @@ pub struct State {
 }
 
 fn new_id(now: u64) -> String {
-    use std::fmt::Write as _;
     let mut bytes = [0u8; 8];
     if getrandom::fill(&mut bytes).is_err() {
         // Never seen in practice; the time keeps ids distinct enough for a local store.
         bytes = now.to_le_bytes();
     }
-    bytes.iter().fold(String::from("p"), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+    format!("p{}", hex::encode(bytes))
 }
 
 fn not_found(id: &str) -> ProjectsError {
@@ -103,6 +101,25 @@ impl State {
             .values()
             .filter(|p| p.as_deref() == Some(project))
             .count()
+    }
+
+    /// How many sessions filed in `project` a sweep has not missed: the chats that really exist (a chat deleted
+    /// outside the app, or one Vibe Work hides, stops counting at the first complete sweep that misses it).
+    #[must_use]
+    pub fn live_member_count(&self, project: &str) -> usize {
+        self.members
+            .iter()
+            .filter(|(id, p)| p.as_deref() == Some(project) && !self.missing.contains_key(*id))
+            .count()
+    }
+
+    /// Whether `project` is shown: always for a project the person made; an automatic project only while it has a
+    /// chat that was not missed (its chats all gone, it is not listed, and the second strike removes it).
+    #[must_use]
+    pub fn listed(&self, project: &Project) -> bool {
+        !project.auto
+            || self.member_count(&project.id) == 0
+            || self.live_member_count(&project.id) > 0
     }
 
     /// Sessions marked missing by the last sweep (first strike).
@@ -428,10 +445,13 @@ impl State {
             ..SweepOutcome::default()
         };
         let mut still: BTreeMap<String, u64> = BTreeMap::new();
+        let mut emptied: BTreeSet<String> = BTreeSet::new();
         for id in gone {
             match self.missing.get(&id) {
                 Some(since) if now.saturating_sub(*since) >= DROP_AFTER_MS => {
-                    self.members.remove(&id);
+                    if let Some(Some(project)) = self.members.remove(&id) {
+                        emptied.insert(project);
+                    }
                     outcome.dropped += 1;
                 }
                 since => {
@@ -441,6 +461,15 @@ impl State {
             }
         }
         self.missing = still;
+        // An automatic project whose last chat this sweep dropped goes with it (one a person made stays, empty).
+        let filed: BTreeSet<&str> = self
+            .members
+            .values()
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        self.projects
+            .retain(|p| !(p.auto && emptied.contains(&p.id) && !filed.contains(p.id.as_str())));
         outcome
     }
 }

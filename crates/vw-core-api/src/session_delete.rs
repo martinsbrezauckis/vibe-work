@@ -62,6 +62,11 @@ fn absolute_directory(server: &SupervisorConfig, configured_dir: &std::path::Pat
 }
 
 impl Deletes {
+    /// Vibe's configured chat folder (`logs/session`), absolute.
+    pub(crate) fn save_dir(&self) -> &std::path::Path {
+        &self.configured_dir
+    }
+
     pub(crate) fn configure(server: &mut SupervisorConfig, data: Option<&std::path::Path>) -> Self {
         let file = data.map(|dir| dir.join(RECORD));
         let mut frozen = false;
@@ -287,6 +292,20 @@ pub(crate) async fn finish(
     guard: Option<OwnedMutexGuard<()>>,
 ) -> Result<Reply, GateError> {
     let Err(error) = result else {
+        if result.is_ok() && files::uuid(id) {
+            // Vibe removed the chat's own files; its plugin data folder is the core's to remove (Vibe never does).
+            let targets = prepared.map_or_else(
+                || Targets {
+                    save_dir: shared.deletes.configured_dir.clone(),
+                    prefix: shared.deletes.prefix.clone(),
+                    legacy: None,
+                },
+                |prepared| prepared.targets,
+            );
+            let id = id.to_owned();
+            let _held = guard;
+            let _ = tokio::task::spawn_blocking(move || files::plugin_data_of(&targets, &id)).await;
+        }
         return result;
     };
     let eligible = files::uuid(id)

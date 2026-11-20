@@ -119,8 +119,7 @@ fn read_record(path: &Path) -> (BTreeSet<String>, Option<String>) {
                     _ => odd += 1,
                 }
             }
-            let damage =
-                (odd > 0).then(|| format!("it holds {odd} entries that are not session ids"));
+            let damage = (odd > 0).then(|| format!("it holds {odd} entries that are not chat IDs"));
             (ids, damage)
         }
         Err(e) => (salvage(&bytes), Some(format!("it does not parse ({e})"))),
@@ -207,7 +206,7 @@ impl TemporarySessions {
         if let Some(aside) = vw_platform::set_aside(&path, vw_projects::now_ms()) {
             error!(
                 file = ?aside, damage, kept,
-                "temporary sessions: the record was damaged and has been moved aside unchanged; the session ids still whole in it were kept"
+                "temporary chats: the record was damaged and has been moved aside unchanged; the chat IDs still whole in it were kept"
             );
             let ids = self.ids.lock_or_recover();
             if !ids.is_empty()
@@ -218,7 +217,7 @@ impl TemporarySessions {
         } else {
             error!(
                 file = ?path, damage, kept,
-                "temporary sessions: the record is damaged and could not be moved aside; it is left untouched and no temporary session can be started until it is fixed or removed"
+                "temporary chats: the record is damaged and could not be moved aside; it is left untouched and no temporary chat can be started until it is fixed or removed"
             );
             self.frozen = Some(format!(
                 "the record {} is damaged ({damage}) and could not be moved aside",
@@ -264,7 +263,7 @@ impl TemporarySessions {
             )
         } else {
             (AlertKind::TemporaryCleanupFailed,
-                "A temporary chat could not be deleted. It remains stored by Vibe. Vibe Work will retry at the next start; you can also delete it from the sessions list.".to_owned())
+                "A temporary chat could not be deleted. It remains stored by Vibe. Vibe Work will retry at the next start; you can also delete it from the chats list.".to_owned())
         };
         let event = CoreEvent::Alert {
             session_id: Some(id.to_owned()),
@@ -337,13 +336,7 @@ impl TemporarySessions {
         vw_platform::ensure_private_dir(&self.scratch_root).map_err(|e| cannot(&e))?;
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random).map_err(|e| cannot(&e))?;
-        let name = random
-            .iter()
-            .fold(String::with_capacity(16), |mut name, b| {
-                use std::fmt::Write as _;
-                let _ = write!(name, "{b:02x}");
-                name
-            });
+        let name = hex::encode(random);
         let dir = self.scratch_root.join(format!("chat-{name}"));
         // `create_dir`, never `create_dir_all`: a name that exists already is not taken over.
         std::fs::create_dir(&dir).map_err(|e| cannot(&e))?;
@@ -454,7 +447,7 @@ impl Core {
         } else {
             error!(
                 session_id = id,
-                "temporary session: the new session could not be deleted again"
+                "temporary chat: the new chat could not be deleted again"
             );
             format!(
                 "The temporary chat was not started: its record could not be saved ({why}). The new empty chat could \
@@ -663,18 +656,7 @@ fn sweep_root(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Whether `meta` (from `symlink_metadata`) is a symbolic link, or on Windows any reparse point (junctions too).
-fn is_link(meta: &std::fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt as _;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return true;
-        }
-    }
-    meta.file_type().is_symlink()
-}
+use vw_platform::link_entry::is_link;
 
 /// Removes the link at `path` itself (a directory link or junction on Windows is removed as a directory entry).
 fn remove_link(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {

@@ -296,7 +296,7 @@ fn revived(
     let mut note = None;
     let mut fail_open = |error: ChangesError| {
         note = Some(format!(
-            "The ignore rules from the start of the session could not be checked ({error}): every file git ignores now is listed."
+            "The ignore rules from the start of the chat could not be checked ({error}): every file git ignores now is listed."
         ));
         std::collections::HashSet::new()
     };

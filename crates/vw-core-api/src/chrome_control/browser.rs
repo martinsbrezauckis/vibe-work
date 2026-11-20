@@ -150,7 +150,7 @@ fn launch(
             .and_then(|mut command| {
                 command
                     .spawn()
-                    .map_err(|_| format!("{name} could not be opened"))
+                    .map_err(|error| start_failed(name, &error, cfg!(windows)))
             });
             // `open` is a short LaunchServices request. Its exit status tells us whether the bundle was found;
             // the browser itself belongs to LaunchServices and is never waited on or killed by the app.
@@ -172,6 +172,47 @@ fn launch(
         .recv()
         .map_err(|_| "The browser could not be opened".to_owned())?
 }
+/// Why the browser `name` did not start (`error` from starting its program), as the person and the agent read it; the
+/// OS error is logged. On Windows the app starts a browser outside its own job (`CREATE_BREAKAWAY_FROM_JOB`) so closing
+/// the app never closes the person's browser; a program that started the app inside a job that forbids that (a
+/// scheduled task does) makes Windows refuse with access denied. The app does not tie the browser to that job: it
+/// says so, and a browser the person opened connects without being started.
+fn start_failed(name: &str, error: &std::io::Error, windows: bool) -> String {
+    tracing::warn!(%error, browser = name, "the browser could not be started");
+    if windows && error.kind() == std::io::ErrorKind::PermissionDenied {
+        vw_vocabulary::texts::BROWSER_START_REFUSED.replace("{browser}", name)
+    } else {
+        format!("{name} could not be opened")
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 #[path = "browser_reap_tests.rs"]
 mod reap_tests;
+
+#[cfg(test)]
+mod start_failed_tests {
+    /// PREDICT (before the change): every failed start said only "Microsoft Edge could not be opened" and nothing was
+    /// logged; an app started by a scheduled task could not start Edge (Windows refuses the job breakaway with access
+    /// denied inside a task and allows it outside) and the person could not learn why or what to do.
+    #[test]
+    fn a_refused_start_on_windows_says_why_and_what_to_do() {
+        let denied = std::io::Error::from_raw_os_error(5);
+        let denied = std::io::Error::new(std::io::ErrorKind::PermissionDenied, denied);
+        assert_eq!(
+            super::start_failed("Microsoft Edge", &denied, true),
+            "Microsoft Edge could not be opened: the program that started Vibe Work does not let it start a browser of \
+             its own. Open Microsoft Edge yourself, then try again."
+        );
+        // Elsewhere, and for any other failure, the short sentence stays.
+        assert_eq!(
+            super::start_failed("Microsoft Edge", &denied, false),
+            "Microsoft Edge could not be opened"
+        );
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(
+            super::start_failed("Google Chrome", &missing, true),
+            "Google Chrome could not be opened"
+        );
+    }
+}

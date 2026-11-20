@@ -36,11 +36,14 @@ pub(crate) async fn root_no<T>(
     };
     let stopping = crate::stops::requested(shared, &command);
     let result = answer.await;
-    // The No itself was delivered: a slow subagent interrupt is logged, not shown as a failed answer.
+    let mut took = result.is_ok();
+    // The No itself was delivered: a slow subagent interrupt is logged, not shown as a failed answer (the Stop then
+    // holds until the person's next message).
     if let Err(error) = crate::stop_tree::descendants(shared, &root).await {
         tracing::warn!(session = %root, %error, "subagents after a No were not interrupted");
+        took = false;
     }
-    crate::stops::finished(shared, &stopping);
+    crate::stops::finished(shared, &stopping, took);
     result
 }
 
@@ -63,6 +66,6 @@ pub(crate) async fn stop_with_no<T>(
         answer,
     )
     .await;
-    crate::stops::finished(shared, &stopping);
+    crate::stops::finished(shared, &stopping, result.is_ok());
     result
 }

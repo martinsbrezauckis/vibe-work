@@ -128,8 +128,10 @@ pub struct ProxyStats {
     pub bad_path: AtomicU64,
     /// Answered 503 because no key came in time.
     pub no_key: AtomicU64,
-    /// Requests that had to wait for a key.
+    /// Total requests that had to wait for a key, including completed and canceled waits.
     pub waited: AtomicU64,
+    /// Requests currently waiting for a key; released on an answer or client cancellation.
+    pub waiting: AtomicU64,
     /// Requests answered immediately because the owner is stopping.
     pub stopping: AtomicU64,
     /// Model requests held for the resumed old turn to end.

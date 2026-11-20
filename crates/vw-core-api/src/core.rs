@@ -37,8 +37,12 @@ use vw_supervisor::Supervisor;
 use vw_terminal::TerminalManager;
 /// State shared by every handle, the pump and the server-request handler.
 pub(crate) struct Shared {
+    /// Serializes a site's vault fill effects with the person's revoke of that grant.
+    pub(crate) fill_effects: crate::fill_grants::Effects,
     pub(crate) browser_settings: crate::browser_settings::Settings,
     pub(crate) browser_dialogs: Arc<crate::browser_dialogs::Dialogs>,
+    /// Which browser each chat's page references came from (`browser_ref_origins`).
+    pub(crate) browser_ref_origins: crate::browser_ref_origins::RefOrigins,
     pub(crate) feedback: crate::feedback::Feedback,
     pub(crate) deletes: Arc<crate::session_delete::Deletes>,
     pub(crate) guard_asks: crate::ask::guards::Calls,
@@ -55,6 +59,7 @@ pub(crate) struct Shared {
     pub(crate) protected_changes: crate::protected_changes::Hub,
     pub(crate) github_reads: Arc<crate::github_reads::Reader>,
     pub(crate) keep_awake: crate::keep_awake::AwakeState,
+    pub(crate) developer_permissions: crate::developer_permissions::DeveloperPermissions,
     /// The New chat screen's owner of terminals, browser and port lease before the first message (`new_chat`).
     pub(crate) new_chat: crate::new_chat::Draft,
     /// Orders skills changes with admitting new work so a busy check cannot race a turn start.

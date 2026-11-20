@@ -111,7 +111,7 @@ export function DiffView({
         <Button
           data-testid="transcript.diff-view-toggle"
           type="button"
-          appearance="expander"
+          appearance="link"
           aria-label="Show full diff"
           title="Show full diff"
           onClick={() => {

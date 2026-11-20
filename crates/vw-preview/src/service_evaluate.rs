@@ -6,6 +6,20 @@ use std::sync::Arc;
 use crate::{EngineError, MountId, PreviewError, PreviewService};
 
 impl PreviewService {
+    /// Checks whether the mounted preview currently has a native menu open.
+    ///
+    /// # Errors
+    /// A closed mount or an unavailable native check.
+    pub async fn select_menu_open(&self, session_id: &str) -> Result<bool, PreviewError> {
+        let _activity = self.session_lock(session_id).await;
+        let id = self
+            .page_mount(session_id)
+            .ok_or(PreviewError::NothingOpen)?;
+        Ok(self
+            .bounded("checking a native menu", self.engine.select_menu_open(&id))
+            .await?)
+    }
+
     /// Reads native request observations without evaluating page code.
     ///
     /// # Errors

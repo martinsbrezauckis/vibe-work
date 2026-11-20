@@ -97,6 +97,7 @@ fn launch(project: &Path, home: &Path, vibe_home: &Path) -> StdioTransport {
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", home)
         .env("VIBE_HOME", vibe_home)
+        .env("VW_TEST_VIBE_PIN", PIN.trim())
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env("XDG_CACHE_HOME", home.join("cache"))
         .env("PYTHONDONTWRITEBYTECODE", "1")

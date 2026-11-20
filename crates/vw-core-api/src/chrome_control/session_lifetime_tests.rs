@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-async fn chat_with_session() -> crate::Core {
+pub(super) async fn chat_with_session() -> crate::Core {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let name = format!(
         "chrome-reopen-{}",
@@ -31,7 +31,7 @@ async fn chat_with_session() -> crate::Core {
     core
 }
 
-fn helper(opened: &'static str) -> impl Fn(&str, &Value) -> Value + Send + 'static {
+pub(super) fn helper(opened: &'static str) -> impl Fn(&str, &Value) -> Value + Send + 'static {
     move |tool, args| {
         if tool == "chrome_session" && args["action"] == "open" {
             json!({"isError":false,"content":[{"type":"text","text":"opened"}],
@@ -45,7 +45,7 @@ fn helper(opened: &'static str) -> impl Fn(&str, &Value) -> Value + Send + 'stat
     }
 }
 
-fn opens(seen: &Arc<std::sync::Mutex<Vec<(String, Value)>>>) -> Vec<Value> {
+pub(super) fn opens(seen: &Arc<std::sync::Mutex<Vec<(String, Value)>>>) -> Vec<Value> {
     seen.lock()
         .unwrap()
         .iter()
@@ -113,7 +113,7 @@ async fn a_completed_turn_keeps_the_same_session_for_reads_and_batches() {
     .await;
     assert_eq!(
         other.unwrap_err(),
-        "Not run: this Chrome session belongs to another chat. Open a Chrome session for this chat with chrome_session."
+        "Not run: this Chrome browser session belongs to another chat. Open a Chrome browser session for this chat with chrome_session."
     );
     // An id no chat ever had says so (Mistral passed a made-up "default" in T34/T35).
     let unknown = super::gateway::call(
@@ -428,210 +428,6 @@ async fn an_explicit_stop_revokes_the_retained_session() {
         );
         core.shutdown().await;
     }
-}
-
-/// The person's Stop is not a turn end: that session is not reopened, and the refusal says what happened.
-#[tokio::test]
-async fn a_session_the_person_stopped_is_not_reopened() {
-    let core = chat_with_session().await;
-    let shared = &core.shared;
-    let seen = super::test_support::answering(shared, helper("t2"));
-    super::gateway::call(
-        shared,
-        "s",
-        "chrome_session",
-        json!({"action":"open","profileId":"p"}),
-    )
-    .await
-    .unwrap();
-    crate::stops::stopped(shared, "s");
-    let refused = super::gateway::call(
-        shared,
-        "s",
-        "chrome_execute",
-        json!({"sessionId":"t2","action":"page.read","args":{}}),
-    )
-    .await;
-    assert_eq!(
-        refused.unwrap_err(),
-        "Not run: this Chrome session was stopped; open a new one with chrome_session."
-    );
-    assert_eq!(opens(&seen).len(), 1);
-    core.shutdown().await;
-}
-#[tokio::test]
-async fn completed_turn_retains_the_session_and_releases_control() {
-    let core = chat_with_session().await;
-    let seen = super::test_support::answering(&core.shared, helper("held"));
-    super::gateway::call(
-        &core.shared,
-        "s",
-        "chrome_session",
-        json!({"action":"open","profileId":"p"}),
-    )
-    .await
-    .unwrap();
-    super::end_turn(&core.shared, "s");
-    assert_eq!(
-        core.shared
-            .chrome_control
-            .tasks
-            .lock()
-            .unwrap()
-            .get("held")
-            .map(String::as_str),
-        Some("s")
-    );
-    tokio::task::yield_now().await;
-    assert!(
-        !seen
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(_, a)| a["action"] == "stop")
-    );
-    // A completed turn must not expire an unanswered or skipped person question.
-    let question = core.shared.asks.open(
-        "user_input",
-        Some("s".into()),
-        vw_ask::Requester::Agent,
-        vec![vw_ask::Choice::No],
-        Some("question-hold".into()),
-    );
-    for skipped in [false, true] {
-        if skipped {
-            assert!(core.shared.asks.settle(
-                &question.ask.id,
-                vw_ask::Outcome::Refused {
-                    by: vw_ask::AnsweredBy::Person,
-                    note: None
-                }
-            ));
-        }
-        super::end_turn(&core.shared, "s");
-        // A following owner call is the acknowledgement barrier for the queued control.
-        core.shared
-            .chrome_control
-            .owner
-            .call("chrome_status", json!({}))
-            .await;
-        let last = seen
-            .lock()
-            .unwrap()
-            .iter()
-            .rev()
-            .find(|(_, args)| args["action"] == "idle")
-            .unwrap()
-            .1
-            .clone();
-        assert_eq!(last["awaitingPerson"], true, "skipped={skipped}: {last}");
-    }
-    core.shared.asks.clear_question_holds(Some("s"));
-    super::end_turn(&core.shared, "s");
-    core.shared
-        .chrome_control
-        .owner
-        .call("chrome_status", json!({}))
-        .await;
-    let last = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .rev()
-        .find(|(_, args)| args["action"] == "idle")
-        .unwrap()
-        .1
-        .clone();
-    assert_eq!(
-        last["awaitingPerson"], false,
-        "a new message releases the hold"
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn an_unconfirmed_resume_never_sends_the_requested_action() {
-    for state in ["connecting", "stopping", "disconnected"] {
-        let core = chat_with_session().await;
-        super::test_support::answering(&core.shared, helper("held"));
-        super::gateway::call(
-            &core.shared,
-            "s",
-            "chrome_session",
-            json!({"action":"open","profileId":"p"}),
-        )
-        .await
-        .unwrap();
-        super::end_turn(&core.shared, "s");
-        let seen = super::test_support::answering(
-            &core.shared,
-            move |_, _| json!({"structuredContent":{"sessionId":"held","state":state}}),
-        );
-        let answer = super::gateway::call(
-            &core.shared,
-            "s",
-            "chrome_execute",
-            json!({"sessionId":"held","action":"page.read","args":{}}),
-        )
-        .await
-        .unwrap();
-        assert!(answer.to_string().contains("SESSION_NOT_READY"), "{answer}");
-        assert!(
-            !seen
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(tool, _)| tool == "chrome_execute")
-        );
-        core.shutdown().await;
-    }
-}
-
-#[tokio::test]
-async fn stop_during_resume_fences_the_action_and_does_not_rebind_the_session() {
-    let core = chat_with_session().await;
-    super::test_support::answering(&core.shared, helper("held"));
-    super::gateway::call(
-        &core.shared,
-        "s",
-        "chrome_session",
-        json!({"action":"open","profileId":"p"}),
-    )
-    .await
-    .unwrap();
-    super::end_turn(&core.shared, "s");
-    let weak = Arc::downgrade(&core.shared);
-    let seen = super::test_support::answering(&core.shared, move |tool, args| {
-        if tool == "chrome_session" && args["action"] == "resume" {
-            crate::stops::stopped(&weak.upgrade().unwrap(), "s");
-        }
-        json!({"structuredContent":{"sessionId":"held","state":"active"}})
-    });
-    let answer = super::gateway::call(
-        &core.shared,
-        "s",
-        "chrome_execute",
-        json!({"sessionId":"held","action":"page.read","args":{}}),
-    )
-    .await;
-    assert!(answer.is_err(), "{answer:?}");
-    assert!(
-        !seen
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(tool, _)| tool == "chrome_execute")
-    );
-    assert!(
-        !core
-            .shared
-            .chrome_control
-            .tasks
-            .lock()
-            .unwrap()
-            .contains_key("held")
-    );
-    core.shutdown().await;
 }
 
 #[path = "session_combined_tests.rs"]

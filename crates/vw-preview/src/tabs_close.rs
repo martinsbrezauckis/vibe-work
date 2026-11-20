@@ -33,7 +33,7 @@ impl PreviewService {
                 .is_none_or(|found| found != owner)
             {
                 return Err(PreviewError::InvalidTab(
-                    "web page does not belong to this session".to_owned(),
+                    "web page does not belong to this chat".to_owned(),
                 ));
             }
             if let Some(expected) = expected

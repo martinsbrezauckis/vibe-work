@@ -82,6 +82,10 @@ pub struct LocalRequest<'a> {
     /// `Sec-Fetch-Dest` is present and not `document`), or the request cannot show it is not (a tunnel where the
     /// engine's navigation callback includes frames, `serve`): never the page's own top-level navigation.
     pub nested: bool,
+    /// True when the request is known to speak TLS (an HTTPS or secure WebSocket request, which a server that speaks
+    /// only plain HTTP cannot answer): a tunnel (`CONNECT`) from an engine that tunnels only TLS. False for a plain
+    /// request and for a tunnel that may carry plain http (macOS `WebKit` tunnels every request).
+    pub tls: bool,
 }
 
 /// The class a [`LocalRequest`] reports for `addrs`: loopback (or unspecified, or one of this computer's own interface
@@ -132,7 +136,7 @@ pub async fn decide(
     host: &str,
     port: u16,
 ) -> Result<Vec<SocketAddr>, String> {
-    decide_for(resolver, scope, host, port, None, false).await
+    decide_for(resolver, scope, host, port, None, false, false).await
 }
 
 /// Where to connect for `host:port` for a request from `initiator` (see [`LocalRequest::initiator`] and
@@ -147,6 +151,7 @@ pub async fn decide_for(
     port: u16,
     initiator: Option<&str>,
     nested: bool,
+    tls: bool,
 ) -> Result<Vec<SocketAddr>, String> {
     let host = bare_host(host);
     let lower = host.trim_end_matches('.').to_ascii_lowercase();
@@ -173,6 +178,7 @@ pub async fn decide_for(
                 own_address: addrs.iter().any(|a| crate::own::is_own(a.ip())),
                 initiator,
                 nested,
+                tls,
             };
             scope.local_access(&request).await?;
         }

@@ -153,7 +153,7 @@ export function ProjectCardView({
           <Button
             data-testid="projects.project-card-view-stop-propagation-3"
             type="button"
-            appearance="project"
+            placement="project"
             shape="outlined"
             disabled={requestBusy}
             title={requestBusy ? HANDBOOK_BUSY_TOOLTIP : undefined}
@@ -250,7 +250,7 @@ export function NoFolderCard({
         <Button
           data-testid="projects.project-card-view-stop-propagation-5"
           type="button"
-          appearance="project"
+          placement="project"
           shape="outlined"
           onClick={(e) => {
             e.stopPropagation();

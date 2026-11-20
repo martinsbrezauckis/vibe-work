@@ -14,11 +14,11 @@ use crate::core::Shared;
 use crate::previews::hub;
 
 fn close_allowed(shared: &Shared, owner: &str, _user_origin: bool) -> Result<(), String> {
-    let mode = crate::chrome_control::check::mode(shared, owner);
+    let mode = crate::chrome_control::chat_mode(shared, owner);
     mode.as_deref()
         .and_then(vw_ask::chrome::Tier::from_mode)
         .ok_or_else(|| {
-            crate::chrome_control::check::mode_refusal(
+            crate::chrome_control::mode_refusal(
                 "Closing browser tabs",
                 vw_ask::chrome::Tier::Ask,
                 mode.as_deref().unwrap_or("an unavailable access mode"),

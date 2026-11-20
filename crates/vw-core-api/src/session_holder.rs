@@ -126,7 +126,7 @@ pub(crate) fn held_refusal(pid: u32) -> CoreError {
     let mut error = CoreError::new(
         ErrorCode::Denied,
         format!(
-            "{} is open in another window (pid {pid}). Read-only here until it closes the session.",
+            "{} is open in another window (pid {pid}). Read-only here until it closes the chat.",
             vw_vocabulary::text("thisSession").unwrap_or_default()
         ),
     );

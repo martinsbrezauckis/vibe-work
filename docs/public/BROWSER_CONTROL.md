@@ -32,8 +32,17 @@ Scroll results state when the page or selected scroll pane reaches its edge, inc
 
 ## Windows and work state
 
+A picker choice points the agent at a profile until it first uses an external browser. Before that first use, you
+can change the choice, and the agent can use another eligible profile; the chat tells you when it used a different
+profile from your pick. Its first successful external session locks that profile.
+
+A chat uses one external browser profile at a time, alongside its built-in Browser. After that external session
+closes, is released or disconnects, the chat can open a new connection in any supported browser or profile. The tab
+picker offers the new choice after Vibe Work confirms the old connection has ended; an unfinished Stop keeps it
+unavailable. An unconfirmed opening also blocks another connection until the earlier session is confirmed ended. Browser permissions granted for the chat follow that chat to its next connection. Closing the sole agent window ends the external session; the chat says that the session ended because its window was closed.
+
 The vault prompt waits until you answer; saying No answers only that call and the turn goes on, and the agent receives:
-`Not run: the user declined this. Explain why it is needed for the user's delegated task.`
+`Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.`
 
 Each chat opens an unfocused Chrome window. New tabs go there and are selected by default; your own tabs can also be used. Chat windows stay ungrouped, so closing one leaves no automatically saved tab group. While a chat's agent works in one of your windows, that window is the chat's until its session ends: another chat's agent is refused there. Stop ends work and leaves the window open. Deleting a chat ends its browser control and leaves its window and tabs open; close the tabs in the browser when you are done with them. Quitting the app leaves windows open and ends sessions. After Stop, the chat's Chrome calls are refused for the rest of that turn. When a turn finishes, its frame and action marker disappear after the browser confirms release. The session stays available for follow-up in the same window, with the same identity; browser work reacquires control before acting. Thirty minutes without browser work ends the retained session. Stop, closing the chat, quitting the app or closing its retained target also ends it; Stop and idle expiry leave the person's tabs open. After a Chrome restart or extension reload, the next call opens a fresh session. Reopening after a lost connection or an extension reload keeps the chat's selected tab when the same page is still open; previous page references and unfinished actions are not reused.
 
@@ -51,7 +60,9 @@ When the agent asks you a question, it releases this chat's browser so you can c
 
 Reads support headings, lists, landmarks, tables, subtrees, depth, interactive elements and optional option lists. CSS-hidden text is excluded. Coordinates resolve nodes and frames before input. Screenshots support regions, scale, maximum dimensions and file output; large full pages are scaled. Console/network reads are filtered and paged from bounded per-tab buffers. Headers redact cookies, authorization and set-cookie by default. Known vault authorization headers stay redacted even at Full access.
 
-Screenshots, PDFs, response bodies and requested GIF recordings land in the chat's `chrome-files` folder. Uploads use chat-relative paths or files selected for that chat in the extension. Handles cannot cross chats. Uploads allow up to 16 files of 32 MiB each; completed downloads copied into the chat folder are limited to 256 MiB.
+The built-in Browser records guarded page screenshots to WebM when the app's encoder supports VP8, up to five minutes or 1,200 frames, without audio. Pause holds capture; your Stop discards it. If video encoding is unavailable, the result offers an action GIF.
+
+Screenshots, PDFs, response bodies and requested GIF or WebM recordings land in the chat's `chrome-files` folder. Uploads use chat-relative paths or files selected for that chat in the extension. Handles cannot cross chats. Uploads allow up to 16 files of 32 MiB each; completed downloads copied into the chat folder are limited to 256 MiB.
 
 Ask Vibe Work on selected text adds a chip to that window's chat, or New chat. With extension 0.1.7, the same menu also shares a page, a link or an image. Pages add their URL, title and current selection and hand the window to the chat. Links and images add their addresses and source-page details without opening or downloading them. The composer's Chrome tab picker adds URL, title and current selection. The agent lists and acts in your tabs within the chat's mode; other chats' tabs are not listed to it and are refused. Neither sends a message automatically. WebMCP tools require a supporting Chrome/page; invoking them needs browser approval below Full access; absence is reported cleanly. Scripts can target a chosen frame. Only the chat's own window can be resized.
 

@@ -1,22 +1,70 @@
-// Whether this document shows a protected field's value: the visual-capture admission below Full access (screenshots,
+// Whether this document shows a protected field's value: the visual-capture admission in every access mode (screenshots,
 // image crops, GIF frames, full-page PNG and PDF). Protected = the shared privateField rule (password, PIN, card,
 // vault-filled). A field the engine draws masked (a password input, `-webkit-text-security`), a hidden or empty field
 // does not count. Fields in this document, its open shadow roots and its same-origin child documents are looked at;
 // over 200,000 elements counts as shown. Closed shadow roots cannot be entered from this world: each document's
 // keeper (vw-preview `js/closed_roots.js`, page world, document start) answers through two cancelable events whether
 // a closed root holds a rendered filled field; a document without the keeper's answer counts as shown.
+// Closed roots the HTML parser made (declarative shadow DOM) never pass the keeper: an engine that can enter closed
+// roots hands every closed root of the frame's process to this script as `closedRoots` (vw-preview `CdpFrames`), and
+// a world where closed roots read as open (macOS 27) sees them through `shadowRoot`; otherwise a document the keeper
+// marks "may hold a declarative closed root" ("vibework-closed-roots-declarative") counts as a protected field and as
+// shown, so raw reads and captures stop there.
 // `frames` counts the child frames this document cannot enter (another origin) and `entered` says whether the parent
 // document could enter this one (and so already looked at it): the host refuses the capture when fewer not-entered
 // frames answered than all documents name. Evaluated in every frame; the answer is untrusted page data.
-/* global editingHost, privateField, viewOf -- Supplied by the Rust script assembler and its shared prelude. */
+/* global REQ, editingHost, privateField, viewOf, closedRoots -- Supplied by the Rust script assembler and its shared
+   prelude; `closedRoots` only by an engine that enters closed roots. */
 (() => {
   __VW_COMMON__
-  const roots = [document];
+  const provided = typeof closedRoots !== "undefined" && Array.isArray(closedRoots) ? closedRoots : null;
+  // Whether this world itself reads closed roots as open (a detached probe; nothing reaches the page).
+  const worldOpen = (() => {
+    try {
+      const probe = document.createElement("div");
+      probe.attachShadow({ mode: "closed" });
+      return probe.shadowRoot !== null;
+    } catch {
+      return false;
+    }
+  })();
+  const roots = [];
+  // A document and the engine's closed roots whose host is in it.
+  const add = (doc) => {
+    roots.push(doc);
+    for (const root of provided || []) {
+      if (root && root.host && root.host.ownerDocument === doc) roots.push(root);
+    }
+  };
+  add(document);
   let seen = 0;
   let frames = 0;
   // The keeper cancels "ready" always and "shown" while a closed root holds a filled field.
   const asked = (doc, type) => !doc.dispatchEvent(new Event(type, { cancelable: true }));
-  const closedShown = (doc) => !asked(doc, "vibework-closed-roots-ready") || asked(doc, "vibework-closed-roots-shown");
+  const unseen = (doc) => !provided && !worldOpen && asked(doc, "vibework-closed-roots-declarative");
+  const closedShown = (doc) =>
+    !asked(doc, "vibework-closed-roots-ready") || asked(doc, "vibework-closed-roots-shown") || unseen(doc);
+  const closedFields = (doc) =>
+    !asked(doc, "vibework-closed-roots-ready") || asked(doc, "vibework-closed-roots-fields") || unseen(doc);
+  const countFields = () => {
+    let count = 0;
+    for (let r = 0; r < roots.length; r += 1) {
+      if (roots[r].nodeType === Node.DOCUMENT_NODE && closedFields(roots[r])) count += 1;
+      for (const el of roots[r].querySelectorAll("*")) {
+        if (++seen > 200000) return -1;
+        if (el.shadowRoot) roots.push(el.shadowRoot);
+        if (el.localName === "iframe" || el.localName === "frame") {
+          let child;
+          try { child = el.contentDocument; } catch { child = null; }
+          if (child) add(child); else frames += 1;
+        }
+        const tag = el.localName;
+        if (!["input", "textarea", "select"].includes(tag) && !editingHost(el)) continue;
+        if (privateField(el) && ++count > 10000) return -1;
+      }
+    }
+    return count;
+  };
   const shown = () => {
     for (let r = 0; r < roots.length; r += 1) {
       if (roots[r].nodeType === Node.DOCUMENT_NODE && closedShown(roots[r])) return true;
@@ -26,7 +74,7 @@
         if (el.localName === "iframe" || el.localName === "frame") {
           let child;
           try { child = el.contentDocument; } catch { child = null; }
-          if (child) roots.push(child); else frames += 1;
+          if (child) add(child); else frames += 1;
         }
         const tag = el.localName;
         const editing = editingHost(el);
@@ -44,5 +92,6 @@
   };
   let entered;
   try { entered = window.frameElement !== null; } catch { entered = false; }
+  if (REQ.countFields) return JSON.stringify({ count: countFields(), frames, entered });
   return JSON.stringify({ shown: shown(), frames, entered });
 })()

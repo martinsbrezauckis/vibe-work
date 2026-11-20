@@ -32,9 +32,9 @@ pub(super) async fn prepare(
     let answer = match answer {
         Err(reason) if reason == vw_browser::SEND_REQUIRED => {
             tool_calls::approve(shared,owner,source,call,json!({"kind":"approval","vwBrowserTier":Tier::AcceptEdits as u8,
-                "vwBrowserAction":crate::chrome_control::builtin::SEND_ACTION,"effect":{"kind":"tool","toolName":"mcp_vw.browser_act","input":args},"requiredPermissions":[]})).await?;
+                "vwBrowserAction":crate::chrome_control::BUILTIN_SEND_ACTION,"effect":{"kind":"tool","toolName":"mcp_vw.browser_act","input":args},"requiredPermissions":[]})).await?;
             if crate::stops::generation(shared, owner) != generation
-                || crate::chrome_control::check::mode(shared, owner)
+                || crate::chrome_control::chat_mode(shared, owner)
                     .as_deref()
                     .and_then(Tier::from_mode)
                     .is_none()

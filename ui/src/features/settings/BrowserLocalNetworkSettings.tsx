@@ -3,13 +3,19 @@
  * reaches apps and devices on this computer or the local network, and the answer is kept per site. Each row shows
  * the site with its Allow / Block answer (changeable) and Forget (the site is asked again next time). Uses the typed
  * core (`localNetworkSites`, `setLocalNetworkSite`) and shows only confirmed values; an answer given in the native
- * question while the list is open (`browserChanged` naming no chat) is read at once. Rendered by BrowserSettings.
+ * question while the list is open (`browserChanged` naming no chat) is read at once. Sites refused because a request
+ * did not say which open page sent it, or timed out, are listed as "Not answered" with Allow and Block (nothing is allowed by
+ * default; the answer is the same decision as in the question). Rendered by BrowserSettings.
+ *
+ * Layout: the label and its description keep the row's first line; the empty state, the lists and the macOS
+ * own-address line each take the row's full width below it (settings.css), so none of them squeezes the label.
  */
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Controls";
 import { Selector } from "../../components/Selector";
 import type { LocalNetworkSite, SiteAnswer } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
+import { detectMac } from "../../state/shortcuts";
 import { useApp } from "../shell/AppContext";
 
 const OPTIONS = [
@@ -25,6 +31,7 @@ export function BrowserLocalNetworkSettings({
 }) {
   const { core } = useApp();
   const [sites, setSites] = useState<LocalNetworkSite[] | null>(null);
+  const [unanswered, setUnanswered] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -37,8 +44,10 @@ export function BrowserLocalNetworkSettings({
       void core
         .run({ type: "browser", request: { op: "localNetworkSites" } })
         .then((reply) => {
-          if (live && reply.type === "browser" && reply.result.type === "localNetworkSites")
+          if (live && reply.type === "browser" && reply.result.type === "localNetworkSites") {
             setSites(reply.result.sites);
+            setUnanswered(reply.result.unanswered.map((u) => u.site));
+          }
         })
         .catch((thrown: unknown) => {
           if (live)
@@ -66,6 +75,7 @@ export function BrowserLocalNetworkSettings({
         if (reply.type !== "browser" || reply.result.type !== "localNetworkSites")
           throw new Error("Local network access unavailable");
         setSites(reply.result.sites);
+        setUnanswered(reply.result.unanswered.map((u) => u.site));
       })
       .catch((thrown: unknown) => {
         setError(
@@ -82,11 +92,47 @@ export function BrowserLocalNetworkSettings({
       <span>
         Sites that can reach your local network
         <span className="d">
-          {sites.length === 0
-            ? "No site has asked yet"
-            : "A site from the web asks before it reaches apps and devices on this computer or your local network"}
+          A site from the web asks before it reaches apps and devices on this computer or your local
+          network.
         </span>
       </span>
+      {sites.length === 0 && unanswered.length === 0 && <p className="d">No site has asked yet.</p>}
+      {unanswered.length > 0 && (
+        <ul aria-label="Sites not answered">
+          {unanswered.map((site) => (
+            <li
+              key={site}
+              data-item-id={site}
+              data-testid="settings.browser-local-network.unanswered"
+            >
+              <span>
+                {site}
+                <span className="d">Not answered</span>
+              </span>
+              <Button
+                disabled={busy !== null}
+                aria-label={`Allow ${site}`}
+                data-testid="settings.browser-local-network.allow"
+                onClick={() => {
+                  change(site, "allow");
+                }}
+              >
+                Allow
+              </Button>
+              <Button
+                disabled={busy !== null}
+                aria-label={`Block ${site}`}
+                data-testid="settings.browser-local-network.block"
+                onClick={() => {
+                  change(site, "block");
+                }}
+              >
+                Block
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
       {sites.length > 0 && (
         <ul aria-label="Sites that can reach your local network">
           {sites.map(({ site, answer }) => (
@@ -117,6 +163,12 @@ export function BrowserLocalNetworkSettings({
             </li>
           ))}
         </ul>
+      )}
+      {detectMac() && (
+        <p className="d">
+          On macOS, web pages cannot reach this Mac’s own network addresses. Localhost and this
+          chat’s preview servers keep their existing access.
+        </p>
       )}
     </div>
   );

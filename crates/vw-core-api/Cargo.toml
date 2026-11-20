@@ -66,6 +66,8 @@ vw-skills = { path = "../vw-skills" }
 base64 = "0.23"
 # Random dictation stream ids; already in the lock file through vw-documents.
 getrandom = { workspace = true }
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 zeroize = { workspace = true }
 # Fixed-size process receipt credentials, checked before allocating a client task.
 subtle = { workspace = true }
@@ -94,7 +96,7 @@ vw-preview = { workspace = true }
 # The agent browser's network guard: loopback answers, Vibe Work's own ports.
 vw-netguard = { workspace = true }
 # The agent browser: observe, act, receipts, prompt guard, Stop and the action log.
-vw-browser = { path = "../vw-browser" }
+vw-browser = { workspace = true }
 # Project Pages: hub, page server, comments, viewer, the vw-plan profile.
 vw-pages = { workspace = true }
 # The user's project groups: store, filing rules, reconcile.
@@ -138,8 +140,10 @@ windows = { workspace = true, features = ["Win32_System_Threading"] }
 blake3 = { workspace = true, features = ["pure"] }
 
 [dev-dependencies]
+# Preview port tests hold a port (bound, not listening) across a stand-in server's close.
+socket2 = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
 
 # Native Windows registry acceptance uses disposable test keys.
 [target.'cfg(windows)'.dev-dependencies]

@@ -10,8 +10,8 @@ use crate::mcp::MCP_PREFIX;
 use crate::routes::{RouteSpec, Upstream, match_route};
 use axum::body::Body;
 use axum::extract::{Request, State};
+use axum::http::StatusCode;
 use axum::http::header::{ACCEPT_ENCODING, AUTHORIZATION, CONTENT_LENGTH, HeaderName, HeaderValue};
-use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{StreamExt, TryStreamExt};
 use std::sync::Arc;
@@ -60,15 +60,6 @@ fn refuse(status: StatusCode, kind: &'static str, message: &'static str) -> Refu
     }
 }
 
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(str::trim)
-}
-
 /// Headers never copied in either direction (RFC 9110 §7.6.1 hop-by-hop, plus our own rules).
 fn dropped(name: &HeaderName, request: bool) -> bool {
     matches!(
@@ -94,7 +85,7 @@ fn admit(
     shared: &Shared,
     parts: &axum::http::request::Parts,
 ) -> Result<&'static RouteSpec, Refusal> {
-    if !bearer(&parts.headers).is_some_and(|t| shared.tokens.accepts(t)) {
+    if !crate::bearer::token(&parts.headers).is_some_and(|t| shared.tokens.accepts(t)) {
         shared.stats.bad_token.fetch_add(1, Ordering::Relaxed);
         warn!(method = %parts.method, "model proxy: refused a request without the current token");
         return Err(refuse(
@@ -136,6 +127,15 @@ fn stopping(shared: &Shared) -> Refusal {
     )
 }
 
+/// Keeps the live count balanced when an HTTP client drops its request during the key wait.
+struct KeyWait(Arc<super::ProxyStats>);
+
+impl Drop for KeyWait {
+    fn drop(&mut self) {
+        self.0.waiting.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Step 3: the key as a sensitive `Authorization` value, waiting for it when needed.
 ///
 /// `wait` false (startup discovery): one snapshot of the key decides, never a wait and never the owner's
@@ -159,10 +159,13 @@ async fn authorization(shared: &Shared, wait: bool) -> Result<HeaderValue, Refus
     let key = if wait {
         let stats = Arc::clone(&shared.stats);
         let hook = Arc::clone(&shared.config.on_wait);
+        let mut waiting = None;
         tokio::select! {
             biased;
             _ = stopping_rx.wait_for(|stopping| *stopping) => return Err(stopping(shared)),
-            result = shared.key.wait_ready(shared.config.key_wait, move |need| {
+            result = shared.key.wait_ready(shared.config.key_wait, |need| {
+                stats.waiting.fetch_add(1, Ordering::Relaxed);
+                waiting = Some(KeyWait(Arc::clone(&stats)));
                 stats.waited.fetch_add(1, Ordering::Relaxed);
                 hook(need);
             }) => result.map_err(unavailable)?,
@@ -314,6 +317,7 @@ fn startup_discovery(route: &RouteSpec) -> bool {
         route.template,
         crate::connectors::BOOTSTRAP_TEMPLATE
             | "/v1/users/me"
+            | "/v1/model-catalog"
             | "/v1/billing/subscription"
             | "/v1/billing/budget"
             | "/console/api/vibe/whoami"

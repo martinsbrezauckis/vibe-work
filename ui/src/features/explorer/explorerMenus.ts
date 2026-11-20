@@ -25,6 +25,7 @@ import type { App } from "../shell/AppContext";
 import { TEXT } from "../../vocabulary";
 import type { Explorer } from "./store";
 import type { WorkspaceModel } from "./workspaceModel";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 /** What a Files menu is for. */
 export type ExplorerTarget =
@@ -151,11 +152,10 @@ export function explorerMenu(deps: ExplorerMenuDeps, target: ExplorerTarget): Bu
               label: "Search in this folder",
               run: () => {
                 explorer.searchIn(target.path);
-                setTimeout(() => {
-                  document
-                    .querySelector<HTMLInputElement>('[data-testid="explorer.search"]')
-                    ?.focus();
-                }, 0);
+                focusWhenMounted({
+                  find: () =>
+                    document.querySelector<HTMLInputElement>('[data-testid="explorer.search"]'),
+                });
               },
             },
             {

@@ -110,13 +110,14 @@ export function CreateStep() {
         }
       />
       <p className="key-field-hint">
-        If you forget the password, paste your key again. Vibe Work never sees your Mistral account
-        password.
+        If you forget the password, you can set the vault aside, start a new one and paste your key
+        again; what the old vault holds stays locked in it. Vibe Work never sees your Mistral
+        account password.
       </p>
       <VaultUnlockChoice value={unlockMethod} onChange={setUnlockMethod} disabled={busy} />
       <Problem text={problem?.text ?? null} />
       <div className="key-actions">
-        <Button type="submit" appearance="dialog" data-testid="setup.save" disabled={busy}>
+        <Button type="submit" variant="primary" data-testid="setup.save" disabled={busy}>
           {busy ? "Saving…" : "Save and test the key"}
         </Button>
         <Button

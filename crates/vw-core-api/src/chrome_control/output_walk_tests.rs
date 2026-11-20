@@ -247,9 +247,6 @@ async fn fixture() -> crate::Core {
 #[tokio::test]
 async fn a_large_read_and_compact_click_outcome_fit_the_code_mode_limit() {
     let core = fixture().await;
-    // Startup can retry this status request between actions; exercise it without depending on elapsed time.
-    super::send_local_network(&core.shared).await;
-    assert!(core.shared.chrome_control.local_network_applied());
     let mut failures = Vec::new();
     for args in [json!({}), json!({"maxChars":60000,"maxBytes":64000})] {
         let click = gateway::call(

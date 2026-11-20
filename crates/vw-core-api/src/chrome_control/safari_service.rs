@@ -97,7 +97,7 @@ pub(super) fn observe(shared: &Arc<Shared>, params: &Value) {
 fn authority(shared: &Shared, claim: &Value) -> Result<(), String> {
     let chat = claim["clientSessionId"]
         .as_str()
-        .ok_or("Safari supplied no chat binding. Start a new session.")?;
+        .ok_or("Safari supplied no chat binding. Start a new browser session.")?;
     if !claim["profileId"]
         .as_str()
         .is_some_and(|p| p.starts_with("safari:"))
@@ -184,7 +184,7 @@ async fn run(shared: &Arc<Shared>, claim: &Value) -> Result<Value, ServiceFault>
                 authority(shared,claim).map_err(|message| after_request(claim, message))?;
                 if tokio::time::Instant::now()>=deadline{return Err(after_request(claim,"The Safari app service did not finish before its deadline. Inspect the page or clipboard before continuing.".into()));}
                 let live=tokio::time::timeout(std::time::Duration::from_millis(250),shared.chrome_control.owner.rpc("owner.safariService.check",json!({"requestId":claim["requestId"]}))).await;
-                if !matches!(live,Ok(Some(ref v)) if v["active"]==true){return Err(after_request(claim,"Safari's operation, connection or permission ended. Read the current session before continuing.".into()));}
+                if !matches!(live,Ok(Some(ref v)) if v["active"]==true){return Err(after_request(claim,"Safari's operation, connection or permission ended. Read the current browser session before continuing.".into()));}
             }
         }
     }

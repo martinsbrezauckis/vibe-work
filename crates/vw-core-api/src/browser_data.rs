@@ -48,7 +48,7 @@ pub(crate) fn options(request: &Value, connected: bool) -> Result<ExtractOptions
 }
 
 pub(crate) fn folder(shared: &Shared, chat: &str) -> Result<Dir, String> {
-    if crate::chrome_control::check::mode(shared, chat)
+    if crate::chrome_control::chat_mode(shared, chat)
         .as_deref()
         .and_then(Tier::from_mode)
         .is_none()

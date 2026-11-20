@@ -1,6 +1,6 @@
 //! The Knowledge base part of the command API: the named places the user keeps (a folder on this computer or a
 //! synced drive folder, an online-only cloud drive reached through the user's own connector, or one of the user's
-//! Mistral Libraries), and the requests that add, rename and remove them.
+//! Mistral Libraries), and the requests that add, rename, re-note and remove them.
 //!
 //! Depends on: serde. Called by: `command`, `knowledge` (the handler and the agent text), the UI through the
 //! generated TypeScript, vw-debug-api.
@@ -91,6 +91,13 @@ pub enum KnowledgeRequest {
         id: String,
         /// The new name.
         name: String,
+    },
+    /// Gives a place a new note for the agent; an empty note removes it.
+    SetNote {
+        /// The place.
+        id: String,
+        /// The new note (empty: no note).
+        note: String,
     },
     /// Removes a place from the list (the folder, drive or library itself is not touched).
     Remove {

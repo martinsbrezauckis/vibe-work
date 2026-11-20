@@ -2,23 +2,19 @@
 //! Depends on: `WKWebView` and `AppKit`. Called by: `native_click` on Tauri's main thread.
 
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use super::ClickReply;
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
-use objc2::{AnyThread, MainThreadMarker, msg_send, sel};
+use objc2::{MainThreadMarker, msg_send, sel};
 use objc2_app_kit::{
     NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSScreen, NSTrackingAreaOptions,
     NSView,
 };
 use objc2_core_graphics::{CGEvent, CGEventField};
 use objc2_foundation::{
-    NSError, NSJSONSerialization, NSJSONWritingOptions, NSPoint, NSPointInRect, NSProcessInfo,
-    NSString, NSTimer, NSUTF8StringEncoding,
+    NSPoint, NSPointInRect, NSProcessInfo, NSRunLoop, NSRunLoopCommonModes, NSTimer,
 };
 use objc2_web_kit::WKWebView;
 
@@ -60,6 +56,22 @@ pub fn click_options(
     click_view(&view, point, sent, options, wheel)
 }
 
+/// `Err(`[`super::MENU_OPEN`]`)` while the main run loop runs `AppKit`'s event-tracking mode, the mode of an open menu (also of a
+/// window drag or live resize). Call on the main thread, right before native input.
+///
+/// # Errors
+/// [`super::MENU_OPEN`].
+pub fn refuse_open_menu() -> Result<(), String> {
+    let mode = NSRunLoop::currentRunLoop().currentMode();
+    // SAFETY: an immutable AppKit constant string, read on the main thread.
+    let tracking = unsafe { objc2_app_kit::NSEventTrackingRunLoopMode };
+    if mode.is_some_and(|mode| mode.isEqualToString(tracking)) {
+        Err(super::MENU_OPEN.to_owned())
+    } else {
+        Ok(())
+    }
+}
+
 fn click_view(
     view: &WKWebView,
     point: (f64, f64),
@@ -68,6 +80,7 @@ fn click_view(
     wheel: Option<(i32, i32)>,
 ) -> Result<(), String> {
     let main = MainThreadMarker::new().ok_or("native click requires the main thread")?;
+    refuse_open_menu()?;
     let base: &NSView = view;
     let window = base.window().ok_or("native preview has no window")?;
     super::require_front(
@@ -260,7 +273,9 @@ fn move_pointer(view: &NSView, local: NSPoint, moved: &NSEvent) {
     }
 }
 
-/// Runs `work` once on the main run loop after `delay` (never earlier). Must be called on the main thread.
+/// Runs `work` once on the main run loop after `delay` (never earlier). Must be called on the main thread. The timer
+/// runs in the run loop's common modes, so it also fires while a menu is open (`AppKit`'s event-tracking mode); in the
+/// default mode alone it would wait until the person closed the menu and the caller's answer would time out.
 pub fn after(delay: Duration, work: impl FnOnce() + 'static) {
     let work = RefCell::new(Some(work));
     let block = RcBlock::new(move |_timer: std::ptr::NonNull<NSTimer>| {
@@ -269,78 +284,10 @@ pub fn after(delay: Duration, work: impl FnOnce() + 'static) {
         }
     });
     // SAFETY: called on the main thread (the callers' WebKit completions); the timer retains the block until it has
-    // fired once, and the main run loop retains the timer.
+    // fired once, and the main run loop retains the timer while it is scheduled.
     unsafe {
-        let _ = NSTimer::scheduledTimerWithTimeInterval_repeats_block(
-            delay.as_secs_f64(),
-            false,
-            &block,
-        );
-    }
-}
-
-/// Evaluates the final page guard, then sends native input in `WebKit`'s main-thread completion.
-pub fn click_checked(
-    webview: *mut std::ffi::c_void,
-    point: (f64, f64),
-    script: &str,
-    sent: Arc<AtomicBool>,
-    allowed: super::ClickPermission,
-    reply: ClickReply,
-) {
-    let Some(_main) = MainThreadMarker::new() else {
-        let _ = reply.send(Err(
-            "Not run: native click requires the main thread".to_owned()
-        ));
-        return;
-    };
-    // SAFETY: Tauri hands us the live WKWebView on its main thread. Retaining it keeps the view alive until the
-    // WebKit completion; Apple documents that completion runs on the app's main thread.
-    let Some(view) = (unsafe { Retained::retain(webview.cast::<WKWebView>()) }) else {
-        let _ = reply.send(Err("Not run: native preview is unavailable".to_owned()));
-        return;
-    };
-    let reply = RefCell::new(Some(reply));
-    let callback_view = view.clone();
-    let callback = RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
-        let Some(reply) = reply.borrow_mut().take() else {
-            return;
-        };
-        if reply.is_closed() {
-            return;
-        }
-        let result = if !error.is_null() || value.is_null() {
-            Err("Not run: final page validation failed".to_owned())
-        } else {
-            // SAFETY: WebKit supplied this object for the lifetime of the callback. NSJSONSerialization's fragment
-            // form distinguishes JavaScript boolean true from number 1 or a truthy string.
-            let json = unsafe {
-                NSJSONSerialization::dataWithJSONObject_options_error(
-                    &*value,
-                    NSJSONWritingOptions::FragmentsAllowed,
-                )
-            }
-            .ok()
-            .and_then(|data| {
-                NSString::initWithData_encoding(NSString::alloc(), &data, NSUTF8StringEncoding)
-            })
-            .map(|text| text.to_string());
-            if json.as_deref().is_some_and(super::validation_is_true) {
-                if reply.is_closed() {
-                    Err("Not run: native click was canceled".to_owned())
-                } else if allowed.as_ref().is_some_and(|allowed| !allowed()) {
-                    Err("Not run: browser permission changed before native input".to_owned())
-                } else {
-                    click_view(&callback_view, point, &sent, (0, 1, 0), None)
-                }
-            } else {
-                Err("Not run: the page target changed before native input".to_owned())
-            }
-        };
-        let _ = reply.send(result);
-    });
-    // SAFETY: the retained view, callback block and string are valid for this main-thread WebKit call.
-    unsafe {
-        view.evaluateJavaScript_completionHandler(&NSString::from_str(script), Some(&callback));
+        let timer =
+            NSTimer::timerWithTimeInterval_repeats_block(delay.as_secs_f64(), false, &block);
+        NSRunLoop::currentRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes);
     }
 }

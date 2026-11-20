@@ -24,7 +24,7 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
       <h3 id={`links-${category}`}>On Mistral&apos;s website</h3>
       {links.map((link) => (
         <div data-item-id={link.id} key={link.id} className="check" data-setting={link.id}>
-          <span>
+          <p>
             {link.label}
             {link.webOnly === true && (
               <>
@@ -32,7 +32,7 @@ export function MistralLinks({ category }: { category: string }): ReactElement |
                 <Badge>Web only</Badge>
               </>
             )}
-          </span>
+          </p>
           <LinkButton
             data-testid="settings.mistral-link-rows-open-link"
             type="button"

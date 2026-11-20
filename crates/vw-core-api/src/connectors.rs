@@ -171,7 +171,7 @@ impl Core {
                 checked_name(&alias)?;
                 if session_id.is_empty() {
                     return Err(invalid(
-                        "a Mistral connector signs in through a session: open a session first",
+                        "a Mistral connector signs in through a chat: open a chat first",
                     ));
                 }
                 let params = json!({"sessionId": session_id, "alias": alias});
@@ -193,7 +193,7 @@ impl Core {
                 checked_name(&alias)?;
                 if session_id.is_empty() {
                     return Err(invalid(
-                        "a Mistral connector connects through a session: open a session first",
+                        "a Mistral connector connects through a chat: open a chat first",
                     ));
                 }
                 let params = json!({"sessionId": session_id, "alias": alias});

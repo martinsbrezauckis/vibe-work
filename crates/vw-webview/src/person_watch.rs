@@ -9,6 +9,12 @@ use std::sync::Arc;
 use tauri::{Webview, Wry};
 use vw_preview::{EngineError, PersonPointer};
 
+/// Sets the app's Quit for its Quit shortcut (Ctrl+Q) pressed while a browser view has the keyboard focus: the watch
+/// keeps that key from the page and calls `quit` (on the watch's input thread; it must only hand the request on).
+pub fn take_quit_from_pages(quit: impl Fn() + Send + Sync + 'static) {
+    vw_platform::native_click::person::block::on_quit(quit);
+}
+
 pub(crate) async fn install(
     webview: &Webview<Wry>,
     label: &str,

@@ -523,7 +523,10 @@ async fn scripted_enter_on_non_text_controls_does_not_submit() {
         let accepted = if control.starts_with("<select") {
             result.as_ref().is_err_and(|error| {
                 error.outcome == vw_browser::Outcome::Refused
-                    && error.text.contains("native select popup")
+                    && (error.text.contains("native select popup")
+                        || error
+                            .text
+                            .contains("dropdown list that only the user can use"))
             })
         } else {
             result.is_ok()

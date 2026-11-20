@@ -1,4 +1,5 @@
-//! `WKWebView` UI/navigation delegate proxies hold native dialog completion blocks on the main thread.
+//! `WKWebView` UI/navigation delegate proxies hold native dialog completion blocks on the main thread and pass
+//! content-rule actions to the webview's watcher (`content_rule_event`).
 //! Unhandled selectors forward to Wry's retained delegates, preserving navigation, popups, file pickers and downloads.
 //! Depends on: Objective-C delegate forwarding and the shared dialog hub.
 //! Called by: the macOS webview dialog adapter.
@@ -11,8 +12,8 @@ use objc2::{
     sel,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
-    NSURLCredentialPersistence, NSURLSessionAuthChallengeDisposition,
+    MainThreadMarker, NSObjectProtocol, NSString, NSURL, NSURLAuthenticationChallenge,
+    NSURLCredential, NSURLCredentialPersistence, NSURLSessionAuthChallengeDisposition,
 };
 use objc2_web_kit::{WKFrameInfo, WKWebView};
 use serde_json::json;
@@ -118,6 +119,19 @@ define_class!(
                 Ok(())
             }));
         }
+        // WebKit's private navigation-delegate method (`WKNavigationDelegatePrivate.h`): one call per rule list that
+        // acted on a load. Declared on this class so WebKit's `respondsToSelector:` check at `setNavigationDelegate:`
+        // finds it.
+        #[unsafe(method(_webView:contentRuleListWithIdentifier:performedAction:forURL:))]
+        fn content_rule_action(&self, view: &WKWebView, identifier: Option<&NSString>, action: Option<&AnyObject>, url: Option<&NSURL>) {
+            if let Some(performed) = crate::webview::content_rule_event::from_native(identifier, action, url) {
+                crate::webview::content_rule_event::deliver(&self.ivars().label, performed);
+            }
+            if let Some(original) = self.original(sel!(_webView:contentRuleListWithIdentifier:performedAction:forURL:)) {
+                // SAFETY: forwarded with the same private delegate signature and the live callback arguments.
+                unsafe { let _: () = msg_send![original, _webView:view, contentRuleListWithIdentifier:identifier, performedAction:action, forURL:url]; }
+            }
+        }
     }
 );
 impl DialogDelegate {
@@ -198,4 +212,5 @@ pub fn install(view: usize, label: String, hub: Arc<Hub>, admit: Admit) -> Resul
 }
 pub(super) fn forget(label: &str) {
     DELEGATES.with(|all| all.borrow_mut().remove(label));
+    crate::webview::content_rule_event::forget(label);
 }

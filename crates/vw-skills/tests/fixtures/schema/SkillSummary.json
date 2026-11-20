@@ -44,7 +44,8 @@
       "enum": [
         "builtin",
         "global",
-        "project"
+        "project",
+        "session"
       ],
       "title": "Scope",
       "type": "string"

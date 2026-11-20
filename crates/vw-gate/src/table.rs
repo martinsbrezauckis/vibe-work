@@ -67,6 +67,19 @@ where
     M: RequestMethod,
     M::Params: DeserializeOwned + Serialize,
 {
+    if M::NAME == "loops/create" {
+        // This client creates interval loops; clock schedules have no reviewed client flow.
+        if params.get("cron").is_some() {
+            return Err("clock schedules are not available here".to_owned());
+        }
+        if params
+            .get("interval")
+            .and_then(Value::as_str)
+            .is_none_or(|interval| interval.trim().is_empty())
+        {
+            return Err("a non-empty interval is required".to_owned());
+        }
+    }
     let parsed: M::Params = serde_json::from_value(params.clone()).map_err(|e| value_free(&e))?;
     let echoed =
         serde_json::to_value(&parsed).map_err(|_| "params cannot be re-encoded".to_owned())?;
@@ -196,7 +209,7 @@ pub const FORWARDED_WITHOUT_UNIFIED_EVIDENCE: &[(&str, &str)] = &[
     ),
     (
         "session/subagents/read",
-        "native per-subagent usage ledger for the Usage screen; read only, scoped to its parent session",
+        "native per-subagent usage ledger for the Usage screen; read only, scoped to its parent chat",
     ),
     (
         "session/turn/queue/steer",
@@ -417,6 +430,23 @@ static TABLE: &[Row] = &[
         WorkspaceTrustUntrustedConfig
     ),
     fwd!("workspace/trust/status", WorkspaceTrustStatus),
+    // Runtime operations without a reviewed client flow stay closed.
+    deny!("config/subscribe", NoEvidence),
+    deny!("config/telemetry/read", NoEvidence),
+    deny!("config/telemetry/update", Privacy),
+    deny!("goal/clear", NoEvidence),
+    deny!("goal/get", NoEvidence),
+    deny!("goal/set", NoEvidence),
+    deny!("projects/link", NoEvidence),
+    deny!("projects/retireCloud", NoEvidence),
+    deny!("projects/setCloud", NoEvidence),
+    deny!("storage/usage/read", NoEvidence),
+    deny!("storage/usage/refresh", NoEvidence),
+    deny!("workspace/git/worktrees/auto/update", NoEvidence),
+    deny!("workspace/trust/folders/add", NoEvidence),
+    deny!("workspace/trust/folders/inspect", NoEvidence),
+    deny!("workspace/trust/folders/list", NoEvidence),
+    deny!("workspace/trust/folders/update", NoEvidence),
 ];
 
 static INDEX: LazyLock<HashMap<&'static str, &'static Row>> =

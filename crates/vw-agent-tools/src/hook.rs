@@ -7,8 +7,9 @@
 //! notice no longer does. The individual `guard <name>` commands remain compatible with older hook blocks.
 //!
 //! Git guard ([`crate::gitparse`]): literal Git and GitHub CLI command starts are classified.
-//! Pushes, forge writes and credential commands are refused here; branch rewrites ask the core
-//! (`git_check`) to compare with the session's copy branch.
+//! Pushes and branch rewrites ask the core (`git_check`), which refuses pushes and compares the
+//! branch with the session's copy; credential commands are refused here. Forge writes use the
+//! read-only GitHub broker when enabled.
 //!
 //! Kill guard: It reads Vibe's hook payload on stdin, classifies the
 //! command ([`crate::killparse`]: untouched / understood with literal targets / not understood) and asks the
@@ -77,7 +78,7 @@ pub const COPY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10)
 /// Longest hook payload read from stdin.
 pub const MAX_PAYLOAD: usize = 1024 * 1024;
 
-const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list shows this session's processes, \
+const ADVICE: &str = "Use the Vibe Work process tools instead: processes_list shows this chat's processes, \
 process_stop stops one of them.";
 
 /// The result of a call the user said No to: the same text as `vw_ask::DECLINED`, which the core returns.
@@ -498,21 +499,19 @@ fn decide_git(payload: &str, endpoint_file: &Path) -> Option<String> {
     if !found.needs_core() {
         return None;
     }
-    if found
+    let push = found
         .ops
         .iter()
-        .any(|op| op.kind == gitparse::GitKind::Deny && !op.what.starts_with("gh "))
-    {
-        return Some(deny(PUSH_REASON));
-    }
-    if found
-        .ops
-        .iter()
-        .any(|op| op.kind == gitparse::GitKind::Credential && !op.what.starts_with("gh "))
+        .any(|op| op.kind == gitparse::GitKind::Deny && !op.what.starts_with("gh "));
+    if !push
+        && found
+            .ops
+            .iter()
+            .any(|op| op.kind == gitparse::GitKind::Credential && !op.what.starts_with("gh "))
     {
         return Some(deny(gitparse::CREDENTIAL_REASON));
     }
-    if found.identity_set() {
+    if !push && found.identity_set() {
         return Some(deny(gitparse::IDENTITY_REASON));
     }
     let args = json!({
@@ -533,12 +532,18 @@ fn decide_git(payload: &str, endpoint_file: &Path) -> Option<String> {
         )
     });
     match answer {
-        Ok(value) if value.get("decision").and_then(Value::as_str) == Some("allow") => None,
+        Ok(value) if value.get("decision").and_then(Value::as_str) == Some("allow") && !push => {
+            None
+        }
+        Ok(value) if value.get("decision").and_then(Value::as_str) == Some("allow") => {
+            Some(deny(PUSH_REASON))
+        }
         Ok(value) => {
             Some(deny(value.get("reason").and_then(Value::as_str).unwrap_or(
                 "Not run: Vibe Work did not allow this git command.",
             )))
         }
+        Err(_problem) if push => Some(deny(PUSH_REASON)),
         Err(problem) => Some(deny(&format!(
             "Not run: Vibe Work could not check this git command ({problem}). Ask the user to run it."
         ))),

@@ -178,10 +178,10 @@ function DataRetention(): ReactElement {
           Chat history
           <span className="d">
             Vibe shares <code>~/.vibe/logs/session</code> with the Vibe command line (or uses your{" "}
-            <code>VIBE_HOME</code> folder). With &quot;Keep Vibe Work chats separate from the
-            CLI&quot; on, it uses <code>vibe-home/logs/session</code> inside Vibe Work&apos;s data
-            folder. Each choice shows a different chat list; chats in the other list are hidden, not
-            deleted, until you switch back.
+            <code>VIBE_HOME</code> folder). With “Keep Vibe Work chats separate from the CLI” on, it
+            uses <code>vibe-home/logs/session</code> inside Vibe Work&apos;s data folder. Each
+            choice shows a different chat list; chats in the other list are hidden, not deleted,
+            until you switch back.
           </span>
         </span>
       </div>
@@ -197,14 +197,13 @@ function DataRetention(): ReactElement {
         </span>
       </div>
       <div className="check">
-        <span>
+        <p>
           Sent to Mistral
           <span className="d">
             Model requests, and any voice, OCR, Libraries or image requests you make. Vibe Work
-            sends no telemetry of its own; Vibe&apos;s usage telemetry follows Settings › Privacy
-            and data.
+            disables Vibe&apos;s usage telemetry, crash reports and remote experiments.
           </span>
-        </span>
+        </p>
         <ExternalLink
           testId="settings.about-data-policy"
           url={MISTRAL_DATA_POLICY_URL}

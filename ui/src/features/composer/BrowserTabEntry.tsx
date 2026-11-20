@@ -29,7 +29,7 @@ export function BrowserTabEntry({ sessionId }: { sessionId: string }) {
   return (
     <Button
       type="button"
-      appearance="choice"
+      shape="outlined"
       data-testid="composer.browser-tabs-open"
       aria-label={TEXT.addBrowserTab}
       aria-description={description}

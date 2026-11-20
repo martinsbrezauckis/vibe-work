@@ -9,9 +9,9 @@ mod readiness;
 pub mod screenshot;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
+use std::io::BufReader;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -22,9 +22,11 @@ use url::Url;
 use vw_browser::capture::{Fetch, FetchFuture};
 use vw_browser::{Browser, Sessions};
 mod cdp;
+mod pipe;
 pub use cdp::NATIVE_CLICK_WITHOUT_WINDOW;
 use cdp::{CdpRequest, PICKERS, cdp_frames, cdp_worker};
 use faults::take_one;
+pub(crate) use pipe::{Pipe, rpc_blocking};
 use vw_preview::{
     ConsoleEntry, EngineError, EngineFuture, HistoryStep, MountId, MountSpec, OpenRequest,
     PageEvent, Placement, PreviewConfig, PreviewEngine, PreviewHooks, PreviewService, Rect,
@@ -34,36 +36,6 @@ pub const SESSION: &str = "fixture";
 pub const URL: &str = "https://93.184.215.14/";
 /// How long after the person's last press or release this fake engine still refuses checked input.
 pub const PERSON_RECENT: Duration = Duration::from_millis(300);
-pub(crate) struct Pipe {
-    child: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
-}
-
-impl Drop for Pipe {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-pub(crate) fn rpc_blocking(pipe: &Mutex<Pipe>, request: &Value) -> Result<Value, EngineError> {
-    let mut pipe = pipe.lock().unwrap();
-    writeln!(pipe.input, "{request}").map_err(|e| EngineError::Platform(e.to_string()))?;
-    pipe.input
-        .flush()
-        .map_err(|e| EngineError::Platform(e.to_string()))?;
-    let mut line = String::new();
-    pipe.output
-        .read_line(&mut line)
-        .map_err(|e| EngineError::Platform(e.to_string()))?;
-    let reply: Value =
-        serde_json::from_str(&line).map_err(|e| EngineError::Platform(e.to_string()))?;
-    if let Some(error) = reply["error"].as_str() {
-        return Err(EngineError::Platform(error.to_owned()));
-    }
-    Ok(reply["value"].clone())
-}
 
 /// The frame registry a lagging host still reports: (frame id, generation).
 type Lagged = Vec<(String, Option<u64>)>;
@@ -84,6 +56,7 @@ pub struct PageEngine {
     /// Model native adapters that move the pointer before submitting a button sequence.
     pub move_before_click: AtomicBool,
     pub focus_required: AtomicBool,
+    pub select_menu_open: AtomicBool,
     pub input_markers: Mutex<Vec<vw_preview::action_tracking::ActionMarker>>,
     pub reverse_frames: AtomicBool,
     pub after_verify: Mutex<Option<String>>,
@@ -138,6 +111,8 @@ pub struct PageEngine {
     pub unreadable_children_in_reads: AtomicBool,
     /// All-frames evaluations that also get a removed child frame's answer (`faults.rs`).
     pub detached_child_evaluations: AtomicU64,
+    /// Native clicks this engine refused for the dispatch age limit (the modelled path was too slow, nothing sent).
+    pub age_refusals: AtomicU64,
 }
 
 impl PageEngine {
@@ -181,6 +156,7 @@ impl PageEngine {
             native_clicks: AtomicU64::new(0),
             move_before_click: AtomicBool::new(false),
             focus_required: AtomicBool::new(false),
+            select_menu_open: AtomicBool::new(false),
             input_markers: Mutex::default(),
             reverse_frames: AtomicBool::new(false),
             after_verify: Mutex::new(None),
@@ -213,6 +189,7 @@ impl PageEngine {
             unreadable_children: AtomicBool::new(false),
             unreadable_children_in_reads: AtomicBool::new(false),
             detached_child_evaluations: AtomicU64::new(0),
+            age_refusals: AtomicU64::new(0),
         })
     }
 
@@ -289,6 +266,21 @@ impl PageEngine {
                     .await.unwrap();
             }
         }
+    }
+
+    /// The person's input this fixture injects between the mark and the dispatch; returns the time it took.
+    async fn person_input_after_mark(
+        &self,
+        point: vw_preview::NativeClickPoint,
+    ) -> Result<Duration, EngineError> {
+        let started = std::time::Instant::now();
+        if self.user_click_after_mark.swap(false, Ordering::Relaxed) {
+            self.rpc(json!({"op":"click", "x":point.x, "y":point.y}))
+                .await?;
+            self.rpc(json!({"op":"frameCoverReady"})).await?;
+        }
+        self.person_during_mark(point).await?;
+        Ok(started.elapsed())
     }
 
     async fn person_during_mark(
@@ -444,6 +436,9 @@ impl PageEngine {
 }
 
 impl PreviewEngine for PageEngine {
+    fn select_menu_open(&self, _: &MountId) -> EngineFuture<'_, bool> {
+        Box::pin(async { Ok(self.select_menu_open.load(Ordering::Relaxed)) })
+    }
     fn show_input_marker(
         &self,
         _: &MountId,
@@ -454,6 +449,9 @@ impl PreviewEngine for PageEngine {
     }
     fn isolated_frame_input(&self) -> bool {
         !self.page_world.load(Ordering::Relaxed)
+    }
+    fn declarative_closed_roots(&self, _: &MountId, urls: Vec<String>) -> EngineFuture<'_, bool> {
+        Box::pin(self.sources_declarative(urls))
     }
     fn evaluate_frames(
         &self,
@@ -484,6 +482,11 @@ impl PreviewEngine for PageEngine {
             }
             self.person.arm(&guard.person);
             let prepared = std::time::Instant::now();
+            // Time this fixture spends injecting the person's own clicks. A native engine receives those from the
+            // OS alongside its dispatch path, so they do not use up the dispatch age limit (POINT_DISPATCH_LIMIT);
+            // without this a loaded machine turns every interleaved-click case into an age refusal. The page scripts
+            // a test runs after validation or after the mark do count: they model time passing on that path.
+            let mut injected = Duration::ZERO;
             if let Some(script) = &guard.validation {
                 if let Ok(request) = serde_json::from_str::<Value>(script) {
                     let answers = self
@@ -517,8 +520,10 @@ impl PreviewEngine for PageEngine {
                 .user_click_before_dispatch
                 .swap(false, Ordering::Relaxed)
             {
+                let started = std::time::Instant::now();
                 self.rpc(json!({"op":"click", "x":point.x, "y":point.y}))
                     .await?;
+                injected += started.elapsed();
             }
             if let Some(validation) = &guard.validation {
                 let request: Value = serde_json::from_str(validation).unwrap();
@@ -540,13 +545,11 @@ impl PreviewEngine for PageEngine {
             if let Some(script) = after_mark {
                 self.rpc(json!({"op":"evaluate", "script":script})).await?;
             }
-            if self.user_click_after_mark.swap(false, Ordering::Relaxed) {
-                self.rpc(json!({"op":"click", "x":point.x, "y":point.y}))
-                    .await?;
-                self.rpc(json!({"op":"frameCoverReady"})).await?;
-            }
-            self.person_during_mark(point).await?;
-            vw_preview::validate_point_dispatch_age(prepared).map_err(EngineError::Platform)?;
+            injected += self.person_input_after_mark(point).await?;
+            vw_preview::validate_point_dispatch_age(prepared + injected).map_err(|refusal| {
+                self.age_refusals.fetch_add(1, Ordering::Relaxed);
+                EngineError::Platform(refusal)
+            })?;
             self.person
                 .admit(
                     &guard.person,
@@ -588,8 +591,8 @@ impl PreviewEngine for PageEngine {
         let id = id.clone();
         Box::pin(async move { self.load(&id, url, None).await })
     }
-    fn history(&self, _: &MountId, _: HistoryStep) -> EngineFuture<'_, ()> {
-        Box::pin(async { Ok(()) })
+    fn history(&self, id: &MountId, step: HistoryStep) -> EngineFuture<'_, ()> {
+        Box::pin(self.fixture_history(id.label.clone(), step))
     }
     fn place(&self, _: &MountId, _: Option<Placement>) -> EngineFuture<'_, ()> {
         Box::pin(async { Ok(()) })
@@ -736,6 +739,7 @@ impl PageEngine {
     ) -> EngineFuture<'_, Option<Vec<vw_preview::FrameAnswer>>> {
         let label = id.label.clone();
         Box::pin(async move {
+            self.report_frame_navigations(&label).await?;
             let pickers = PICKERS.load(Ordering::Relaxed);
             let mut answers = self.frame_answers(frame.clone(), &script, input).await?;
             if input && PICKERS.load(Ordering::Relaxed) > pickers {

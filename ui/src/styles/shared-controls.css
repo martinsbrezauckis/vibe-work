@@ -209,7 +209,8 @@ select:disabled {
 .check > .set-actions {
   margin-block: 0;
 }
-.set-row > span {
+.set-row > span,
+.set-row > p {
   flex: 1 1 24ch;
 }
 .set-actions > .tb-btn {

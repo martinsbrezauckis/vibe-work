@@ -10,7 +10,7 @@ import { Button } from "../../components/Controls";
 import type { ReactElement } from "react";
 
 import { Selector } from "../../components/Selector";
-import { ToolsTabs } from "../connectors/ToolsTabs";
+import { ToolsTabs, ToolsTitle } from "../connectors/ToolsTabs";
 import { LocalPlugins } from "./LocalPlugins";
 import { MarketCard } from "./MarketCard";
 import { MarketDetail } from "./MarketDetail";
@@ -95,6 +95,7 @@ export function MarketplacePage(): ReactElement {
       data-testid="marketplace-page"
     >
       <div className="cmain">
+        <ToolsTitle />
         <ChromeCard />
         <div className="chead">
           <ToolsTabs />

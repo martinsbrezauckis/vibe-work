@@ -4,6 +4,10 @@
 //! PREDICT: without the line in `app_context::append` that adds the knowledge text, a turn's `vw://app/context`
 //! resource holds only the machine facts, so `a_turn_carries_the_places_and_drops_removed_ones` fails at its
 //! first `contains`; with it, the places appear from the next turn on and a removed place is gone.
+//!
+//! PREDICT (`a_change_tells_every_window_and_the_next_turn_sees_a_new_note`): fails before the change. The core sent
+//! no event for a knowledge base change, so an open Settings page in another window (or one the Debug API or the
+//! agent changed under it) kept its old list until it was reopened; and there was no `setNote` request.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -205,5 +209,102 @@ async fn the_vault_folder_its_parents_and_its_contents_are_refused() {
     )
     .await
     .unwrap();
+    core.shutdown().await;
+}
+
+/// The `knowledgeChanged` events received so far (waits a moment for the last one).
+async fn changes(events: &mut crate::CoreSubscription) -> usize {
+    let mut seen = 0;
+    while let Ok(Some(event)) =
+        tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
+    {
+        if matches!(event, crate::CoreEvent::KnowledgeChanged {}) {
+            seen += 1;
+        }
+    }
+    seen
+}
+
+#[tokio::test]
+async fn a_change_tells_every_window_and_the_next_turn_sees_a_new_note() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = vw_platform::canonical_plain(scratch.path()).unwrap();
+    let core = core(&root).await;
+    let mut events = core.subscribe(None);
+    assert_eq!(changes(&mut events).await, 0, "nothing changed yet");
+    let view = knowledge(
+        &core,
+        KnowledgeRequest::Add {
+            name: "Team drive".into(),
+            kind: KnowledgeKind::Drive,
+            location: "Google Drive".into(),
+            label: None,
+            note: Some("old note".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(changes(&mut events).await, 1, "an add is announced");
+    let id = view.places[0].id.clone();
+    knowledge(&core, KnowledgeRequest::List {}).await.unwrap();
+    knowledge(
+        &core,
+        KnowledgeRequest::Rename {
+            id: id.clone(),
+            name: "Team drive".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        changes(&mut events).await,
+        0,
+        "a list or a change that changes nothing is not announced"
+    );
+    knowledge(
+        &core,
+        KnowledgeRequest::Add {
+            name: String::new(),
+            kind: KnowledgeKind::Drive,
+            location: "OneDrive".into(),
+            label: None,
+            note: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(changes(&mut events).await, 0, "a refusal is not announced");
+    let noted = knowledge(
+        &core,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: "shared contracts".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(noted.places[0].note.as_deref(), Some("shared contracts"));
+    assert_eq!(changes(&mut events).await, 1, "a new note is announced");
+    let text = facts(&core).await;
+    assert!(text.contains("Note: \"shared contracts\""), "{text}");
+    assert!(!text.contains("old note"), "{text}");
+    knowledge(
+        &core,
+        KnowledgeRequest::SetNote {
+            id: id.clone(),
+            note: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!facts(&core).await.contains("Note:"));
+    knowledge(&core, KnowledgeRequest::Remove { id })
+        .await
+        .unwrap();
+    assert_eq!(
+        changes(&mut events).await,
+        2,
+        "clearing and removing are announced"
+    );
     core.shutdown().await;
 }

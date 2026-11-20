@@ -69,6 +69,8 @@ const POLL: Duration = Duration::from_millis(60);
 pub struct ActError {
     /// A typed screenshot refusal, when capture was blocked before it could run.
     pub capture_block: Option<vw_preview::CaptureBlock>,
+    /// How many protected fields made a raw page operation unavailable.
+    pub protected_values_withheld: Option<u64>,
     /// Refused, failed or stopped.
     pub outcome: Outcome,
     /// The reason.
@@ -78,6 +80,7 @@ pub struct ActError {
 pub(crate) fn refused(text: impl Into<String>) -> ActError {
     ActError {
         capture_block: None,
+        protected_values_withheld: None,
         outcome: Outcome::Refused,
         text: text.into(),
     }
@@ -86,6 +89,7 @@ pub(crate) fn refused(text: impl Into<String>) -> ActError {
 pub(crate) fn failed(text: impl Into<String>) -> ActError {
     ActError {
         capture_block: None,
+        protected_values_withheld: None,
         outcome: Outcome::Failed,
         text: text.into(),
     }
@@ -115,12 +119,14 @@ struct Baseline {
     loads: u64,
     console: Option<u64>,
     refused: u64,
+    request_refused: u64,
 }
 
 /// The agent browser over the sessions' previews.
 #[derive(Clone)]
 pub struct Browser {
     pub(crate) recordings: crate::recording::Recordings,
+    pub(crate) video: crate::recording::VideoRecordings,
     pub(crate) service: PreviewService,
     pub(crate) sessions: Arc<Sessions>,
     captures: crate::capture::Captures,
@@ -134,6 +140,8 @@ pub struct Browser {
     pub(crate) test_consent_origin: Arc<RwLock<Option<String>>>,
     /// Per session: the engine's refusal counts already reported on a receipt (`act_notes`).
     pub(crate) act_reported: Arc<std::sync::Mutex<std::collections::HashMap<String, [u64; 2]>>>,
+    /// Sites where raw scripts and raw data reads stay off (`protected_origins`).
+    pub(crate) protected_origins: crate::protected_origins::ProtectedOrigins,
 }
 
 impl Browser {
@@ -142,6 +150,7 @@ impl Browser {
     pub fn new(service: PreviewService, sessions: Arc<Sessions>) -> Self {
         Self {
             recordings: crate::recording::Recordings::default(),
+            video: crate::recording::VideoRecordings::default(),
             service,
             sessions,
             captures: crate::capture::Captures::default(),
@@ -154,6 +163,7 @@ impl Browser {
             #[cfg(feature = "e2e-script")]
             test_consent_origin: Arc::new(RwLock::new(None)),
             act_reported: Arc::default(),
+            protected_origins: crate::protected_origins::ProtectedOrigins::default(),
         }
     }
 
@@ -216,6 +226,7 @@ impl Browser {
         let load0 = self.service.load_state(session_id);
         let console0 = self.service.console_mark(session_id).await.ok();
         let refused0 = self.service.refusal_mark(session_id);
+        let request_refused0 = self.service.request_refusal_mark(session_id);
         let marks = self.act_marks(session_id);
         let mut result = json!({"action": action.name()});
         let mut page_target = Value::Null;
@@ -299,6 +310,7 @@ impl Browser {
             loads: load0.as_ref().map_or(0, |l| l.loads),
             console: console0,
             refused: refused0,
+            request_refused: request_refused0,
         };
         let mut receipt = self
             .receipt(session_id, action, base, result, page_target)

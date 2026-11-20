@@ -6,6 +6,9 @@
 //!   swallowed. Tab passes so the keyboard can still leave the page (the frame's Pause and Stop sit in the app,
 //!   outside the page). System and app shortcuts pass too (Alt or the Windows key on Windows, Command on macOS): the
 //!   person keeps switching windows and using the app's own shortcuts while the agent works.
+//! - The app's Quit shortcut (Ctrl+Q with no other modifier, where the app has one: Windows and Linux) never reaches
+//!   a page, blocked or not: the watch swallows it and asks the app to quit ([`on_quit`]), which asks the person first
+//!   while agent work runs. A page cannot take it over.
 //! - A release goes the way of its press: the release of a swallowed press is swallowed even after the block ended
 //!   (the page never saw the press), and the release of a press the page saw passes even when the block started in
 //!   between (the page must not keep a button or key held).
@@ -18,7 +21,41 @@
 //!
 //! Depends on: std only. Called by: the platform watches in `person` (Linux, macOS, Windows).
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
+
+/// The app's Quit, set once at startup ([`on_quit`]).
+static QUIT: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Sets the app's Quit, which a Quit shortcut pressed in a page calls. Called once; a later call is ignored.
+pub fn on_quit(quit: impl Fn() + Send + Sync + 'static) {
+    let _ = QUIT.set(Box::new(quit));
+}
+
+/// Whether the app takes its Quit shortcut from pages (it set [`on_quit`]). The platform watches map a key to
+/// `Input::Key { quit: true }` only then.
+#[must_use]
+pub fn takes_quit() -> bool {
+    QUIT.get().is_some()
+}
+
+/// Calls the app's Quit for a press of the Quit shortcut. Called on the view's input thread (a hook thread on
+/// Windows): the app's Quit only hands the request on.
+pub fn quit_pressed(input: Input) {
+    let press = matches!(
+        input,
+        Input::Key {
+            quit: true,
+            press: true,
+            ..
+        }
+    );
+    if let (true, Some(quit)) = (press, QUIT.get()) {
+        quit();
+    }
+}
 
 /// Answers whether the view is blocked right now. Called on the view's input thread for every event, so it must
 /// be cheap and never block.
@@ -59,6 +96,8 @@ pub enum Input {
         tab: bool,
         /// A system or app shortcut (Alt / Windows key on Windows, Command on macOS).
         shortcut: bool,
+        /// The app's Quit shortcut (Ctrl+Q with no other modifier) while the app takes it ([`takes_quit`]).
+        quit: bool,
         /// A press (`false`: a release).
         press: bool,
     },
@@ -88,9 +127,10 @@ pub fn swallow(blocked: bool, input: Input, held: &mut Held) -> bool {
             code,
             tab,
             shortcut,
+            quit,
             press: true,
         } => {
-            let swallowed = blocked && !tab && !shortcut;
+            let swallowed = quit || (blocked && !tab && !shortcut);
             let original = held.keys.entry(code).or_insert(swallowed);
             swallowed || *original
         }
@@ -98,11 +138,12 @@ pub fn swallow(blocked: bool, input: Input, held: &mut Held) -> bool {
             code,
             tab,
             shortcut,
+            quit,
             press: false,
         } => held
             .keys
             .remove(&code)
-            .unwrap_or(blocked && !tab && !shortcut),
+            .unwrap_or(quit || (blocked && !tab && !shortcut)),
         Input::Other => false,
     }
 }
@@ -111,7 +152,7 @@ pub fn swallow(blocked: bool, input: Input, held: &mut Held) -> bool {
 mod tests {
     //! PREDICT: before the rule exists every person's event reaches the page while the agent works (the watches only
     //! observe). These tests pin the contract every platform maps onto.
-    use super::{Held, Input, refused_press, swallow};
+    use super::{Held, Input, quit_pressed, refused_press, swallow};
 
     fn key(press: bool) -> Input {
         key_code(1, press)
@@ -122,6 +163,17 @@ mod tests {
             code,
             tab: false,
             shortcut: false,
+            quit: false,
+            press,
+        }
+    }
+
+    fn quit_key(press: bool) -> Input {
+        Input::Key {
+            code: 81,
+            tab: false,
+            shortcut: false,
+            quit: true,
             press,
         }
     }
@@ -170,6 +222,7 @@ mod tests {
                         code: 1,
                         tab,
                         shortcut,
+                        quit: false,
                         press
                     },
                     &mut held
@@ -274,5 +327,32 @@ mod tests {
         assert!(swallow(true, key(true), &mut second));
         assert!(swallow(false, key(false), &mut second));
         assert!(!swallow(true, key(false), &mut first));
+    }
+
+    #[test]
+    fn the_quit_shortcut_never_reaches_a_page_and_asks_the_app_to_quit() {
+        // PREDICT: before the rule a page view passed Ctrl+Q to the page (unblocked) or swallowed it as any key
+        // (while the agent works), so the app's Quit never ran from a page.
+        for blocked in [false, true] {
+            let mut held = Held::default();
+            assert!(
+                swallow(blocked, quit_key(true), &mut held),
+                "blocked={blocked}"
+            );
+            assert!(
+                swallow(false, key_code(81, false), &mut held),
+                "the release of the swallowed Q is swallowed even after Ctrl went up (blocked={blocked})"
+            );
+        }
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = calls.clone();
+        super::on_quit(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        assert!(super::takes_quit());
+        quit_pressed(quit_key(true));
+        quit_pressed(quit_key(false));
+        quit_pressed(key(true));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 }

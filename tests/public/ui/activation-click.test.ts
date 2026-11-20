@@ -1,4 +1,5 @@
-/** The window-activation guard holds back only the press that activates the window, never a later one. */
+/** The window-activation guard holds back synthetic activation presses and lets a person's first press answer. */
+// PREDICT: a trusted first press on a waiting card is still classified as blocked after another app had focus.
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   guardActivationClick,
@@ -117,6 +118,18 @@ it("a press is an activation press only before or right after the window gets it
       activating: true,
       focusedAt: null,
       now: 1000,
+    }),
+  ).toBe(false);
+});
+
+it("lets a trusted first card press answer after another desktop app had focus", () => {
+  expect(
+    isActivationPress({
+      activating: true,
+      focusedAt: null,
+      now: 1000,
+      onApproval: true,
+      trusted: true,
     }),
   ).toBe(false);
 });

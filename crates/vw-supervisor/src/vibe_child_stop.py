@@ -291,6 +291,7 @@ def install():
     # Every guard below was checked against the releases in vibe_guard_versions.py; any other Vibe stops here
     # with that message rather than running with some or all guards missing.
     require_guarded_vibe("launcher")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
+    install_privacy_guard()  # noqa: F821 - launch.rs prepends vibe_privacy_guard.py
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild
     from mistralai_vibe_local_harness.vibe._subagents._controller import success_output

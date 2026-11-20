@@ -14,7 +14,6 @@
 //!   `vw-plan` write profile and the page server (covered by `vw_core_projects`).
 //! - `delete` never deletes a session: its members move to "not in a project".
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -44,14 +43,12 @@ fn view(project: &Project, sessions: usize) -> ProjectView {
 fn list(shared: &Shared) -> ProjectsResult {
     let swept = shared.projects.swept.load(Ordering::Relaxed);
     shared.projects.store.read(|s| {
-        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-        for project in s.members().values().flatten() {
-            *counts.entry(project.as_str()).or_default() += 1;
-        }
+        // Counts follow the chats that really exist; an automatic project whose chats are all gone is not listed.
         let projects = s
             .projects()
             .iter()
-            .map(|p| view(p, counts.get(p.id.as_str()).copied().unwrap_or(0)))
+            .filter(|p| s.listed(p))
+            .map(|p| view(p, s.live_member_count(&p.id)))
             .collect();
         ProjectsResult::List {
             projects,
@@ -89,7 +86,7 @@ fn check_folder(shared: &Shared, folder: &str) -> Result<(), CoreError> {
     } else {
         Err(CoreError::new(
             ErrorCode::Denied,
-            "a main folder must be a folder a session works in, or one chosen with Choose folder",
+            "a main folder must be a folder a chat works in, or one chosen with Choose folder",
         ))
     }
 }
@@ -156,7 +153,7 @@ impl Core {
         {
             return Err(CoreError::new(
                 ErrorCode::InvalidParams,
-                format!("move 1 to {MAX_MOVE} sessions"),
+                format!("move 1 to {MAX_MOVE} chats"),
             ));
         }
         let now = vw_projects::now_ms();

@@ -57,7 +57,13 @@ fn record(
             ids.clear();
         }
         let row = &event["request"];
-        let id=lock(log).start(json!({"url":row["url"],"method":row["method"],"type":event["type"],"requestHeaders":headers(&row["headers"]),"requestHeadersTruncated":row["headers"].as_object().is_some_and(|m|m.len()>32 || m.values().any(|v|v.as_str().is_some_and(|s|s.len()>512))),"finished":false}));
+        let started_at_ms = event["wallTime"]
+            .as_f64()
+            .filter(|seconds| seconds.is_finite() && (0.0..1e12).contains(seconds))
+            .and_then(|seconds| {
+                u64::try_from(std::time::Duration::from_secs_f64(seconds).as_millis()).ok()
+            });
+        let id=lock(log).start(json!({"url":row["url"],"method":row["method"],"type":event["type"],"requestHeaders":headers(&row["headers"]),"requestHeadersTruncated":row["headers"].as_object().is_some_and(|m|m.len()>32 || m.values().any(|v|v.as_str().is_some_and(|s|s.len()>512))),"finished":false,"startedAtMs":started_at_ms}));
         ids.insert(request.into(), id);
     } else if let Some(id) = ids.get(request) {
         let fields = match method {

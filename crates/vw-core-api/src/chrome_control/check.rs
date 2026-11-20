@@ -28,10 +28,28 @@ pub(crate) fn check_full(
 }
 /// A mode reduction revokes the helper lease, including already-installed request rules and emulation.
 pub(crate) fn mode_changed(shared: &Shared, session: &str, before: Option<&str>) {
+    // The hook after a chat's mode changes (mode switch, runtime update, model choice): a running job that the mode
+    // no longer allows checks again at once. A chat load wakes the same waits in `sessions`.
+    crate::stops::conditions_changed(shared);
     let old = before.and_then(Tier::from_mode);
     let now = mode(shared, session).as_deref().and_then(Tier::from_mode);
     if old.is_some() && now < old {
+        // Ended on purpose (the lower mode must not keep the higher one's lease or installed rules), never silently:
+        // the agent's next call says why, the person gets a chat notice; the tabs stay open.
+        let ended = shared
+            .chrome_control
+            .work
+            .lock_or_recover()
+            .lower_mode(session);
         super::end_chat(shared, session, false);
+        for browser in ended {
+            let message = vw_vocabulary::texts::BROWSER_SESSION_MODE_LOWERED
+                .replace("{browser}", browser.name());
+            let _ = shared.store.apply(vw_session::Notification::new(
+                "warning",
+                json!({"sessionId":session,"warning":{"code":"browser_mode_lowered","message":message}}),
+            ));
+        }
     }
 }
 /// Whether the session's current mode has a browser tier (tests; the tool list itself is `gateway::list`).
@@ -206,10 +224,6 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         }
         result["structuredContent"]["chromeExtensionStore"] =
             json!(super::commands::extension_store(shared));
-        result["structuredContent"]["localNetwork"] = json!({
-            "on": shared.chrome_control.local_network(),
-            "applied": shared.chrome_control.local_network_applied(),
-        });
     }
     let Some(rows) = result["structuredContent"]["capabilities"]["actions"].as_array_mut() else {
         return;

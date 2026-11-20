@@ -219,7 +219,21 @@ pub fn page_text(page: &str, request: &Value) -> String {
 /// The visual-capture admission script: answers `{"shown": true}` while the document shows a protected field's value.
 #[must_use]
 pub fn protected_shown() -> String {
-    assemble(PROTECTED_SHOWN, &json!({}))
+    format!(
+        "{}\n{}",
+        vw_preview::CLOSED_ROOTS_LINE,
+        assemble(PROTECTED_SHOWN, &json!({}))
+    )
+}
+
+/// Count fields whose live values page.read withholds before page scripts or raw data reads.
+#[must_use]
+pub fn protected_count() -> String {
+    format!(
+        "{}\n{}",
+        vw_preview::CLOSED_ROOTS_LINE,
+        assemble(PROTECTED_SHOWN, &json!({"countFields":true}))
+    )
 }
 
 /// The full-page screenshot helper script: `op` = metrics, scroll (to `y`), eager, pin, unpin.

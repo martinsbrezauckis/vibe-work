@@ -225,7 +225,7 @@ export function ConfirmBox({ changes }: { changes: Changes }): ReactElement | nu
           <Button
             data-testid="changes.confirm-box-accept"
             type="button"
-            appearance="dialog"
+            variant="primary"
             data-action="confirm"
             disabled={confirm.kind === "history" && !validIdentity(confirm.identity)}
             onClick={() => void changes.accept()}

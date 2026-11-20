@@ -162,7 +162,7 @@ impl History {
             .decode(encoded)
             .map_err(|_| "Invalid video image.")?;
         if !safe(session) || bytes.len() > vw_preview::MAX_BYTES {
-            return Err("Invalid video image or session.".into());
+            return Err("Invalid video image or chat.".into());
         }
         let mut state = self.state.lock_or_recover();
         if state.deleted.contains(session) {

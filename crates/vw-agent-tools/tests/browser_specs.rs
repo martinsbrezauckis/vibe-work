@@ -26,6 +26,11 @@ fn browser_targets_offer_only_builtin() {
             "{name}"
         );
         if name == "browser_act" {
+            // PREDICT: GIF and WebM are both discoverable, with the action selecting the matching format.
+            assert_eq!(
+                tool["inputSchema"]["properties"]["format"]["enum"],
+                json!(["gif", "webm"])
+            );
             assert_eq!(tool["inputSchema"]["properties"]["x"]["type"], "integer");
             assert_eq!(tool["inputSchema"]["properties"]["y"]["type"], "integer");
             let description = tool["description"].as_str().unwrap();

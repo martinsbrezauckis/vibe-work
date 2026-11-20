@@ -1,4 +1,4 @@
-//! The commit message draft of the `git` command: Mistral writes it from the
+//! The commit message draft of the `git` command: the chat's active model (`utility_models`) writes it from the
 //! repository's recent subjects (style), the per-project instruction, the session title and a short diff, with
 //! the user's key (the core's own direct call, like OCR; no unlock prompt is raised); without a key or on any
 //! failure the draft is the session title in the repository's style, and the answer says which.
@@ -46,13 +46,24 @@ impl Core {
                 Some("No Mistral key in this run."),
             ));
         };
+        let model = match &self.shared.config.commit_model {
+            Some(model) => Some(model.clone()),
+            None => crate::utility_models::active_model(&self.shared, Some(session_id)).await,
+        };
+        let Some(model) = model else {
+            return Ok(draft(
+                fallback,
+                DraftSource::Fallback,
+                Some("The message model could not be reached (the chat's model is not known yet)."),
+            ));
+        };
         let (system, user) =
             message::prompt(&subjects, &settings.instruction, &place.title, &stat, &diff);
         let request = vw_mistral::chat::ChatRequest {
-            model: &self.shared.config.commit_model,
+            model: &model,
             system: &system,
             user: &user,
-            // Large 4 always thinks now and refuses `none`; the cap leaves room for its default thinking.
+            // Thinking models (Large 4 always thinks and refuses `none`): the cap leaves room for default thinking.
             max_tokens: 2000,
             timeout: Duration::from_secs(40),
             reasoning_effort: None,

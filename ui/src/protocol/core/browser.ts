@@ -314,6 +314,21 @@ site: string,
  */
 answer: SiteAnswer, };
 
+export type UnansweredSite = {
+/**
+ * The site (`https://example.com`).
+ */
+site: string,
+/**
+ * The chat whose open page it is.
+ */
+sessionId: string,
+/**
+ * `true`: the site's own question was shown and not answered; `false`: a request did not say which open site
+ * sent it. The chat's card says which.
+ */
+asked: boolean, };
+
 export type BrowserResult = { "type": "preferences",
 /**
  * Current saved settings and native availability.
@@ -322,7 +337,13 @@ preferences: BrowserPreferences, } | { "type": "localNetworkSites",
 /**
  * Every remembered site and its answer, sorted by site.
  */
-sites: Array<LocalNetworkSite>, } | { "type": "shields",
+sites: Array<LocalNetworkSite>,
+/**
+ * Sites not answered yet (sorted by site): refused because a request did not say which open page sent it, or
+ * because the site's own question was not answered (`asked`), each with the chat whose page it is (the chat's
+ * card). The person may answer each (`setLocalNetworkSite`); none is allowed by default.
+ */
+unanswered: Array<UnansweredSite>, } | { "type": "shields",
 /**
  * Confirmed mode and platform availability.
  */
@@ -582,7 +603,7 @@ rect: ViewRect,
  */
 cropPngBase64: string | null,
 /**
- * Why the picture was left out, when the page showed a protected value below Full access (the capture
+ * Why the picture was left out, when the page showed a protected value (the capture
  * refusal's wording); the note and position are kept. Absent (not null) otherwise, matching the optional
  * TypeScript field the UI checks with `!== undefined`.
  */

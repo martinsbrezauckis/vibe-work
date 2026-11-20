@@ -1,9 +1,8 @@
 //! Pins unsupported experiments off in the app-owned Vibe config and migrates retired keys.
 //! Depends on TOML parsing/editing; written by [`crate::startup_config`] in both launch paths before Vibe starts.
-//! Registry skills default on because skill offers need them on this Vibe version; recheck at every Vibe pin bump.
-//! Migrates the former app-written registry false once, then preserves personal choices. A separate app-owned
-//! marker survives Vibe config rewrites. Preserves access mode, comments and unrelated values. Invalid TOML is left for
-//! Vibe to diagnose. The parsed result must match the intended migration before writing.
+//! Registry skills and the model catalog default on. Separate app-owned markers record each first default so a later
+//! personal choice survives Vibe config rewrites. Preserves access mode, comments and unrelated values. Invalid TOML
+//! is left for Vibe to diagnose. The parsed result must match the intended migration before writing.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +12,7 @@ use toml::{Table, Value};
 use toml_edit::{DocumentMut, value};
 
 /// The keys pinned off (top level of Vibe's config).
-pub const KEYS: [&str; 6] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
+pub const KEYS: [&str; 5] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
 
 /// Stable features disabled until the app offers them through its own controls.
 pub const STABLE_KEYS: [&str; 1] = vw_supervisor::STABLE_CONFIG_KEYS;
@@ -26,8 +25,10 @@ const OLD_NOTE: &str =
 const OLD_COW: &str = "experimental_worktree_copy_on_write";
 const COW: &str = "worktree_copy_on_write";
 const REGISTRY: &str = "experimental_enable_registry_skills";
+const MODEL_CATALOG: &str = "experimental_enable_model_catalog";
 // App-owned state in the managed home, outside the config Vibe rewrites; removed with that home.
 const REGISTRY_MIGRATION: &str = ".vw-registry-skills-default-v1";
+const CATALOG_MIGRATION: &str = ".vw-model-catalog-default-v1";
 
 /// What [`ensure`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,10 +54,26 @@ impl ExperimentPins {
 /// Returns the migrated config and pin outcome, or `None` if no values need changing. Pure.
 #[must_use]
 pub fn with_pins_off(existing: &str) -> (Option<String>, ExperimentPins) {
-    edited(existing, false)
+    edited(existing, false, true)
 }
 
-fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, ExperimentPins) {
+fn enable(doc: &mut DocumentMut, expected: &mut Table, key: &str) {
+    let decor = doc
+        .get(key)
+        .and_then(toml_edit::Item::as_value)
+        .map(|v| v.decor().clone());
+    doc[key] = value(true);
+    if let (Some(decor), Some(new)) = (decor, doc[key].as_value_mut()) {
+        *new.decor_mut() = decor;
+    }
+    expected.insert(key.into(), Value::Boolean(true));
+}
+
+fn edited(
+    existing: &str,
+    migrate_registry: bool,
+    migrate_catalog: bool,
+) -> (Option<String>, ExperimentPins) {
     let Ok(mut expected) = existing.parse::<Table>() else {
         return (
             None,
@@ -104,15 +121,17 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
     if !doc.contains_key(REGISTRY)
         || (migrate_registry && expected.get(REGISTRY).and_then(Value::as_bool) == Some(false))
     {
-        let decor = doc
-            .get(REGISTRY)
-            .and_then(toml_edit::Item::as_value)
-            .map(|v| v.decor().clone());
-        doc[REGISTRY] = value(true);
-        if let (Some(decor), Some(new)) = (decor, doc[REGISTRY].as_value_mut()) {
-            *new.decor_mut() = decor;
-        }
-        expected.insert(REGISTRY.into(), Value::Boolean(true));
+        enable(&mut doc, &mut expected, REGISTRY);
+    }
+    // On the first launch with this default, replace a missing or disabled catalog choice.
+    // The marker makes later changes to this key the person's own choice.
+    if migrate_catalog
+        && matches!(
+            expected.get(MODEL_CATALOG),
+            None | Some(Value::Boolean(false))
+        )
+    {
+        enable(&mut doc, &mut expected, MODEL_CATALOG);
     }
     for key in KEYS.into_iter().chain(STABLE_KEYS) {
         match expected.get(key) {
@@ -162,21 +181,36 @@ fn edited(existing: &str, migrate_registry: bool) -> (Option<String>, Experiment
 /// The experiment step staged in a [`Draft`]: its outcome and the registry-migration marker state.
 pub(crate) struct Stage {
     marker: PathBuf,
+    catalog_marker: PathBuf,
     /// Whether the registry migration ran before, or why the marker could not be checked.
     migrated: Result<bool, String>,
+    catalog_migrated: Result<bool, String>,
     pins: Staged<ExperimentPins>,
+}
+
+impl Stage {
+    /// Whether this is the first completed-attempt window for the catalog default and model cleanup.
+    pub(crate) fn catalog_first_launch(&self) -> bool {
+        self.catalog_migrated
+            .as_ref()
+            .is_ok_and(|recorded| !*recorded)
+    }
 }
 
 /// Runs this step's edit over `draft` (the registry migration only while its marker is absent).
 pub(crate) fn stage(draft: &mut Draft, vibe_home: &Path) -> Stage {
     let marker = vibe_home.join(REGISTRY_MIGRATION);
+    let catalog_marker = vibe_home.join(CATALOG_MIGRATION);
     let migrated = marker
         .try_exists()
         .map_err(|e| format!("{}: {e}", marker.display()));
-    let pins = match migrated {
-        Ok(migrated) => draft.apply(
+    let catalog_migrated = catalog_marker
+        .try_exists()
+        .map_err(|e| format!("{}: {e}", catalog_marker.display()));
+    let pins = match (&migrated, &catalog_migrated) {
+        (Ok(migrated), Ok(catalog_migrated)) => draft.apply(
             |text, _| {
-                let (updated, outcome) = edited(text, !migrated);
+                let (updated, outcome) = edited(text, !*migrated, !*catalog_migrated);
                 if updated.is_none() && outcome.skipped.is_none() {
                     let notes = crate::config_comments::restored(text, None, REGISTRY, &[NOTE]);
                     return (notes, outcome);
@@ -185,14 +219,16 @@ pub(crate) fn stage(draft: &mut Draft, vibe_home: &Path) -> Stage {
             },
             |why| ExperimentPins::skipped(&why),
         ),
-        Err(_) => Staged {
-            outcome: ExperimentPins::skipped("the registry migration marker could not be checked"),
+        _ => Staged {
+            outcome: ExperimentPins::skipped("a default migration marker could not be checked"),
             changed: false,
         },
     };
     Stage {
         marker,
+        catalog_marker,
         migrated,
+        catalog_migrated,
         pins,
     }
 }
@@ -205,10 +241,15 @@ pub(crate) fn stage(draft: &mut Draft, vibe_home: &Path) -> Stage {
 /// The marker could not be checked or written, or this step's edit was part of a failed write.
 pub(crate) fn finish(stage: Stage, written: &Written) -> Result<ExperimentPins, String> {
     let migrated = stage.migrated?;
+    let catalog_migrated = stage.catalog_migrated?;
     let pins = written.settle(stage.pins, |why| ExperimentPins::skipped(&why))?;
     if !migrated && pins.skipped.is_none() && written.landed() {
         std::fs::write(&stage.marker, b"1\n")
             .map_err(|e| format!("{}: {e}", stage.marker.display()))?;
+    }
+    if !catalog_migrated && pins.skipped.is_none() && written.landed() {
+        std::fs::write(&stage.catalog_marker, b"1\n")
+            .map_err(|e| format!("{}: {e}", stage.catalog_marker.display()))?;
     }
     Ok(pins)
 }

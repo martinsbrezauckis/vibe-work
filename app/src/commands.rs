@@ -42,12 +42,39 @@ pub async fn core_execute(
 /// `serverUnavailable` when Vibe is not running (the UI then shows the reason).
 #[tauri::command]
 pub async fn core_subscribe(
+    webview: tauri::Webview,
     host: State<'_, HostHandle>,
     events: Channel<CoreEvent>,
 ) -> Result<(), CoreError> {
+    // The main page is up and connected: the start watch ends (before any wait for the core).
+    if webview.label() == crate::MAIN_WINDOW {
+        crate::start_watch::page_connected(webview.app_handle());
+    }
     host.get()
         .await
         .subscribe(move |event| events.send(event).is_ok())
+}
+
+/// Connects the trusted main webview's `WebCodecs` encoder to guarded browser frames.
+#[allow(clippy::needless_pass_by_value)] // Tauri injects Webview and State by value.
+#[tauri::command]
+pub fn browser_video_subscribe(
+    webview: tauri::Webview,
+    state: State<'_, crate::browser_video::BrowserVideo>,
+    requests: Channel<crate::browser_video::UiRequest>,
+) -> Result<(), String> {
+    crate::browser_video::subscribe(&webview, &state, requests)
+}
+
+/// Answers one pending encoder request from the trusted main webview.
+#[allow(clippy::needless_pass_by_value)] // Tauri injects Webview and State by value.
+#[tauri::command]
+pub fn browser_video_reply(
+    webview: tauri::Webview,
+    state: State<'_, crate::browser_video::BrowserVideo>,
+    reply: crate::browser_video::UiReply,
+) -> Result<bool, String> {
+    crate::browser_video::reply(&webview, &state, reply)
 }
 
 /// Long-polls for the next Debug API `ui/*` request (up to `wait_ms`, capped at 30 s). `None`
@@ -425,6 +452,14 @@ fn updates(handle: &UpdatesHandle) -> Result<&UpdateManager, CoreError> {
     })
 }
 
+/// Why this build makes no update check although it carries a channel (the refused channel's text), for Settings;
+/// `None` when the build has no channel or an accepted one.
+#[allow(clippy::needless_pass_by_value)] // Tauri injects State by value.
+#[tauri::command]
+pub fn update_off_reason(refused: State<'_, crate::updater::UpdatesRefused>) -> Option<String> {
+    refused.0.clone()
+}
+
 /// Starts the stream of update views into `events` (the current one first, then every change) and says whether
 /// this build has an update channel at all (`false`: the UI shows no update section).
 ///
@@ -596,6 +631,23 @@ pub fn desktop_focus_subscribe(app: AppHandle, focused: Channel<bool>) -> Result
 #[tauri::command]
 pub fn desktop_focus_app(webview: tauri::Webview) -> Result<(), String> {
     webview.set_focus().map_err(|error| error.to_string())
+}
+
+/// Draws the main window's title bar dark or light like the app's theme (Windows; a no-op elsewhere). The web view's
+/// `prefers-color-scheme` is not touched, so "follow the system theme" keeps reading the system.
+// Tauri injects AppHandle by value into commands.
+#[allow(clippy::needless_pass_by_value)]
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
+#[tauri::command]
+pub fn desktop_title_bar(app: AppHandle, dark: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    if let Some(window) = crate::main_window(&app) {
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        vw_platform::set_title_bar_dark(hwnd.0 as isize, dark)?;
+    }
+    #[cfg(not(windows))]
+    let _ = (app, dark);
+    Ok(())
 }
 
 /// Explicit Quit, shared with the tray menu and the Debug API.

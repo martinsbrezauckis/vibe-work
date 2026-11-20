@@ -369,7 +369,7 @@ pub async fn pick_folder<R: Runtime>(
 pub async fn save_markdown<R: Runtime>(app: &AppHandle<R>, name: &str) -> Option<PathBuf> {
     choose_one(
         app,
-        "Export the session as Markdown",
+        "Export the chat as Markdown",
         Chooser::Save,
         |dialog| dialog.set_file_name(name).add_filter("Markdown", &["md"]),
     )

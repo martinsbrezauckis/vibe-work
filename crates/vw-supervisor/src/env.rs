@@ -29,11 +29,10 @@ pub const API_KEY_VAR: &str = "MISTRAL_API_KEY";
 pub const MCP_TOKEN_VAR: &str = "VW_MCP_TOKEN";
 
 /// Unsupported experiments pinned off in both the app config and the server environment.
-pub const EXPERIMENT_CONFIG_KEYS: [&str; 6] = [
+pub const EXPERIMENT_CONFIG_KEYS: [&str; 5] = [
     "experimental_enable_mistral_mcp_connector",
     "experimental_local_runtime_session_api",
     "experimental_enable_document_library_connector",
-    "experimental_enable_model_catalog",
     "experimental_enable_local_projects",
     "experimental_enable_tab_status",
 ];

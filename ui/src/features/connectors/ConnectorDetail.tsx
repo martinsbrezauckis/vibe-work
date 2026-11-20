@@ -80,7 +80,7 @@ function ConnectorPart({
           <Button
             data-testid="connectors.connector-detail-sign-in"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={keyBlocked}
             onClick={() => void actions?.signIn(tile.alias)}
           >
@@ -91,7 +91,7 @@ function ConnectorPart({
           <Button
             data-testid="connectors.connector-detail-connect"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={keyBlocked}
             onClick={() => void actions?.connect(tile.alias, tile.meta.name)}
           >
@@ -162,7 +162,7 @@ function KeyLine({ server }: { server: ServerView }): ReactElement {
           <Button
             data-testid="connectors.connector-detail-allow-server-key"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={vaultBlocked}
             onClick={() => void actions?.allowServerKey(server.name)}
           >
@@ -230,30 +230,33 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
             <Button
               data-testid="connectors.connector-detail-sign-in-server"
               type="button"
-              appearance="dialog"
+              variant="primary"
               onClick={() => void actions?.signInServer(server.name)}
             >
               Sign in
             </Button>
           ) : null}
+          {/* The pane's actions are outlined; Sign out ends a live sign-in, so it is red like Settings' Sign out and
+              never first (patterns.md, Destructive actions). */}
+          <Button
+            data-testid="connectors.connector-detail-set-server-off"
+            type="button"
+            shape="outlined"
+            onClick={() => void actions?.setServerOff(server.name, !server.off)}
+          >
+            {server.off ? "Turn on" : "Turn off"}
+          </Button>
           {server.signIn === "oauth" && tone === "connected" ? (
             <Button
               data-testid="connectors.connector-detail-sign-out-server"
               type="button"
-
+              shape="outlined"
+              variant="danger"
               onClick={() => void actions?.signOutServer(server.name)}
             >
               Sign out
             </Button>
           ) : null}
-          <Button
-            data-testid="connectors.connector-detail-set-server-off"
-            type="button"
-
-            onClick={() => void actions?.setServerOff(server.name, !server.off)}
-          >
-            {server.off ? "Turn on" : "Turn off"}
-          </Button>
           <Button
             data-testid="connectors.connector-detail-remove-server"
             type="button"

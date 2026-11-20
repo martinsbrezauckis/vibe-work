@@ -336,11 +336,11 @@ enabled: boolean,
  */
 edgeEnabled?: boolean,
 /**
- * Legacy compatibility status; browser address access is always enabled.
+ * Legacy field, always true: browser address access is always enabled.
  */
 localNetwork: boolean,
 /**
- * The running helper acknowledged `local_network`'s current value (false while a change is still being sent).
+ * Legacy field, always true: there is no setting for the helper to acknowledge.
  */
 localNetworkApplied: boolean,
 /**
@@ -445,7 +445,7 @@ profileId: string | null,
  */
 name: string,
 /**
- * Selected, stopping, unconfirmed, or removed (the browser deleted this profile).
+ * Unopened suggestion, selected session, stopping, unconfirmed, or removed.
  */
 state: string,
 /**

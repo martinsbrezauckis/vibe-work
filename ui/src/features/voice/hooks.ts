@@ -11,6 +11,7 @@ import { type RefObject, useEffect } from "react";
 
 import { createStore, useStore } from "../../state/createStore";
 import type { VoicePromptState } from "../../state/voicePrompt";
+import type { VoiceQuestionState } from "../../state/voiceQuestion";
 import { type CaretPlacement, DICTATION_IDLE, type DictationState } from "../../state/dictation";
 import { NARRATION_IDLE, type NarrationState } from "../../state/narration";
 import { VOICE_CHAT_OFF, type VoiceChatState } from "../../state/voiceChat";
@@ -31,6 +32,7 @@ const NO_NARRATION = createStore<NarrationState>(NARRATION_IDLE);
 const NO_SETTINGS = createStore<VoiceSettings>(VOICE_DEFAULTS);
 const NO_PLACED = createStore<CaretPlacement>(null);
 const NO_PROMPT = createStore<VoicePromptState | null>(null);
+const NO_QUESTION = createStore<VoiceQuestionState | null>(null);
 const NO_VOICE_CHAT = createStore<VoiceChatState>(VOICE_CHAT_OFF);
 
 /** Selects from the dictation state (idle without voice). */
@@ -51,6 +53,11 @@ export function useVoiceChat<S>(select: (s: VoiceChatState) => S): S {
 /** The single card currently being read or answered by voice. */
 export function useVoicePrompt<S>(select: (s: VoicePromptState | null) => S): S {
   return useStore(useApp().voice?.voiceChat.prompt.store ?? NO_PROMPT, select);
+}
+
+/** The question card being answered by voice in voice chat, or `null`. */
+export function useVoiceQuestion<S>(select: (s: VoiceQuestionState | null) => S): S {
+  return useStore(useApp().voice?.voiceChat.question.store ?? NO_QUESTION, select);
 }
 
 /** Selects from the voice settings (the defaults without voice). */

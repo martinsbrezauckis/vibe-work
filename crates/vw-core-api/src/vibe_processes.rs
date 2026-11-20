@@ -4,7 +4,6 @@
 //! erase receipts. No project files or inferred command/cwd matches can register a process.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -62,10 +61,7 @@ impl VibeProcesses {
         let fail = |e: String| CoreStartError::ProcessTracking(e);
         let mut random = [0_u8; 32];
         getrandom::fill(&mut random).map_err(|e| fail(e.to_string()))?;
-        let mut token = String::with_capacity(64);
-        for byte in random {
-            let _ = write!(token, "{byte:02x}");
-        }
+        let token = hex::encode(random);
         let (listener, own) = vw_netguard::listeners::bind_own_tokio()
             .await
             .map_err(|e| fail(e.to_string()))?;

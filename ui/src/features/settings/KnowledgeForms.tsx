@@ -3,8 +3,10 @@
  * folder or cloud-drive location on this computer). The core checks and saves each place.
  * Depends on: useKnowledge, Controls, Selector, AppContext. Called by: KnowledgeSettings.
  * Invariants: names, paths, notes and library names are the user's text and render as text; the Mistral Libraries
- * list is fetched only when the user opens Add in that group; a failed list is said once by the app's announcer; an
- * opened Add form takes focus on its first control; an edit in an Add form clears the shown refusal.
+ * list is fetched only when the user opens Add in that group, the connectors only when the user picks a cloud drive
+ * that is not on this computer (free text only when the install has none or they cannot be read); a failed list is
+ * said once by the app's announcer; an opened Add form takes focus on its first control; an edit in an Add form
+ * clears the shown refusal.
  */
 import { type ReactElement, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/Controls";
@@ -144,6 +146,57 @@ export function AddLibrary({ knowledge, onDone }: { knowledge: Knowledge; onDone
   );
 }
 
+/**
+ * The connector of an online-only cloud drive: a pick of the connectors this install has, or, when it has none or
+ * they cannot be read, the connector's name typed in a field that says why.
+ */
+function ConnectorPick({
+  knowledge,
+  value,
+  onChange,
+}: {
+  knowledge: Knowledge;
+  value: string;
+  onChange: (name: string) => void;
+}): ReactElement {
+  const choices = knowledge.connectors;
+  if (choices === null && !knowledge.connectorsFailed)
+    return (
+      <p className="key-line" role="status">
+        Loading your connectors…
+      </p>
+    );
+  if (choices === null || choices.length === 0)
+    return (
+      <>
+        <Field
+          label="Connector name"
+          value={value}
+          onChange={onChange}
+          testId="settings.knowledge-connector"
+          placeholder="Google Drive"
+        />
+        <p className="key-field-hint ui-help">
+          {choices === null
+            ? "Your connectors could not be read. Type the name of the connector you use for this drive."
+            : "No connectors are set up yet. Type the name of the connector you will use for this drive, or add it in Connectors first."}
+        </p>
+      </>
+    );
+  return (
+    <Selector
+      testId="settings.knowledge-connector-pick"
+      label="Connector"
+      value={value}
+      options={[
+        ...(value === "" ? [{ value: "", label: "Choose a connector", disabled: true }] : []),
+        ...choices.map((c) => ({ value: c.name, label: c.name, description: c.status })),
+      ]}
+      onChange={onChange}
+    />
+  );
+}
+
 /** Add form of the local group: a folder (also a synced cloud drive folder) or an online-only cloud drive. */
 export function AddLocal({ knowledge, onDone }: { knowledge: Knowledge; onDone: () => void }) {
   const { core } = useApp();
@@ -181,6 +234,7 @@ export function AddLocal({ knowledge, onDone }: { knowledge: Knowledge; onDone: 
           knowledge.clearError();
           setKind(value);
           setLocation("");
+          if (value === "drive" && knowledge.connectors === null) void knowledge.loadConnectors();
         }}
       />
       <Field
@@ -215,12 +269,10 @@ export function AddLocal({ knowledge, onDone }: { knowledge: Knowledge; onDone: 
           }
         />
       ) : (
-        <Field
-          label="Connector"
+        <ConnectorPick
+          knowledge={knowledge}
           value={location}
           onChange={clearing(knowledge, setLocation)}
-          testId="settings.knowledge-connector"
-          placeholder="Google Drive"
         />
       )}
       <Field

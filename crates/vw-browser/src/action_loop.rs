@@ -96,7 +96,7 @@ impl Browser {
             tokio::select! {
                 result = work => result,
                 receipt = self.wait_for_dialog(session_id), if !matches!(action, Action::Dialog(_)) => Ok(receipt),
-                _ = cancel.changed(), if by == Actor::Agent => Err(ActError { capture_block: None, outcome: Outcome::Stopped,
+                _ = cancel.changed(), if by == Actor::Agent => Err(ActError { capture_block: None, protected_values_withheld: None, outcome: Outcome::Stopped,
                     text: if self.sessions.stopped(session_id) { STOPPED.to_owned() }
                         else { "Not run: this browser act was canceled because its turn ended or was replaced.".to_owned() } }),
             }

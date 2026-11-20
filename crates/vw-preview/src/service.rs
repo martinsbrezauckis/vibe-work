@@ -236,6 +236,8 @@ impl PreviewService {
             site_answers: std::sync::Mutex::new(crate::local_access::SiteAnswers::load(
                 &config.storage_root,
             )),
+            unanswered: std::sync::Mutex::default(),
+            timed_out_sites: std::sync::Mutex::default(),
             guard_refused: std::sync::Mutex::new(None),
             state: std::sync::Mutex::new(State::default()),
             policy: config.policy.clone(),
@@ -245,6 +247,7 @@ impl PreviewService {
             guard: std::sync::Mutex::new(None),
             names: crate::names::NameCheck::new(),
             rules_lock: tokio::sync::Mutex::new(()),
+            documents: std::sync::Mutex::default(),
         });
         if let Some(resolver) = &config.name_resolver {
             inner.names.set_resolver(resolver.clone());
@@ -429,7 +432,7 @@ impl PreviewService {
             entry.allowed.clone_from(&request.allowed_ports);
             entry.downloads_dir.clone_from(&request.downloads_dir);
             entry.last_used = now;
-            entry.loading = true;
+            entry.set_loading(true);
             entry.browser_mount = BrowserMountState::Ready;
             let loads = entry.loads.subscribe();
             let before = *loads.borrow();
@@ -552,7 +555,7 @@ impl PreviewService {
             entry.reset_console();
             entry.url = None;
             entry.title = None;
-            entry.loading = false;
+            entry.set_loading(false);
             entry.server_status = None;
             entry.pending_open = None;
             entry.pending_previous_url = None;

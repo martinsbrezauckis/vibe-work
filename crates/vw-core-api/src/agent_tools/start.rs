@@ -148,7 +148,7 @@ pub(crate) fn process_start(
     let max = tools.config.max_per_session;
     if live_count(shared, tools, request.session_id) >= max {
         return Err(format!(
-            "this session already runs {max} processes started with process_start; stop one first \
+            "this chat already runs {max} processes started with process_start; stop one first \
              (processes_list, process_stop)"
         ));
     }
@@ -249,7 +249,7 @@ fn already_running(
             "shell": launch.shell,
             "status": "already running",
             "reused": true,
-            "note": "this exact command already runs for this session; call processes_list for readiness; reuse it",
+            "note": "this exact command already runs for this chat; call processes_list for readiness; reuse it",
         }));
     }
     // A failed readiness scan must not turn a known live command into a second spawn.
@@ -263,16 +263,45 @@ fn already_running(
         .find(|(_, p)| Some(*p) == launch.port)
         .or_else(|| listening.first())
         .map(|(a, p)| url(*a, *p));
-    Some(json!({
+    let ports: Vec<u16> = listening.iter().map(|(_, p)| *p).collect();
+    let mut reply = json!({
         "pid": launch.process.pid,
         "port": launch.port,
         "shell": launch.shell,
-        "listening": listening.iter().map(|(_, p)| *p).collect::<Vec<_>>(),
+        "listening": ports,
         "url": url_main,
         "status": "already running",
         "reused": true,
-        "note": "this exact command already runs for this session in this folder: reuse it (process_restart restarts it)",
-    }))
+        "note": "this exact command already runs for this chat in this folder: reuse it (process_restart restarts it)",
+    });
+    if let Some(leased) = launch.port {
+        add_port_note(&mut reply, leased, &ports);
+    }
+    Some(reply)
+}
+
+/// When the command listens, but not on its leased port (a literal port in the command, no `$PORT`), the reply says
+/// so: `port` stays the leased `$PORT` (the reply's contract), and without this note the agent read it as the port
+/// the server answers on (for example "port 28112" while `python3 -m http.server` listened on 8000).
+fn port_note(leased: u16, listening: &[u16]) -> Option<String> {
+    if listening.is_empty() || listening.contains(&leased) {
+        return None;
+    }
+    let ports = listening
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "it listens on {ports}, not on its leased port {leased}: the command does not use $PORT. url is where it \
+         answers; to stay on this chat's ports, start it with $PORT"
+    ))
+}
+
+fn add_port_note(reply: &mut Value, leased: u16, listening: &[u16]) {
+    if let (Some(note), Some(object)) = (port_note(leased, listening), reply.as_object_mut()) {
+        object.insert("portNote".to_owned(), Value::String(note));
+    }
 }
 
 /// The pid's identity (start token), retried briefly while the OS publishes the new process.
@@ -345,7 +374,7 @@ fn wait_for_it(
         .find(|(_, p)| *p == port)
         .or_else(|| listeners.first())
         .map(|(a, p)| url(*a, *p));
-    json!({
+    let mut reply = json!({
         "pid": process.pid,
         "port": port,
         "shell": started.shell,
@@ -355,7 +384,9 @@ fn wait_for_it(
         "status": status,
         "firstOutput": first_output(log),
         "note": "keeps running after this turn and after Vibe Work closes; stop it with process_stop",
-    })
+    });
+    add_port_note(&mut reply, port, &ports);
+    reply
 }
 
 fn first_output(log: &std::path::Path) -> Vec<String> {

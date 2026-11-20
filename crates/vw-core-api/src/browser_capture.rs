@@ -231,6 +231,7 @@ pub(crate) async fn run(
 ) -> Result<Value, ActError> {
     let refused = |text: String| ActError {
         capture_block: None,
+        protected_values_withheld: None,
         outcome: vw_browser::Outcome::Refused,
         text,
     };
@@ -239,11 +240,11 @@ pub(crate) async fn run(
     let owner = hub
         .service
         .owner_session_id(session_id)
-        .ok_or_else(|| refused("browser page has no session owner".to_owned()))?;
+        .ok_or_else(|| refused("browser page has no owning chat".to_owned()))?;
     let folders = crate::agent_tools::session::folders(shared, &owner).map_err(refused)?;
     let folder = folders
         .first()
-        .ok_or_else(|| refused("this session has no folder".to_owned()))?;
+        .ok_or_else(|| refused("this chat has no folder".to_owned()))?;
     let fetch = CoreFetch::new(shared, hub.service.clone()).map_err(refused)?;
     hub.browser
         .capture(

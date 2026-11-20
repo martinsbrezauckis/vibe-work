@@ -167,7 +167,7 @@ async fn a_chat_bound_to_a_deleted_profile_keeps_the_row_and_names_the_next_step
     let error = super::profiles::check(chrome, ID).unwrap_err();
     assert_eq!(
         error,
-        "Chrome · Work was removed; no action ran. Open the session again so the user can pick another profile, or ask the user to reconnect this profile."
+        "Chrome · Work was removed; no action ran. Open the browser session again so the user can pick another profile, or ask the user to reconnect this profile."
     );
     let chat = super::profile_selection::view(chrome).unwrap();
     assert_eq!(chat[0].state, "removed");

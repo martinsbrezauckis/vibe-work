@@ -136,7 +136,7 @@ export function ChangesTab({ changes }: { changes: Changes }): ReactElement {
           <Button
             data-testid="changes.changes-tab-load"
             type="button"
-            appearance="key-link"
+            appearance="link"
             onClick={() => {
               void changes.load(sessionId);
             }}

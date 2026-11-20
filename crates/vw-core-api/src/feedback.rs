@@ -5,7 +5,6 @@ use crate::{
     Core, CoreError, ErrorCode, FeedbackDraft, FeedbackReport, FeedbackRequest, FeedbackView,
     Origin,
 };
-use std::fmt::Write;
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -44,10 +43,7 @@ fn id() -> Result<String, CoreError> {
             "Could not prepare the report. Try again.",
         )
     })?;
-    Ok(bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    }))
+    Ok(hex::encode(bytes))
 }
 fn view(core: &Core, state: &State) -> FeedbackView {
     FeedbackView {
@@ -220,7 +216,7 @@ pub(crate) async fn offer(
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     if shared.store.view(session).is_none() {
-        return Err("The session is not open. Open it before offering feedback.".into());
+        return Err("The chat is not open. Open it before offering feedback.".into());
     }
     // Remarks are optional, as in the dialog: an absent field opens with empty remarks.
     let mut args = args;

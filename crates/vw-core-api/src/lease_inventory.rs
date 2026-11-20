@@ -99,7 +99,7 @@ pub(super) async fn ensure(shared: &Arc<Shared>) -> Result<(), CoreError> {
     if inventory.stopped.load(Ordering::Relaxed) {
         return Err(CoreError::new(
             ErrorCode::Cancelled,
-            "session holder tracking stopped",
+            "chat holder tracking stopped",
         ));
     }
     let current = generation(shared);
@@ -118,9 +118,7 @@ pub(super) async fn ensure(shared: &Arc<Shared>) -> Result<(), CoreError> {
     let result = if let Some(current) = current {
         tokio::time::timeout(super::READ_WAIT, connect(shared, current))
             .await
-            .map_err(|_| {
-                CoreError::new(ErrorCode::Timeout, "the session's holder could not be read")
-            })
+            .map_err(|_| CoreError::new(ErrorCode::Timeout, "the chat's holder could not be read"))
             .and_then(|result| result)
     } else {
         Err(CoreError::new(
@@ -155,13 +153,13 @@ async fn connect(shared: &Arc<Shared>, current: u64) -> Result<(), CoreError> {
         .ok_or_else(|| {
             CoreError::new(
                 ErrorCode::ServerError,
-                "Vibe returned an invalid session holder inventory",
+                "Vibe returned an invalid chat holder inventory",
             )
         })?;
     if channel.generation != current || generation(shared) != Some(current) {
         return Err(CoreError::new(
             ErrorCode::ServerUnavailable,
-            "Vibe restarted while reading session holders",
+            "Vibe restarted while reading chat holders",
         ));
     }
     let weak = Arc::downgrade(shared);
@@ -169,7 +167,7 @@ async fn connect(shared: &Arc<Shared>, current: u64) -> Result<(), CoreError> {
     if shared.holders.inventory.stopped.load(Ordering::Relaxed) {
         return Err(CoreError::new(
             ErrorCode::Cancelled,
-            "session holder tracking stopped",
+            "chat holder tracking stopped",
         ));
     }
     if let Some(task) = state.task.take() {

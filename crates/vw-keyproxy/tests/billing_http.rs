@@ -17,7 +17,87 @@ use vw_keyproxy::{KeyCell, KeyNeed, KeyState, ProxyConfig, ProxyHandle, TokenSlo
 use zeroize::Zeroizing;
 
 const KEY: &str = "synthetic-upstream-key-for-billing-tests";
+const PIN: &str = include_str!("../../../tools/public/codegen/vibe.pin");
 type Seen = Arc<Mutex<Vec<(String, String, String)>>>;
+
+// PREDICT: catalog discovery forwards only the exact credentialed GET and never waits for an unlock.
+#[tokio::test]
+async fn model_catalog_uses_the_api_credential_and_discovery_never_waits_for_a_key() {
+    let ready = rig(false).await;
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/v1/model-catalog?surface=vibe-code",
+        ready.proxy.base_url()
+    );
+    let response = client
+        .get(&url)
+        .bearer_auth(&ready.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        ready.seen.lock().unwrap().as_slice(),
+        &[(
+            "GET".to_owned(),
+            "/v1/model-catalog?surface=vibe-code".to_owned(),
+            format!("Bearer {KEY}")
+        )]
+    );
+    for method in ["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"] {
+        assert_eq!(
+            client
+                .request(method.parse().unwrap(), &url)
+                .bearer_auth(&ready.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403,
+            "{method}"
+        );
+    }
+    for path in [
+        "/v1/model-catalog/",
+        "/v1/model-catalog/extra",
+        "/v1/model-catalogue",
+        "/console/v1/model-catalog",
+    ] {
+        assert_eq!(
+            client
+                .get(format!("{}{path}", ready.proxy.base_url()))
+                .bearer_auth(&ready.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403,
+            "{path}"
+        );
+    }
+    assert_eq!(ready.seen.lock().unwrap().len(), 1);
+    ready.proxy.shutdown().await;
+    ready.upstream.abort();
+
+    let locked = rig(true).await;
+    let response = tokio::time::timeout(
+        Duration::from_millis(500),
+        client
+            .get(format!(
+                "{}/v1/model-catalog?surface=vibe-code",
+                locked.proxy.base_url()
+            ))
+            .bearer_auth(&locked.token)
+            .send(),
+    )
+    .await
+    .expect("discovery must not wait for key_wait")
+    .unwrap();
+    assert_eq!(response.status(), 503);
+    assert!(locked.seen.lock().unwrap().is_empty());
+    locked.proxy.shutdown().await;
+    locked.upstream.abort();
+}
 
 struct Rig {
     proxy: ProxyHandle,
@@ -31,7 +111,7 @@ async fn upstream(State((seen, status)): State<(Seen, Arc<AtomicU16>)>, req: Req
     let path = req.uri().path().to_owned();
     seen.lock().unwrap().push((
         req.method().to_string(),
-        path.clone(),
+        req.uri().path_and_query().unwrap().to_string(),
         req.headers()
             .get("authorization")
             .unwrap()
@@ -237,7 +317,7 @@ async fn billing_discovery_never_waits_for_a_locked_key() {
 }
 
 #[tokio::test]
-#[ignore = "needs installed Vibe 3.1.2: set VIBE_PYTHON and VW_TEST_ROOT and run with --ignored"]
+#[ignore = "needs installed pinned Vibe: set VIBE_PYTHON and VW_TEST_ROOT and run with --ignored"]
 async fn installed_vibe_reads_billing_through_the_proxy() {
     let python = std::env::var_os("VIBE_PYTHON").expect("set VIBE_PYTHON to the pinned runtime");
     let root = std::env::var_os("VW_TEST_ROOT")
@@ -263,6 +343,7 @@ async fn installed_vibe_reads_billing_through_the_proxy() {
             .arg(format!("{}/v1", rig.proxy.base_url()))
             .arg(&rig.token)
             .arg(mode)
+            .arg(PIN.trim())
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", &home)
@@ -288,7 +369,7 @@ async fn installed_vibe_reads_billing_through_the_proxy() {
             String::from_utf8_lossy(&output.stderr)
         );
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        println!("Vibe 3.1.2 billing fixture {code} {mode}: {value}");
+        println!("Vibe {} billing fixture {code} {mode}: {value}", PIN.trim());
         if code == 200 {
             assert_eq!(value["subscription"]["vibe_payg_enabled"], true);
             if mode == "both" {

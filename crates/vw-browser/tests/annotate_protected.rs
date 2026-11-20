@@ -1,6 +1,6 @@
-//! The person's "Annotate this page" picture follows the capture rule: below Full access a page showing a password,
-//! PIN or card value gives no picture (the note and position stay, and the annotation says why); Full access and
-//! a page without protected values give the picture. Real browser driver and Chromium pixels; fake values only.
+//! The person's "Annotate this page" picture follows the capture rule: a page showing a password,
+//! PIN or card value gives no picture (the note and position stay, and the annotation says why).
+//! A page without protected values gives the picture. Real browser driver and Chromium pixels; fake values only.
 //!
 //! PREDICT (before the admission): the crop of the annotated area is attached on a page showing the typed card
 //! number, because `annotate` took its screenshot without asking the capture admission.
@@ -55,7 +55,7 @@ async fn no_picture_below_full_access_while_a_protected_value_shows() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn full_access_and_ordinary_pages_keep_the_picture() {
+async fn ordinary_pages_keep_the_picture_and_full_access_still_withholds_protected_pixels() {
     let rig = Rig::new().await;
     let ordinary = annotation(
         &rig,
@@ -69,9 +69,6 @@ async fn full_access_and_ordinary_pages_keep_the_picture() {
     assert!(wire.get("cropLeftOut").is_none(), "{wire}");
     rig.browser.set_delegation_authorizer(Arc::new(Full));
     let full = annotation(&rig, CARD).await;
-    assert!(
-        full.crop_png_base64.is_some(),
-        "delegated session keeps the crop"
-    );
-    assert_eq!(full.crop_left_out, None);
+    assert!(full.crop_png_base64.is_none());
+    assert_eq!(full.crop_left_out, Some(protected_shown()));
 }

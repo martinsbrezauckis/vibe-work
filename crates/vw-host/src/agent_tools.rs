@@ -221,6 +221,45 @@ pub fn hook_block(binary: &Path, endpoint_file: &Path) -> String {
     out
 }
 
+/// What every tool call answers when the tools binary is shipped but cannot start (`problem`: why, from
+/// `install_check::start_problem`, or that it is missing): which part of Vibe Work, and that reinstalling repairs it.
+#[must_use]
+pub fn unavailable_reason(problem: &str) -> String {
+    // Facts only: an agent reads an instruction inside a tool result as untrusted and does not pass it on.
+    format!(
+        "Not run: the Vibe Work tool program {BINARY} cannot start on this computer ({problem}), so no command, file, \
+         process or browser tool can run in this chat. Vibe Work is not installed completely; running the Vibe Work \
+         installer again repairs it, and a new chat then has its tools."
+    )
+}
+
+/// Our managed hook block when the tools binary cannot start: one strict pre-tool entry for every tool whose command
+/// prints a deny with `reason` (so the agent reads the reason, not the bare exit code of a program that never ran).
+/// The command is an `echo` of single-quoted JSON, which `sh`, Git Bash and PowerShell print alike; the text is kept
+/// to printable ASCII without single quotes or backslashes so no shell can split, expand or unescape it.
+#[must_use]
+pub fn refusal_block(reason: &str) -> String {
+    let plain: String = reason
+        .chars()
+        .map(|c| match c {
+            // dash's `echo` reads backslash escapes; a path keeps its readable form with forward slashes.
+            '\\' => '/',
+            '\'' => '?',
+            c if c.is_ascii_graphic() || c == ' ' => c,
+            _ => '?',
+        })
+        .collect();
+    let json = serde_json::json!({"decision": "deny", "reason": plain}).to_string();
+    format!(
+        "{BEGIN}\n[[hooks]]\nname = {}\ntype = \"pre_tool\"\nmatch = \"*\"\nstrict = true\ntimeout = 30.0\ndescription = {}\ncommand = {}\n{END}\n",
+        toml_string(Guard::Safety.hook_name()),
+        toml_string(
+            "Vibe Work: its tool program cannot start, so every tool is refused with the reason"
+        ),
+        toml_string(&format!("echo '{json}'"))
+    )
+}
+
 /// `existing` with our block replaced by `block` (or removed when `None`); other content kept.
 #[must_use]
 pub fn with_block(existing: &str, block: Option<&str>) -> String {
@@ -330,6 +369,45 @@ pub fn prepare(
     }
     let note = note_line(&supervisor.vibe_home, plugin.is_some());
     Ok(format!("agent tools on: {}{note}{shell}", binary.display()))
+}
+
+/// Turns the session tools off for this run because the shipped binary cannot start (`problem`: why): no tools
+/// config, no shell wrapper (on Windows the wrapper is a copy of the same binary), and every tool call refused with
+/// [`unavailable_reason`] through [`refusal_block`]. The built-in plugin (`plugin_root`; skills only) and the Vibe Work
+/// note stay. Returns a line for the log.
+///
+/// # Errors
+/// A text reason when `hooks.toml` cannot be updated.
+pub fn prepare_unavailable(
+    supervisor: &mut SupervisorConfig,
+    data_dir: &Path,
+    problem: &str,
+    plugin_root: Option<&Path>,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    let shell = format!("; {}", crate::git_bash::prepare(supervisor, data_dir, None));
+    #[cfg(not(windows))]
+    let shell = {
+        let _ = data_dir;
+        String::new()
+    };
+    write_hooks(
+        &supervisor.vibe_home,
+        Some(&refusal_block(&unavailable_reason(problem))),
+    )?;
+    // The skills and the always-on note are text only (no tool, no hook): they stay, so the agent keeps its trusted
+    // instruction to tell the user that a reinstall repairs an incomplete installation.
+    let plugin = plugin_root.filter(|r| r.join("vw").join("plugin.json").is_file());
+    if let Some(root) = plugin {
+        supervisor
+            .extra_args
+            .push("--additional-builtin-plugin-root".into());
+        supervisor.extra_args.push(root.as_os_str().to_owned());
+    }
+    let note = note_line(&supervisor.vibe_home, plugin.is_some());
+    Ok(format!(
+        "agent tools cannot start: {BINARY}: {problem}; every tool call is refused with that reason{note}{shell}"
+    ))
 }
 
 /// Writes or removes the Vibe Work note in `vibe_home/AGENTS.md`; the text to add to the log line (empty when all

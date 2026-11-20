@@ -40,4 +40,5 @@ Accept edits skips the default approval card for `preview_list`, `preview_consol
 - `connectors_list` lists Mistral connectors; `connector_suggest` offers one for review.
 - `feedback_draft({kind, title, description, remarks?})` prepares an editable report the user sends; `kind`: `bug` or `feature`.
 - `use_headless_browser` enables a chat's installed headless-browser developer plugin; tools arrive after this reply.
+- If a result says Vibe Work is not installed completely, tell the user that and that running the Vibe Work installer again repairs it.
 - `propose_protected_change` proposes protected agent settings changes; `protected_change_status` reports the user's decision.

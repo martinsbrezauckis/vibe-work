@@ -44,7 +44,7 @@ pub(crate) fn file_name_for(title: Option<&str>, session_id: &str) -> String {
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
         let short: String = session_id.chars().take(8).collect();
-        format!("Vibe session {short}.md")
+        format!("Vibe chat {short}.md")
     } else {
         format!("{trimmed}.md")
     }
@@ -141,7 +141,7 @@ impl Core {
         let (mut markdown, counts) = render(&head, &entries);
         if cut {
             markdown.push_str(
-                "\n*The oldest part of this session is not in this export (it is longer than Vibe Work reads).*\n",
+                "\n*The oldest part of this chat is not in this export (it is longer than Vibe Work reads).*\n",
             );
         }
         let mut secrets_replaced = Vec::new();

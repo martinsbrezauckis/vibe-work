@@ -45,6 +45,29 @@ pub fn set_creation_flags(command: &mut Command, extra_flags: u32) {
     let _ = (command, extra_flags);
 }
 
+/// Windows: makes this process, and every program it starts (they inherit the mode), fail with a status code instead of
+/// showing a system error box when a DLL a program needs is missing or a drive is unreadable. Without it a person's
+/// normal start (Explorer, the Start menu) gives each child that cannot load its DLLs a blocking "System Error" box: the
+/// child neither runs nor exits, so the install check reads it as starting and the agent's tool server hangs behind a new
+/// box every few seconds. Microsoft's guidance is that every application sets `SEM_FAILCRITICALERRORS` at
+/// startup. Called first in the app's `main`. Other systems: nothing to do.
+#[allow(unsafe_code)]
+pub fn fail_without_error_boxes() {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Diagnostics::Debug::{
+            GetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX, SetErrorMode,
+            THREAD_ERROR_MODE,
+        };
+        // SAFETY: both calls only read or set this process's error mode flags.
+        unsafe {
+            SetErrorMode(
+                THREAD_ERROR_MODE(GetErrorMode()) | SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX,
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 fn hidden_flags(extra_flags: u32) -> u32 {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -54,6 +77,18 @@ fn hidden_flags(extra_flags: u32) -> u32 {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    #[test]
+    #[allow(unsafe_code)]
+    fn error_boxes_are_off_for_this_process_and_its_children() {
+        use windows::Win32::System::Diagnostics::Debug::{
+            GetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX,
+        };
+        fail_without_error_boxes();
+        // SAFETY: reads this process's error mode.
+        let mode = unsafe { GetErrorMode() };
+        let wanted = (SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX).0;
+        assert_eq!(mode & wanted, wanted);
+    }
     #[test]
     fn extra_flags_keep_no_window_and_job_wrappers_use_the_same_flags() {
         assert_eq!(hidden_flags(0x0000_0200 | 0x0100_0000), 0x0900_0200);

@@ -37,7 +37,7 @@ impl ReceiptStore {
                 }
                 Ok(_) => (
                     BTreeMap::new(),
-                    Some("receipt session identifiers do not match".to_owned()),
+                    Some("browser session identifiers in the receipt do not match".to_owned()),
                 ),
                 Err(error) => (
                     BTreeMap::new(),

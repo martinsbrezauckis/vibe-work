@@ -1,7 +1,8 @@
 /**
  * The line above the text box while dictating: the timer, the live text (realtime), a note
- * (live text lost, the length limit, nothing heard) or the error, with Stop and Cancel. While the OS asks for the
- * microphone (a first use on macOS) it says so, with Cancel and no time limit.
+ * (live text lost, the length limit, nothing heard) or the error, with Cancel. The microphone button (a square while
+ * recording) is the one Stop, by pointer, keyboard (Enter, Space, the dictation shortcut) and screen reader. While
+ * the OS asks for the microphone (a first use on macOS) it says so, with Cancel and no time limit.
  * Depends on: AppContext, the voice hooks, the announcer. Called by: Composer.
  * Invariants: render only; shown for the session that dictates; the live text is plain text (React
  * escapes it), never Markdown. The strip is not a live region: a note or an error is said once by the app's
@@ -61,18 +62,6 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
                 : partial
               : (error ?? note)}
       </span>
-      {phase === "recording" ? (
-        <Button
-          data-testid="voice.dictation-strip-stop"
-          type="button"
-          appearance="compact"
-          title="Stop dictation and transcribe speech"
-          aria-label="Stop dictation and transcribe speech"
-          onClick={() => void dictation.stop()}
-        >
-          Stop
-        </Button>
-      ) : null}
       {phase === "recording" || phase === "starting" ? (
         <Button
           data-testid="voice.dictation-strip-cancel"

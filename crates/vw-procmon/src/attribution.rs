@@ -518,15 +518,64 @@ fn other(name: Option<String>, evidence: Vec<Evidence>) -> Attributed {
     }
 }
 
-/// Path form used for "inside" checks: component-wise (`/w/app2` is not inside `/w/app`); on Windows
-/// case-insensitive and without the `\\?\` verbatim prefix `canonicalize` adds.
+/// Path form used for "inside" checks: component-wise (`/w/app2` is not inside `/w/app`); on Windows the
+/// repository's one Windows path key ([`vw_platform::windows_key`]): case-insensitive, `/` read as `\`, without the
+/// verbatim prefix `canonicalize` adds (`\\?\C:\x` is `c:\x`, `\\?\UNC\s\x` is `\\s\x`).
 #[must_use]
 pub fn normalize(path: &Path) -> PathBuf {
     if cfg!(windows) {
-        let text = path.to_string_lossy();
-        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-        PathBuf::from(text.to_lowercase())
+        PathBuf::from(normalize_text(&path.to_string_lossy(), true))
     } else {
+        // Unix keeps the raw bytes: a lossy text form would make a folder with an invalid UTF-8 byte and a folder
+        // named with a literal U+FFFD the same key, so one chat's process could be attributed to the other.
         path.to_path_buf()
+    }
+}
+
+fn normalize_text(text: &str, windows: bool) -> String {
+    if windows {
+        vw_platform::windows_key(text)
+    } else {
+        text.to_owned()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod normalize_unix_tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    /// PREDICT: fails while the Unix form goes through a lossy text conversion: `/w/a\xff` and `/w/a\u{FFFD}` would
+    /// both become `/w/a\u{FFFD}`.
+    #[test]
+    fn unix_folders_with_invalid_utf8_keep_distinct_keys() {
+        let invalid = Path::new(OsStr::from_bytes(b"/w/a\xff"));
+        let replacement = Path::new("/w/a\u{FFFD}");
+        assert_ne!(super::normalize(invalid), super::normalize(replacement));
+        assert_eq!(super::normalize(invalid), invalid.to_path_buf());
+    }
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::normalize_text;
+
+    /// PREDICT: fails while the Windows form keeps `UNC\` of a verbatim UNC path (`\\?\UNC\s\x` would read as the
+    /// relative `unc\s\x`, never inside `\\s\x`) or leaves `/` unconverted.
+    #[test]
+    fn the_windows_form_is_the_shared_windows_path_key() {
+        assert_eq!(normalize_text(r"\\?\C:\Work\App", true), r"c:\work\app");
+        assert_eq!(
+            normalize_text(r"\\?\UNC\Server\Share\App", true),
+            r"\\server\share\app"
+        );
+        assert_eq!(normalize_text("C:/Work/App", true), r"c:\work\app");
+        assert_eq!(normalize_text(r"\\Server\Share", true), r"\\server\share");
+    }
+
+    #[test]
+    fn other_systems_keep_the_path_as_written() {
+        assert_eq!(normalize_text("/Work/App", false), "/Work/App");
     }
 }

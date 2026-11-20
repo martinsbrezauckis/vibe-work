@@ -1,6 +1,6 @@
 //! The preview tools behind a session credential: `preview_list`, `preview_open`,
 //! `preview_screenshot`, `preview_console`. Every one acts on the credential's session only; refusals are plain
-//! text naming the owner ("port 28104 belongs to another session ('Shop')").
+//! text naming the owner ("port 28104 belongs to another chat ('Shop')").
 //!
 //! Depends on: `previews` (the shared open path, the hub), `preview_ports`, vw-preview, vw-agent-tools (`wire`),
 //! `paused_tools_gate` (the person's browser Pause).
@@ -206,7 +206,7 @@ async fn list(
         "note": if let Some(reason) = pending { reason } else if let Some(view) = hub.service.view(session_id).filter(|view| view.server == Some(vw_preview::PreviewServerState::Stopped)) {
             open_note(&view, hub.service.screenshot_unavailable_reason(session_id))
         } else { "the user sees the preview in Vibe Work's side panel; preview_open shows a page there. canOpen: \
-                 this session's servers listening now. leasedFree: unassigned ports where binding succeeds; \
+                 this chat's servers listening now. leasedFree: unassigned ports where binding succeeds; \
                  start a server with process_start first. leasedUnavailable: a pending/live process reserves \
                  the port or the OS refuses binding, even though no listener is visible yet.".to_owned() },
     }))

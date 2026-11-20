@@ -240,6 +240,12 @@ pub trait PreviewHooks: Send + Sync {
     /// load either way under the public-page policy). `Layer(..)` reports another layer the engine installed,
     /// such as content rules. An engine without a guard never calls it.
     fn network_guard(&self, label: &str, check: GuardCheck);
+    /// A macOS content rule stopped a web-page subrequest to this Mac's own interface address before any send
+    /// (reported by `WebKit`'s content-rule action callback; the request watcher never sees such a load). The person
+    /// is told once per page; every call is a receipt for the agent.
+    fn content_rule_refused_own_address(&self, label: &str, host: &str, port: u16) {
+        let _ = (label, host, port);
+    }
     /// May mount `label`'s page send a sub-request (script, image, `fetch`, ...) to `url`? Asked by an engine
     /// before the request is sent. The live mount and URL scheme are checked; an address literal of this computer
     /// or the local network follows Local Network Access (Vibe Work's own ports and a site the person blocked are
@@ -292,6 +298,12 @@ pub trait PreviewHooks: Send + Sync {
 
 /// The native engine.
 pub trait PreviewEngine: Send + Sync {
+    /// Whether a native menu is currently tracking input in the mounted preview's window.
+    /// Engines without a native popup route return false.
+    fn select_menu_open(&self, id: &MountId) -> EngineFuture<'_, bool> {
+        let _ = id;
+        Box::pin(async { Ok(false) })
+    }
     /// Changes one view's native color preference; `None` restores inherited appearance.
     fn color_scheme(&self, id: &MountId, dark: Option<bool>) -> EngineFuture<'_, ()> {
         let _ = id;
@@ -395,6 +407,15 @@ pub trait PreviewEngine: Send + Sync {
                 })?;
             crate::frames::main_answer(answers).map(|answer| answer.value)
         })
+    }
+    /// Whether a document at one of `urls` (the page's frames, as the protected scan saw them) came from HTML that may
+    /// attach a closed shadow root through the parser ([`crate::declarative_closed_source`]) that this engine's
+    /// private world cannot enter. A document whose source is still arriving counts too; an address no document
+    /// came from (`history.pushState`) does not. An engine
+    /// whose private world enters closed roots answers `false` (its scan already read them); so does this default.
+    fn declarative_closed_roots(&self, id: &MountId, urls: Vec<String>) -> EngineFuture<'_, bool> {
+        let _ = (id, urls);
+        Box::pin(std::future::ready(Ok(false)))
     }
     /// Read or set native mute on this exact mounted tab, returning actual mute/audible state.
     fn tab_audio(&self, id: &MountId, muted: Option<bool>) -> EngineFuture<'_, serde_json::Value> {

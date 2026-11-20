@@ -56,14 +56,14 @@ fn user_data_uses_receipt_identity_then_vendor_paths_and_never_guesses_chrome() 
     );
 }
 
-struct Scratch {
-    root: PathBuf,
+pub(super) struct Scratch {
+    pub(super) root: PathBuf,
     /// This test's own disposable registry key (Windows); removed on drop (the shared parent stays).
     registry: super::super::registry_native_tests::TestRoot,
 }
 
 impl Scratch {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let root = std::env::var_os("VW_TEST_ROOT")
             .map_or_else(std::env::temp_dir, PathBuf::from)
             .join(format!("vw-cc-setup-{name}-{}", std::process::id()));
@@ -88,7 +88,7 @@ impl Scratch {
             registry: super::super::registry_native_tests::TestRoot::new(&format!("setup-{name}")),
         }
     }
-    fn config(&self) -> ChromeControlConfig {
+    pub(super) fn config(&self) -> ChromeControlConfig {
         ChromeControlConfig {
             // Compatibility file tests use the Windows/Linux flow; macos_data overrides this seam.
             macos: Some(false),
@@ -100,10 +100,10 @@ impl Scratch {
             ..ChromeControlConfig::default()
         }
     }
-    fn state(&self) -> PathBuf {
+    pub(super) fn state(&self) -> PathBuf {
         self.root.join("data").join("chrome-control")
     }
-    fn vibe_home(&self) -> PathBuf {
+    pub(super) fn vibe_home(&self) -> PathBuf {
         self.root.join("data").join("vibe-home")
     }
     fn every_file(&self) -> Vec<PathBuf> {
@@ -131,125 +131,14 @@ impl Drop for Scratch {
     }
 }
 
-#[test]
-fn the_registry_default_is_chromes_per_user_native_host_root() {
-    assert_eq!(
-        ChromeControlConfig::default().windows_registry_root,
-        r"HKCU\Software\Google\Chrome\NativeMessagingHosts"
-    );
-}
-
 #[cfg(windows)]
-fn registration(key: &str) -> (Option<i32>, Vec<u8>, Vec<u8>) {
+pub(super) fn registration(key: &str) -> (Option<i32>, Vec<u8>, Vec<u8>) {
     let output = std::process::Command::new("reg")
         .args(["query", key, "/s"])
         .output()
         .unwrap();
     assert!(matches!(output.status.code(), Some(0 | 1)));
     (output.status.code(), output.stdout, output.stderr)
-}
-
-#[test]
-fn windows_registry_manifest_paths_use_native_separators_for_both_browsers() {
-    for root in [r"C:\Users\Test Person\data", "C:/Users/Test Person/data"] {
-        let state = Path::new(root).join("chrome-control");
-        for browser in ["Google Chrome", "Microsoft Edge"] {
-            assert_eq!(
-                windows_native_path(&manifest_path(&state, browser)),
-                format!(r"C:\Users\Test Person\data\chrome-control\host\{HOST_NAME}.json"),
-                "{browser}: {root}"
-            );
-        }
-    }
-}
-
-#[cfg(windows)]
-#[test]
-fn set_up_and_remove_use_the_configured_key_and_leave_real_chrome_untouched() {
-    let s = Scratch::new("registry");
-    let config = s.config();
-    let real = format!(r"HKCU\Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}");
-    let before = registration(&real);
-    let real_edge = format!(r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}");
-    let edge_before = registration(&real_edge);
-    let key = format!(r"{}\{HOST_NAME}", config.windows_registry_root);
-    assert_eq!(
-        targets(&s.root.join("home"), &config)[0].registry,
-        Some(config.windows_registry_root.as_str())
-    );
-    assert_eq!(registration(&key).0, Some(1));
-    // Configured roots can contain forward slashes; persisted native paths must not.
-    let mixed_state = PathBuf::from(s.state().to_str().unwrap().replace('\\', "/"));
-    let view = install(&config, &mixed_state, &s.vibe_home()).unwrap();
-    #[cfg(feature = "your-edge")]
-    register_edge(&config, &mixed_state).unwrap();
-    assert_eq!(view.state, SetupState::WaitingForExtension);
-    let installed = registration(&key);
-    assert_eq!(installed.0, Some(0));
-    let manifest = s.state().join("host").join(format!("{HOST_NAME}.json"));
-    assert!(String::from_utf8_lossy(&installed.1).contains(manifest.to_str().unwrap()));
-    assert!(!manifest.to_str().unwrap().contains('/'));
-    let host: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
-    assert_eq!(
-        host["path"],
-        s.state().join("bin").join(helper_name()).to_str().unwrap()
-    );
-    assert!(!host["path"].as_str().unwrap().contains('/'));
-    assert_eq!(registration(&real), before);
-    assert_eq!(registration(&real_edge), edge_before);
-    let receipt = read_receipt(&s.config(), &s.state()).unwrap();
-    let mut expected = vec![key.clone()];
-    if cfg!(feature = "your-edge") {
-        let edge_key = format!(r"{}\{HOST_NAME}", config.edge_registry_root);
-        let edge_installed = registration(&edge_key);
-        assert_eq!(edge_installed.0, Some(0));
-        assert!(String::from_utf8_lossy(&edge_installed.1).contains(manifest.to_str().unwrap()));
-        expected.push(edge_key);
-    }
-
-    assert_eq!(receipt.registry_keys, expected);
-    assert!(!receipt.user_data[0].to_str().unwrap().contains('/'));
-    remove(&s.config(), &s.state()).unwrap();
-    for key in expected {
-        assert_eq!(registration(&key).0, Some(1));
-    }
-    assert!(!s.state().exists());
-    assert_eq!(registration(&real), before);
-    assert_eq!(registration(&real_edge), edge_before);
-}
-
-#[cfg(windows)]
-#[test]
-fn a_failed_receipt_rolls_back_registration_and_scratch_drop_cleans_up_after_panic() {
-    let real = format!(r"HKCU\Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}");
-    let before = registration(&real);
-    let result = std::panic::catch_unwind(|| {
-        let s = Scratch::new("registry-unwind");
-        let config = s.config();
-        assert_eq!(
-            targets(&s.root.join("home"), &config)[0].registry,
-            Some(config.windows_registry_root.as_str())
-        );
-        let key = format!(r"{}\{HOST_NAME}", config.windows_registry_root);
-        std::fs::create_dir_all(s.state().join("setup.json")).unwrap();
-        assert!(install(&config, &s.state(), &s.vibe_home()).is_err());
-        assert_eq!(registration(&key).0, Some(1));
-        std::fs::remove_dir(s.state().join("setup.json")).unwrap();
-        install(&config, &s.state(), &s.vibe_home()).unwrap();
-        assert_eq!(registration(&key).0, Some(0));
-        panic!("exercise scratch cleanup on test failure");
-    });
-    assert_eq!(
-        result.unwrap_err().downcast_ref::<&str>(),
-        Some(&"exercise scratch cleanup on test failure")
-    );
-    let registry_key = format!(
-        r"HKCU\Software\VibeWorkTests\setup-registry-unwind-{}",
-        std::process::id()
-    );
-    assert_eq!(registration(&registry_key).0, Some(1));
-    assert_eq!(registration(&real), before);
 }
 
 #[cfg(not(windows))]

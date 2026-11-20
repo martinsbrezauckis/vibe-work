@@ -31,9 +31,4 @@ pub use state::{DROP_AFTER_MS, MAX_MOVE, State};
 pub use store::{FILE_NAME, ProjectStore};
 
 /// Milliseconds since the Unix epoch (0 when the clock is before it).
-#[must_use]
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
+pub use vw_platform::wall_clock::unix_ms as now_ms;

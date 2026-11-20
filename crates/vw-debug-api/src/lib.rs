@@ -58,7 +58,7 @@ mod window_capture;
 mod window_routes;
 pub use window_capture::{WindowCaptureError, capture_main};
 
-pub use auth::{constant_time_eq, host_allowed, origin_allowed, token_present};
+pub use auth::{constant_time_eq, host_allowed, origin_allowed};
 pub use config::{DEV_BUILD, DebugApiConfig, EnabledReason, enablement};
 pub use registry::{RegistryError, UiRoutes};
 pub use reply::status_of;

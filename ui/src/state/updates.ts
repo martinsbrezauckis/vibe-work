@@ -226,12 +226,19 @@ export interface UpdatesState {
   view: UpdateView | null;
   /** The notice key the user dismissed with "Later". */
   dismissed: string | null;
+  /** Why a build whose update channel was refused makes no update check; `null` otherwise. */
+  offReason: string | null;
 }
 
 /** Creates the updates controller. */
 export function createUpdates(options: { client: CoreClient; toasts: Toasts }) {
   const { client, toasts } = options;
-  const store = createStore<UpdatesState>({ available: false, view: null, dismissed: null });
+  const store = createStore<UpdatesState>({
+    available: false,
+    view: null,
+    dismissed: null,
+    offReason: null,
+  });
   let started = false;
 
   async function run(step: () => Promise<void>): Promise<void> {
@@ -257,6 +264,11 @@ export function createUpdates(options: { client: CoreClient; toasts: Toasts }) {
           store.set((s) => ({ ...s, view }));
         });
         store.set((s) => ({ ...s, available }));
+        // A build whose channel was refused says why in Settings instead of hiding updates without a word.
+        if (!available && client.updates.offReason !== undefined) {
+          const offReason = await client.updates.offReason().catch(() => null);
+          store.set((s) => ({ ...s, offReason }));
+        }
         return available;
       } catch {
         started = false;

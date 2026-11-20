@@ -475,6 +475,7 @@ fn fetch_kind(error: &FetchError) -> FailKind {
         FetchError::Checksum { .. } | FetchError::TooLarge(_) | FetchError::Archive(_) => {
             FailKind::Checksum
         }
+        FetchError::Refused { .. } => FailKind::Refused,
         FetchError::Timeout(_) => FailKind::Timeout,
         FetchError::Disk { .. } => FailKind::Disk,
     }

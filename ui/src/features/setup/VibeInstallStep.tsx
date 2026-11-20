@@ -47,6 +47,9 @@ function failText(phase: Extract<InstallPhase, { state: "failed" }>): string {
   switch (phase.kind) {
     case "network":
       return "Vibe Work could not reach the download server. Check your internet connection or proxy settings, then try again.";
+    case "refused":
+      // The core's sentence (in Details) names the refused host.
+      return "A Vibe download was redirected to a server Vibe does not use, so nothing was downloaded. Try again; if it happens again, your network may be redirecting downloads.";
     case "checksum":
       return "A download did not match its published checksum, so it was deleted and not used. Try again; if it happens again, your network may be changing downloads.";
     case "timeout":
@@ -80,7 +83,7 @@ function Offer({ offer }: { offer: InstallOffer }) {
         <Button
           data-testid="setup.vibe-install-step-confirm"
           type="button"
-          appearance="dialog"
+          variant="primary"
           disabled={busy}
           onClick={() => void vibe?.confirm(offer.offerId)}
         >
@@ -159,7 +162,7 @@ export function VibeInstallStep() {
             <Button
               data-testid="setup.vibe-install-step-prepare"
               type="button"
-              appearance="dialog"
+              variant="primary"
               disabled={busy}
               onClick={() => void vibe?.prepare()}
             >
@@ -220,7 +223,7 @@ export function VibeInstallStep() {
           <Button
             data-testid="setup.vibe-install-step-summary"
             type="button"
-            appearance="expander"
+            appearance="link"
             aria-expanded={detailsOpen}
             aria-controls="vibe-install-details"
             onClick={() => {
@@ -237,7 +240,7 @@ export function VibeInstallStep() {
           <Button
             data-testid="setup.vibe-install-step-prepare-2"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={busy}
             onClick={() => {
               // After a failed start the install is complete: Try again only starts Vibe again (no new review).

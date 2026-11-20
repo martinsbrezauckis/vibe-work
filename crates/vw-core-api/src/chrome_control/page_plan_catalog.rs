@@ -86,7 +86,7 @@ pub(super) fn decorate(result: &mut Value, requested: Option<&str>) {
                 row["inputSchema"] = schema(name);
                 row["description"] = if name.starts_with("recording.video.") {
                     json!(
-                        "Continuous video of this chat's own tab where the browser's extension reports page.video.v1 (Chrome/Edge extension 0.1.12); elsewhere this returns unavailable with the recording.start/stop action-screenshot GIF alternative."
+                        "Continuous VP8 WebM video of this chat's own tab in Chrome, Edge, Firefox or Safari when its connection offers video. Firefox and Safari use guarded screenshots; recording.start/stop saves an action GIF where video is unavailable."
                     )
                 } else if super::page_capture::NAMES.contains(name) {
                     json!(

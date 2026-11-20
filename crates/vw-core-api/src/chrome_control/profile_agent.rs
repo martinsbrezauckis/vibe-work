@@ -109,12 +109,21 @@ pub(super) fn status(shared: &Shared, chat: &str, result: &mut Value) {
     else {
         return;
     };
+    let unbound = selected.is_none();
     body.insert("selectedProfile".into(), json!(selected_row));
     body.insert(
         "profileChoices".into(),
         Value::Array(choices.iter().map(|row| agent_row(chrome, row)).collect()),
     );
-    if selected.is_none() {
+    if let Some(id) = selected.filter(|_| profile_bindings::locked(chrome, chat)) {
+        body.insert(
+            "profileSelection".into(),
+            json!(
+                vw_vocabulary::texts::BROWSER_PROFILE_AGENT_SELECTION
+                    .replace("{profile}", &profiles::label(chrome, &id))
+            ),
+        );
+    } else if unbound {
         body.insert("profileSelection".into(), json!("A new chat uses the only connected profile or the user's default profile. With several profiles and no default, open with the browser's name as profileId (\"chrome\" or \"edge\"), not a profile's ID; the user picks on a card. The user can set a default in Settings > Browser."));
     }
     super::output::sync_text(result);

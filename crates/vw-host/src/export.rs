@@ -44,7 +44,7 @@ impl Host {
     pub async fn export_session_name(&self, session_id: &str) -> String {
         match self.core_or_unavailable() {
             Ok(core) => core.export_session_name(session_id).await,
-            Err(_) => "Vibe session.md".to_owned(),
+            Err(_) => "Vibe chat.md".to_owned(),
         }
     }
 }

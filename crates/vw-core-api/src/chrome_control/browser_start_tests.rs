@@ -46,7 +46,7 @@ pub(super) async fn fixture(
     std::fs::create_dir_all(
         data.join("Default/Extensions")
             .join(&chrome.config.extension_id)
-            .join("0.1.6_0"),
+            .join("0.2.6_0"),
     )
     .unwrap();
     std::fs::write(chrome.dir().unwrap().join("setup.json"),
@@ -55,7 +55,7 @@ pub(super) async fn fixture(
     for connected in [true, false] {
         test_support::observe_status(
             shared,
-            &json!({"profiles":[{"profileId":profile,"connected":connected,"extensionVersion":"0.1.6"}]}),
+            &json!({"profiles":[{"profileId":profile,"connected":connected,"extensionVersion":"0.2.6"}]}),
         );
     }
     for chat in ["a", "b", "c"] {

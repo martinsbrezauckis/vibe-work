@@ -8,7 +8,7 @@
 //! official source, a confirmation showing what will run and its SHA-256, a time limit, the output tail).
 //!
 //! Modules: [`pin`] (embedded, generated pin), [`manager`] (state machine, consent), `run` (the install task),
-//! [`fetch`] (checksum-verified download), [`steps`] (contained uv processes), [`existing`] (other installs),
+//! [`fetch`] (checksum-verified download, only from the servers [`download_hosts`] allows), [`steps`] (contained uv processes), [`existing`] (other installs),
 //! [`layout`] (folders and records), [`view`] (what the UI and the Debug API see); [`support`] (the
 //! signed supported-Vibe manifest; its rollback record in `seen`, its Chrome store state in [`extension_store`]) and
 //! [`update`] (its check and the consent-bound Vibe update); `refresh` (an existing install's environment rebuilt from
@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod download_hosts;
 pub mod e2e_guard;
 pub mod existing;
 pub mod extension_store;

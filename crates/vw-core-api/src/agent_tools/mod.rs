@@ -48,6 +48,12 @@ mod document_consent;
 mod document_read_tests;
 mod document_tools;
 mod prepare;
+#[cfg(test)]
+mod push_flow_tests;
+mod push_jobs;
+#[cfg(test)]
+mod push_tests;
+mod push_tool;
 mod search_tool;
 mod server;
 pub(crate) mod session;
@@ -197,6 +203,7 @@ pub(crate) struct AgentTools {
     pub(crate) one_ask: crate::one_ask::Ledger,
     pub(crate) shell_commands: shell_commands::Commands,
     pub(crate) tool_asks: crate::ask::tool_calls::Calls,
+    pub(crate) pushes: Arc<push_jobs::Jobs>,
     #[cfg(feature = "video")]
     video: video_budget::Budget,
     #[cfg(feature = "video")]
@@ -231,6 +238,7 @@ impl AgentTools {
         let hook = table.hook().map_err(|e| e.to_string())?;
         write_endpoint_file(&config.endpoint_file(), &endpoint, &hook)?;
         let launches = launches::Launches::load(&config.data_dir.join("launches.json"));
+        let pushes = Arc::new(push_jobs::Jobs::open(config.data_dir.join("pushes.json"))?);
         Ok(Self {
             chrome_package,
             shared: OnceLock::new(),
@@ -248,6 +256,7 @@ impl AgentTools {
             one_ask: crate::one_ask::Ledger::default(),
             shell_commands: shell_commands::Commands::default(),
             tool_asks: crate::ask::tool_calls::Calls::default(),
+            pushes,
             #[cfg(feature = "video")]
             video: video_budget::Budget::default(),
             copy_locks: copycheck::CopyLocks::default(),
@@ -329,11 +338,11 @@ impl AgentTools {
                 params
                     .get("sessionId")
                     .and_then(Value::as_str)
-                    .and_then(|id| crate::chrome_control::check::mode(&shared, id))
+                    .and_then(|id| crate::chrome_control::chat_mode(&shared, id))
             });
         chrome_launch(
             shared.chrome_control.config.available(),
-            shared.chrome_control.enabled() || crate::chrome_control::safari::enabled(&shared),
+            shared.chrome_control.enabled() || crate::chrome_control::safari_enabled(&shared),
             mode.as_deref(),
         )
     }
@@ -394,6 +403,9 @@ impl AgentTools {
     /// A deleted session's credentials stop working.
     pub(crate) fn session_deleted(&self, session_id: &str) {
         self.table.revoke_session(session_id);
+        if let Err(error) = self.pushes.forget(session_id) {
+            tracing::warn!(%error, "Could not delete saved push receipts");
+        }
         self.tool_asks.browser_requests.forget(session_id);
         #[cfg(feature = "video")]
         self.video.forget(session_id);
@@ -409,6 +421,9 @@ impl AgentTools {
     /// processes `process_start` started this run now belong to `new`.
     pub(crate) fn session_handed_off(&self, old: &str, new: &str) {
         let moved = self.table.hand_off(old, new);
+        if let Err(error) = self.pushes.hand_off(old, new) {
+            tracing::warn!(%error, "Could not move saved push receipts");
+        }
         self.on_demand.hand_off(old, new);
         self.launches.hand_off(old, new);
         for started in self

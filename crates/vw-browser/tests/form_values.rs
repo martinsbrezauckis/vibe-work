@@ -264,6 +264,42 @@ async fn native_stepped_keys_do_not_change_payment_fields() {
 }
 
 #[tokio::test]
+async fn enter_in_a_payment_card_field_is_refused_before_any_key_reaches_the_page() {
+    // PREDICT: before the refusal the native Enter reached the card field (the page saw a trusted keydown), the
+    // receipt guard then blocked the form's implicit submission, and the agent got "Stopped or failed after native
+    // input was sent ... The page may have acted on it", which reads as if the payment could have been sent.
+    let rig = page().await;
+    rig.engine.eval("document.body.insertAdjacentHTML('beforeend', '<form id=pay method=post action=/pay><label>Card number one<input id=card-auto autocomplete=cc-number value=CC-SENTINEL></label><label>Card number two<input id=card-plain value=PLAIN-CARD></label><button>Pay</button></form><label>Card number three<input id=card-alone autocomplete=cc-number value=ALONE-CARD></label>');window.keys=0;window.sent=0;document.addEventListener('keydown',()=>window.keys++,true);document.getElementById('pay').addEventListener('submit',e=>{e.preventDefault();window.sent++});").await;
+    for (id, value) in [
+        ("card-auto", "CC-SENTINEL"),
+        ("card-plain", "PLAIN-CARD"),
+        ("card-alone", "ALONE-CARD"),
+    ] {
+        let error = act(&rig, id, json!({"action":"press","key":"Enter"}))
+            .await
+            .unwrap_err();
+        assert!(
+            error.text.starts_with("Enter was not pressed")
+                && error
+                    .text
+                    .contains("Nothing was sent and the field is unchanged"),
+            "{id}: {error:?}"
+        );
+        assert_eq!(
+            rig.engine
+                .eval(&format!("document.getElementById({}).value", json!(id)))
+                .await,
+            value,
+            "{id}"
+        );
+    }
+    assert_eq!(
+        rig.engine.eval("[window.keys, window.sent]").await,
+        json!([0, 0])
+    );
+}
+
+#[tokio::test]
 async fn range_keys_report_changes_and_respect_bounds() {
     let rig = page().await;
     for (key, value) in [
@@ -414,4 +450,164 @@ async fn a_key_on_the_focused_range_reports_its_changed_value() {
             .any(|r| r["value"] == "6"),
         "{receipt}"
     );
+}
+
+#[tokio::test]
+async fn ordinary_select_ref_from_broad_read_survives_a_protected_select_neighbor() {
+    const CARD: &str = "<label>Card choice <select autocomplete=cc-number><option>none</option><option>CARD-SECRET-7319</option></select></label>";
+    for (before, after, options) in [
+        (
+            "",
+            "<label>Other <select><option>none</option><option>test</option></select></label>",
+            "<option value=a>a</option><option value=b>b</option>",
+        ),
+        (
+            "",
+            CARD,
+            "<option value=a>a</option><option value=b>b</option>",
+        ),
+        (
+            CARD,
+            "",
+            "<option value=a>a</option><option value=b>b</option>",
+        ),
+        (
+            "",
+            CARD,
+            "<optgroup label=Group><option value=a>a</option><option value=b>b</option></optgroup>",
+        ),
+    ] {
+        let rig = Rig::new().await;
+        rig.engine
+            .eval(&format!(
+                "document.head.innerHTML='';document.body.innerHTML={};scrollTo(0,0)",
+                json!(format!(
+                    "{before}<label>Choice <select id=ordinary>{options}</select></label>{after}"
+                ))
+            ))
+            .await;
+        let (model, _, _) = rig
+            .browser
+            .observe(SESSION, ReadOptions::default())
+            .await
+            .unwrap();
+        let ordinary = model
+            .refs
+            .iter()
+            .find(|item| item.tag == "select" && item.name.starts_with("Choice"))
+            .unwrap();
+        assert_eq!(ordinary.name, "Choice a b", "{model:?}");
+        assert!(!format!("{model:?}").contains("CARD-SECRET-7319"));
+        let reference = &ordinary.id;
+        // The installed failure also followed a fresh `find` read; it must name the same ref the same way.
+        let (found, _, _) = rig
+            .browser
+            .observe(
+                SESSION,
+                ReadOptions {
+                    find: Some("Choice".into()),
+                    ..ReadOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            found
+                .refs
+                .iter()
+                .any(|item| &item.id == reference && item.name == "Choice a b"),
+            "{found:?}"
+        );
+        assert!(!format!("{found:?}").contains("CARD-SECRET-7319"));
+        rig.browser
+            .act(
+                SESSION,
+                vw_browser::parse(&json!({"action":"focus","ref":reference})).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await
+            .unwrap();
+        rig.browser
+            .act(
+                SESSION,
+                vw_browser::parse(&json!({"action":"select","ref":reference,"value":"b"})).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await
+            .unwrap();
+        assert_eq!(rig.engine.eval("ordinary.value").await, "b");
+    }
+}
+
+#[tokio::test]
+async fn first_key_after_focus_in_a_document_without_focus_is_not_refused_as_unstable() {
+    for (field, key, expected) in [
+        ("<input id=field type=number value=4>", "ArrowUp", "5"),
+        (
+            "<input id=field type=range min=0 max=10 value=4>",
+            "ArrowRight",
+            "5",
+        ),
+        (
+            "<select id=field><option value=a>a</option><option value=b>b</option></select>",
+            "ArrowDown",
+            "b",
+        ),
+    ] {
+        let rig = Rig::new().await;
+        rig.engine.viewport(1280, 900).await;
+        // The app's browser pane while the chat composer holds OS focus: the page document reports no
+        // focus, so focusing an already focused field sends no new focus event and the focus wait runs out.
+        rig.engine
+            .eval(&format!(
+                "document.head.innerHTML='';document.body.innerHTML={};scrollTo(0,0);Document.prototype.hasFocus=()=>false;window.keys=0;field.addEventListener('keydown',()=>keys++)",
+                json!(format!("<h1>Numbers</h1><label>Step {field}</label>"))
+            ))
+            .await;
+        let (model, _, _) = rig
+            .browser
+            .observe(SESSION, ReadOptions::default())
+            .await
+            .unwrap();
+        let reference = &model
+            .refs
+            .iter()
+            .find(|item| item.tag == "select" || item.tag == "input")
+            .unwrap()
+            .id;
+        rig.browser
+            .act(
+                SESSION,
+                vw_browser::parse(&json!({"action":"focus","ref":reference})).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await
+            .unwrap();
+        let result = rig
+            .browser
+            .act(
+                SESSION,
+                vw_browser::parse(&json!({"action":"press","ref":reference,"key":key})).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await;
+        if cfg!(any(target_os = "macos", target_os = "linux")) && field.starts_with("<select") {
+            let error = result.expect_err("native select key would open a popup");
+            assert!(
+                error
+                    .text
+                    .contains("dropdown list that only the user can use")
+            );
+            assert_eq!(rig.engine.eval("field.value").await, "a");
+            assert_eq!(rig.engine.eval("keys").await, 0);
+            continue;
+        }
+        assert!(result.is_ok(), "{field}: {result:?}");
+        assert_eq!(rig.engine.eval("field.value").await, expected);
+        assert_eq!(rig.engine.eval("keys").await, 1);
+    }
 }

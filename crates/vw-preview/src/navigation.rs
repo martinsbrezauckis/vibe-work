@@ -29,7 +29,7 @@ impl Entry {
         if let Some(mount) = &mut self.mount {
             mount.navigation.generation = mount.navigation.generation.wrapping_add(1);
             if mount.navigation.pending.take().is_some() {
-                self.loading = false;
+                self.set_loading(false);
             }
         }
     }

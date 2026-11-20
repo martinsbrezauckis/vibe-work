@@ -54,6 +54,7 @@ export const EVENT_NAMES = [
   "worktreesChanged",
   "gitBrowserChanged",
   "secretsChanged",
+  "knowledgeChanged",
   "secretScan",
   "feedback",
   "gitIdentityAsked",

@@ -64,6 +64,9 @@ pub struct InstallOffer {
 pub enum FailKind {
     /// No connection (offline, DNS, refused, proxy unreachable).
     Network,
+    /// A download address (or a redirect) that is not one of Vibe's download servers: nothing was requested from it.
+    /// The error is the plain sentence the person sees.
+    Refused,
     /// A download did not have the pinned checksum (it was deleted, never run).
     Checksum,
     /// A step took longer than its limit.

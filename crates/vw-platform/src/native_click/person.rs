@@ -59,6 +59,7 @@ mod linux {
                 refused();
             }
             if swallowed {
+                super::block::quit_pressed(input);
                 return glib::Propagation::Stop;
             }
             match input {
@@ -89,17 +90,33 @@ mod linux {
             gdk::EventType::Scroll
             | gdk::EventType::TouchpadSwipe
             | gdk::EventType::TouchpadPinch => Input::Wheel,
-            // GTK handles the window's accelerators before the view sees a key, so no key here is a shortcut.
+            // GTK handles the window's accelerators before the view sees a key, so no key here is a shortcut. The
+            // app's Quit (Ctrl+Q) is the interface's own shortcut, not a GTK accelerator: it is recognised here.
             kind @ (gdk::EventType::KeyPress | gdk::EventType::KeyRelease) => Input::Key {
                 code: u32::from(event.keycode().unwrap_or_default()),
                 tab: event.keyval().is_some_and(|key| {
                     key == *gdk::keys::constants::Tab || key == *gdk::keys::constants::ISO_Left_Tab
                 }),
                 shortcut: false,
+                quit: quit_shortcut(event) && super::block::takes_quit(),
                 press: kind == gdk::EventType::KeyPress,
             },
             _ => Input::Other,
         }
+    }
+
+    /// Ctrl+Q with no other modifier (the letter by the keyboard layout, as the interface's own shortcut reads it).
+    fn quit_shortcut(event: &gdk::Event) -> bool {
+        let others = gdk::ModifierType::SHIFT_MASK
+            | gdk::ModifierType::MOD1_MASK
+            | gdk::ModifierType::SUPER_MASK
+            | gdk::ModifierType::META_MASK
+            | gdk::ModifierType::HYPER_MASK;
+        event.state().is_some_and(|state| {
+            state.contains(gdk::ModifierType::CONTROL_MASK) && !state.intersects(others)
+        }) && event
+            .keyval()
+            .is_some_and(|key| *gdk::keys::Key::from(key).to_lower() == *gdk::keys::constants::q)
     }
 
     /// Whether a pointer button is down right now with the pointer over this webview (window-system state).
@@ -199,6 +216,8 @@ mod macos {
                 shortcut: event
                     .modifierFlags()
                     .contains(objc2_app_kit::NSEventModifierFlags::Command),
+                // On macOS the app menu owns Command+Q; this watch does not map it.
+                quit: false,
                 press: kind == NSEventType::KeyDown,
             },
             _ => Input::Other,

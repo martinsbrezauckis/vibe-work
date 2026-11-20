@@ -27,7 +27,7 @@ fn consent_request(
         method: METHOD.to_owned(),
         requester: Requester::Window,
         summary: format!(
-            "Save the {length}-character value you selected in the {} on {} for session {} to your vault as {}{}? The agent never sees the value; it can later ask to use it in a command.",
+            "Save the {length}-character value you selected in the {} on {} for chat {} to your vault as {}{}? The agent never sees the value; it can later ask to use it in a command.",
             vw_gate::dialog_quote(element),
             vw_gate::dialog_quote(page),
             vw_gate::dialog_chat_quote(title),
@@ -63,7 +63,7 @@ pub(crate) async fn choose(
     let owner = crate::previews::hub(shared)?
         .service
         .owner_session_id(session_id)
-        .ok_or_else(|| denied("browser page has no session owner".to_owned()))?;
+        .ok_or_else(|| denied("browser page has no owning chat".to_owned()))?;
     if shared.store.view(&owner).is_none() {
         return Err(crate::error::CoreError::not_loaded(&owner));
     }
@@ -100,7 +100,7 @@ pub(crate) async fn save(
     let owner = crate::previews::hub(shared)?
         .service
         .owner_session_id(session_id)
-        .ok_or_else(|| denied("browser page has no session owner".to_owned()))?;
+        .ok_or_else(|| denied("browser page has no owning chat".to_owned()))?;
     if shared.store.view(&owner).is_none() {
         return Err(crate::error::CoreError::not_loaded(&owner));
     }

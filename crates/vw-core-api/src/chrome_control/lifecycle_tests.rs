@@ -1,5 +1,6 @@
 //! Chat teardown and retained-window ownership; tests the parent connection state without a browser.
 use super::*;
+use std::path::Path;
 #[test]
 fn ending_a_chat_releases_its_tasks_and_deletion_forgets_its_window() {
     let chrome = ChromeControl::new(Path::new("."), ChromeControlConfig::default());
@@ -23,16 +24,18 @@ fn ending_a_chat_releases_its_tasks_and_deletion_forgets_its_window() {
 
 #[test]
 fn completion_is_checked_at_locked_admission_and_reset_has_no_unused_counter() {
-    let gateway = include_str!("gateway.rs");
+    let gateway = [include_str!("gateway.rs"), include_str!("gateway_steps.rs")].concat();
     let admission = include_str!("gateway_scope.rs");
     assert!(
         !gateway.contains("pending.finish(shared, session, browser, &answer)?;"),
         "completion is already checked under the admission lock"
     );
     assert!(admission.contains("pending.finish(shared, session, browser, answer)?;"));
-    let state = include_str!("mod.rs");
+    let state = include_str!("state.rs");
     assert!(
-        !state.contains("    generation: AtomicU64,"),
+        !state.lines().any(|line| {
+            line.trim().trim_start_matches("pub(super) ") == "generation: AtomicU64,"
+        }),
         "the unused global counter has no reader; per-browser generations own invalidation"
     );
     assert!(!state.contains("self.generation.fetch_add"));

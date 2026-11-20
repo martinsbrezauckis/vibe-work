@@ -365,51 +365,45 @@ fn built_in_session_grants_describe_the_whole_action_in_plain_words() {
     for (tool, action) in [
         (
             "file_system.write_file",
-            "creating and changing files anywhere in this session",
+            "creating and changing files anywhere in this chat",
         ),
         (
             "file_system.read_file",
-            "reading files anywhere in this session",
+            "reading files anywhere in this chat",
         ),
-        (
-            "file_system.edit",
-            "changing files anywhere in this session",
-        ),
+        ("file_system.edit", "changing files anywhere in this chat"),
         (
             "file_system.grep",
-            "searching file contents anywhere in this session",
+            "searching file contents anywhere in this chat",
         ),
-        ("web_search", "searching the web in this session"),
+        ("web_search", "searching the web in this chat"),
         (
             "file_system.search_replace",
-            "changing files anywhere in this session",
+            "changing files anywhere in this chat",
         ),
-        ("skill.read", "reading skill instructions in this session"),
-        ("subagent.spawn", "starting subagents in this session"),
-        ("agents.spawn", "starting subagents in this session"),
-        ("agents.list", "listing subagents in this session"),
+        ("skill.read", "reading skill instructions in this chat"),
+        ("subagent.spawn", "starting subagents in this chat"),
+        ("agents.spawn", "starting subagents in this chat"),
+        ("agents.list", "listing subagents in this chat"),
         (
             "agents.list_configs",
-            "listing agent configurations in this session",
+            "listing agent configurations in this chat",
         ),
         (
             "agents.send_message",
-            "sending messages to subagents in this session",
+            "sending messages to subagents in this chat",
         ),
-        ("agents.interrupt", "interrupting subagents in this session"),
-        ("self.wait", "waiting in this session"),
-        ("subagent.list", "listing subagents in this session"),
-        ("subagent.wait", "waiting for subagents in this session"),
+        ("agents.interrupt", "interrupting subagents in this chat"),
+        ("self.wait", "waiting in this chat"),
+        ("subagent.list", "listing subagents in this chat"),
+        ("subagent.wait", "waiting for subagents in this chat"),
         (
             "subagent.send_message",
-            "sending messages to subagents in this session",
+            "sending messages to subagents in this chat",
         ),
-        (
-            "subagent.interrupt",
-            "interrupting subagents in this session",
-        ),
-        ("subagent.stop", "stopping subagents in this session"),
-        ("self.sleep", "waiting in this session"),
+        ("subagent.interrupt", "interrupting subagents in this chat"),
+        ("subagent.stop", "stopping subagents in this chat"),
+        ("self.sleep", "waiting in this chat"),
     ] {
         let entry = json!({"detail":{"kind":"approval", "effect":{"toolName":tool}, "requiredPermissions":[]}});
         let grants::Scopeable::Grant {

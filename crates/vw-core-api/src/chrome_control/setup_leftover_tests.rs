@@ -5,6 +5,10 @@
 //! PREDICT (before the fix): every case that expects Connect to succeed fails with "Browser helper is set up by
 //! another Vibe Work", because setup without a receipt refused any existing manifest, even one naming the very path
 //! it is about to write. The refusal cases already pass and must keep passing.
+//!
+//! PREDICT (stale registrations): a manifest naming another helper path whose program no longer exists fails with
+//! "Browser helper is set up by another Vibe Work" (then "Try Connect again", which cannot help); a live one is
+//! refused without naming where it is or how to clear it.
 use super::*;
 
 fn bundle(s: &Scratch, browser: &str) {
@@ -76,6 +80,13 @@ fn connect_rewrites_a_leftover_manifest_naming_this_installations_helper() {
         for browser in browsers() {
             install_for(&config, &s.state(), &s.vibe_home(), browser)
                 .unwrap_or_else(|e| panic!("macos {macos}, {browser}: {e}"));
+            // Only the first Connect finds the leftover with its helper copy gone; the next one shares that copy.
+            let notice = config.setup_notice.take();
+            assert_eq!(
+                notice.is_some(),
+                browser == "Google Chrome",
+                "{browser}: {notice:?}"
+            );
             let file = host_file(&s, &config, browser);
             assert_eq!(
                 std::fs::read(&file).unwrap(),
@@ -107,11 +118,23 @@ fn connect_still_refuses_a_manifest_naming_another_helper_path() {
         });
         let config = config_for(&s, macos);
         let other = s.root.join("home/another/bin").join(helper_name());
+        // Another setup that is still there: its helper program exists.
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, b"another helper").unwrap();
         let file = host_file(&s, &config, "Google Chrome");
         leftover(&file, &other);
         let before = std::fs::read(&file).unwrap();
         let error = install_for(&config, &s.state(), &s.vibe_home(), "Google Chrome").unwrap_err();
-        assert_eq!(error, "Browser helper is set up by another Vibe Work");
+        assert_eq!(
+            error,
+            format!(
+                "Chrome is connected to another Vibe Work setup ({}). Open that setup and use Remove in \
+                 Settings > Browser, or delete the file {}, then retry Connect",
+                other.display(),
+                file.display()
+            )
+        );
+        assert!(config.setup_notice.take().is_none());
         assert_eq!(std::fs::read(&file).unwrap(), before, "macos {macos}");
         assert!(!s.state().join("bin").join(helper_name()).exists());
         assert!(read_receipt(&config, &s.state()).is_none());
@@ -127,4 +150,44 @@ fn connect_refuses_an_unreadable_manifest_without_a_receipt() {
     std::fs::write(&file, b"not json").unwrap();
     assert!(install_for(&config, &s.state(), &s.vibe_home(), "Google Chrome").is_err());
     assert_eq!(std::fs::read(&file).unwrap(), b"not json");
+}
+
+#[test]
+fn connect_replaces_a_manifest_whose_helper_program_is_gone_and_says_so_once() {
+    for macos in [false, true] {
+        let s = Scratch::new(if macos { "stale-mac" } else { "stale-linux" });
+        let config = config_for(&s, macos);
+        let gone = s.root.join("home/old-dev/bin").join(helper_name());
+        let helper = s.state().join("bin").join(helper_name());
+        for browser in browsers() {
+            leftover(&host_file(&s, &config, browser), &gone);
+            install_for(&config, &s.state(), &s.vibe_home(), browser)
+                .unwrap_or_else(|e| panic!("macos {macos}, {browser}: {e}"));
+            let file = host_file(&s, &config, browser);
+            assert_eq!(
+                std::fs::read(&file).unwrap(),
+                manifest_for(&helper, &config, browser),
+                "macos {macos}, {browser}"
+            );
+            let short = if browser == "Microsoft Edge" {
+                "Edge"
+            } else {
+                "Chrome"
+            };
+            assert_eq!(
+                config.setup_notice.take(),
+                Some(format!(
+                    "Connected. An old {short} connection named a helper program that no longer \
+                     exists ({}); Vibe Work replaced it.",
+                    gone.display()
+                )),
+                "macos {macos}, {browser}"
+            );
+            assert!(config.setup_notice.take().is_none(), "said once");
+        }
+        remove(&config, &s.state()).unwrap();
+        for browser in browsers() {
+            assert!(!host_file(&s, &config, browser).exists(), "{browser}");
+        }
+    }
 }

@@ -47,6 +47,8 @@
   --primary-fg: #131317;
   --shadow: 0 18px 50px -12px #000000aa, 0 0 0 1px var(--line-2);
   /* Colours that are not theme-dependent: fixed ink on accent fills, the brand mark, overlays. */
+  /* Video frames always flatten transparent screenshot pixels onto white, independent of theme. */
+  --recording-matte: #fff;
   --on-accent: #131317;
   --accent-ink: #1a1300;
   --brand-1: #ff8205;
@@ -74,6 +76,7 @@
   --weight-heading: 650;
   --leading-ui: 1.5;
   --leading-helper: 1.45;
+  --leading-reading: 1.65; /* the chat's answers and the code diffs: long reading at 15 px or in Space Mono */
   /* Corner scale (DESIGN.md, Shapes). */
   --radius-mark: 2px; /* drawn marks: glyph parts, drop lines, progress bars */
   --radius-xs: 4px; /* keycaps, inline code, thumbnails */
@@ -257,6 +260,11 @@ button {
   font: inherit;
   color: inherit;
 }
+/* A link inside text (Markdown in chat, narration, skills and the Files preview) has one look: the link colour with
+   the text underline, never the browser's default or visited colour. Action links are LinkButton (.ext-link). */
+a {
+  color: var(--blue);
+}
 /* Selects: the system look (a grey GTK button on Linux, a macOS pop-up button) is replaced by the app's
    field look with a drawn caret, the same on every system. Feature rules set the colours, borders and padding;
    they use background-color (not the background shorthand) so the caret stays, and leave room on the right. */
@@ -282,7 +290,7 @@ input[type="checkbox"] {
   height: 14px;
   margin: 0;
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   display: inline-grid;
   place-content: center;

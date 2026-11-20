@@ -2,11 +2,12 @@
  * Layout decisions for the shell, as one pure function: is the list visible, how wide is the side
  * panel, is it a drawer. Up to three columns show (list, chat, one panel): a wide tab takes the room the chat can
  * spare and folds the list only when the three do not fit; a dragged width is remembered per tab kind and clamped;
- * narrow windows turn the panel into an overlay drawer.
+ * narrow windows hide the list (a drawer) and keep the panel beside the chat while both minimums fit; narrower
+ * still, the panel is an overlay drawer.
  * Depends on: shellState. Called by: the Shell component (sets CSS variables and classes), the
  * UI-control `state` route, tests.
- * Invariants: pure; the chat column never gets narrower than `CHAT_MIN` in grid mode; the panel is
- * never narrower than `PANEL_MIN`.
+ * Invariants: pure; the chat column never gets narrower than `CHAT_MIN` while the panel sits beside it (every
+ * window of at least `DOCK_MIN`); the panel is never narrower than `PANEL_MIN`.
  */
 import { editorLayoutOf } from "./editorLayout";
 import { type ShellState, TAB_META, panelOf } from "./shellState";
@@ -23,8 +24,15 @@ export const RAIL_W = 56;
 const COL_W = 284;
 /** Narrowest side panel. */
 export const PANEL_MIN = 360;
-/** At or below this width the panel is an overlay drawer and the list is hidden. */
+/** At or below this width the list is hidden (it opens as an overlay drawer). */
 export const DRAWER_MAX = 899;
+/**
+ * Narrowest window where an open panel still sits BESIDE the chat (rail + the chat's minimum + the panel's
+ * minimum). Narrower, the panel is an overlay drawer over the chat. Between this and `DRAWER_MAX` the panel used to
+ * overlay as well: a 900 px Windows window has a ~884 px WebView2 viewport, so the panel lay over the page and a
+ * width remembered from a wider window covered it almost whole.
+ */
+export const DOCK_MIN = RAIL_W + CHAT_MIN + PANEL_MIN;
 /** At or below this width the rail is hidden too (phone layout). */
 const PHONE_MAX = 640;
 
@@ -40,6 +48,8 @@ export interface Layout {
   /** The active tab wants room. */
   wide: boolean;
   drawer: boolean;
+  /** The open panel lies over the chat as a drawer (the window is narrower than `DOCK_MIN`). */
+  panelOverlay: boolean;
   phone: boolean;
   /** The panel owns the whole window. */
   maximized: boolean;
@@ -57,6 +67,7 @@ export function computeLayout(state: ShellState, viewport: number): Layout {
   const panelOpen = active !== null;
   const wide = active !== null && TAB_META[active].size === "wide";
   const drawer = viewport <= DRAWER_MAX;
+  const overlay = drawer && viewport < DOCK_MIN;
   const phone = viewport <= PHONE_MAX;
   const editorSplit = editor.split && panelOpen && !settings;
   const slotWidth = Math.max(CHAT_MIN, Math.min(520, viewport * 0.3));
@@ -73,6 +84,7 @@ export function computeLayout(state: ShellState, viewport: number): Layout {
         : Math.round(viewport - RAIL_W - 48 - (editor.slot === "folded" ? 48 : actualSlot)),
       wide: true,
       drawer,
+      panelOverlay: drawer,
       phone,
       maximized: false,
       listDrawerOpen: false,
@@ -93,10 +105,12 @@ export function computeLayout(state: ShellState, viewport: number): Layout {
   if (active !== null && panelShown) {
     const remembered = state.widths[active];
     if (remembered !== undefined) width = remembered;
-    else if (drawer) width = wide ? viewport * 0.92 : SIDE_W;
+    else if (overlay) width = wide ? viewport * 0.92 : SIDE_W;
     else width = wide ? avail - CHAT_COMPACT : SIDE_W;
   }
-  if (!drawer) width = Math.max(PANEL_MIN, Math.min(width, avail - CHAT_MIN));
+  // Beside the chat the width is clamped on every call, so a window shrink also shrinks a width remembered from a
+  // wider window (the chat keeps CHAT_MIN); the remembered value itself stays for when the window grows again.
+  if (!overlay) width = Math.max(PANEL_MIN, Math.min(width, avail - CHAT_MIN));
   return {
     editorSplit: false,
     slotWidth: Math.round(slotWidth),
@@ -107,6 +121,7 @@ export function computeLayout(state: ShellState, viewport: number): Layout {
     panelWidth: Math.round(width),
     wide: wide && panelShown,
     drawer,
+    panelOverlay: overlay,
     phone,
     maximized: panelShown && state.maximized,
     listDrawerOpen: drawer && state.drawer,

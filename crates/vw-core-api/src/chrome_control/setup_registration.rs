@@ -86,12 +86,26 @@ pub(super) fn ensure_manifest(
     path: &Path,
     expected: &[u8],
 ) -> Result<(), String> {
+    ensure_manifest_over(config, path, expected, None)
+}
+
+/// [`ensure_manifest`], and also replaces a manifest whose bytes are exactly `stale`: one Connect found naming a
+/// helper program that no longer exists. The write itself rechecks those bytes, so a manifest another setup
+/// rewrote meanwhile is refused.
+pub(super) fn ensure_manifest_over(
+    config: &ChromeControlConfig,
+    path: &Path,
+    expected: &[u8],
+    stale: Option<&[u8]>,
+) -> Result<(), String> {
     let before = files::read(config, path).map_err(|e| super::problem::io_message(config, &e))?;
     if let Some(bytes) = &before {
         if bytes == expected {
             return Ok(());
         }
-        owned_manifest(bytes, expected)?;
+        if stale != Some(bytes.as_slice()) {
+            owned_manifest(bytes, expected)?;
+        }
     }
     files::write(config, path, before.as_deref(), expected)
         .map_err(|e| super::problem::io_message(config, &e))

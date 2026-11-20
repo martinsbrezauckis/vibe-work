@@ -43,6 +43,8 @@ export interface WorktreesState {
   end: EndChoice | null;
   /** Leftover and kept copies with no live session. */
   orphans: readonly OrphanWorktree[];
+  /** Every copy the core counts (also those chats still use); `null` before the first read. */
+  copies: number | null;
   /** A fresh "New chat here" choice resets the copy switch, even for the same folder. */
   newChatRequest: number;
   /**
@@ -58,6 +60,7 @@ export interface WorktreesState {
 export const NO_WORKTREES = createStore<WorktreesState>({
   end: null,
   orphans: [],
+  copies: null,
   newChatRequest: 0,
   newChatCopy: null,
   included: {},
@@ -90,6 +93,7 @@ export function createWorktrees(deps: {
   const store = createStore<WorktreesState>({
     end: null,
     orphans: [],
+    copies: null,
     newChatRequest: 0,
     newChatCopy: null,
     included: {},
@@ -142,6 +146,7 @@ export function createWorktrees(deps: {
     counting = counting.then(async () => {
       try {
         const result = await run({ op: "count" });
+        if (result.kind === "count") store.set((s) => ({ ...s, copies: result.count }));
         if (result.kind === "count" && notices.observe(result.count) !== null) {
           toasts.push({
             kind: "info",
@@ -297,6 +302,9 @@ export function createWorktrees(deps: {
     dismiss(): void {
       store.set((s) => ({ ...s, end: null }));
     },
+
+    /** Counts every copy again (Settings says how many chats still use one when none is left over). */
+    countCopies,
 
     /** Loads the startup list of orphan copies. */
     async loadOrphans(): Promise<void> {

@@ -264,10 +264,7 @@ fn forms_from(value: &str, min: usize) -> Vec<Vec<u8>> {
     };
     add(json_escaped(value).into_bytes());
     add(percent_encoded(value).into_bytes());
-    let mut hex = String::with_capacity(value.len() * 2);
-    for b in value.bytes() {
-        let _ = write!(hex, "{b:02x}");
-    }
+    let hex = hex::encode(value);
     add(hex.to_ascii_uppercase().into_bytes());
     add(hex.into_bytes());
     let bytes = value.as_bytes();

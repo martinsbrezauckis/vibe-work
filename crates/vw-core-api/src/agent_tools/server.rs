@@ -225,7 +225,7 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
         // session/start, while its credential is still pending (the session id is not known yet), so a pending
         // credential gets it too. The list is the same for every chat (`gateway::list`).
         Some(Holder::Session(_) | Holder::Pending) if tool == names::CHROME_TOOL_LIST => {
-            Ok(crate::chrome_control::gateway::list(&shared))
+            Ok(crate::chrome_control::list_tools(&shared))
         }
         Some(Holder::Session(session_id)) if names::SESSION_TOOLS.contains(&tool) => {
             let outcome =
@@ -250,7 +250,7 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
         }
         // Chrome authority follows the current chat mode without a permission card.
         Some(Holder::Hook) if tool == names::CHROME_CHECK => {
-            let outcome = Ok(crate::chrome_control::check::check(&shared, &request.args));
+            let outcome = Ok(crate::chrome_control::check_request(&shared, &request.args));
             log(tool, None, &outcome);
             outcome
         }

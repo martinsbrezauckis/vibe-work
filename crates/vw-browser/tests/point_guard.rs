@@ -144,19 +144,36 @@ async fn normalized_native_event_fields_cannot_bypass_target_enforcement_during_
     }
 }
 
+/// PREDICT (load, written before the fix): under 32 busy loops this failed in 4 of 5 runs with `native_clicks` 0: the
+/// fixture's own injected click and its sync point used up the 200 ms dispatch age limit, so the agent's press was
+/// refused for age before dispatch and the guard was never exercised. The fixture now leaves its injected person
+/// clicks out of that age; an attempt the engine still refused for age (the modelled path itself was too slow; its
+/// text can read "native input was blocked" because the receipt's blocked bit names the injected click) did not test
+/// the guard, so a fresh one runs, at most eight. Every attempt must leave no effect; the one that reaches dispatch
+/// must have sent the press exactly once.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_interleaved_trusted_sequence_cannot_release_target_enforcement_before_collection() {
-    let (rig, id) = prepared(false).await;
-    rig.engine.eval("window.coverReady=true").await;
-    *rig.engine.after_point_mark.lock().unwrap() =
-        Some("document.querySelector('#cover').style.left='20px'".into());
-    // Model a trusted sequence delivered ahead of already-admitted agent input. It must not consume the guard.
-    rig.engine
-        .user_click_after_mark
-        .store(true, Ordering::Relaxed);
-    let error = act(&rig, &id, "click").await;
-    no_effect(&rig, &error).await;
-    assert_eq!(rig.engine.native_clicks.load(Ordering::Relaxed), 1);
+    for attempt in 1..=8 {
+        let (rig, id) = prepared(false).await;
+        rig.engine.eval("window.coverReady=true").await;
+        *rig.engine.after_point_mark.lock().unwrap() =
+            Some("document.querySelector('#cover').style.left='20px'".into());
+        // Model a trusted sequence delivered ahead of already-admitted agent input. It must not consume the guard.
+        rig.engine
+            .user_click_after_mark
+            .store(true, Ordering::Relaxed);
+        let error = act(&rig, &id, "click").await;
+        no_effect(&rig, &error).await;
+        if attempt < 8 && rig.engine.age_refusals.load(Ordering::Relaxed) > 0 {
+            continue;
+        }
+        assert_eq!(
+            rig.engine.native_clicks.load(Ordering::Relaxed),
+            1,
+            "attempt {attempt}: {error:?}"
+        );
+        return;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

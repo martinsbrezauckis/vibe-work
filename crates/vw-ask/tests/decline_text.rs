@@ -14,3 +14,28 @@ fn a_decline_says_nothing_was_done_and_must_not_be_reported_as_done() {
     assert!(vw_ask::DECLINED.contains("Nothing was done"));
     assert!(vw_ask::DECLINED.contains("never as done"));
 }
+
+/// The public manuals quote the decline text the agent receives word for word.
+///
+/// PREDICT: fails while any of these manuals quotes another wording of the decline text.
+#[test]
+fn the_manuals_quote_the_current_decline_text() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for manual in [
+        "README.md",
+        "docs/public/BROWSER_CONTROL.md",
+        "docs/public/DEBUG_API.md",
+    ] {
+        let text = std::fs::read_to_string(root.join(manual)).unwrap();
+        let quotes: Vec<&str> = text
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|quote| quote.starts_with("Not run: the user declined this."))
+            .collect();
+        assert!(!quotes.is_empty(), "{manual} quotes the decline text");
+        for quote in quotes {
+            assert_eq!(quote, vw_ask::DECLINED, "{manual}");
+        }
+    }
+}

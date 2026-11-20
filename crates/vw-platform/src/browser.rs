@@ -14,7 +14,7 @@ mod process;
 #[cfg(any(windows, test))]
 #[path = "browser_windows.rs"]
 mod windows;
-pub use launch::{launch_command, launch_command_with_profile};
+pub use launch::launch_command_with_profile;
 
 /// A supported browser identity; Chrome and Edge facts are always kept separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

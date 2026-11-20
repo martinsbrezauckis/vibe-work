@@ -48,16 +48,21 @@ fn primitive_failure(error: owner::RpcFailure, action: &str) -> String {
             // These are fixed helper admissions, not page-derived strings. A future helper's
             // arbitrary error text may contain page data, so only known advice is shown verbatim.
             const UNKNOWN_HISTORY: &str = "Not run: this document's page-script or vault-fill history could not be verified after reconnecting. Reload or navigate the tab to a new document before filling or running JavaScript.";
+            const STALE_TAB: &str =
+                "Not run: no tab with this ID is available. Use a tabId from tabs.list";
+            const TIMEOUT_HELPER: &str = "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this browser session.";
             const ADVICE: &[&str] = &[
                 UNKNOWN_HISTORY,
-                "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this session.",
+                STALE_TAB,
+                TIMEOUT_HELPER,
                 "Session start must be acknowledged",
                 "Settle the current operation before another admission",
                 "Another browser chat still has work on this tab. Use a tab in this chat's window, or wait for that work to finish.",
             ];
             let known_helper_code = match message.as_str() {
                 UNKNOWN_HISTORY => Some("VAULT_SCRIPT_CONFLICT"),
-                "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this session." | "Session start must be acknowledged" => Some("CONTROL_SUSPENDED"),
+                STALE_TAB => Some("UNSUPPORTED_TARGET"),
+                TIMEOUT_HELPER | "Session start must be acknowledged" => Some("CONTROL_SUSPENDED"),
                 "Settle the current operation before another admission" => Some("OPERATION_BUSY"),
                 "Another browser chat still has work on this tab. Use a tab in this chat's window, or wait for that work to finish." => Some("TAB_BUSY"),
                 _ => None,
@@ -72,8 +77,16 @@ fn primitive_failure(error: owner::RpcFailure, action: &str) -> String {
                 && matches!(action, "capture.page" | "capture.media")
             {
                 format!("Capture was not run because Vibe Work cannot verify this page's earlier use of secrets. For your own agent tab, reload or navigate it, then capture again. For the user's tab, ask the user to reload or navigate it. ({rejection})")
-            } else if code == -32602 && ADVICE.contains(&message.as_str()) {
-                format!("{message} ({rejection})")
+            } else if code == -32602
+                && ADVICE.contains(&message.as_str())
+                && (message != STALE_TAB || helper_code.as_deref() == Some("UNSUPPORTED_TARGET"))
+            {
+                let advice = if message == TIMEOUT_HELPER {
+                    message.replace("in this session.", "in this browser session.")
+                } else {
+                    message
+                };
+                format!("{advice} ({rejection})")
             } else {
                 format!("The browser controller refused this page operation (code {code}); check browser state before trying again.")
             }
@@ -85,11 +98,66 @@ fn primitive_failure(error: owner::RpcFailure, action: &str) -> String {
 mod primitive_failure_tests {
     use super::{owner::RpcFailure, primitive_failure};
 
+    /// PREDICT: a closed tab after reconnect is reported by the helper as `UNSUPPORTED_TARGET`,
+    /// but capture loses the useful `tabs.list` continuation while `page.read` preserves it.
+    #[test]
+    fn stale_capture_tab_gives_the_vetted_tab_list_continuation() {
+        const MESSAGE: &str =
+            "Not run: no tab with this ID is available. Use a tabId from tabs.list";
+        for action in ["capture.page", "capture.media"] {
+            let text = primitive_failure(
+                RpcFailure::Rejected {
+                    code: -32602,
+                    helper_code: Some("UNSUPPORTED_TARGET".into()),
+                    message: MESSAGE.into(),
+                },
+                action,
+            );
+            assert!(text.contains(MESSAGE), "{action}: {text}");
+            assert!(text.contains("UNSUPPORTED_TARGET"), "{action}: {text}");
+        }
+        for (code, message) in [
+            ("OTHER", MESSAGE),
+            (
+                "UNSUPPORTED_TARGET",
+                "Not run: no tab with this ID is available. SECRET_SENTINEL",
+            ),
+        ] {
+            let text = primitive_failure(
+                RpcFailure::Rejected {
+                    code: -32602,
+                    helper_code: Some(code.into()),
+                    message: message.into(),
+                },
+                "capture.page",
+            );
+            assert!(!text.contains("tabs.list"), "{text}");
+            assert!(!text.contains("SECRET_SENTINEL"), "{text}");
+        }
+    }
+
     #[test]
     fn transport_loss_does_not_claim_a_refusal_or_a_safe_retry() {
         let text = primitive_failure(RpcFailure::Unavailable, "capture.page");
         assert!(text.contains("outcome is unknown"), "{text}");
         assert!(!text.contains("refused"), "{text}");
+    }
+
+    #[test]
+    fn known_helper_timeout_keeps_matching_original_advice_and_names_browser_session() {
+        let text = primitive_failure(
+            RpcFailure::Rejected {
+                code: -32602,
+                helper_code: Some("CONTROL_SUSPENDED".into()),
+                message: "The browser has not yet confirmed that the timed-out action stopped; the page may still be busy. Wait a few seconds, then try again in this browser session.".into(),
+            },
+            "page.read",
+        );
+        assert!(
+            text.contains("try again in this browser session."),
+            "{text}"
+        );
+        assert!(text.contains("CONTROL_SUSPENDED"), "{text}");
     }
 
     #[test]
@@ -132,6 +200,14 @@ pub(super) async fn dispatch(
 ) -> Result<Value, String> {
     checked(shared, chat, request, consent)?;
     let tab = request["args"]["tabId"].as_u64().filter(|id| i32::try_from(*id).is_ok()).ok_or("Not run: this action needs an exact tabId from this chat's tabs.list; select its page first.")?;
+    let helper_session = request["sessionId"]
+        .as_str()
+        .ok_or("A browser session is required")?;
+    let operation = shared
+        .chrome_control
+        .external_video
+        .operation(helper_session);
+    let _operation_guard = operation.lock().await;
     let status = shared
         .chrome_control
         .owner
@@ -235,6 +311,14 @@ pub(super) async fn send(
     {
         checked(shared, chat, request, consent)?;
         // Extensions that report page.video.v1 record the chat's own tab themselves; the helper admits the action.
+        let status = shared
+            .chrome_control
+            .owner
+            .call("chrome_status", json!({}))
+            .await;
+        if super::external_video::supports(status.value(), request) {
+            return super::external_video::send(shared, chat, request, consent).await;
+        }
         if records_video(shared, request).await {
             return super::escalation::send(
                 shared,

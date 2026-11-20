@@ -129,8 +129,9 @@ pub struct CoreConfig {
     /// GitHub's REST API base for the PR card without gh. Default `https://api.github.com`; tests
     /// point it at a local fake.
     pub github_api_base: String,
-    /// The model that drafts commit messages. Default [`crate::git_cmd::DEFAULT_COMMIT_MODEL`].
-    pub commit_model: String,
+    /// The model that drafts commit messages. `None` (the default): the chat's active model, as Vibe reports it
+    /// from Mistral's model list (`utility_models`), so no model name of Vibe Work's own can go stale.
+    pub commit_model: Option<String>,
     /// The shortest time between two forge reads of one PR card. `None` (the default): 30 s with gh,
     /// 120 s with GitHub's public API. Tests set it to zero.
     pub pr_card_floor: Option<Duration>,
@@ -204,7 +205,7 @@ impl Default for CoreConfig {
             app_version: None,
             gh_program: None,
             github_api_base: "https://api.github.com".to_owned(),
-            commit_model: crate::git_cmd::DEFAULT_COMMIT_MODEL.to_owned(),
+            commit_model: None,
             pr_card_floor: None,
             network_file: None,
             network_settings_rejected: false,

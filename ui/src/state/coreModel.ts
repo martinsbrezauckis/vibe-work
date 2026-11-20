@@ -367,7 +367,8 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     // The connectors store follows sign-ins (`state/connectorSignIn.ts`); the marketplace store
     // follows `marketInstall` (`state/market.ts`). The project groups store follows
     // `projectsChanged` (`state/projectGroups.ts`); Settings › Project secrets follows
-    // `secretsChanged` itself. The Vibe install has its own store (`state/vibeInstall.ts`).
+    // `secretsChanged` itself, Settings › Knowledge base follows `knowledgeChanged`
+    // (`state/useKnowledge.ts`). The Vibe install has its own store (`state/vibeInstall.ts`).
     case "rateLimits":
       return { ...state, rateLimits: event.limits };
     case "gitIdentityAsked":
@@ -398,6 +399,7 @@ export function applyEvent(state: CoreState, event: CoreEvent): CoreState {
     case "keepAwake":
     case "secretScan":
     case "secretsChanged":
+    case "knowledgeChanged":
     case "guardRefused":
     case "readAloud":
     case "panelRead":

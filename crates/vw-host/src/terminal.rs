@@ -18,7 +18,7 @@ use crate::host::Host;
 /// The `ui/*` routes this block registers: `(name, description)`.
 pub(crate) const TERMINAL_ROUTES: &[(&str, &str)] = &[(
     "terminal",
-    "The Terminal tab of the shown session. Body: {action: state|selection|selectAll|focus|open|select, terminalId?}: state = its terminal tabs, the active one, whether a terminal has keyboard focus, font size and renderer; selection = the selected text of the active terminal (read only, for \"Point Vibe at this\"); selectAll selects the whole buffer; focus focuses the active terminal; open opens a new terminal tab (same as the + button); select makes terminalId the active tab.",
+    "The Terminal tab of the shown chat. Body: {action: state|selection|selectAll|focus|open|select, terminalId?}: state = its terminal tabs, the active one, whether a terminal has keyboard focus, font size and renderer; selection = the selected text of the active terminal (read only, for \"Point Vibe at this\"); selectAll selects the whole buffer; focus focuses the active terminal; open opens a new terminal tab (same as the + button); select makes terminalId the active tab.",
 )];
 
 /// What the window learns when it attaches to a terminal.

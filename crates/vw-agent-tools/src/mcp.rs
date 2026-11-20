@@ -96,6 +96,8 @@ fn tool_result(outcome: Result<Value, String>) -> Value {
                 || reason.starts_with("Stopped or failed after native mouse input was sent.")
                 || reason.starts_with("Stopped or failed after native input was sent.")
                 || reason.starts_with("The browser act ended but its receipt could not be saved:")
+                // A page script that ran and whose result the browser withheld: it did run.
+                || reason.starts_with("Result withheld:")
             {
                 reason
             } else {
@@ -269,4 +271,17 @@ pub fn serve_with_package(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_withheld_script_result_is_not_reported_as_not_run() {
+        let text =
+            "Result withheld: this page script reached a card number, PIN or password field.";
+        let answer = super::tool_result(Err(text.to_owned()));
+        assert_eq!(answer["content"][0]["text"], text);
+        let other = super::tool_result(Err("port busy".to_owned()));
+        assert_eq!(other["content"][0]["text"], "Not run: port busy");
+    }
 }

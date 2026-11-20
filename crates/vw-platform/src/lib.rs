@@ -41,6 +41,8 @@ pub mod content_rules;
 #[allow(unsafe_code)]
 pub mod dock_icon;
 pub mod edge_policy;
+#[allow(unsafe_code)]
+pub mod end_process;
 mod event_target;
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
@@ -61,6 +63,7 @@ mod key_positions;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub mod kill_job;
+pub mod link_entry;
 #[cfg(feature = "webview")]
 pub mod live_profile;
 #[cfg(feature = "webview")]
@@ -86,7 +89,9 @@ pub mod send_to;
 #[cfg(feature = "startup-dialog")]
 pub mod startup_error;
 mod system_version;
+mod title_bar;
 pub mod tray;
+pub mod wall_clock;
 #[cfg(feature = "webview")]
 pub mod webview;
 #[cfg(windows)]
@@ -122,6 +127,7 @@ pub use process::{
 pub use remove_tree::remove_owned_tree;
 pub use reveal::{Opener, RevealError, reveal_folder, reveal_target, windows_local_drive_path};
 pub use system_version::{glibc_version, system_version};
+pub use title_bar::set_title_bar_dark;
 pub use window_keys::ignore_bare_alt;
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics

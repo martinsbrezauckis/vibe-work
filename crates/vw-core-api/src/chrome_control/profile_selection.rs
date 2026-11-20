@@ -30,7 +30,7 @@ pub struct ChatBrowserProfile {
     pub profile_id: Option<String>,
     /// Readable browser and person-owned profile name.
     pub name: String,
-    /// Selected, stopping, unconfirmed, or removed (the browser deleted this profile).
+    /// Unopened suggestion, selected session, stopping, unconfirmed, or removed.
     pub state: String,
     /// Requested identity, present only during a handover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,6 +49,8 @@ pub(super) fn view(chrome: &super::ChromeControl) -> Option<Vec<ChatBrowserProfi
                 Some(change) => change.state.clone(),
                 // The browser deleted this profile; the chat names it and asks for another or a reconnect.
                 None if profiles::deleted(chrome, &profile_id) => "removed".into(),
+                None if profile_bindings::uncertain(chrome, &session_id) => "unconfirmed".into(),
+                None if !profile_bindings::locked(chrome, &session_id) => "unopened".into(),
                 None => "selected".into(),
             };
             ChatBrowserProfile {
@@ -67,6 +69,17 @@ pub(super) fn view(chrome: &super::ChromeControl) -> Option<Vec<ChatBrowserProfi
                 profile_id: None,
                 name: "Choose profile".into(),
                 state: "choiceRequired".into(),
+                requested_profile_id: None,
+            });
+        }
+    }
+    for chat in profile_bindings::uncertain_chats(chrome) {
+        if !rows.iter().any(|row| row.session_id == chat) {
+            rows.push(ChatBrowserProfile {
+                session_id: chat,
+                profile_id: None,
+                name: vw_vocabulary::texts::BROWSER_PROFILE_UNCONFIRMED_NAME.into(),
+                state: "unconfirmed".into(),
                 requested_profile_id: None,
             });
         }
@@ -166,6 +179,10 @@ async fn select_with(
     }
     eligible(shared, &profile, offline)?;
     profile_bindings::complete_change(chrome, chat, &profile)?;
+    chrome
+        .picked_profiles
+        .lock_or_recover()
+        .insert(chat.into(), profile.clone());
     super::owner::publish(shared);
     Ok(!change.releases.is_empty())
 }

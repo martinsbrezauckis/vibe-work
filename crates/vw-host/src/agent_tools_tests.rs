@@ -152,3 +152,119 @@ fn with_block_keeps_a_person_notification_hook() {
     let removed = super::with_block(&first, None);
     assert_eq!(removed.trim_end(), own.trim_end());
 }
+
+// PREDICT (refusal block): when vw-agent-tools.exe cannot start, the strict guard and the shell wrapper (both that
+// program) fail before any code runs, so every tool result said only "exited with code 3221225781" and the agent named
+// the wrong cause. The refusal block's command must print a deny with the plain reason in sh, Git Bash and PowerShell.
+
+/// The one hook of a refusal block, parsed as Vibe reads `hooks.toml`.
+fn refusal_hook(block: &str) -> toml::Table {
+    let table: toml::Table = toml::from_str(block).unwrap();
+    let hooks = table["hooks"].as_array().unwrap();
+    assert_eq!(hooks.len(), 1, "{block}");
+    hooks[0].as_table().unwrap().clone()
+}
+
+/// The shells a Windows hook line runs in (Git Bash, PowerShell) or a Unix one (sh), as available here.
+fn hook_shells() -> Vec<(std::ffi::OsString, Vec<&'static str>)> {
+    let mut shells: Vec<(std::ffi::OsString, Vec<&'static str>)> = Vec::new();
+    if cfg!(windows) {
+        shells.push((
+            "powershell".into(),
+            vec!["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"],
+        ));
+        let git_bash = Path::new(r"C:\Program Files\Git\bin\bash.exe");
+        if git_bash.is_file() {
+            shells.push((git_bash.into(), vec!["-c"]));
+        }
+    } else {
+        shells.push(("/bin/sh".into(), vec!["-c"]));
+        shells.push(("/bin/bash".into(), vec!["-c"]));
+    }
+    if let Some(pwsh) = std::env::var_os("VW_TEST_POWERSHELL") {
+        shells.push((
+            pwsh,
+            vec!["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"],
+        ));
+    }
+    shells
+}
+
+#[test]
+fn a_tools_program_that_cannot_start_refuses_every_tool_with_the_plain_reason() {
+    let problem = "Windows could not load it: error 0xC0000135, a DLL it needs is missing";
+    let reason = super::unavailable_reason(problem);
+    assert_eq!(
+        reason,
+        "Not run: the Vibe Work tool program vw-agent-tools.exe cannot start on this computer (Windows could not load \
+         it: error 0xC0000135, a DLL it needs is missing), so no command, file, process or browser tool can run in \
+         this chat. Vibe Work is not installed completely; running the Vibe Work installer again repairs it, and a new \
+         chat then has its tools."
+            .replace(".exe", if cfg!(windows) { ".exe" } else { "" })
+    );
+    let hook = refusal_hook(&super::refusal_block(&reason));
+    assert_eq!(hook["type"].as_str(), Some("pre_tool"));
+    assert_eq!(hook["match"].as_str(), Some("*"));
+    assert_eq!(hook["strict"].as_bool(), Some(true));
+    // Interrupted sessions bound to the combined guard's name still resolve to this refusal.
+    assert_eq!(
+        hook["name"].as_str(),
+        Some(vw_agent_tools::hook::Guard::Safety.hook_name())
+    );
+    let command = hook["command"].as_str().unwrap();
+    // The agent sees exactly the reason, with the one character no shell line may hold replaced.
+    let expected = reason.replace('\'', "?");
+    for (shell, args) in hook_shells() {
+        let output = std::process::Command::new(&shell)
+            .args(&args)
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{shell:?}: {output:?}");
+        let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(answer["decision"], "deny", "{shell:?}");
+        assert_eq!(answer["reason"], expected.as_str(), "{shell:?}");
+    }
+}
+
+#[test]
+fn a_refusal_reason_with_shell_characters_stays_one_plain_line() {
+    let reason =
+        "it could not be started (Zugriff verweigert: C:\\a b\\$x `y` 'z' ‘q’ \"w\"; & | > <)";
+    let hook = refusal_hook(&super::refusal_block(reason));
+    let command = hook["command"].as_str().unwrap();
+    for (shell, args) in hook_shells() {
+        let output = std::process::Command::new(&shell)
+            .args(&args)
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            answer["reason"],
+            "it could not be started (Zugriff verweigert: C:/a b/$x `y` ?z? ?q? \"w\"; & | > <)",
+            "{shell:?}"
+        );
+    }
+}
+
+#[test]
+fn the_next_start_replaces_a_refusal_with_the_normal_guards() {
+    let refused = super::with_block(
+        "[[hooks]]\nname = \"mine\"\n",
+        Some(&super::refusal_block("x")),
+    );
+    let normal = super::hook_block(
+        Path::new("/opt/vw-agent-tools"),
+        Path::new("/data/hook.json"),
+    );
+    let replaced = super::with_block(&refused, Some(&normal));
+    assert!(
+        replaced.starts_with("[[hooks]]\nname = \"mine\"\n"),
+        "{replaced}"
+    );
+    assert!(!replaced.contains("decision"), "{replaced}");
+    assert!(replaced.contains("kill-guard"), "{replaced}");
+}

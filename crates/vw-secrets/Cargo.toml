@@ -12,6 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 # Substring search (already in the lockfile through regex/aho-corasick users).
 memchr = { workspace = true }
 # The base64 forms a value can take inside an encoded answer (same major version as the workspace).

@@ -13,8 +13,8 @@ from vibe.core.platform_auth import ApiKeyPlatformCredentialProvider
 
 
 async def main():
-    assert version("mistral-vibe") == "3.1.2", "probe the reviewed runtime"
-    base, token, mode = sys.argv[1:]
+    base, token, mode, expected = sys.argv[1:]
+    assert version("mistral-vibe") == expected, "probe the reviewed runtime"
     parsed = urlsplit(base)
     assert parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
     assert parsed.path == "/v1"

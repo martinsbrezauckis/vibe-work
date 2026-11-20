@@ -7,11 +7,13 @@ import { Badge, Button, LinkButton } from "../../components/Controls";
 import { Modal } from "../../components/Modal";
 import type { MistralKeyView } from "../../protocol/core";
 import { savedTestText } from "../../state/mistralKeys";
+import { ForgotPassword } from "../setup/ForgotPassword";
 import { KeyStep } from "../setup/KeyStep";
 import { PasswordAsk } from "../setup/PasswordAsk";
 import { Problem } from "../setup/fields";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 /** The Account list, immediately above Mistral's website links. */
 export function MistralKeys() {
@@ -36,11 +38,15 @@ export function MistralKeys() {
   if (keys === null || availability !== "ready" || status === null) return null;
   const unlocked = status.vaultState === "unlocked";
   const rowFocus = (id: string | undefined) => {
-    requestAnimationFrame(() => {
-      const row = Array.from(
-        root.current?.querySelectorAll<HTMLElement>("[data-mistral-key]") ?? [],
-      ).find((el) => el.dataset["mistralKey"] === id);
-      (row ?? add.current)?.focus();
+    focusWhenMounted({
+      // No row to wait for: the add button at once.
+      find: () =>
+        id === undefined
+          ? false
+          : Array.from(
+              root.current?.querySelectorAll<HTMLElement>("[data-mistral-key]") ?? [],
+            ).find((el) => el.dataset["mistralKey"] === id),
+      fallback: () => add.current?.focus(),
     });
   };
   const cancelAdd = () => {
@@ -60,6 +66,7 @@ export function MistralKeys() {
               void keys.unlock(password);
             }}
           />
+          <ForgotPassword />
         </>
       ) : (
         <>
@@ -165,7 +172,7 @@ export function MistralKeys() {
                   </LinkButton>
                   {!item.inUse && (
                     <Button
-                      appearance="text-link"
+                      appearance="link"
                       variant="danger"
                       data-testid="settings.mistral-keys-remove"
                       disabled={busy}

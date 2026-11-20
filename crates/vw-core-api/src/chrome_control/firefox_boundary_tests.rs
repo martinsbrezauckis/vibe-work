@@ -179,7 +179,7 @@ async fn a_stopped_firefox_session_refusal_names_firefox_on_every_route() {
     .unwrap_err();
     assert_eq!(
         error,
-        "Not run: this Firefox session was stopped; open a new one with chrome_session."
+        "Not run: this Firefox browser session was stopped; open a new one with chrome_session."
     );
     core.shutdown().await;
 }

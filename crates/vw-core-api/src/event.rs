@@ -354,6 +354,9 @@ pub enum CoreEvent {
     ProjectsChanged {},
     /// Project secrets, their grants or the use log changed: re-read with `secrets list`. Never a value.
     SecretsChanged {},
+    /// The knowledge base changed (a place added, renamed, re-noted or removed, from any window, the agent or the
+    /// Debug API): re-read with `knowledge list`.
+    KnowledgeChanged {},
     /// A session's File tab viewer changed (an HTML page or PDF loaded, a link was refused): re-read
     /// with `files viewer`. `None`: several changed.
     FilesChanged {
@@ -435,6 +438,9 @@ pub enum AlertKind {
     ToolsUnavailable,
     /// The person's native browser approval could not be saved by the helper.
     BrowserPairingFailed,
+    /// A local-network request was refused without an answer: its native question timed out, or its origin was
+    /// ambiguous among open pages. The site remains visible in Settings > Browser.
+    LocalNetworkUnanswered,
 }
 
 /// Serializable mirror of `vw_session::Change` (minus `Replaced`, which subscribers receive as a
@@ -696,6 +702,7 @@ impl CoreEvent {
             | Self::RateLimits { .. }
             | Self::ProjectsChanged {}
             | Self::SecretsChanged {}
+            | Self::KnowledgeChanged {}
             | Self::DocumentsAdded { .. }
             | Self::DocumentChanged { .. }
             | Self::Dictation { .. }

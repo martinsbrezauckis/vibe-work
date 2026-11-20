@@ -208,6 +208,7 @@ pub(crate) async fn restore(
     last: Value,
     recorded: Option<Choice>,
 ) -> Value {
+    super::retired::migrate(&shared.model_choices.records, id, &last);
     let record = shared.model_choices.records.get(id);
     let replacement = record.fallback;
     let is_replacement = replacement.is_some();
@@ -224,7 +225,26 @@ pub(crate) async fn restore(
         }
         return fallback(shared, id, &choice, last).await;
     }
-    let recorded = recorded.map(|choice| {
+    // Vibe's own pin of the retired Large 4 alias names the catalog Large 4: put it back silently (this also ends
+    // Vibe's missing-model warning, which lasts until the chat's pin changes), even when the default runs Large 4.
+    // Vibe's pin names only the alias; the chat's saved choice of that alias says which model it is, so a project's
+    // own `large-4` model is never taken for the retired app seed.
+    let recorded = recorded.map(|mut pin| {
+        if pin.name.is_empty()
+            && let Some(saved) = record
+                .remembered
+                .as_ref()
+                .filter(|saved| saved.alias == pin.alias)
+        {
+            pin.name.clone_from(&saved.name);
+        }
+        pin
+    });
+    let retired = recorded
+        .as_ref()
+        .and_then(|choice| super::retired::resolve(&last, choice));
+    let resolved = retired.is_some();
+    let recorded = retired.or(recorded).map(|choice| {
         record
             .remembered
             .filter(|saved| saved.alias == choice.alias)
@@ -233,6 +253,12 @@ pub(crate) async fn restore(
                 saved
             })
     });
+    if resolved && let Some(choice) = recorded.as_ref().filter(|choice| offered(&last, choice)) {
+        return match apply(shared, id, choice).await {
+            Ok(runtime) => runtime,
+            Err(_) => fallback(shared, id, choice, last).await,
+        };
+    }
     if let Some(choice) =
         recorded.filter(|choice| differs(&last, choice) && !unset_off(&last, choice))
     {

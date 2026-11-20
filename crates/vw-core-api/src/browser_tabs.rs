@@ -31,7 +31,7 @@ pub(crate) fn web_page(service: &PreviewService, owner: &str, key: &str) -> Resu
     {
         Ok(())
     } else {
-        Err(denied("web tab does not belong to this session"))
+        Err(denied("web tab does not belong to this chat"))
     }
 }
 

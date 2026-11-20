@@ -1,33 +1,21 @@
 /**
- * Voice chat: one session at a time talks with Vibe by
- * voice. The loop: listen (microphone → the core's speech stream, the same Voxtral path as dictation) → the user's turn
- * ends (the button, or a pause: `features/voice/turnEnd`) → the words go out as a voice turn (the composer's
- * `sendSpoken`: the voice instruction rides in Vibe's context channel, never in the message) → thinking (an approval or
- * a question is spoken as a short prompt and waits for the card). Complete reply sentences stream through core
- * `speak` with the Settings voice while the model continues; the next sentence synthesizes during playback.
- * After the turn and its audio finish, listen again. Adapted from ShellX's voice chat, the state machine keeps one owner and
- * one active audio stream, resumes listening after speech, and keeps the mode on after recoverable errors.
- * Depends on: coreStore, composer (`sendSpoken`), voiceSettings, toastStore, voiceChatTurns, the voice features
- * (capture, player, turn end, words). Called by: state/voice (`createVoice`), the Voice chat button, the strip, the
- * session row tag, the `ui/voice` route.
- * Invariants:
- * - At most one owner session; turning it on elsewhere moves it (a toast says so). In memory only: a restart never
- *   reopens the microphone.
- * - The microphone is open only while listening (never while speaking: the reply cannot hear itself).
- * - Errors keep the mode on with the reason; only a lost or refused microphone, the owner session closing,
- *   or the user turning it off ends the mode. A turn that finishes after voice chat is off is never spoken.
- * - Every async step re-checks `gen` (bumped by on/off/move) so a late answer never acts on a newer state.
- * - Model output is untrusted: it is only turned into words (`spokenReply`) and spoken, never run.
+ * Voice chat owns one microphone and speech stream, sends spoken turns, reads replies and cards, then listens again.
+ * A pause carries later words through thinking until playback starts; the microphone closes before playback.
+ * The strip says Listening after sound reaches the speech stream. Async work checks `gen` before changing state.
+ * Depends on voice capture, speech, composer, core store and voice settings. Called by state/voice.
  */
 import { quietPlayback } from "../features/voice/playbackGate";
 import { createVoicePrompt } from "./voicePrompt";
+import { createVoiceQuestion } from "./voiceQuestion";
+import { CARRY_OVERFLOW, createCarry } from "./voiceCarry";
+import { createSoundWait } from "./voiceSoundWait";
 import type { CoreEvent, SpeechRequest, SpeechResult } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import { micErrorText } from "../features/voice/pcmCapture";
 import { type TurnEnd, createTurnEnd, pcmRms } from "../features/voice/turnEnd";
 import { FAILED_SAID } from "../features/voice/voiceChatText";
 import { type VoiceLatency, voiceLatency } from "../features/voice/voiceLatency";
-import { type VoiceReplyBudget, createVoiceReplyStream } from "../features/voice/voiceReplyStream";
+import { createTurnReplies } from "../features/voice/voiceReplyStream";
 import { createStore } from "./createStore";
 import { toBase64 } from "./dictation";
 import { NEW_CHAT } from "./newChatKey";
@@ -41,13 +29,15 @@ import {
   turnAnswers,
   voiceTurnId,
 } from "./voiceChatTurns";
-
 import {
   VOICE_CHAT_OFF,
   type VoiceChatState,
   type VoiceChatDeps,
   type VoiceChatUtterance as Say,
   type TurnEndedBy,
+  EXPECT_MS,
+  LISTEN_SETTLE_MS,
+  SENTENCE_GAP_MS,
 } from "./voiceChatState";
 export {
   VOICE_CHAT_OFF,
@@ -55,21 +45,9 @@ export {
   type VoiceChatPhase,
   type TurnEndedBy,
   type SpokenKind,
+  SENTENCE_GAP_MS,
 } from "./voiceChatState";
-
-/** How long after a send voice chat waits for the turn to show before it listens again. */
-const EXPECT_MS = 15_000;
-/** How long the session must look idle before the microphone opens again. */
-const LISTEN_SETTLE_MS = 300;
-
-function decode(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-/** Creates the voice chat controller. */
+/** Creates the one-owner voice chat controller. */
 export function createVoiceChat(deps: VoiceChatDeps) {
   const { core, composer, settings, toasts, player } = deps;
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
@@ -80,24 +58,26 @@ export function createVoiceChat(deps: VoiceChatDeps) {
   let streamId: string | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   let detector: TurnEnd | null = null;
-  /** Audio received in the current listening stretch (ms): the turn-end rule's clock. */
+  const carry = createCarry();
+  let carrying = false;
+  let readingPaused = false;
   let heardMs = 0;
   let known = new Set<string>();
   let prompted = new Set<string>();
   let expecting: number | null = null;
   let expectTimer: ReturnType<typeof setTimeout> | null = null;
   let listenTimer: ReturnType<typeof setTimeout> | null = null;
-
+  const soundWait = createSoundWait();
   let queue: Say[] = [];
   let currentSpeech: Say | null = null;
-  const streams = new Map<string, ReturnType<typeof createVoiceReplyStream>>();
-  const speechBudgets = new Map<string, VoiceReplyBudget>();
+  const replies = createTurnReplies();
   const mutedTurns = new Set<string>();
   let skipSpeech = 0;
   let lastLoudAt: number | null = null;
   let promptListening = false;
+  let questionListening = false;
   let restoreOutput: (() => void) | null = null;
-
+  let lastSentence: { turnId: string | undefined; at: number } | null = null;
   const entryOf = (id: string | null) => (id === null ? undefined : core.store.get().sessions[id]);
   const speech = async (request: SpeechRequest): Promise<SpeechResult> => {
     const r = await core.run({ type: "speech", request });
@@ -107,36 +87,60 @@ export function createVoiceChat(deps: VoiceChatDeps) {
   const patch = (p: Partial<VoiceChatState>) => {
     store.set((s) => ({ ...s, ...p }));
   };
+  const interrupted = (message?: string): void => {
+    gen++;
+    question.cancel();
+    const waiting = queue;
+    halt();
+    queue = waiting.filter(
+      (item) =>
+        item.callbackId === undefined ||
+        core.store.get().asks[`callback:${item.callbackId}`] !== undefined,
+    );
+    if (message !== undefined) queue.push({ text: message, kind: "prompt" });
+    patch({ phase: "waiting", partial: "", micPending: false, note: message ?? null });
+    settle();
+  };
+  const owner = () => (store.get().on ? store.get().owner : null);
   const prompt = createVoicePrompt({
     core,
     accessibility: deps.accessibility,
     speech,
-    owner: () => (store.get().on ? store.get().owner : null),
+    owner,
     blocked: () => deps.promptBlocked?.() === true || deps.canUseKey?.() === false,
     language: () => settings.store.get().language,
-    interrupted: () => {
-      gen++;
-      const waiting = queue;
-      halt();
-      queue = waiting.filter(
-        (item) =>
-          item.callbackId === undefined ||
-          core.store.get().asks[`callback:${item.callbackId}`] !== undefined,
-      );
-      patch({ phase: "waiting", partial: "", micPending: false });
-      settle();
-    },
+    interrupted,
+  });
+  const question = createVoiceQuestion({
+    core,
+    speech,
+    owner,
+    enabled: () =>
+      deps.accessibility?.store.get().readPrompts !== "never" && deps.canUseKey?.() !== false,
+    answer:
+      deps.answer ??
+      ((sessionId, callbackId, output) =>
+        core.run({ type: "answerCallback", sessionId, callbackId, output }).then(
+          () => true,
+          () => false,
+        )),
+    interrupted,
   });
   const stamp = (stage: keyof VoiceLatency): void => {
     const t = store.get().latency;
     if (t !== null && t[stage] === null) patch({ latency: { ...t, [stage]: now() } });
   };
-
-  /** Stops whatever runs (microphone, stream, speech) without changing the mode. */
-  const halt = (): void => {
-    promptListening = false;
+  const closeCapture = (): void => {
     capture?.stop();
     capture = null;
+  };
+  const halt = (): void => {
+    promptListening = false;
+    questionListening = false;
+    carry.take();
+    carrying = false;
+    readingPaused = false;
+    closeCapture();
     restoreOutput?.();
     restoreOutput = null;
     const id = streamId;
@@ -146,8 +150,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     if (busy === "speak") player.stop();
     queue = [];
     currentSpeech = null;
-    streams.clear();
-    speechBudgets.clear();
+    replies.clear();
     mutedTurns.clear();
     skipSpeech += 1;
     busy = null;
@@ -156,14 +159,33 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     expectTimer = null;
     if (listenTimer !== null) clearTimeout(listenTimer);
     listenTimer = null;
+    soundWait.clear();
   };
-
-  /** At most one sentence ahead: synthesize it while the current sentence plays. */
+  const silence = (): void => {
+    prompt.cancel();
+    question.cancel();
+    queue = [];
+    skipSpeech += 1;
+    player.stop();
+  };
+  /**
+   * A card answered or closed while its prompt is read or waits to be read: that prompt is not read any further
+   * (the person already chose; reading the options on would talk over what comes next).
+   */
+  const dropClosedPrompts = (entry: ReturnType<typeof entryOf>): void => {
+    const reading = busy === "speak" ? currentSpeech?.callbackId : undefined;
+    if (reading === undefined && !queue.some((item) => item.callbackId !== undefined)) return;
+    const open = new Set(openPrompts(entry).map((p) => p.callbackId));
+    queue = queue.filter((item) => item.callbackId === undefined || open.has(item.callbackId));
+    if (reading !== undefined && !open.has(reading)) {
+      skipSpeech += 1;
+      player.stop();
+    }
+  };
   const prepareSpeech = (item: Say): Promise<SpeechResult> => {
     if (item.ready !== undefined) return item.ready;
     if (item.kind === "answer") stamp("firstTtsRequest");
-    item.ready = speech({ op: "speak", text: item.text, voice: settings.store.get().voice });
-    // A prefetched request can fail before the player awaits it. The player still reports its error.
+    item.ready = prompt.speak(item.callbackId, item.text, settings.store.get().voice);
     void item.ready.catch(() => undefined);
     return item.ready;
   };
@@ -171,12 +193,11 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     if (busy === "speak" && currentSpeech !== null && queue[0]?.kind === "answer")
       void prepareSpeech(queue[0]);
   };
-
-  /** Turns voice chat off (`reason`: shown on the strip and the button). */
   const turnOff = (reason: string | null = null): void => {
     if (!store.get().on) return;
     gen += 1;
     prompt.end();
+    question.cancel();
     halt();
     store.set((s) => ({
       ...VOICE_CHAT_OFF,
@@ -186,47 +207,64 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       latency: s.latency,
       note: reason,
     }));
-    // The reason is visible even though the composer's strip goes away with the mode.
     if (reason !== null) toasts.push({ kind: "warn", bellKind: "failure", text: reason });
+  };
+  const keyLost = (): boolean => {
+    if (deps.canUseKey?.() !== false) return false;
+    turnOff();
+    return true;
   };
 
   const speakAll = async (): Promise<void> => {
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     const mine = gen;
     busy = "speak";
     while (queue.length > 0 && mine === gen) {
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
+      if (keyLost()) return;
       const item = queue.shift();
       if (item === undefined) break;
       currentSpeech = item;
       const ticket = skipSpeech;
-      patch({ phase: "speaking" });
+      patch({
+        phase: "speaking",
+        ...(item.kind === "answer" && store.get().note !== CARRY_OVERFLOW ? { note: null } : {}),
+      });
       try {
-        if (item.callbackId !== undefined && !item.repeat)
-          item.text = await prompt.prepare(item.callbackId, item.text);
+        if (item.callbackId !== undefined && !item.repeat) {
+          const asked = question.prepare(item.callbackId, item.text);
+          item.text =
+            asked !== item.text ? asked : await prompt.prepare(item.callbackId, item.text);
+        }
         if (mine !== gen || ticket !== skipSpeech) break;
         const r = await prepareSpeech(item);
-        if (deps.canUseKey?.() === false) {
-          turnOff();
-          return;
-        }
+        if (keyLost()) return;
         if (mine !== gen || ticket !== skipSpeech || r.kind !== "speech") break;
         prefetch();
-        const played = await player.play(decode(r.audio), () => {
-          if (mine === gen && ticket === skipSpeech && item.kind === "answer")
-            stamp("firstAudioPlayed");
-        });
-        if (deps.canUseKey?.() === false) {
-          turnOff();
-          return;
+        const wait =
+          item.kind === "answer" && lastSentence !== null && lastSentence.turnId === item.turnId
+            ? SENTENCE_GAP_MS - (now() - lastSentence.at)
+            : 0;
+        if (wait > 0) {
+          await new Promise((resolve) => setTimeout(resolve, wait));
+          if (mine !== gen || ticket !== skipSpeech) break;
         }
+        if (capture !== null) {
+          readingPaused = true;
+          if (carrying) carry.markCutoff(settings.store.get().voiceChatPauseMs);
+          carrying = false;
+          closeCapture();
+          patch({ carryOpen: false });
+        }
+        const played = await player.play(
+          Uint8Array.from(atob(r.audio), (c) => c.charCodeAt(0)),
+          () => {
+            if (mine === gen && ticket === skipSpeech && item.kind === "answer")
+              stamp("firstAudioPlayed");
+          },
+        );
+        if (keyLost()) return;
         if (mine !== gen) return;
+        lastSentence = item.kind === "answer" ? { turnId: item.turnId, at: now() } : null;
         if (ticket !== skipSpeech || played.stopped) break;
         store.set((s) => ({
           ...s,
@@ -240,23 +278,24 @@ export function createVoiceChat(deps: VoiceChatDeps) {
         }));
         if (item.callbackId !== undefined) {
           prompt.played(item.callbackId);
-          if (prompt.ready()) break;
+          question.played(item.callbackId);
+          if (prompt.ready() || question.ready()) break;
         }
       } catch (thrown) {
-        if (item.callbackId !== undefined) prompt.cancel();
-        if (deps.canUseKey?.() === false) {
-          turnOff();
-          return;
+        if (item.callbackId !== undefined) {
+          prompt.cancel();
+          question.cancel();
         }
+        if (keyLost()) return;
         if (mine !== gen) return;
         if (ticket !== skipSpeech) break;
-        // A failed reply keeps the mode on; the loop goes on listening.
         patch({
           error: `The answer could not be read aloud: ${toCallError(thrown).error.message}`,
         });
       }
     }
     if (mine !== gen) return;
+    question.unread((id) => queue.some((item) => item.callbackId === id));
     currentSpeech = null;
     busy = null;
     settle();
@@ -264,56 +303,62 @@ export function createVoiceChat(deps: VoiceChatDeps) {
 
   const fail = (message: string): void => {
     prompt.cancel();
-    capture?.stop();
-    capture = null;
+    question.cancel();
+    closeCapture();
+    carrying = false;
     restoreOutput?.();
     restoreOutput = null;
     streamId = null;
     detector = null;
     busy = null;
-    patch({ phase: "error", error: message, micPending: false, partial: "" });
+    patch({ phase: "error", error: message, micPending: false, partial: "", carryOpen: false });
   };
-
-  const append = (id: string, pcm: Uint8Array): void => {
+  const append = (id: string, pcm: Uint8Array, delivered?: () => void): void => {
     chain = chain.then(async () => {
       if (streamId !== id) return;
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
+      if (keyLost()) return;
       try {
         const r = await speech({ op: "append", streamId: id, pcm: toBase64(pcm) });
-        if (r.kind === "appended" && r.atLimit) void endTurn("limit");
-      } catch (thrown) {
-        if (deps.canUseKey?.() === false) {
-          turnOff();
-          return;
+        if (r.kind === "appended") {
+          delivered?.();
+          if (r.atLimit) void endTurn("limit");
         }
-        if (streamId === id) fail(toCallError(thrown).error.message);
+      } catch (thrown) {
+        if (keyLost()) return;
+        if (streamId === id && !prompt.endOnError(thrown, promptListening && !questionListening))
+          fail(toCallError(thrown).error.message);
       }
     });
   };
 
-  /** Opens the microphone and a speech stream for the owner. */
   const listen = async (): Promise<void> => {
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     const mine = gen;
-    promptListening = prompt.ready();
-    const restore = promptListening ? quietPlayback() : null;
+    const resumed = readingPaused;
+    readingPaused = false;
+    carrying = false;
+    closeCapture();
+    const permission = prompt.ready();
+    questionListening = !permission && question.ready();
+    promptListening = permission || questionListening;
+    // Only a permission answer mutes the app's sounds (a recording must not say "allow").
+    const restore = permission ? quietPlayback() : null;
     restoreOutput = restore;
     busy = "listen";
-    patch({ phase: "listening", partial: "", micPending: true, endedBy: null });
+    patch({
+      phase: "listening",
+      partial: "",
+      micPending: true,
+      awaitingSound: true,
+      endedBy: null,
+      carryOpen: false,
+      resumed,
+    });
     let prepared;
     try {
       prepared = await deps.prepare();
     } catch (thrown) {
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
+      if (keyLost()) return;
       if (mine === gen) turnOff(micErrorText(thrown));
       return;
     }
@@ -324,7 +369,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     }
     let started: SpeechResult;
     try {
-      started = promptListening
+      started = permission
         ? await prompt.start(prepared.sampleRate, settings.store.get().language)
         : await speech({
             op: "start",
@@ -333,11 +378,9 @@ export function createVoiceChat(deps: VoiceChatDeps) {
           });
     } catch (thrown) {
       prepared.discard();
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
-      if (mine === gen) fail(toCallError(thrown).error.message);
+      if (keyLost()) return;
+      if (mine === gen && !prompt.endOnError(thrown, permission))
+        fail(toCallError(thrown).error.message);
       return;
     }
     if (started.kind !== "started" || mine !== gen || deps.canUseKey?.() === false) {
@@ -352,21 +395,44 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     const id = started.streamId;
     const rate = prepared.sampleRate;
     streamId = id;
+    if (questionListening) question.listening();
     const s = settings.store.get();
     heardMs = 0;
     lastLoudAt = null;
     detector = createTurnEnd({ pauseMs: s.voiceChatPauseMs, words: started.mode === "realtime" });
+    const feed = (pcm: Uint8Array): void => {
+      append(
+        id,
+        pcm,
+        soundWait.heard(id, pcm)
+          ? () => {
+              if (busy === "listen" && streamId === id && store.get().awaitingSound) {
+                soundWait.clear();
+                patch({ awaitingSound: false });
+              }
+            }
+          : undefined,
+      );
+      heardMs += (pcm.length / 2 / rate) * 1000;
+      detector?.audio(pcmRms(pcm), (pcm.length / 2 / rate) * 1000, heardMs);
+      if (pcmRms(pcm) >= (detector?.view().threshold ?? 0.01)) lastLoudAt = now();
+      if (settings.store.get().voiceChatAutoEnd && detector?.ended(heardMs) === true)
+        void endTurn("pause");
+    };
+    // Carried words come first, in an ordinary stretch only: a card's answer never hears audio from before it.
+    const hadCarry = !promptListening && carry.hasSpeech();
+    if (hadCarry) detector.audio(0, 0, 0);
+    if (!promptListening) for (const pcm of carry.take()) feed(pcm);
     try {
       capture = await prepared.open({
         deviceId: s.micId,
         onChunk: (pcm) => {
-          append(id, pcm);
-          // The turn-end rule runs on audio time (ms of audio received), not the wall clock: chunks are audio.
-          heardMs += (pcm.length / 2 / rate) * 1000;
-          detector?.audio(pcmRms(pcm), (pcm.length / 2 / rate) * 1000, heardMs);
-          if (pcmRms(pcm) >= (detector?.view().threshold ?? 0.01)) lastLoudAt = now();
-          if (settings.store.get().voiceChatAutoEnd && detector?.ended(heardMs) === true)
-            void endTurn("pause");
+          if (carrying) {
+            if (carry.keep(pcm, pcmRms(pcm), rate)) {
+              patch({ note: CARRY_OVERFLOW });
+              toasts.push({ kind: "warn", bellKind: "failure", text: CARRY_OVERFLOW });
+            }
+          } else if (busy === "listen" && streamId === id) feed(pcm);
         },
         onEnded: () => {
           turnOff(
@@ -376,56 +442,64 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       });
     } catch (thrown) {
       void speech({ op: "cancel", streamId: id }).catch(() => undefined);
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
+      if (keyLost()) return;
       if (mine === gen) turnOff(micErrorText(thrown));
       return;
     }
     if (mine !== gen || streamId !== id || deps.canUseKey?.() === false) {
-      capture.stop();
-      capture = null;
+      closeCapture();
       restore?.();
       if (restoreOutput === restore) restoreOutput = null;
       if (deps.canUseKey?.() === false) turnOff();
       return;
     }
     patch({ micPending: false });
-  };
-
-  /** Ends the user's turn now: the words go out as a voice turn. */
-  const endTurn = async (by: TurnEndedBy): Promise<void> => {
-    if (deps.canUseKey?.() === false) {
-      turnOff();
+    if (hadCarry && s.voiceChatAutoEnd && detector.ended(heardMs)) {
+      void endTurn("pause");
       return;
     }
+    soundWait.arm(
+      id,
+      () => mine === gen && busy === "listen" && streamId === id && store.get().awaitingSound,
+      turnOff,
+    );
+  };
+  const endTurn = async (by: TurnEndedBy): Promise<void> => {
+    if (keyLost()) return;
     const id = streamId;
     if (busy !== "listen" || id === null || store.get().micPending) return;
     const mine = gen;
     busy = "send";
-    capture?.stop();
-    capture = null;
+    // A pause ended an ordinary turn: collect the person's next words until reply playback starts.
+    carrying = by === "pause" && !promptListening;
+    if (carrying) carry.arm(detector?.view().threshold ?? 0.01);
+    else closeCapture();
     restoreOutput?.();
     restoreOutput = null;
     detector = null;
-    patch({ phase: "sending", endedBy: by, latency: voiceLatency(lastLoudAt ?? now(), now()) });
+    patch({
+      phase: "sending",
+      endedBy: by,
+      carryOpen: carrying,
+      resumed: false,
+      latency: voiceLatency(lastLoudAt ?? now(), now()),
+    });
     await chain;
     if (mine !== gen || streamId !== id) return;
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     if (promptListening) {
-      const callbackId = prompt.store.get()?.callbackId;
-      const answered = await prompt.answer(id);
+      const callbackId = (questionListening ? question : prompt).store.get()?.callbackId;
+      const answered: { again: string | null; note: string; said?: string | null } =
+        questionListening ? await question.hear(id) : await prompt.answer(id);
       if (mine !== gen) return;
       promptListening = false;
+      questionListening = false;
       streamId = null;
       busy = null;
       patch({ partial: "", note: answered.note, phase: "waiting" });
       if (answered.again !== null && callbackId !== undefined)
         queue.unshift({ text: answered.again, kind: "prompt", callbackId, repeat: true });
+      if (typeof answered.said === "string") queue.unshift({ text: answered.said, kind: "prompt" });
       settle();
       return;
     }
@@ -434,35 +508,35 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       const r = await speech({ op: "stop", streamId: id });
       text = r.kind === "transcript" ? r.text.trim() : "";
     } catch (thrown) {
-      if (deps.canUseKey?.() === false) {
-        turnOff();
-        return;
-      }
+      if (keyLost()) return;
       if (mine === gen) fail(toCallError(thrown).error.message);
       return;
     }
     if (mine !== gen) return;
     streamId = null;
     stamp("transcriptionDone");
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     if (text === "") {
+      carrying = false;
+      closeCapture();
       busy = null;
-      patch({ note: "Nothing was heard.", partial: "" });
+      patch({ note: "Nothing was heard.", partial: "", carryOpen: false });
       settle();
       return;
     }
-    patch({ heard: text, partial: "", note: null, error: null, phase: "thinking" });
+    patch({
+      heard: text,
+      partial: "",
+      note: store.get().note === CARRY_OVERFLOW ? CARRY_OVERFLOW : null,
+      error: null,
+      phase: "thinking",
+    });
     expect();
     stamp("turnSent");
     const sent = await composer.actions?.sendSpoken(store.get().owner ?? NEW_CHAT, text);
     if (mine !== gen) return;
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
+    if (!carrying) closeCapture();
     busy = null;
     if (sent === undefined || !sent.ok) {
       expecting = null;
@@ -476,8 +550,6 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     }
     settle();
   };
-
-  /** After a send: think until the turn shows (or `EXPECT_MS` passed). */
   const expect = (): void => {
     expecting = now();
     if (expectTimer !== null) clearTimeout(expectTimer);
@@ -487,31 +559,18 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     }, EXPECT_MS);
   };
 
-  /** The owner's entry last looked at (`observe` reads history only when it changed). */
   let observed: object | undefined;
-  /** A removal check is scheduled (`settle`). */
   let goneCheck = false;
   const streamAnswer = (entry: ReturnType<typeof entryOf>, turnId: string, done = false): void => {
     if (mutedTurns.has(turnId)) return;
     const answers = turnAnswers(entry, turnId);
     for (const [index, answer] of answers.entries()) {
-      const key = `${turnId}/${answer.id}`;
-      let take = streams.get(key);
-      if (take === undefined) {
-        let budget = speechBudgets.get(turnId);
-        if (budget === undefined) {
-          budget = { chars: 0, truncated: false };
-          speechBudgets.set(turnId, budget);
-        }
-        take = createVoiceReplyStream(budget);
-        streams.set(key, take);
-      }
-      const chunks = take(answer.text, done || answer.done || index < answers.length - 1);
-      for (const text of chunks) queue.push({ text, kind: "answer", turnId });
+      const last = done || answer.done || index < answers.length - 1;
+      for (const text of replies.take(turnId, answer.id, answer.text, last))
+        queue.push({ text, kind: "answer", turnId });
     }
     prefetch();
   };
-  /** Notices finished turns and open prompts of the owner, queuing what to say. */
   const observe = (
     entry: ReturnType<typeof entryOf>,
     prompts: ReturnType<typeof openPrompts>,
@@ -536,7 +595,6 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       if (/[.!?](?:["')\]]*)(?:\s|$)/.test(finalAnswer(entry, turn.id))) stamp("firstSentence");
       if (turn.how === "answer") streamAnswer(entry, turn.id, true);
       else {
-        // A stopped/failed turn must not drain its prefetched answer after completion.
         queue = queue.filter((item) => item.turnId !== turn.id);
         if (currentSpeech?.turnId === turn.id) {
           skipSpeech += 1;
@@ -545,8 +603,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
         mutedTurns.add(turn.id);
         if (turn.how === "failed") queue.push({ text: FAILED_SAID, kind: "failed" });
       }
-      for (const key of streams.keys()) if (key.startsWith(`${turn.id}/`)) streams.delete(key);
-      speechBudgets.delete(turn.id);
+      replies.forget(turn.id);
     }
     const newPrompts: Say[] = [];
     for (const prompt of prompts) {
@@ -559,12 +616,8 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     prefetch();
   };
 
-  /** Decides the next step when nothing is in flight. */
   function settle(ready = false): void {
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     const s = store.get();
     if (!s.on || s.owner === null) return;
     const entry = entryOf(s.owner);
@@ -592,28 +645,31 @@ export function createVoiceChat(deps: VoiceChatDeps) {
         return;
       }
     }
-    // A turn started while listening (typed with Enter, or a queued item): stop listening (the listen still opening
-    // gives up: `gen`), the reply comes.
     if (busy === "listen" && !promptListening && sessionBusy(entry)) {
       gen += 1;
       halt();
       patch({ phase: "thinking", partial: "", micPending: false });
     }
+    dropClosedPrompts(entry);
     const prompts =
       entry === undefined || entry === observed
         ? []
         : openPrompts(entry, Object.values(core.store.get().asks));
     observe(entry, prompts);
     if (busy !== null) return;
-    if (prompt.ready()) {
+    if (prompt.ready() || question.ready()) {
       void listen();
       return;
+    }
+    const cutoff = queue.length === 0 && !sessionBusy(entry) ? carry.takeCutoffNotice() : null;
+    if (cutoff !== null) {
+      queue.push({ text: cutoff, kind: "prompt" });
+      patch({ note: cutoff });
     }
     if (queue.length > 0) {
       void speakAll();
       return;
     }
-    // Cheap test first: the history is read only when a callback can be open.
     if (
       entry !== undefined &&
       entry.openCallbackIds.length + prompted.size > 0 &&
@@ -622,8 +678,6 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       patch({ phase: "waiting" });
       return;
     }
-    // `expecting` stays until a turn ends (`observe`): between a queued item leaving the queue and its turn starting
-    // the session looks idle for a moment (otherwise the microphone can open briefly in that gap).
     if (sessionBusy(entry)) {
       patch({ phase: "thinking" });
       return;
@@ -633,7 +687,6 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       return;
     }
     if (s.phase === "error") return;
-    // Listen only once the session stayed idle for `LISTEN_SETTLE_MS` (a turn about to start shows up first).
     if (!ready) {
       if (listenTimer === null) {
         listenTimer = setTimeout(() => {
@@ -646,7 +699,6 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     void listen();
   }
 
-  /** Turns voice chat on for `sessionId` (moving it from another session). Returns why not, or `null`. */
   const turnOn = (sessionId: string): string | null => {
     if (deps.canUseKey?.() === false) return null;
     if (deps.dictating())
@@ -675,17 +727,29 @@ export function createVoiceChat(deps: VoiceChatDeps) {
 
   deps.accessibility?.store.subscribe(() => {
     prompt.reconcile();
+    question.reconcile();
   });
   core.store.subscribe(() => {
     prompt.reconcile();
+    question.reconcile();
     if (store.get().on) settle();
+  });
+  let sendingBefore = composer.store.get().sending;
+  composer.store.subscribe(() => {
+    const sending = composer.store.get().sending;
+    const before = sendingBefore;
+    sendingBefore = sending;
+    const s = store.get();
+    if (!s.on || s.owner === null || busy !== "speak") return;
+    if (sending[s.owner] !== true || before[s.owner] === true) return;
+    const active = voiceTurnId(entryOf(s.owner));
+    for (const item of [currentSpeech, ...queue])
+      if (item?.turnId !== undefined && item.turnId !== active) mutedTurns.add(item.turnId);
+    silence();
   });
   core.listen((event: CoreEvent) => {
     if (event.type !== "dictation" || event.streamId !== streamId) return;
-    if (deps.canUseKey?.() === false) {
-      turnOff();
-      return;
-    }
+    if (keyLost()) return;
     const u = event.update;
     if (u.type === "partial") {
       if (u.text !== store.get().partial) detector?.words(heardMs);
@@ -696,13 +760,12 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       fail(u.reason);
     }
   });
-
   return {
     store,
     prompt,
+    question,
     turnOn,
     turnOff,
-    /** Ends the user's turn now (the route; the button uses `press`). */
     endTurn: (): Promise<void> => endTurn("button"),
     /**
      * The Voice chat button of `sessionId`: off or another owner → on here; listening → end my turn; speaking → stop
@@ -713,27 +776,23 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       if (!s.on || s.owner !== sessionId) return turnOn(sessionId);
       if (s.phase === "listening") void endTurn("button");
       else if (s.phase === "speaking") {
-        const active = voiceTurnId(entryOf(s.owner));
+        const active =
+          currentSpeech?.callbackId === undefined ? voiceTurnId(entryOf(s.owner)) : null;
         if (active !== null) {
           mutedTurns.add(active);
           void composer.actions?.stop(sessionId);
         }
-        prompt.cancel();
-        queue = [];
-        skipSpeech += 1;
-        player.stop();
+        silence();
       } else if (s.phase === "error") {
         patch({ error: null, phase: "thinking" });
         settle();
       }
       return null;
     },
-    /** True when `sessionId` is in voice chat (its turns are voice turns; narration leaves it alone). */
     owns(sessionId: string): boolean {
       const s = store.get();
       return s.on && s.owner === sessionId;
     },
-    /** True while voice chat holds or may soon reopen the microphone (dictation waits). */
     active(): boolean {
       return store.get().on;
     },

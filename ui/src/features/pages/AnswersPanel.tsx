@@ -51,7 +51,8 @@ function TextAnswer({ item, answer }: { item: InputAnswer; answer: Answer }): Re
       <Button
         data-testid="pages.answers-panel-answer"
         type="button"
-        appearance="page"
+        shape="outlined"
+        placement="page"
         disabled={text.trim() === stored.trim()}
         onClick={() => {
           answer(item.input.id, text.trim() === "" ? null : { type: "text", text });
@@ -195,7 +196,8 @@ const InputBlock = memo(function InputBlock({
         <Button
           data-testid="pages.answers-panel-answer-2"
           type="button"
-          appearance="page"
+          shape="outlined"
+          placement="page"
           onClick={() => {
             answer(input.id, null);
           }}
@@ -243,7 +245,8 @@ export function AnswersPanel({
         <Button
           data-testid="pages.answers-panel-pages-btn"
           type="button"
-          appearance="page"
+          shape="outlined"
+          placement="page"
           variant="primary"
           disabled={page.answered === 0 && page.detached.length === 0}
           onClick={send}
@@ -253,7 +256,8 @@ export function AnswersPanel({
         <Button
           data-testid="pages.answers-panel-toggle"
           type="button"
-          appearance="page"
+          shape="outlined"
+          placement="page"
           aria-expanded={shown}
           aria-controls={controls}
           onClick={() => {

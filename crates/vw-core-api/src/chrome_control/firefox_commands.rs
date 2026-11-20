@@ -235,7 +235,7 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             _ => (
                 A::ChromeClosed,
                 "Window closed",
-                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new chat browser session; the old session has ended.",
+                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new browser session for this chat; the old browser session has ended.",
             ),
         }
     };
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(
             view.instruction,
             format!(
-                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {name}, then open a new chat browser session; the old session has ended."
+                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {name}, then open a new browser session for this chat; the old browser session has ended."
             )
         );
     }

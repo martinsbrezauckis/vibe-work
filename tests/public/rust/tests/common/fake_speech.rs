@@ -39,6 +39,8 @@ pub type BatchSeen = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 pub struct SpeechControl {
     pub tts_bodies: Arc<Mutex<Vec<serde_json::Value>>>,
     pub tts_status: Arc<AtomicU16>,
+    /// With a 403 `tts_status`: answer Mistral's real guardrail body instead of the echo marker.
+    pub tts_guardrail: Arc<AtomicBool>,
     pub batch: BatchSeen,
     pub batch_status: Arc<AtomicU16>,
     pub batch_text: Arc<Mutex<String>>,
@@ -53,6 +55,7 @@ impl Default for SpeechControl {
         Self {
             tts_bodies: Arc::default(),
             tts_status: Arc::default(),
+            tts_guardrail: Arc::default(),
             batch: Arc::default(),
             batch_status: Arc::default(),
             batch_text: Arc::new(Mutex::new("fake batch transcript".to_owned())),
@@ -94,6 +97,14 @@ fn json(status: u16, body: serde_json::Value) -> Response {
 
 fn marker(status: u16) -> Response {
     json(status, serde_json::json!({"message": "ECHOED-BODY-MARKER"}))
+}
+
+/// The 403 body Mistral answers when its moderation blocks a text (shape seen from the live service).
+fn guardrail_body() -> serde_json::Value {
+    serde_json::json!({"object": "error", "type": "guardrail_violation", "code": "1920",
+        "message": "ECHOED-BODY-MARKER",
+        "guardrails": [{"moderation_llm_v2": {"action": "block",
+            "categories": {"jailbreaking": {"violated": true}}}}]})
 }
 
 /// The 307 of `redirect_all`, when it is on and the path is not the target.
@@ -140,6 +151,9 @@ pub fn answer(
             }
             control.tts_bodies.lock().unwrap().push(value);
             let status = control.tts_status.load(Ordering::SeqCst);
+            if status == 403 && control.tts_guardrail.load(Ordering::SeqCst) {
+                return Some(json(403, guardrail_body()));
+            }
             if status != 0 {
                 return Some(marker(status));
             }

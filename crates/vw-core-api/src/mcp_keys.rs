@@ -145,13 +145,7 @@ impl McpKeysState {
     }
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+use vw_platform::wall_clock::unix_ms_signed as now_ms;
 
 fn keys(shared: &Shared) -> Result<&Arc<KeyService>, CoreError> {
     shared

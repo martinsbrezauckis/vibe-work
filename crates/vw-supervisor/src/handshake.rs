@@ -41,6 +41,7 @@ pub fn default_initialize_params() -> InitializeParams {
             // "ask before editing this checkout" rule out of the prompt; the person still picks folder or copy
             // at chat start.
             agent_worktrees: Some(true),
+            child_session_events: None,
             agent_plugins: None,
             client_tool_definitions: None,
             disabled_notifications: None,

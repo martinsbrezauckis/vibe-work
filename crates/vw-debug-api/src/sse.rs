@@ -83,6 +83,7 @@ fn event_name(event: &CoreEvent) -> &'static str {
         CoreEvent::LineCommentsChanged { .. } => "lineCommentsChanged",
         CoreEvent::ProjectsChanged {} => "projectsChanged",
         CoreEvent::SecretsChanged {} => "secretsChanged",
+        CoreEvent::KnowledgeChanged {} => "knowledgeChanged",
         CoreEvent::Dictation { .. } => "dictation",
         CoreEvent::ConnectorSignIn { .. } => "connectorSignIn",
         CoreEvent::MarketInstall { .. } => "marketInstall",

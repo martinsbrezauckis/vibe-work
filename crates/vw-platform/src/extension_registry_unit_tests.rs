@@ -295,3 +295,84 @@ fn removal_preserves_a_preexisting_marker_value() {
     assert_eq!(contents.value.as_deref(), Some(UPDATE_URL));
     assert_eq!(contents.marker.as_deref(), Some("foreign marker"));
 }
+
+/// Connect takes over a key whose value the caller found naming a missing manifest, but only that exact value, and
+/// only in a key that carries nothing else.
+///
+/// PREDICT (before the fix): `host` has no way to take over a foreign value, so a key left by another setup whose
+/// manifest file is gone refuses Connect every time with "belongs to another setup".
+#[test]
+fn native_host_replaces_only_the_exact_stale_value_the_caller_checked() {
+    let stale = r"C:\work\old\native-host-manifest.json";
+    let manifest = r"C:\state\host.json";
+    let registry = Fake {
+        exists: true,
+        ..Default::default()
+    };
+    registry.contents.borrow_mut().value = Some(stale.into());
+    assert_eq!(
+        host_replacing("HKCU\\fixture", manifest, false, Some(stale), &registry),
+        Ok(HostOutcome::Replaced)
+    );
+    assert_eq!(registry.contents.borrow().value.as_deref(), Some(manifest));
+    // Repeating Connect finds its own value.
+    assert_eq!(
+        host_replacing("HKCU\\fixture", manifest, true, Some(stale), &registry),
+        Ok(HostOutcome::Unchanged)
+    );
+
+    // Another setup rewrote the key after the caller's check: still refused, its value kept.
+    let registry = Fake {
+        exists: true,
+        ..Default::default()
+    };
+    registry.contents.borrow_mut().value = Some(r"C:\another\host.json".into());
+    assert_eq!(
+        host_replacing("HKCU\\fixture", manifest, false, Some(stale), &registry),
+        Err(FOREIGN_HOST.to_owned())
+    );
+    assert_eq!(
+        registry.contents.borrow().value.as_deref(),
+        Some(r"C:\another\host.json")
+    );
+
+    // A stale value in a key that also carries another value or a child is never taken over.
+    for (other_value, child) in [(true, false), (false, true)] {
+        let registry = Fake {
+            exists: true,
+            ..Default::default()
+        };
+        {
+            let mut c = registry.contents.borrow_mut();
+            c.value = Some(stale.into());
+            c.other_value = other_value;
+            c.child = child;
+        }
+        assert!(host_replacing("HKCU\\fixture", manifest, false, Some(stale), &registry).is_err());
+        assert_eq!(registry.contents.borrow().value.as_deref(), Some(stale));
+    }
+
+    // An empty `stale` never matches an empty or missing value of another setup's key.
+    let registry = Fake {
+        exists: true,
+        ..Default::default()
+    };
+    registry.contents.borrow_mut().value = Some(String::new());
+    assert!(host_replacing("HKCU\\fixture", manifest, false, Some(""), &registry).is_err());
+}
+
+#[test]
+fn reading_a_host_value_changes_nothing() {
+    let registry = Fake {
+        exists: true,
+        ..Default::default()
+    };
+    registry.contents.borrow_mut().value = Some(r"C:\old\host.json".into());
+    assert_eq!(
+        host_value("HKCU\\fixture", &registry),
+        Ok(Some(r"C:\old\host.json".to_owned()))
+    );
+    let c = registry.contents.borrow();
+    assert_eq!(c.value.as_deref(), Some(r"C:\old\host.json"));
+    assert!(!c.deleted && c.marker.is_none());
+}

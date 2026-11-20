@@ -6,7 +6,7 @@ mod policy;
 mod text;
 pub mod voice;
 pub use grant::{CoversPart, GrantOffer, GrantPermission, SessionGrant};
-pub use policy::{Policy, always_settings, policies, policy};
+pub use policy::{Policy, policies, policy};
 pub use text::{DECLINED, agent_text, is_hidden_char, plain_note};
 
 /// Who supplied the answer.

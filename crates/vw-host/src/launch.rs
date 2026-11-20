@@ -270,6 +270,12 @@ impl ProductLaunch {
             }
         })?;
         clear_connector_cache(&vibe_home);
+        // Vibe's chat folder: its own, or the Vibe CLI's when the app shares it.
+        crate::plugin_staging::release_leftovers(
+            self.cli_session_dir
+                .as_deref()
+                .unwrap_or(&vibe_home.join("logs").join("session")),
+        );
         let mut supervisor = SupervisorConfig::new(self.server_bin.clone(), vibe_home, work);
         supervisor.extra_env = vec![("PYTHONUNBUFFERED".to_owned(), OsString::from("1"))];
         if let Some(dir) = &self.cli_session_dir {

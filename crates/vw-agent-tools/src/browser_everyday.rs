@@ -13,7 +13,7 @@ pub(crate) fn extend(tools: &mut [Value]) {
     for (key, schema) in [
         (
             "format",
-            json!({"type":"string","enum":["gif"],"description":"recording.start: GIF of action screenshots, without audio; at most 30 frames over two minutes."}),
+            json!({"type":"string","enum":["gif","webm"],"description":vw_vocabulary::text("browserVideoFormatDescription").unwrap_or_default()}),
         ),
         (
             "mediaId",

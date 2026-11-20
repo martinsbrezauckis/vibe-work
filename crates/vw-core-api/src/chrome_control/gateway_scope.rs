@@ -5,7 +5,23 @@ use crate::core::Shared;
 use serde_json::{Value, json};
 use vw_platform::sync::LockRecover;
 
-/// Waiting for the adapter or a dialog never preserves an old browser-action authorization.
+/// The person's Stop of this browser in this turn ends any acting call; an open browser dialog also holds
+/// `chrome_execute`. One check for every point where a call starts or resumes (see `gateway::call_entry`).
+pub(in crate::chrome_control) fn halted(
+    shared: &Shared,
+    session: &str,
+    browser: Browser,
+    tool: &str,
+) -> Result<(), String> {
+    crate::chrome_control::reconnect::stopped(shared, session, browser)?;
+    if tool == "chrome_execute" {
+        shared.browser_dialogs.check()?;
+    }
+    Ok(())
+}
+
+/// Waiting for the adapter or a dialog never preserves an old browser-action authorization: the person's Stop, the
+/// chat mode and (`chrome_execute`) an open dialog are read again, in that order of refusal.
 pub(in crate::chrome_control) fn recheck(
     shared: &Shared,
     session: &str,
@@ -32,6 +48,7 @@ pub(in crate::chrome_control) fn scope_result(
     answer: &mut owner::Answer,
 ) -> Result<(), String> {
     let mut tasks = shared.chrome_control.tasks.lock_or_recover();
+    let mut used_instead = None;
     // Profile Off takes this same lease lock. Recheck every browser at admission so an off/on cycle
     // cannot grant a late open after the earlier reply validation passed.
     pending.finish(shared, session, browser, answer)?;
@@ -42,21 +59,34 @@ pub(in crate::chrome_control) fn scope_result(
         && result["structuredContent"]["status"] != "unknown"
         && let Some(id) = result["structuredContent"]["sessionId"].as_str()
     {
-        let profile = result["structuredContent"]["profileId"].as_str().ok_or("The browser did not identify the opened profile. Reconnect the profile before opening a session.")?;
+        let profile = result["structuredContent"]["profileId"].as_str().ok_or("The browser did not identify the opened profile. Reconnect the profile before opening a browser session.")?;
         let work = shared.chrome_control.work.lock_or_recover();
         if work
             .profile_of(id)
             .is_some_and(|old| !crate::chrome_control::profile_ids::same(old, profile))
             || work.chat_of(id).is_some_and(|old| old != session)
         {
-            return Err("This browser session is already associated with another chat or profile. Reconnect this profile before opening a new session.".into());
+            return Err("This browser session is already associated with another chat or profile. Reconnect this profile before opening a new browser session.".into());
         }
+        drop(work);
+        let picked =
+            (!crate::chrome_control::profile_bindings::locked(&shared.chrome_control, session))
+                .then(|| {
+                    shared
+                        .chrome_control
+                        .picked_profiles
+                        .lock_or_recover()
+                        .get(session)
+                        .cloned()
+                })
+                .flatten();
         crate::chrome_control::profile_bindings::remember(
             &shared.chrome_control,
             session,
             profile,
             Some(id),
         )?;
+        let work = shared.chrome_control.work.lock_or_recover();
         tasks.retain(|id, owner| {
             owner != session
                 || work
@@ -81,6 +111,9 @@ pub(in crate::chrome_control) fn scope_result(
                 }),
             pending.turn.as_deref(),
         );
+        used_instead = picked
+            .filter(|picked| !crate::chrome_control::profile_ids::same(picked, profile))
+            .map(|picked| (picked, profile.to_owned()));
     }
     if tool == "chrome_status" && result["structuredContent"].get("profiles").is_some() {
         for key in ["sessions", "pending"] {
@@ -95,8 +128,32 @@ pub(in crate::chrome_control) fn scope_result(
         result["content"] = json!([{"type":"text","text":serde_json::to_string(&result["structuredContent"]).unwrap_or_default()}]);
     }
     drop(tasks);
+    if let Some((picked, used)) = used_instead {
+        notice_used_instead(shared, session, &picked, &used);
+    }
     if request {
         owner::publish(shared);
     }
     Ok(())
+}
+
+fn notice_used_instead(shared: &Shared, session: &str, picked: &str, used: &str) {
+    shared
+        .chrome_control
+        .picked_profiles
+        .lock_or_recover()
+        .remove(session);
+    let message = vw_vocabulary::texts::BROWSER_PROFILE_USED_INSTEAD
+        .replace(
+            "{picked}",
+            &crate::chrome_control::profiles::label(&shared.chrome_control, picked),
+        )
+        .replace(
+            "{used}",
+            &crate::chrome_control::profiles::label(&shared.chrome_control, used),
+        );
+    let _ = shared.store.apply(vw_session::Notification::new(
+        "warning",
+        json!({"sessionId":session,"warning":{"code":"browser_profile_used_instead","message":message}}),
+    ));
 }

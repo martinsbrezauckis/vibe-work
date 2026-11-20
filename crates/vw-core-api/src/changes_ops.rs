@@ -182,12 +182,12 @@ impl Core {
         self.changes_read(session_id).await
     }
 
-    /// Takes the session's baseline if it has none, before `method` reaches Vibe (`dispatch::forward`).
+    /// Takes the chat's baseline if it has none, before `method` reaches Vibe (`dispatch::forward`).
     /// Bounded by `CoreConfig::changes_baseline_limit`; never fails the call.
     ///
     /// Past the limit the review is "unavailable" at once (a new generation), and the work goes on without a
     /// baseline. The blocking task cannot be stopped: a cleanup task waits for it (its own late result is
-    /// dropped by the generation check in `Hub::ensure`), removes what it left in the session's baseline
+    /// dropped by the generation check in `Hub::ensure`), removes what it left in the chat's baseline
     /// folder, and only then releases the claim, so "Start reviewing from now" never overlaps it.
     pub(crate) async fn changes_before_work(&self, params: &Value) {
         if self.shared.changes.dir.is_none() {
@@ -213,7 +213,7 @@ impl Core {
         else {
             warn!(
                 session_id,
-                "changes: the session's baseline is still being written; the work starts without it"
+                "changes: the chat's baseline is still being written; the work starts without it"
             );
             return;
         };
@@ -240,13 +240,13 @@ impl Core {
         }
         warn!(
             session_id,
-            "changes: baseline took too long; the review is off for this session"
+            "changes: baseline took too long; the review is off for this chat"
         );
         // Late, the baseline could include the agent's first edits: "unavailable" now, in a new generation.
         let late = if written.load(std::sync::atomic::Ordering::SeqCst) {
-            "Watching the folder for changes took too long to start before the session started."
+            "Watching the folder for changes took too long to start before the chat started."
         } else {
-            "Recording the folder took too long before the session started."
+            "Recording the folder took too long before the chat started."
         };
         let generation = self.shared.changes.expire(session_id, &folder, late);
         let hub_owner = self.shared.clone();
@@ -295,7 +295,7 @@ impl Core {
         let folder = session
             .cwd
             .clone()
-            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the session has no folder yet"))?;
+            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the chat has no folder yet"))?;
         Ok((session, folder))
     }
 
@@ -493,12 +493,12 @@ fn no_review(tracker: &Tracker) -> CoreError {
     if matches!(tracker.review, Some(Review::Lost { .. })) {
         return CoreError::new(
             ErrorCode::Denied,
-            "the starting point for this session was lost: start reviewing from now before keeping or reverting",
+            "the starting point for this chat was lost: start reviewing from now before keeping or reverting",
         );
     }
     CoreError::new(
         ErrorCode::Denied,
-        "no git review for this session (the folder has no version history, or the review is unavailable)",
+        "no git review for this chat (the folder has no version history, or the review is unavailable)",
     )
 }
 

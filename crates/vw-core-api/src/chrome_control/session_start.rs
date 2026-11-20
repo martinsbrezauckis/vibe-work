@@ -34,13 +34,13 @@ pub(super) async fn fresh(
         }
         if !stopped {
             return Err(format!(
-                "{} reused an ended session. Check the browser before opening a fresh session.",
+                "{} reused an ended browser session. Check the browser before opening a fresh browser session.",
                 browser.name()
             ));
         }
         if !old || attempt == 2 {
             return Err(format!(
-                "Not run: {} returned a stopped session. Open a fresh session before acting.",
+                "Not run: {} returned a stopped browser session. Open a fresh browser session before acting.",
                 browser.name()
             ));
         }
@@ -61,9 +61,7 @@ pub(super) async fn arguments(
 ) -> Result<(), String> {
     super::session_title::apply(shared, session, browser, args).await?;
     super::profile_agent::check(shared, session, "chrome_session", args)?;
-    if let Some(profile) = args["profileId"].as_str() {
-        super::profile_bindings::remember(&shared.chrome_control, session, profile, None)?;
-    }
+    // The person's pick remains a preference until an exact opened session receipt is accepted.
     super::reconnect::stopped(shared, session, browser)?;
     super::check::authorize_read(shared, session, "chrome_session", args, consent)?;
     args["_clientSessionId"] = serde_json::json!(session);

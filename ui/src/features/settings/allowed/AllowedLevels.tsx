@@ -35,10 +35,10 @@ export function AllowedLevels(): ReactElement | null {
       <h3 id="allowed-levels-title">How much Vibe may do without asking</h3>
       {levelRows(access, safetyLine(chrome.view), chromeAvailable(chrome.view)).map((row) => (
         <SettingsRow key={row.id} data-level={row.id}>
-          <span>
+          <p>
             {row.label}
             <span className="d">{row.value}</span>
-          </span>
+          </p>
           <LinkButton
             data-testid="settings.allowed-level-link"
             data-item-id={row.id}

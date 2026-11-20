@@ -32,21 +32,25 @@ compile_error!(
 );
 
 mod attention;
+mod browser_video;
 mod commands;
 mod dialog_plugin;
 mod dialogs;
 mod feedback_entry;
 mod in_front;
+mod install_notice;
 mod instance;
 mod live_profile;
 #[cfg(target_os = "macos")]
 mod mac_menu;
 mod notifications;
+mod page_crash;
 mod picked_files;
 mod quit_guard;
 #[cfg(target_os = "macos")]
 mod send_to;
 mod setup;
+mod start_watch;
 mod startup;
 mod startup_market;
 mod tray;
@@ -86,18 +90,21 @@ fn main_permission(kind: &str) -> PermissionResponse {
 /// a preview webview is decided by its own handler (the preview's URL policy), any other label is
 /// refused. Each main-document load resets child placements before new window commands may place them, and the
 /// placements of commands the replaced document started place nothing after that reset.
-fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("navigation-guard")
         .on_navigation(|webview, url| match webview.label() {
             "main" => navigation_allowed(url, startup::DEV_BUILD),
             label => vw_preview::is_preview_label(label),
         })
         .on_page_load(|webview, payload| {
-            if webview.label() == MAIN_WINDOW && payload.event() == PageLoadEvent::Started {
-                webview
-                    .app_handle()
-                    .state::<HostHandle>()
-                    .main_ui_load_started(&tauri::async_runtime::handle().inner().clone());
+            if webview.label() == MAIN_WINDOW {
+                if payload.event() == PageLoadEvent::Started {
+                    webview
+                        .app_handle()
+                        .state::<HostHandle>()
+                        .main_ui_load_started(&tauri::async_runtime::handle().inner().clone());
+                }
+                tray::main_page_event(webview.app_handle(), payload.event());
             }
         })
         .build()
@@ -247,7 +254,10 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::desktop_focus_subscribe,
         commands::app_quit,
         commands::desktop_focus_app,
+        commands::desktop_title_bar,
         commands::core_subscribe,
+        commands::browser_video_subscribe,
+        commands::browser_video_reply,
         commands::ui_control_next,
         commands::ui_control_reply,
         commands::debug_api_set,
@@ -271,6 +281,7 @@ fn bridge_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'sta
         commands::terminal_ack,
         commands::terminal_detach,
         commands::update_subscribe,
+        commands::update_off_reason,
         commands::update_check,
         commands::update_download,
         commands::update_install,
@@ -300,6 +311,7 @@ pub fn run() -> tauri::Result<()> {
     };
     let updater = updater::plugin_if_configured(context.config());
     let update_checks = updater.is_some();
+    let updates_refused = updater::refusal(context.config().plugins.0.get("updater"));
     let mut builder = tauri::Builder::default()
         .plugin(navigation_guard())
         .plugin(dialog_plugin::init());
@@ -312,6 +324,19 @@ pub fn run() -> tauri::Result<()> {
     if let Some(plugin) = updater {
         builder = builder.plugin(plugin);
     }
+    // macOS: a webview's page process that ended. The main window is reloaded and the person told; a preview is
+    // reloaded once and asked about when it ends again soon (page_crash). This hook replaces Tauri's own silent
+    // reload for every webview.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.on_web_content_process_terminate(|webview| {
+            if webview.label() == MAIN_WINDOW {
+                page_crash::crashed(webview.app_handle(), vw_webview::PageCrash::Ended);
+            } else {
+                page_crash::preview_crashed(webview);
+            }
+        });
+    }
     // macOS: Cmd+Q and the app menu's Quit ask about running work like the tray's Quit (see mac_menu).
     #[cfg(target_os = "macos")]
     {
@@ -321,16 +346,24 @@ pub fn run() -> tauri::Result<()> {
     }
     let app = builder
         .manage(handle.clone())
+        .manage(browser_video::BrowserVideo::default())
         .manage(window_focus::WindowFocus::default())
         .manage(updater::UpdatesHandle::default())
+        .manage(updates_refused)
         .manage(updater::VibeSlot::default())
         .invoke_handler(bridge_commands())
         .on_window_event(on_window_event)
         .setup(move |app| {
+            quit_guard::take_from_pages(app.handle());
             if let Err(error) = setup::start(app, &handle, hand_over, update_checks) {
                 // Tauri panics if this callback returns Err, including across AppKit's event callback.
                 vw_platform::startup_error::show(&error.to_string());
                 app.handle().exit(1);
+            } else {
+                // After the main window exists: the notice is a dialog over it.
+                install_notice::check(app.handle());
+                // The start after a restart from a stuck start says so (once).
+                start_watch::notice(app.handle());
             }
             Ok(())
         })

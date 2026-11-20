@@ -77,7 +77,7 @@ pub enum PagesError {
     #[error("no page {0} in the handbook folder")]
     NoPage(String),
     /// Nothing of this session is shown in the viewer.
-    #[error("this session's page is not shown in the Project tab (open the Project tab first)")]
+    #[error("this chat's page is not shown in the Project tab (open the Project tab first)")]
     NotShown,
     /// A pick ended without anything picked.
     #[error("nothing was picked (Escape, the page changed, or no click within the time limit)")]

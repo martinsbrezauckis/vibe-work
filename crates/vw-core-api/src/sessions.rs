@@ -69,7 +69,7 @@ pub(crate) async fn observe(
     // The profile each session runs with (`access.rs`): from any result that carries a runtime, and
     // from an accepted switch.
     if let Some(id) = params.get("sessionId").and_then(Value::as_str) {
-        let previous_mode = crate::chrome_control::check::mode(shared, id);
+        let previous_mode = crate::chrome_control::chat_mode(shared, id);
         if method == "session/agent/update" {
             shared.access.observe_request(method, id, params);
         }
@@ -80,7 +80,7 @@ pub(crate) async fn observe(
         {
             shared.access.observe_runtime(id, runtime);
         }
-        crate::chrome_control::check::mode_changed(shared, id, previous_mode.as_deref());
+        crate::chrome_control::mode_changed(shared, id, previous_mode.as_deref());
     }
     shared.model_choices.observe(method, params, result)?;
     if method == "turn/start" {
@@ -149,6 +149,7 @@ pub(crate) async fn observe(
             if kind != LoadKind::Read {
                 shared.supervisor.track_session(&id);
                 shared.access.observe_request(method, &id, params);
+                crate::stops::conditions_changed(shared);
                 if crate::working_note::mcp_disabled(&shared.instructions.own_home) {
                     shared.emit(crate::CoreEvent::Alert {
                         session_id: Some(id.clone()),
@@ -188,7 +189,7 @@ pub(crate) fn snapshot(shared: &Shared, id: &str) -> Result<SessionSnapshot, Cor
             #[cfg(feature = "video")]
             crate::video_projection::apply(shared, &mut snapshot.state);
             crate::edit_preview::project(shared, &mut snapshot.state);
-            crate::chrome_control::approval::project(shared, &mut snapshot.state);
+            crate::chrome_control::project_approvals(shared, &mut snapshot.state);
             crate::paused_tools_gate::mark_held_calls(shared, &mut snapshot.state);
             shared.protected_changes.overlay(id, &mut snapshot.state);
             crate::ask::tool_calls::overlay(shared, id, &mut snapshot.state);
@@ -217,7 +218,7 @@ pub(crate) fn project_result(shared: &Shared, method: &str, params: &Value, resu
     #[cfg(feature = "video")]
     crate::video_projection::apply(shared, result);
     crate::edit_preview::project(shared, result);
-    crate::chrome_control::approval::project(shared, result);
+    crate::chrome_control::project_approvals(shared, result);
     crate::paused_tools_gate::mark_held_calls(shared, result);
     let Some(state) = result.get_mut("state").filter(|s| s.is_object()) else {
         return;

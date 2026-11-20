@@ -13,4 +13,24 @@ impl PageEngine {
                 panic!("waiting for loaded frame {url} containing {selector}: {error}")
             });
     }
+
+    /// The fixture as a `WebKit` engine whose private world cannot enter closed roots: the kept source of each
+    /// `http(s)` document decides (an address no document came from has none); the `DevTools` route enters closed roots instead.
+    pub(super) async fn sources_declarative(
+        &self,
+        urls: Vec<String>,
+    ) -> Result<bool, vw_preview::EngineError> {
+        if super::cdp::cdp_frames() && !self.page_world.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(false);
+        }
+        let web: Vec<String> = urls
+            .into_iter()
+            .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+            .collect();
+        let bodies = self.rpc(json!({"op":"sources", "urls":web})).await?;
+        Ok(bodies.as_array().into_iter().flatten().any(|body| {
+            body.as_str()
+                .is_some_and(|body| vw_preview::declarative_closed_source(body.as_bytes()))
+        }))
+    }
 }

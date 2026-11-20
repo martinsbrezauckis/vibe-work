@@ -162,7 +162,7 @@ export function SessionList() {
             <Button
               data-testid="shell.session-list-open-new-chat"
               type="button"
-              appearance="dialog"
+              variant="primary"
               title={
                 badge === null
                   ? `${TEXT.newChat} (${formatKeys("Mod+N")})`
@@ -240,7 +240,8 @@ export function SessionList() {
               </div>
             )}
             <div className="sec">
-              <span>Projects</span>
+              {/* A paragraph: WebKitGTK drops a plain span's text beside a button in a landmark. */}
+              <p>Projects</p>
               {groups !== null && model.grouped && (
                 <button
                   data-testid="shell.session-list-set-creating"

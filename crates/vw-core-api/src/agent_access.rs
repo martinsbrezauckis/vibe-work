@@ -42,8 +42,7 @@ pub(crate) fn check_for(shared: &Shared, kind: &str, session: &str) -> Result<()
 pub(crate) fn check_item(shared: &Shared, session: &str, id: &str) -> Result<(), String> {
     if id == vw_keys::DEBUG_TOKEN_ITEM
         && (shared.store.view(session).is_none()
-            || crate::chrome_control::check::mode(shared, session).as_deref()
-                != Some("auto-approve"))
+            || crate::chrome_control::chat_mode(shared, session).as_deref() != Some("auto-approve"))
     {
         let full = vw_vocabulary::label("accessModes", "auto-approve");
         return Err(format!(
@@ -56,6 +55,8 @@ pub(crate) fn check_item(shared: &Shared, session: &str, id: &str) -> Result<(),
 /// Sets the pause after a user-only command has passed `vault_scope`.
 pub(crate) fn set(shared: &Shared, locked: bool) {
     shared.agent_access_locked.store(locked, Ordering::SeqCst);
+    // A running secret capture checks the switch again at once.
+    crate::stops::conditions_changed(shared);
 }
 
 /// Applies the user's switch; unlocking also revives a remembered cryptographic vault if needed.

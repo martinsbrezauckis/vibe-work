@@ -32,4 +32,6 @@ similar = { workspace = true }
 # the lockfile..
 sha1 = "0.10.7"
 sha2 = { workspace = true }
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }

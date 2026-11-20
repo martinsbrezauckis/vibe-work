@@ -56,7 +56,7 @@ async fn confirm(shared: &Shared, request: &KeyRequest) -> Result<(), CoreError>
     let request = ConfirmationRequest {
         method: "vibe-work/replaceModelKey".to_owned(),
         requester: Requester::Window,
-        summary: "Replace the Mistral key in use? This replaces the key used by sessions with the new key. Agents never see either value.".to_owned(),
+        summary: "Replace the Mistral key in use? This replaces the key used by chats with the new key. Agents never see either value.".to_owned(),
         params: json!({}),
         always: None,
     };

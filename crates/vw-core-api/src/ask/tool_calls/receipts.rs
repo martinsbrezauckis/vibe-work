@@ -331,10 +331,47 @@ fn index(
         .position(|r| r.key == key)
         .ok_or("Unknown or already used tool decision.")?;
     let receipt = &pending[index];
-    if receipt.owner != owner || receipt.tool != tool || receipt.args != clean(args)? {
+    let args = clean(args)?;
+    if receipt.owner != owner || receipt.tool != tool || receipt.args != args {
+        // Where the call differs from the decision (field paths only, never values), for the log.
+        let mut fields = Vec::new();
+        differing(&receipt.args, &args, String::new(), &mut fields);
+        tracing::warn!(
+            tool,
+            same_owner = receipt.owner == owner,
+            same_tool = receipt.tool == tool,
+            ?fields,
+            "tool decision does not match this call"
+        );
         return Err("Tool decision does not match this call.".into());
     }
     Ok(index)
+}
+
+/// The JSON pointers where `a` and `b` differ (at most 8; a pointer that names no field: the value's type or
+/// length differs there).
+fn differing(decided: &Value, called: &Value, at: String, out: &mut Vec<String>) {
+    if out.len() >= 8 || decided == called {
+        return;
+    }
+    match (decided, called) {
+        (Value::Object(before), Value::Object(after)) => {
+            let added = after.keys().filter(|k| !before.contains_key(*k));
+            for key in before.keys().chain(added) {
+                let path = format!("{at}/{key}");
+                match (before.get(key), after.get(key)) {
+                    (Some(old), Some(new)) => differing(old, new, path, out),
+                    _ => out.push(path),
+                }
+            }
+        }
+        (Value::Array(before), Value::Array(after)) if before.len() == after.len() => {
+            for (i, (old, new)) in before.iter().zip(after).enumerate() {
+                differing(old, new, format!("{at}/{i}"), out);
+            }
+        }
+        _ => out.push(at),
+    }
 }
 pub(super) fn verify(
     calls: &Calls,

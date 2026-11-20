@@ -53,6 +53,8 @@ for (const name of ["app", "vw-keyproxy", "vw-core-api", "vw-gate", "vw-agent-to
 const forbidden = new Set([
   "your-safari",
   "video-test",
+  // vw-host: update channels outside the release server (private tests only).
+  "update-test-channels",
 ]);
 if (safariPackage) {
   if (!selectedTarget?.includes("apple-darwin"))

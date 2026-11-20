@@ -655,5 +655,5 @@ fn random_id() -> String {
             .map_or(0, |d| d.as_nanos());
         bytes = nanos.to_le_bytes();
     }
-    crate::pin::hex(&bytes)
+    hex::encode(bytes)
 }

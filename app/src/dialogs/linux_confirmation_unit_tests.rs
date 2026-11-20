@@ -353,7 +353,7 @@ fn the_window_shows_answers_and_closes_when_its_request_is_dropped() {
     gtk::init().expect("GTK starts on the X display");
     let app = tauri::test::mock_app();
     let names = labels(&["Continue", "Cancel"]);
-    let text = "Delete the session \"Notes\"?".to_owned();
+    let text = "Delete the chat \"Notes\"?".to_owned();
 
     // A pressed button answers its label, and the window goes away.
     let mut waiting = Box::pin(show_dialog(app.handle(), text.clone(), &names, true, None));

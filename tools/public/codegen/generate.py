@@ -2,7 +2,7 @@
 """Generate the Rust and TypeScript protocol types from the installed Mistral Vibe package.
 
 Role: single entry point of the generator. Run it with the interpreter that has Vibe
-installed (data/vibe-3.1.2/venv/bin/python, or the one named by $VIBE_PYTHON).
+installed (data/vibe-3.1.3/venv/bin/python, or the one named by $VIBE_PYTHON).
   --write   regenerate crates/vw-protocol/src/generated and ui/src/protocol/generated
   --check   regenerate into a scratch directory and fail on any difference (CI drift gate)
 Fails loudly when: the installed Vibe version differs from vibe.pin; method_map.json is out of
@@ -101,6 +101,8 @@ def render(schema: Schema) -> dict[Path, str]:
     out[RUST_DIR / "support.rs"] = (HERE / "templates/support.rs").read_text(encoding="utf-8")
     out[RUST_DIR / "methods.rs"] = registry_emit.emit_rust(schema)
     out[RUST_DIR / "reencode.rs"] = registry_emit.emit_reencode(schema)
+    for filename, text in registry_emit.emit_reencode_payloads(schema).items():
+        out[RUST_DIR / filename] = text
     out[TS_DIR / "index.ts"] = ts_emit.emit_index(list(files), [])
     out[TS_DIR / "support.ts"] = (HERE / "templates/support.ts").read_text(encoding="utf-8")
     out[TS_DIR / "methods.ts"] = registry_emit.emit_ts(schema)

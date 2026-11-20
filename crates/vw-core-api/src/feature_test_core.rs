@@ -16,6 +16,10 @@ pub(crate) struct Fixture {
 }
 impl Fixture {
     pub async fn new() -> Self {
+        Self::with_confirmer(NoPrompt).await
+    }
+    /// The fixture with `confirmer` answering native prompts (a test that expects one).
+    pub async fn with_confirmer(confirmer: impl Confirmer + 'static) -> Self {
         let root = std::env::temp_dir().join(format!(
             "vw-feature-core-{}-{}",
             std::process::id(),
@@ -40,7 +44,7 @@ impl Fixture {
         let core = Box::pin(crate::Core::start(
             vw_supervisor::SupervisorConfig::new(root.join("no-vibe-spawned"), home, root.clone()),
             Arc::new(vw_supervisor::NoSecret),
-            NoPrompt,
+            confirmer,
             config,
         ))
         .await

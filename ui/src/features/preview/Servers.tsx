@@ -47,7 +47,8 @@ function TargetRow({
       <Button
         data-testid="preview.servers-preview-btn"
         type="button"
-        appearance="preview"
+        shape="outlined"
+        placement="preview"
         disabled={busy}
         onClick={onOpen}
       >
@@ -114,7 +115,8 @@ function BusyRow({
             data-item-id={optionLabel(option)}
             key={optionLabel(option)}
             type="button"
-            appearance="preview"
+            shape="outlined"
+            placement="preview"
             disabled={busy}
             onClick={() => {
               act(option);

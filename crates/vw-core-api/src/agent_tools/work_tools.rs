@@ -41,7 +41,7 @@ pub(crate) async fn call(
     args: &Value,
 ) -> Result<Value, String> {
     if shared.store.view(session_id).is_none() {
-        return Err("this session is not open in Vibe Work right now".to_owned());
+        return Err("this chat is not open in Vibe Work right now".to_owned());
     }
     match tool {
         names::LIBRARIES_LIST => libraries_list(shared, session_id).await,
@@ -145,7 +145,7 @@ async fn library_search(
     if ids.is_empty() {
         return Err(none_on(&knowledge_places(shared)));
     }
-    match work::ask(shared, question, ids)
+    match work::ask(shared, Some(session_id), question, ids)
         .await
         .map_err(|e| e.message)?
     {
@@ -200,7 +200,7 @@ fn stem(name: Option<&str>, prompt: &str) -> String {
 
 /// The edit source: a file inside one of the session's folders, read (at most 10 MB).
 fn read_source(folders: &[PathBuf], path: &str) -> Result<(String, Vec<u8>), String> {
-    let first = folders.first().ok_or("this session has no folder")?;
+    let first = folders.first().ok_or("this chat has no folder")?;
     let joined = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
@@ -214,7 +214,7 @@ fn read_source(folders: &[PathBuf], path: &str) -> Result<(String, Vec<u8>), Str
         .any(|f| candidate.starts_with(vw_procmon::normalize(f)))
     {
         return Err(format!(
-            "{path} is outside this session's folder; only images inside it can be edited"
+            "{path} is outside this chat's folder; only images inside it can be edited"
         ));
     }
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("{path}: {e}"))?;
@@ -238,7 +238,7 @@ fn save(folder: &Path, stem: &str, ext: &str, bytes: &[u8]) -> Result<String, St
     match std::fs::symlink_metadata(&dir) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
             return Err(
-                "the session folder's images entry is not a plain folder; nothing was saved"
+                "the chat folder's images entry is not a plain folder; nothing was saved"
                     .to_owned(),
             );
         }
@@ -253,11 +253,11 @@ fn save(folder: &Path, stem: &str, ext: &str, bytes: &[u8]) -> Result<String, St
     let real =
         vw_platform::canonical_plain(&dir).map_err(|e| format!("could not check images/: {e}"))?;
     let expected = vw_platform::canonical_plain(folder)
-        .map_err(|e| format!("could not check the session folder: {e}"))?
+        .map_err(|e| format!("could not check the chat folder: {e}"))?
         .join("images");
     if vw_procmon::normalize(&real) != vw_procmon::normalize(&expected) {
         return Err(
-            "the session folder's images entry leads somewhere else; nothing was saved".to_owned(),
+            "the chat folder's images entry leads somewhere else; nothing was saved".to_owned(),
         );
     }
     for n in 1..1000_u32 {
@@ -319,7 +319,31 @@ async fn image_generate(
         policy: &config.image_fetch,
         timeouts: config.image_timeouts,
     };
-    let made = tokio::time::timeout(config.image_deadline, keys.image_make(&job))
+    // Mistral's own alias first; refused, once more with the chat's active model, within the same deadline.
+    let attempts = async {
+        match keys.image_make(&job).await {
+            Err(error) if crate::utility_models::model_refused(&error) => {
+                let Some(active) =
+                    crate::utility_models::retry_model(shared, Some(session_id), job.model).await
+                else {
+                    return Err(error);
+                };
+                info!(session = session_id, refused = %job.model, model = %active, "image: model refused, using the chat's model");
+                let retry = ImageJob {
+                    model: &active,
+                    prompt: job.prompt,
+                    source: source
+                        .as_ref()
+                        .map(|(name, bytes)| SourceImage { name, bytes }),
+                    policy: job.policy,
+                    timeouts: job.timeouts,
+                };
+                keys.image_make(&retry).await
+            }
+            other => other,
+        }
+    };
+    let made = tokio::time::timeout(config.image_deadline, attempts)
         .await
         .map_err(|_| {
             "Mistral did not finish the image in time, so no image was saved; try again".to_owned()
@@ -344,7 +368,7 @@ async fn image_generate(
         "action": if made.function == "edit_image" { "edited" } else { "generated" },
         "promptUsed": made.prompt,
         "note": format!(
-            "Saved in the session folder. Show it to the user in your reply with ![short description]({path}). \
+            "Saved in the chat folder. Show it to the user in your reply with ![short description]({path}). \
              To change it, call image_generate again with edit: \"{path}\" and say what to change."
         ),
     }))

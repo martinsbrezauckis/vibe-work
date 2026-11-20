@@ -1,7 +1,8 @@
 /**
  * The composer's microphone button (adapted from ShellX: its state machine and labels, without MediaRecorder or xAI). One gesture for both modes: **hold** (released after
  * 400 ms stops and inserts the text) and **press** (a short press starts; the next press stops). Keyboard:
- * Enter/Space toggle; Escape cancels (wired in `hooks.ts`).
+ * Enter/Space toggle; Escape cancels (wired in `hooks.ts`). While recording it is the dictation's only Stop (a square),
+ * so its name then starts with "Stop dictation" (screen readers, "Click Stop dictation" in voice control).
  * Depends on: AppContext, the voice hooks, Icon. Called by: Composer (through the tool row's `mic` slot).
  * Invariants: render and event wiring only; the controller decides (`state/dictation`); while another
  * session dictates, or while voice chat is on (one microphone), this button is disabled. While the previous text is still being made ("Finishing…") a press
@@ -63,9 +64,9 @@ export function MicButton({
       : !mine
         ? "Dictate: unavailable while dictating in another chat"
         : phase === "starting"
-          ? `Dictate: starting the microphone; press to stop (${keys}); Escape to cancel`
+          ? `Stop dictation: starting the microphone; press to stop (${keys}); Escape to cancel`
           : phase === "recording"
-            ? `Dictate: recording ${clock(seconds)}; release or press to stop (${keys}); Escape to cancel`
+            ? `Stop dictation: recording ${clock(seconds)}; release or press to stop (${keys}); Escape to cancel`
             : phase === "transcribing"
               ? queued
                 ? `Dictate: finishing; press to cancel the next dictation (${keys})`

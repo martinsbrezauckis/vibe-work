@@ -3,7 +3,8 @@
  * Vibe could not load (`runtime.issues`, file and message), a config warning (`runtime.config.validationWarnings`),
  * a project config folder Vibe ignores because it is marked untrusted (`workspace/trust/untrustedConfig`), and a model
  * the organization's admin config enforces (`config/fields/read`: `active_model` whose top layer is `admin`).
- * Depends on: coreStore (the sessions' runtime snapshots and the typed `call` command), toastStore, the vocabulary.
+ * Depends on: coreStore (the sessions' runtime snapshots and the typed `call` command), toastStore, the vocabulary,
+ * thinkingLevels (the retired Large 4 alias rule).
  * Called by: createApp (wiring), useShellWiring (`start`).
  * Invariants:
  * - One plain line per problem, naming the file (or folder, or model) and what is wrong; never explanatory prose.
@@ -12,6 +13,8 @@
  *   again, also in later runs. Closing its toast is not dismissing it. A changed message is a new problem.
  * - One alert per model: a warning about a model that a model-fallback alert of this run names is not shown, and
  *   leaves the bell (without counting as dismissed) when that alert arrives after it.
+ * - Vibe's warning about Vibe Work's retired `large-4` alias is not shown while the list offers the one catalog Large 4
+ *   a chat on that alias is put back on (`retiredAliasSettled`); Core alerts itself if that fails.
  * - Reads only sessions that already have a runtime (their channel is open); the trust read runs once per folder
  *   and the admin read once per app run. A failed read shows nothing (it is retried on a later run).
  */
@@ -19,6 +22,7 @@ import type { JsonValue } from "../protocol/core";
 import { TEXT, wording } from "../vocabulary";
 import type { CoreController } from "./coreStore";
 import type { Toasts } from "./toastStore";
+import { retiredAliasSettled } from "./thinkingLevels";
 
 const KEY = "vw.config.problems.dismissed";
 /** Vibe's warnings about an unavailable or excluded model (`vibe_schema.py`), which name its alias. */
@@ -74,6 +78,16 @@ export function isConfigProblem(runtime: JsonValue | undefined, message: string)
   );
 }
 
+/**
+ * True for Vibe's warning that the retired `large-4` alias is not available while `runtime`'s list offers the one
+ * catalog Large 4 Core puts such a chat back on without a notice (`retiredAliasSettled`): no bell entry, no notice.
+ */
+export function settledModelWarning(runtime: JsonValue | undefined, message: string): boolean {
+  const alias = MODEL_WARNING.exec(oneLine(message))?.[1];
+  const models = list(obj(obj(runtime)?.["config"])?.["models"]).map(obj);
+  return alias !== undefined && retiredAliasSettled(alias, models);
+}
+
 function problem(kind: string, file: string, message: string, text: string): ConfigProblem {
   return { id: JSON.stringify([kind, file, message]), text: oneLine(text) };
 }
@@ -106,6 +120,7 @@ export function runtimeProblems(runtime: JsonValue | undefined): ConfigProblem[]
     );
     const alias = MODEL_WARNING.exec(warning)?.[1];
     if (alias === undefined) return [shown];
+    if (settledModelWarning(runtime, warning)) return [];
     const display = list(config?.["models"])
       .map(obj)
       .find((model) => model?.["alias"] === alias)?.["displayName"];

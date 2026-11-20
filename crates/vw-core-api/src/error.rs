@@ -162,6 +162,10 @@ pub struct CoreError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub capture_block: Option<vw_preview::CaptureBlock>,
+    /// Number of protected page fields withheld by a refused raw operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub protected_values_withheld: Option<u64>,
     /// What kind of failure.
     pub code: ErrorCode,
     /// Human-readable description.
@@ -186,6 +190,7 @@ impl CoreError {
             summary: None,
             server_code: None,
             capture_block: None,
+            protected_values_withheld: None,
         }
     }
 
@@ -221,7 +226,7 @@ impl CoreError {
         Self::new(
             ErrorCode::NotFound,
             format!(
-                "{} is not open. Open it from the session list and try again.",
+                "{} is not open. Open it from the chat list and try again.",
                 vw_vocabulary::text("thisSession").unwrap_or_default()
             ),
         )
@@ -299,6 +304,7 @@ impl CoreError {
             summary: None,
             server_code,
             capture_block: None,
+            protected_values_withheld: None,
         }
     }
 
@@ -336,6 +342,7 @@ impl CoreError {
             )
             .then(|| "stopped".to_owned()),
             capture_block: None,
+            protected_values_withheld: None,
         }
     }
 }
@@ -376,16 +383,27 @@ mod tests {
 
     #[test]
     fn capture_refusals_keep_the_typed_reason_and_complete_agent_guidance() {
-        let text = "No chat is selected. Ask the user to open this session.";
+        let text = "No chat is selected. Ask the user to open this chat.";
         let error = crate::browser::act_error(&vw_browser::ActError {
             outcome: vw_browser::Outcome::Refused,
             text: text.into(),
             capture_block: Some(vw_preview::CaptureBlock::NoChatSelected),
+            protected_values_withheld: None,
         });
         let wire = serde_json::to_value(&error).unwrap();
         assert_eq!(wire["captureBlock"], "noChatSelected");
         assert_eq!(wire["message"], text);
         assert_eq!(wire["code"], "denied");
+        let raw = crate::browser::act_error(&vw_browser::ActError {
+            outcome: vw_browser::Outcome::Refused,
+            text: "Protected field values were withheld from this result.".into(),
+            capture_block: None,
+            protected_values_withheld: Some(3),
+        });
+        assert_eq!(
+            serde_json::to_value(raw).unwrap()["protectedValuesWithheld"],
+            3
+        );
         assert!(
             serde_json::to_value(CoreError::new(ErrorCode::Denied, "other"))
                 .unwrap()

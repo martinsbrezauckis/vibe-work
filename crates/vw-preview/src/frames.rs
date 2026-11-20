@@ -47,6 +47,10 @@ pub fn detached_aware(script: &str) -> String {
     )
 }
 
+/// The final point guard's refusal when the actual hit (or its label's control) is a native select whose popup only
+/// the person could use. The same words as the observed-select refusal of the act script.
+pub const NATIVE_SELECT_POPUP_REFUSAL: &str = "Not run: this would open a dropdown list that only the user can use. Use browser_act select with this ref and the option value.";
+
 /// Why a checked native click is refused before any input while a frame on the page cannot report its events.
 pub const UNREPORTING_FRAME_REFUSAL: &str =
     "Not run: a frame on this page cannot report a click's events; read the page again";
@@ -135,6 +139,7 @@ pub fn validate_frame_point(
                 "authorization changed",
                 "keyboard target cannot keep focus; read the page and choose its current ref",
                 "native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text",
+                NATIVE_SELECT_POPUP_REFUSAL,
             ];
             return Err(if known.contains(&reason) {
                 reason
@@ -183,6 +188,27 @@ impl PreviewService {
         allowed: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     ) -> Result<Option<Vec<FrameAnswer>>, PreviewError> {
         self.frames_on_mount(id, frame, script, allowed, true).await
+    }
+
+    /// [`crate::PreviewEngine::declarative_closed_roots`] for the documents at `urls` of mount `id`.
+    ///
+    /// # Errors
+    /// A closed mount or a bounded native failure (the caller refuses).
+    pub async fn declarative_closed_roots_on_mount(
+        &self,
+        id: &MountId,
+        urls: Vec<String>,
+    ) -> Result<bool, PreviewError> {
+        let _activity = self.session_lock(&id.session_id).await;
+        if self.page_mount(&id.session_id).as_ref() != Some(id) {
+            return Err(EngineError::NotMounted.into());
+        }
+        Ok(self
+            .bounded(
+                "page source check",
+                self.engine.declarative_closed_roots(id, urls),
+            )
+            .await?)
     }
 
     async fn frames_on_mount(

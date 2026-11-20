@@ -10,7 +10,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 
 | ID | Name | Description | Tooltip |
 | --- | --- | --- | --- |
-| `auto-approve` | Full access | Vibe tools run without Vibe's approval card, including outside the folder. Vibe Work's protected actions still need your permission. | Use Full access access mode |
+| `auto-approve` | Full access | Vibe tools run without Vibe's approval card, including outside the folder. Vibe Work's protected actions still need your permission. | Use Full access |
 | `smart-approve` | Smart approve | A model checks each tool call: the calls it judges low-risk run, the others ask. | Use Smart approve access mode |
 | `accept-edits` | Accept edits | File edits run. Commands and anything outside the folder ask. | Use Accept edits access mode |
 | `ask` | Ask | Asks before tool use. | Use Ask access mode |

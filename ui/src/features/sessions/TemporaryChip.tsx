@@ -4,11 +4,13 @@
  * Depends on: AppContext, state/createStore, state/sessionTools. Called by: shell/Content (the session header).
  * Invariants: renders nothing for a normal session. A narrow header (a side panel open, or a chat area under
  * 1040 px) shows only "Temporary"; the whole explanation is the chip's tooltip, reachable without a mouse: the chip
- * is in the Tab order, the tooltip is its accessible description, it shows while the chip is hovered or focused,
- * and Esc hides it while focus stays.
+ * is in the Tab order, the explanation is its accessible name (it starts with the visible word, and every screen
+ * reader reads a focused element's name; NVDA does not read a focused note's description), the tooltip shows while
+ * the chip is hovered or focused, and Esc hides it while focus stays. The tooltip stays inside the session header
+ * (`tooltipPlace`): a side panel beside it is a native view painted above the page, which would cut it off.
  */
 import { Badge } from "../../components/Controls";
-import { type ReactElement, useId, useState } from "react";
+import { type ReactElement, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { useStore } from "../../state/createStore";
 import { NO_SESSION_TOOLS } from "../../state/sessionTools";
@@ -18,6 +20,23 @@ import { useApp } from "../shell/AppContext";
 const EXPLANATION =
   "Temporary chat: deleted when you quit. Files in a folder you chose stay changed; the chat's own folder is removed.";
 
+/** Smallest gap between the tooltip and the edge of the header it must stay inside, in CSS pixels. */
+const EDGE = 8;
+/** The tooltip's widest size (as in the stylesheet). */
+const WIDEST = 320;
+
+/** Where the tooltip goes: its left offset from the chip and its widest size, so it fits inside `area`. */
+export function tooltipPlace(
+  anchor: { left: number },
+  tipWidth: number,
+  area: { left: number; right: number },
+): { left: number; maxWidth: number } {
+  const maxWidth = Math.max(0, Math.min(WIDEST, area.right - area.left - 2 * EDGE));
+  const width = Math.min(tipWidth, maxWidth);
+  const start = Math.max(area.left + EDGE, Math.min(anchor.left, area.right - EDGE - width));
+  return { left: start - anchor.left, maxWidth };
+}
+
 /** The chip, or nothing. */
 export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElement | null {
   const { sessionTools } = useApp();
@@ -26,9 +45,21 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
   );
   const tip = useId();
   const [shown, setShown] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const tooltip = useRef<HTMLSpanElement>(null);
+  const [place, setPlace] = useState<{ left: number; maxWidth: number } | null>(null);
+  // Measured once the tooltip shows (it needs its own width), before the browser paints it.
+  useLayoutEffect(() => {
+    const box = anchor.current;
+    const tipBox = tooltip.current;
+    if (!shown || box === null || tipBox === null) return;
+    const area = (box.closest(".shead") ?? document.documentElement).getBoundingClientRect();
+    setPlace(tooltipPlace(box.getBoundingClientRect(), tipBox.getBoundingClientRect().width, area));
+  }, [shown]);
   if (!temporary) return null;
   return (
     <span
+      ref={anchor}
       className="temporary-explained"
       data-shown={shown ? "true" : "false"}
       onMouseEnter={() => {
@@ -42,9 +73,9 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
         presentation="temporary"
         data-testid="temporary-chip"
         tabIndex={0}
-        // A note role: Orca on Linux reads the description of a focused note, not of a plain focusable span.
+        // A note: a focusable span with a role; its name is the whole explanation, read on focus everywhere.
         role="note"
-        aria-describedby={tip}
+        aria-label={EXPLANATION}
         onFocus={() => {
           setShown(true);
         }}
@@ -58,11 +89,20 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
           }
         }}
       >
-        <span>
+        {/* Hidden from assistive tech: NVDA on WebView2 read this visible text instead of the note's name, so the
+            name is the only thing left to read (once, on every engine). */}
+        <span aria-hidden="true">
           Temporary<span className="temporary-more"> · deleted when you quit</span>
         </span>
       </Badge>
-      <span className="temporary-tooltip" role="tooltip" id={tip}>
+      {/* The chip's name already says this; the tooltip is for the eye. */}
+      <span
+        ref={tooltip}
+        className="temporary-tooltip"
+        id={tip}
+        aria-hidden="true"
+        style={place === null ? undefined : { left: place.left, maxWidth: place.maxWidth }}
+      >
         {EXPLANATION}
       </span>
     </span>

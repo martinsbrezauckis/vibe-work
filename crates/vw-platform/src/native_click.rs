@@ -29,6 +29,10 @@ pub type ClickPermission = Option<Arc<dyn Fn() -> bool + Send + Sync>>;
 /// adapter refusal keeps its own text. Vibe Work never brings its window forward for native input.
 pub const NOT_IN_FRONT: &str = "the browser window is not in front";
 
+/// Refusal while a native menu is open: the menu can undo a scripted selection when the person dismisses it.
+/// The engine passes this to the agent as it is.
+pub const MENU_OPEN: &str = "a menu or dropdown list is open in Vibe Work's window and only the user can use it, so nothing was sent. Ask the user to close the menu, then try again";
+
 /// The in-front check shared by the click, wheel and keyboard adapters of every OS. `shown`: the browser view and
 /// its window are visible (not hidden, minimized or in the tray). `front`: that window is the active, foreground or
 /// key window.
@@ -93,11 +97,9 @@ mod linux {
     use gdk::prelude::*;
     use glib::translate::ToGlibPtr;
     use gtk::prelude::*;
-    use javascriptcore::ValueExt;
     use std::sync::atomic::Ordering;
-    use webkit2gtk::WebViewExt;
 
-    use super::{Arc, AtomicBool, ClickReply};
+    use super::AtomicBool;
 
     /// Sends a press and release into the mapped `WebKitGTK` widget via GTK's event path.
     ///
@@ -135,6 +137,9 @@ mod linux {
         }
         if options != (0, 0, 0) && (button > 2 || !(1..=3).contains(&count) || modifiers > 15) {
             return Err("invalid native click options".into());
+        }
+        if super::linux_menu_open() {
+            return Err(super::MENU_OPEN.to_owned());
         }
         let widget: &gtk::Widget = view.upcast_ref();
         let top = widget
@@ -193,45 +198,6 @@ mod linux {
             }
         });
         Ok(())
-    }
-
-    /// Evaluates the final page guard and clicks in its GTK callback, without another queue hop.
-    pub fn click_checked(
-        view: &webkit2gtk::WebView,
-        point: (f64, f64),
-        script: &str,
-        sent: Arc<AtomicBool>,
-        allowed: super::ClickPermission,
-        reply: ClickReply,
-    ) {
-        let view = view.clone();
-        view.clone().evaluate_javascript(
-            script,
-            None,
-            None,
-            None::<&webkit2gtk::gio::Cancellable>,
-            move |answer| {
-                if reply.is_closed() {
-                    return;
-                }
-                let result = match answer {
-                    Ok(value) if value.is_boolean() && value.to_boolean() => {
-                        if reply.is_closed() {
-                            return;
-                        }
-                        if allowed.as_ref().is_some_and(|allowed| !allowed()) {
-                            Err("Not run: browser permission changed before native input"
-                                .to_owned())
-                        } else {
-                            click(&view, point, &sent)
-                        }
-                    }
-                    Ok(_) => Err("Not run: the page target changed before native input".to_owned()),
-                    Err(error) => Err(format!("Not run: final page validation failed: {error}")),
-                };
-                let _ = reply.send(result);
-            },
-        );
     }
 
     fn move_pointer(window: &gdk::Window, device: &gdk::Device, x: f64, y: f64, rx: f64, ry: f64) {
@@ -365,25 +331,32 @@ pub mod person;
 #[cfg(target_os = "linux")]
 pub use linux::click as linux_click;
 #[cfg(target_os = "linux")]
-pub use linux::click_checked as linux_click_checked;
-#[cfg(target_os = "linux")]
 pub use linux::click_options as linux_click_options;
 
 #[cfg(windows)]
 mod windows_click;
 #[cfg(windows)]
 pub use windows_click::click as windows_click;
-#[cfg(windows)]
-pub use windows_click::click_checked as windows_click_checked;
 
 #[cfg(target_os = "macos")]
 mod macos;
+/// Whether `AppKit`'s event-tracking loop is holding a native menu or gesture.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn macos_menu_open() -> bool {
+    macos::refuse_open_menu().is_err()
+}
+/// Whether this process currently holds a GTK grab. `WebKitGTK`'s native select popup grabs a
+/// `GtkWindow`; an ordinary background app has no grab. Call on the GTK UI thread.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn linux_menu_open() -> bool {
+    gtk::grab_get_current().is_some()
+}
 #[cfg(target_os = "macos")]
 pub use macos::after as macos_after;
 #[cfg(target_os = "macos")]
 pub use macos::click as macos_click;
-#[cfg(target_os = "macos")]
-pub use macos::click_checked as macos_click_checked;
 #[cfg(target_os = "macos")]
 pub use macos::click_options as macos_click_options;
 

@@ -1,6 +1,6 @@
 // Selector matching on an inert, redacted DOM snapshot; observe/extract use original nodes only after matching.
 // Counts and ancestor/relative predicates cannot inspect values that the ordinary reader withholds.
-/* global COPY_ATTRS, hideKeys, privateField, visible */
+/* global COPY_ATTRS, clip, hideKeys, privateField, visible */
 /* exported safeSelectors */
 const safeSelectors = elements => {
   const copies = new Map(), originals = new Map(), roots = new Map(), privateNodes = new Set();
@@ -30,11 +30,19 @@ const safeSelectors = elements => {
     if (privateValue) privateNodes.add(el);
     for (const attr of el.attributes) {
       if (attr.name.startsWith("on") || (privateValue && (COPY_ATTRS.includes(attr.name) || !identityAttributes.has(attr.name)))) continue;
-      copy.setAttributeNS(attr.namespaceURI, attr.name, hideKeys(attr.value, el));
+      // A clone keeps the attribute's exact name and namespace: a script-set `xmlns` or `xml:lang` has no
+      // namespace, which setAttributeNS refuses to recreate (the page's own setAttribute allowed it).
+      const copied = attr.cloneNode();
+      copied.value = hideKeys(attr.value, el);
+      copy.setAttributeNode(copied);
     }
     copies.set(el, copy);
     originals.set(copy, el);
-    if (privateValue || el.matches("script,style,noscript,template") || !visible(el)) continue;
+    // Native options have no layout box, but their text contributes to an ordinary select's label.
+    // Protected options remain excluded by privateValue, including when the select is beside this one.
+    const parentSelect = el.matches("option,optgroup") ? el.closest("select") : null;
+    if (privateValue || el.matches("script,style,noscript,template") ||
+        (!visible(el) && !(parentSelect && visible(parentSelect)))) continue;
     // Insert text in its original position once child elements have been copied below.
     for (const child of el.childNodes) {
       if (child.nodeType !== 3) continue;
@@ -108,8 +116,9 @@ const safeSelectors = elements => {
     const linked = String(copy?.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
       .map(id => query.text(root.getElementById?.(id))).filter(Boolean).join(" ");
     const labels = Array.from(el.labels || [], label => query.text(label)).filter(Boolean).join(" ");
-    if (!field) return copy?.getAttribute("aria-label") || linked || labels || null;
-    return copy?.getAttribute("aria-label") || linked || labels || copy?.getAttribute("title") || copy?.getAttribute("placeholder") || (field ? "Private field" : null);
+    const shown = copy?.getAttribute("aria-label") || linked || labels || (field &&
+      (copy?.getAttribute("title") || copy?.getAttribute("placeholder") || "Private field"));
+    return shown ? clip(shown, 160) : null;
   };
   // Text nodes were copied only from rendered, non-secret elements. Separate block boundaries
   // without consulting native form values or falling back to hidden textContent.

@@ -61,7 +61,7 @@ fn action_sentence<'a>(method: &str, params: &Value, base: &'a str) -> &'a str {
         "connector_catalog/auth/request" => "Open the sign-in page for this Mistral connector?",
         "connector_catalog/connect" => "Connect this Mistral connector?",
         "mcp/add" | "mcp_catalog/add" => {
-            "Add this MCP server? Vibe can connect to it from sessions, and its tools may run code or send data."
+            "Add this MCP server? Vibe can connect to it from chats, and its tools may run code or send data."
         }
         "mcp/login" | "mcp_catalog/login" => "Open the sign-in page for this MCP server?",
         "projectLinks/inspectRoot" => "Inspect this project root for a link?",

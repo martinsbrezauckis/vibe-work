@@ -242,8 +242,7 @@ fn delete_session(params: &Value) -> Adjusted {
         client_user_message_id: None,
         user_entry_ids: Vec::new(),
         confirm: Some(
-            "Delete this session and its history permanently (the Vibe CLI loses it too)"
-                .to_owned(),
+            "Delete this chat and its history permanently (the Vibe CLI loses it too)".to_owned(),
         ),
     }
 }

@@ -1,7 +1,7 @@
 //! Installs the helper and selected native host. Uses checked setup I/O; macOS browser failures are isolated.
 use super::{
     ChromeControlConfig, ChromeSetupView, HOST_NAME, Made, Path, RECEIPT, Receipt, edge, firefox,
-    helper_name, home_of, manifest_for, manifest_path, packaged_helper, places, problem,
+    helper_name, home_of, manifest_for, manifest_path, packaged_helper, places, prior, problem,
     read_receipt, registration, registration_lock, registry_set, targets, view_for, write_file,
 };
 
@@ -48,10 +48,14 @@ fn install_inner(
     let mut made = Made::default();
     let result = (|| -> Result<Receipt, String> {
         let helper = state.join("bin").join(helper_name());
+        // Read before the helper copy is written, so an old registration naming this helper path is judged by
+        // what was there.
+        let mut replaced = None;
         for target in targets(&home, config)
             .into_iter()
             .filter(|t| t.name == browser)
         {
+            replaced = prior::check(config, &target, state)?;
             if target.name == "Mozilla Firefox" {
                 firefox::require_unregistered(
                     config,
@@ -77,7 +81,12 @@ fn install_inner(
             match (&target.hosts, target.registry) {
                 (Some(hosts), _) => {
                     let file = hosts.join(format!("{HOST_NAME}.json"));
-                    registration::ensure_manifest(config, &file, &manifest)?;
+                    registration::ensure_manifest_over(
+                        config,
+                        &file,
+                        &manifest,
+                        replaced.as_ref().and_then(|s| s.manifest_bytes.as_deref()),
+                    )?;
                     made.written.push((file.clone(), manifest.clone()));
                     made.files.push(file);
                 }
@@ -89,7 +98,7 @@ fn install_inner(
                         made.files.push(file.clone());
                     }
                     let key = format!(r"{root}\{HOST_NAME}");
-                    registry_set(&key, &file)?;
+                    registry_set(&key, &file, replaced.as_ref())?;
                     made.keys.push((key.clone(), file.clone()));
                     receipt.registry_keys.push(key);
                 }
@@ -98,6 +107,7 @@ fn install_inner(
             receipt.browsers.push(target.name.to_owned());
             receipt.user_data.push(target.user_data);
         }
+        made.notice = replaced.map(|s| s.notice);
         receipt.selected_browsers = Some(receipt.browsers.clone());
         receipt.files.clone_from(&made.files);
         let bytes = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
@@ -107,6 +117,9 @@ fn install_inner(
     match result {
         Ok(_) => {
             drop(held);
+            if let Some(notice) = made.notice.take() {
+                config.setup_notice.set(notice);
+            }
             problem::finish(config, state, browser, Ok(()))?;
             Ok(view_for(config, Some(state), vibe_home, browser))
         }

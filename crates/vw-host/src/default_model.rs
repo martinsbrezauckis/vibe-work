@@ -1,11 +1,11 @@
-//! Seeds the product's model choice in its own `VIBE_HOME` on first start.
+//! Keeps an offline Large 4 fallback only while the provider's catalog is disabled.
 //!
-//! Depends on the TOML parser; written by [`crate::startup_config`]. Runs in [`crate::launch::ProductLaunch`] before
-//! the other config defaults, and is the one startup step whose failed write fails the launch. Existing Large 4
-//! entries gain the missing published prices, the missing output-token cap, the missing thinking levels, the missing
-//! default level (High) and the missing compaction point (800,000 tokens);
-//! a window or price that still holds the value an earlier version seeded takes the published one.
-//! Every other configured value and the user's model choice remain unchanged.
+//! Depends on the TOML parser; written by [`crate::startup_config`] after catalog policy is staged. Product launch
+//! applies the offline fallback; the first catalog-on launch in either mode removes an exact app seed. A failed
+//! product write stops launch; development logs it and continues. With the catalog off,
+//! existing Large 4 entries gain missing prices, output cap, thinking levels and compaction point; old seeded values
+//! take their published updates. With the catalog on, an exact app seed is removed so Vibe uses the provider's model
+//! list on the first catalog migration. A customized model row and unrelated settings remain unchanged.
 
 use std::io;
 use std::path::Path;
@@ -17,8 +17,7 @@ const CACHED_INPUT_PRICE: f64 = 0.07;
 const OUTPUT_PRICE: f64 = 2.10;
 // The context window the Mistral API reports for mistral-large-4 (`max_context_length`).
 const WINDOW: i64 = 1_048_576;
-// The values earlier versions seeded: an entry still holding one was never changed by its user,
-// so it takes the published value (any other value is the user's and stays).
+// Recognized seed values take the current published value; a different value stays unchanged.
 const OLD_WINDOW: i64 = 1_000_000;
 const OLD_INPUT_PRICE: f64 = 0.68;
 const OLD_OUTPUT_PRICE: f64 = 2.09;
@@ -90,6 +89,17 @@ pub fn ensure(vibe_home: &Path) -> io::Result<bool> {
 /// This step's edit for [`crate::startup_config`]: the first config when `missing` (no file, no text yet), else
 /// [`with_missing_defaults`].
 pub(crate) fn edit(existing: &str, missing: bool) -> (Option<String>, ModelDefaults) {
+    if existing
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|config| config.get("experimental_enable_model_catalog")?.as_bool())
+        == Some(true)
+    {
+        return match without_app_seed(existing) {
+            Some(text) => (Some(text), ModelDefaults::Filled),
+            None => (None, ModelDefaults::Unchanged),
+        };
+    }
     if missing {
         return (Some(FIRST_CONFIG.to_owned()), ModelDefaults::Created);
     }
@@ -97,6 +107,28 @@ pub(crate) fn edit(existing: &str, missing: bool) -> (Option<String>, ModelDefau
         Some(text) => (Some(text), ModelDefaults::Filled),
         None => (None, ModelDefaults::Unchanged),
     }
+}
+
+/// Removes only the exact local row previously seeded by this app. A customized row and
+/// the person's active-model choice stay for the catalog and Core to resolve.
+fn without_app_seed(original: &str) -> Option<String> {
+    // Compare after normalizing only recognized seed values; a different value stays different.
+    let comparable = with_missing_defaults(original).unwrap_or_else(|| original.to_owned());
+    let parsed: toml::Table = comparable.parse().ok()?;
+    let seeded: toml::Table = FIRST_CONFIG.parse().ok()?;
+    let seed = seeded.get("models")?.as_array()?.first()?;
+    let index = parsed
+        .get("models")?
+        .as_array()?
+        .iter()
+        .position(|row| row == seed)?;
+    let mut config: DocumentMut = original.parse().ok()?;
+    let models = config.get_mut("models")?.as_array_of_tables_mut()?;
+    models.remove(index);
+    if models.is_empty() {
+        config.remove("models");
+    }
+    Some(config.to_string())
 }
 
 /// The config text with the missing prices, output cap, thinking levels, default level and
@@ -202,4 +234,61 @@ fn with_missing_defaults(original: &str) -> Option<String> {
         }
     }
     changed.then(|| config.to_string())
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::{ModelDefaults, edit};
+
+    // PREDICT: the startup editor still writes the local Large 4 model and pins it as the active
+    // default even when the catalog is enabled. A later catalog cannot become the model source.
+    #[test]
+    fn catalog_enabled_fresh_start_has_no_app_model_pin() {
+        let (text, outcome) = edit("experimental_enable_model_catalog = true\n", false);
+        assert_eq!(outcome, ModelDefaults::Unchanged);
+        assert!(text.is_none());
+    }
+
+    // PREDICT: a previous app-owned Large 4 row remains in config.toml and overrides the catalog.
+    #[test]
+    fn catalog_enabled_upgrade_retires_only_the_exact_app_seed() {
+        let old = format!(
+            "experimental_enable_model_catalog = true\n{}",
+            super::FIRST_CONFIG
+        );
+        let (text, outcome) = edit(&old, false);
+        assert_eq!(outcome, ModelDefaults::Filled);
+        let next: toml::Table = text.unwrap().parse().unwrap();
+        assert_eq!(next["active_model"].as_str(), Some("large-4"));
+        assert!(!next.contains_key("models"));
+
+        let legacy = old
+            .replace(
+                "max_context_length = 1048576",
+                "max_context_length = 1000000",
+            )
+            .replace("input_price = 0.7", "input_price = 0.68")
+            .replace("output_price = 2.1", "output_price = 2.09");
+        let (text, outcome) = edit(&legacy, false);
+        assert_eq!(outcome, ModelDefaults::Filled);
+        let next: toml::Table = text.unwrap().parse().unwrap();
+        assert_eq!(next["active_model"].as_str(), Some("large-4"));
+        assert!(!next.contains_key("models"));
+
+        let custom = old.replace(
+            "display_name = \"Mistral Large 4\"",
+            "display_name = \"Mine\"",
+        );
+        let (text, outcome) = edit(&custom, false);
+        assert_eq!(outcome, ModelDefaults::Unchanged);
+        assert!(text.is_none());
+
+        let off = old.replace(
+            "experimental_enable_model_catalog = true",
+            "experimental_enable_model_catalog = false",
+        );
+        let (text, outcome) = edit(&off, false);
+        assert_eq!(outcome, ModelDefaults::Unchanged);
+        assert!(text.is_none());
+    }
 }

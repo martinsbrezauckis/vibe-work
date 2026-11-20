@@ -68,7 +68,7 @@ function OpenDialog({ url }: { url: string }): ReactElement {
           <Button
             data-testid="transcript.link-dialog-open-link"
             type="button"
-            appearance="dialog"
+            variant="primary"
             aria-label="Open link in browser"
             title="Open link in browser"
             onClick={() => {

@@ -1,5 +1,6 @@
 //! Write and policy falsifiers sent directly to the broker, bypassing the shim and any hook.
 //! Fake gh's invocation file must remain absent for every refusal, including alternate flag spellings.
+//! PREDICT: gh writes stay refused and the push-tool pointer names its required Developer setting.
 
 mod support;
 
@@ -14,7 +15,11 @@ fn refusal_keeps_the_diagnosis_and_addresses_remote_actions_to_the_user() {
         text.contains("only supported read-only gh commands"),
         "{text}"
     );
-    assert!(text.ends_with("For remote changes, ask the user to use Push or Create PR in the folder's Changes tab, or make the change on the code hosting site.\n"), "{text}");
+    assert!(text.contains("For remote changes, ask the user to use Push or Create PR in the folder's Changes tab, or make the change on the code hosting site."), "{text}");
+    assert!(
+        text.contains("push tool (requires Developer permissions)"),
+        "{text}"
+    );
     assert!(!text.contains("broker"), "{text}");
     assert_eq!(reply.exit_code, 1);
     assert!(!harness.cwd.path().join("runs").exists());

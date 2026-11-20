@@ -1,6 +1,7 @@
 /**
- * The General Settings entry to session copies (git worktrees): Review copies opens the welcome inventory; with no
- * copies the row says so instead (the inventory itself is hidden while empty).
+ * The General Settings entry to session copies (git worktrees): Review copies opens the welcome inventory of copies
+ * no chat uses anymore; with none to review the row says so, and how many copies chats still use (the inventory
+ * itself is hidden while empty).
  * Depends on AppContext, shared controls, the worktrees store and openCopies; called by SettingsPage.
  */
 import { useEffect } from "react";
@@ -16,19 +17,29 @@ function useCopyCount(worktrees: Worktrees): number {
   const count = useStore(worktrees.store, (s) => s.orphans.length);
   useEffect(() => {
     void worktrees.loadOrphans();
+    void worktrees.countCopies();
   }, [worktrees]);
   return count;
+}
+
+/** The row's text with nothing to review: copies chats still use are named, so it never reads as "no copies". */
+function noneText(copies: number | null): string {
+  if (copies === null || copies <= 0) return "None right now";
+  return copies === 1
+    ? "None to review: 1 in use by a chat"
+    : `None to review: ${String(copies)} in use by chats`;
 }
 
 function Row({ worktrees }: { worktrees: Worktrees }) {
   const app = useApp();
   const count = useCopyCount(worktrees);
+  const copies = useStore(worktrees.store, (s) => s.copies);
   return (
     <div className="check" data-setting="session-copies">
       <span>Chat copies</span>
       {count === 0 ? (
         <span className="d" data-testid="settings.copies-settings-none">
-          None right now
+          {noneText(copies)}
         </span>
       ) : (
         <Button

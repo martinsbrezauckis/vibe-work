@@ -44,7 +44,7 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
             assert_eq!(browser.addon(shared).state, AddonState::ChromeClosed);
             assert_eq!(
                 browser.addon(shared).extension_version.as_deref(),
-                Some("0.1.6")
+                Some("0.2.6")
             );
             assert_eq!(
                 installation::paired_directory(shared, browser).as_deref(),
@@ -55,7 +55,7 @@ async fn disabled_external_copies_do_not_block_the_paired_browser_or_its_launch(
         installation::forget_directory(chrome, browser);
         let profile = format!("{}:p", browser.id());
         let connected =
-            json!({"profiles":[{"profileId":profile,"connected":true,"extensionVersion":"0.1.6"}]});
+            json!({"profiles":[{"profileId":profile,"connected":true,"extensionVersion":"0.2.6"}]});
         test_support::observe_status(shared, &connected);
         assert_eq!(browser.addon(shared).state, AddonState::Connected);
         assert_eq!(
@@ -140,8 +140,8 @@ async fn deleting_an_uncorrelated_folder_keeps_both_profile_history_rows() {
         test_support::observe_status(
             shared,
             &json!({"profiles":[
-                {"profileId":format!("{}:p", browser.id()),"connected":true,"extensionVersion":"0.1.6"},
-                {"profileId":second,"connected":true,"extensionVersion":"0.1.6"}
+                {"profileId":format!("{}:p", browser.id()),"connected":true,"extensionVersion":"0.2.6"},
+                {"profileId":second,"connected":true,"extensionVersion":"0.2.6"}
             ]}),
         );
         preferences(&pending, &chrome.config.extension_id, &json!(8192)).unwrap();

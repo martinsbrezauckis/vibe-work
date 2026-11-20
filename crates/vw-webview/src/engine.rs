@@ -160,6 +160,33 @@ mod title;
 mod win_guard;
 
 impl PreviewEngine for TauriEngine {
+    fn select_menu_open(&self, id: &MountId) -> EngineFuture<'_, bool> {
+        let webview = self.webview(id);
+        Box::pin(async move {
+            let webview = webview?;
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            {
+                crate::platform::with_native(
+                    &webview,
+                    "checking a native menu",
+                    Duration::from_secs(2),
+                    move |_native, reply| {
+                        #[cfg(target_os = "macos")]
+                        let open = vw_platform::native_click::macos_menu_open();
+                        #[cfg(target_os = "linux")]
+                        let open = vw_platform::native_click::linux_menu_open();
+                        let _ = reply.send(Ok(open));
+                    },
+                )
+                .await
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                let _ = webview;
+                Ok(false)
+            }
+        })
+    }
     fn page_window(
         &self,
         page: &str,
@@ -225,6 +252,41 @@ impl PreviewEngine for TauriEngine {
                 .snapshot()
         });
         Box::pin(std::future::ready(result))
+    }
+    fn declarative_closed_roots(&self, id: &MountId, urls: Vec<String>) -> EngineFuture<'_, bool> {
+        // Windows: the protected scan already entered every closed root through the DevTools protocol.
+        #[cfg(windows)]
+        let result: EngineFuture<'_, bool> = {
+            let _ = (id, urls);
+            Box::pin(std::future::ready(Ok(false)))
+        };
+        // Linux: the documents' sources as `WebKitGTK` delivered them (request log).
+        #[cfg(target_os = "linux")]
+        let result: EngineFuture<'_, bool> = {
+            let found = self.webview(id).and_then(|_| {
+                let log = self
+                    .request_logs
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&id.label)
+                    .cloned()
+                    .ok_or(EngineError::NotMounted)?;
+                let _ = urls;
+                let declarative = log
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .declarative();
+                Ok(declarative)
+            });
+            Box::pin(std::future::ready(found))
+        };
+        #[cfg(target_os = "macos")]
+        let result: EngineFuture<'_, bool> = {
+            let _ = urls;
+            let webview = self.webview(id);
+            Box::pin(async move { crate::mac_agent::declarative_closed_roots(&webview?).await })
+        };
+        result
     }
     fn site_cookies(
         &self,

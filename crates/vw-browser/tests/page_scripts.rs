@@ -23,6 +23,75 @@ async fn script(rig: &Rig, expression: &str) -> Result<Value, String> {
         .await
         .map_err(|e| e.text)
 }
+// PREDICT: a page script can read protected form values in Full access and return them as JSON.
+#[tokio::test]
+async fn protected_fields_refuse_page_scripts_before_execution() {
+    let rig = Rig::new().await;
+    rig.engine.eval("document.body.innerHTML = '<label>Card number <input value=4111111111119917></label><label>PIN <input value=4471></label><label>Password <input type=password value=PWVAL-1></label>'").await;
+    let result = rig
+        .browser
+        .act(
+            SESSION,
+            vw_browser::parse(
+                &json!({"action":"raw.execute","expression":"window.shouldNotRun = true"}),
+            )
+            .unwrap(),
+            Actor::Agent,
+            &NoNavigation,
+        )
+        .await;
+    let error = result.unwrap_err();
+    assert!(error.text.contains("Protected field values were withheld"));
+    assert_eq!(error.protected_values_withheld, Some(3));
+    assert_eq!(
+        rig.engine.eval("window.shouldNotRun === undefined").await,
+        json!(true)
+    );
+}
+#[tokio::test]
+async fn protected_fields_refuse_other_raw_page_outputs() {
+    let rig = Rig::new().await;
+    rig.engine.eval("document.body.innerHTML = '<label>Card number <input value=4111111111119917></label><label>PIN <input value=4471></label><label>Password <input type=password value=PWVAL-1></label>'").await;
+    for request in [
+        json!({"action":"page.add_style","css":"body { color: red; }"}),
+        json!({"action":"storage.read","area":"local","keys":["fixture"]}),
+        // A payment page can copy the typed card number into a cookie.
+        json!({"action":"cookies.read"}),
+        json!({"action":"network.headers","requestId":"fixture","unredacted":true}),
+        json!({"action":"console.read"}),
+        json!({"action":"page.errors"}),
+    ] {
+        let error = rig
+            .browser
+            .act(
+                SESSION,
+                vw_browser::parse(&request).unwrap(),
+                Actor::Agent,
+                &NoNavigation,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.text.contains("Protected field values were withheld"),
+            "{request}: {}",
+            error.text
+        );
+        // The first refusal counts the page's fields and marks the site; later raw actions are refused for the
+        // site before the page is counted.
+        let first = request["action"] == "page.add_style";
+        assert_eq!(
+            error.protected_values_withheld,
+            Some(if first { 3 } else { 0 }),
+            "{request}"
+        );
+        if !first {
+            assert_eq!(
+                error.text,
+                vw_browser::protected_origins::NOT_RUN_SITE_HAS_FIELD
+            );
+        }
+    }
+}
 #[tokio::test]
 async fn page_script_resolves_once_and_reports_real_failures() {
     let rig = Rig::new_in_world(true).await;

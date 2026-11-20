@@ -47,6 +47,9 @@ pub enum VaultError {
     /// `create` was called although a vault exists.
     #[error("a vault already exists on this computer")]
     AlreadyExists,
+    /// [`crate::Vault::set_aside`] would not move this vault; nothing moved.
+    #[error("the vault was not set aside: {0}")]
+    SetAsideRefused(SetAsideRefusal),
     /// The vault is locked (no passphrase or remembered device used yet).
     #[error("the vault is locked")]
     Locked,
@@ -80,6 +83,20 @@ pub enum VaultError {
         /// The OS error.
         source: std::io::Error,
     },
+}
+
+/// Why a forgotten-password vault was not set aside (module `set_aside`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SetAsideRefusal {
+    /// The vault is open; there is nothing to set aside.
+    #[error("the vault is open")]
+    VaultOpen,
+    /// A ShellX or Vault-app vault, shared with other apps: never moved by this app.
+    #[error("the vault is shared with other apps")]
+    SharedVault,
+    /// This computer keeps an unlock key for it; a new vault would replace that key.
+    #[error("this computer still keeps an unlock key for the vault")]
+    RememberedVault,
 }
 
 impl VaultError {

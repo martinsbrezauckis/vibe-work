@@ -113,7 +113,7 @@ export function CommitDialog({
           <Button
             data-testid="git.commit-dialog-commit-3"
             type="button"
-            appearance="dialog"
+            variant="primary"
             disabled={!can}
             data-action="commit"
             onClick={() => {

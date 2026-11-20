@@ -49,12 +49,15 @@ const armPointReceipt = (check, target) => {
     if (!event.isTrusted || options.count === 0 && !options.wheel || result.dispatchedAt === null) return;
     if (event.type === "pointerdown" || event.type === "mousedown") labelPress = null;
     const path = event.composedPath();
+    // A select that reached the point after the final check (or a label's select) never gets the agent's press.
+    const select = REQ.nativeSelectPopup && !REQ.nativeUser
+      && (path.some(node => node?.localName === "select") || control?.localName === "select");
     const forwarding = labelPress && event.type === "click" && event.button === 0;
     const allowedForward = forwarding && control && path.includes(control)
       && event.clientX === labelPress.x && event.clientY === labelPress.y;
     // Frame motion, clock rounding and native compatibility-event fields cannot identify the input source.
     // The marked interval always enforces target identity; fields and timing qualify the receipt below.
-    if (result.blocked || !check?.target || !sameAssociation() || !hitTarget()
+    if (result.blocked || select || !check?.target || !sameAssociation() || !hitTarget()
       || (forwarding ? !allowedForward : !path.includes(target))) {
       // Enforce first: collecting a diagnostic must never let an event through if a DOM read fails.
       event.preventDefault();

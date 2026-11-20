@@ -264,10 +264,10 @@ impl Core {
                 if durable {
                     "Recovery metadata was saved separately."
                 } else {
-                    "Recovery metadata is available only for this run; keep the session ID and copy path before quitting."
+                    "Recovery metadata is available only for this run; keep the chat ID and copy path before quitting."
                 },
                 if archive.is_err() {
-                    " The archive did not finish; Review checks whether the session still uses the copy."
+                    " The archive did not finish; Review checks whether the chat still uses the copy."
                 } else {
                     ""
                 },

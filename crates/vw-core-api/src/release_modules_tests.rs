@@ -14,7 +14,7 @@ async fn safari_settings_and_agent_facts_follow_the_off_by_default_module() {
         value["view"]["safari"].is_object(),
         cfg!(feature = "your-safari")
     );
-    let addons = crate::chrome_control::installation::addons(&core.shared);
+    let addons = crate::chrome_control::addons(&core.shared);
     assert_eq!(
         addons
             .as_array()

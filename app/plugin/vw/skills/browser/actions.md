@@ -8,7 +8,7 @@
 | Group | `action` names |
 |---|---|
 | Pages, tabs | `navigate`, `back`, `forward`, `reload`, `list_tabs`, `close_tab` |
-| Input | `click`, `page.click`, `page.double_click`, `page.right_click`, `page.middle_click`, `page.triple_click`, `hover`, `drag`, `move`, `wheel`, `resolve_point`, `scroll`, `scroll_position`, `type`, `insert_text`, `focus`, `blur`, `select`, `check`, `press`, `upload`, `form`, `highlight`, `wait` |
+| Input | `click` (same as `page.click`), `page.double_click`, `page.right_click`, `page.middle_click`, `page.triple_click`, `hover`, `drag`, `move`, `wheel`, `resolve_point`, `scroll`, `scroll_position`, `type`, `insert_text`, `focus`, `blur`, `select`, `check`, `press`, `upload`, `form`, `highlight`, `wait` |
 | Dialogs, sign-in | `page.dialogs`, `page.dialog.accept`, `page.dialog.dismiss`, `page.dialog.prompt`, `auth.basic`, `fill` (skill item 6) |
 | Downloads | `files.download`, `files.wait_download`, `files.list_downloads`, `files.save_download` |
 | Windows, screenshots | `window.open`, `window.focus`, `window.close`, `window.list`, `window.resize`, `capture.screenshot` |
@@ -22,7 +22,7 @@
 | `navigate`, `back`, `forward`, `reload` | `{url}`; reload `bypassCache: true` | Reload receipt: page and whether still loading |
 | `list_tabs` | more: `tab: result.nextTab` | `tabs`: id/site/owner/active/suspended; title/URL under `untrustedPageContent.tabs` |
 | `close_tab {tab}`, `hover {ref}`, `drag {ref, to}`, `check {ref, checked}`, `press {key, ref?}` | | |
-| `click`, `page.click`, `page.double_click`, `page.right_click`, `page.middle_click`, `page.triple_click` | `{ref}` or `{x, y, ref?}` (viewport CSS px); `modifiers: ["Alt", "Control", "Meta", "Shift"]` | These use checked native input; a failure after input says it may have acted and must not be repeated blindly |
+| `click` (same as `page.click`), `page.double_click`, `page.right_click`, `page.middle_click`, `page.triple_click` | `{ref}` or `{x, y, ref?}` (viewport CSS px); `modifiers: ["Alt", "Control", "Meta", "Shift"]` | These use checked native input; a failure after input says it may have acted and must not be repeated blindly |
 | `type` | `{ref, text, submit?}` | Replaces text; submit presses Enter; `clear:false` inserts like `insert_text` |
 | `insert_text`, `focus`, `blur` | `{ref, text}` / `{ref}` | Insert: at the selection, no key events, keeps surrounding text, reads the value back; focus/blur verify focus. Password and other secret fields remain unavailable |
 | `select` | `{ref, value}` or `{ref, values}` | Multiple native options; `values: []` clears them |
@@ -38,7 +38,7 @@ Native date fields take `YYYY-MM-DD`; text datepickers the page's displayed form
 
 Native input needs the Vibe Work window in front; it never brings itself forward. Behind another app, minimized or in the tray, nothing is sent: ask the user to bring it forward, read the page, then retry.
 
-Text entry, `insert_text` and page keys use the native keyboard path with trusted events and a settled read-back. A changed document or focus refuses input; an interrupted dispatched operation is never retried. Read the page after a failed or unknown result before another action. An input with an unresolved native receipt cannot be repeated by the agent in the same document, also after reading again. Native select popups and date/colour picker keys give no receipt: use `select` or the field's value action. Clipboard shortcuts refuse because they bypass the protected clipboard; use `clipboard.read`/`clipboard.write` and `insert_text` instead. Copy/cut/paste authority remains Full only.
+Text entry, `insert_text` and page keys use the native keyboard path with trusted events and a settled read-back. Changed documents or focus refuse input; never retry interrupted dispatch. Read after failure or unknown result before another action. Never repeat unresolved native input in the same document, even after reading. Native select popups and date/colour picker keys give no receipt: use `select` or the field's value action. On macOS and Linux use `select` for dropdowns: agent clicks and keys that would open the system list are refused before it opens. Only the user can use an open menu; ask them to close it before `select`. Clipboard shortcuts refuse because they bypass the protected clipboard; use `clipboard.read`/`clipboard.write` and `insert_text` instead. Copy/cut/paste authority remains Full only.
 
 ## Reading options (`browser_read`)
 
@@ -71,7 +71,7 @@ Ask: ordinary GET downloads need no approval; saving with `files.save_download` 
 | `window.focus`, `window.close` | `{windowId}` | Window actions run in Ask, retain Stop and ownership checks, and never target another chat. The engine limits live windows; close one to free a slot |
 | `window.list` | | Focus, visibility, size of this chat's windows |
 | `window.resize` | `{windowId, width, height}` | 400–4096 × 300–4096 content px; main app window ids refuse |
-| `capture.screenshot` | `{ref?}` or `{clip?: {x, y, width, height}}` (CSS px) | PNG of one visible element or rectangle; neither = viewport. Scroll offscreen elements into view first. The usual vault screenshot restrictions apply. Below Full access, a capture that would show a protected value is refused. |
+| `capture.screenshot` | `{ref?}` or `{clip?: {x, y, width, height}}` (CSS px) | PNG of one visible element or rectangle; neither = viewport. Scroll offscreen elements into view first. The usual vault screenshot restrictions apply. In every mode a capture that shows a protected value is refused. |
 
 `file:` navigation: one PDF, HTML or image from the chat's first folder, ≤32 MiB. The built-in browser grants the selected document only; other local paths and linked local resources remain unavailable. `document_read` reads a saved PDF when the viewer shows no text.
 

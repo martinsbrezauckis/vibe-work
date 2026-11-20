@@ -215,7 +215,7 @@ pub(crate) fn cancel_browser_chat(shared: &Shared, chat: &str) {
         .collect();
     for id in entries {
         shared.asks.settle(&format!("callback:{id}"), Outcome::Cancelled {
-            reason: "The user changed this chat's browser profile. Open a fresh session in the selected profile.".into(),
+            reason: "The user changed this chat's browser profile. Open a fresh browser session in the selected profile.".into(),
         });
         shared.ask_grants.forget_callback(&id);
     }

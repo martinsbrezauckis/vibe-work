@@ -1,14 +1,14 @@
-//! Vibe Work's own facts for Mistral Large 4, for what Mistral's own Large 4 entry does not report: the window the
-//! Mistral API reports (1,048,576 tokens) and the published prices. They live in one `[[models]]` entry for Mistral's alias in Vibe
-//! Work's `config.toml`, identified by the exact fields and values we write (no `name` or `provider`). Vibe's own
+//! Legacy app facts for an experiment-backed Mistral Large 4 entry that did not report its window or prices.
+//! The catalog supplies its own model facts; the app does not add this entry to catalog models. The legacy facts live
+//! in one `[[models]]` entry for Mistral's alias in Vibe Work's `config.toml`, identified by the exact fields and
+//! values we write (no `name` or `provider`). Vibe's own
 //! config write drops comments, so known Large 4 aliases are recognised without the comment or side record.
 //! Entries with different content are the person's and keep every byte. Vibe deep-merges the facts entry onto
 //! Mistral's entry, so Vibe's compaction, the context
 //! meter and the session's prices keep working.
 //!
-//! Mistral's own values win: the launch check (`model_check`) reads Mistral's entry with this entry taken out, and
-//! writes back only the facts Mistral's entry still lacks. Prices are never in Vibe's model views
-//! (`app_server/config.py` `ModelConfigView`), so ours always apply.
+//! Mistral's own values win: the launch check (`model_check`) reads a legacy experiment entry with this entry taken
+//! out, and writes back only the facts that entry still lacks. Catalog entries are left untouched.
 //!
 //! Depends on: `toml_edit`, the private atomic writer. Called by: `model_check`.
 //! Invariant: the record never names an entry the file may lack: it is cleared before a write that takes our entry

@@ -98,13 +98,14 @@ pub(super) async fn prepare(
         vw_browser::parse_form(args)?;
     }
     target(shared.chrome_control.config.available(), args)?;
+    shared.browser_ref_origins.check_builtin(owner, args)?;
     if args.get("steps").is_some() {
         return super::browser_batch::prepare(shared, owner, source, call, args)
             .await
             .map(Some);
     }
-    if crate::chrome_control::builtin::activates_send(args)
-        && crate::chrome_control::check::mode(shared, owner).as_deref() == Some("ask")
+    if crate::chrome_control::builtin_activates_send(args)
+        && crate::chrome_control::chat_mode(shared, owner).as_deref() == Some("ask")
     {
         return super::browser_sending::prepare(shared, owner, source, call, args)
             .await
@@ -179,11 +180,16 @@ pub(crate) async fn call(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
-    let allow_send = crate::chrome_control::builtin::may_send(
-        crate::chrome_control::check::mode(shared, session_id).as_deref(),
+    let allow_send = crate::chrome_control::builtin_may_send(
+        crate::chrome_control::chat_mode(shared, session_id).as_deref(),
         &args,
     );
     let mut answer = call_with_sending(shared, session_id, tool, args, allow_send).await?;
+    shared.browser_ref_origins.note(
+        session_id,
+        None,
+        crate::browser_ref_origins::refs_in(&answer),
+    );
     crate::paused_tools_gate::note_resumed(shared, session_id, &mut answer);
     Ok(answer)
 }
@@ -274,6 +280,7 @@ fn validate_call(
     vw_agent_tools::browser_input::validate(tool, args)?;
     if tool == names::BROWSER_ACT {
         shared.browser_dialogs.check()?;
+        shared.browser_ref_origins.check_builtin(session_id, args)?;
     }
     if args.get("steps").is_some() {
         return Err(
@@ -295,7 +302,7 @@ fn validate_call(
     }
     target(shared.chrome_control.config.available(), args)?;
     if tool == names::BROWSER_ACT {
-        crate::chrome_control::builtin::check_full(
+        crate::chrome_control::builtin_check_full(
             shared.access.remembered(session_id).as_deref(),
             args,
         )?;
@@ -338,7 +345,7 @@ async fn act_on_page(
         let mut receipt = driver
             .fill_form(page, &args, Actor::Agent, &nav, allow_send)
             .await?;
-        crate::chrome_control::builtin::explain_form_send(&mut receipt);
+        crate::chrome_control::builtin_explain_form_send(&mut receipt);
         attach_tab(shared, page, &mut receipt);
         return Ok(receipt);
     }

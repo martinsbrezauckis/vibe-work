@@ -11,6 +11,7 @@
     reason = "fixture folders and the Firefox fact must exist for the test to mean anything"
 )]
 use super::*;
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 type Opened = Arc<Mutex<Vec<String>>>;
@@ -246,7 +247,7 @@ async fn a_shared_firefox_page_reaches_the_chat_without_giving_the_agent_the_per
         .unwrap();
     let calls = test_support::answering(
         &core.shared,
-        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Selected words"}}}),
+        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Selected words"},"agentData":{"url":"https://page.test/","title":"Shared page","text":"Selected words"}}}),
     );
     owner::observe(
         &Arc::downgrade(&core.shared),

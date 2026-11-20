@@ -156,7 +156,7 @@ async fn catalog(
         if !cursors.insert(next.to_owned()) {
             return Err(CoreError::new(
                 ErrorCode::ServerError,
-                "Vibe repeated a session-listing cursor",
+                "Vibe repeated a chat-listing cursor",
             ));
         }
         params["cursor"] = Value::String(next.to_owned());

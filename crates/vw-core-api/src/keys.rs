@@ -169,6 +169,9 @@ pub enum KeyRequest {
     /// Locks the vault and deletes its kept key (model requests wait for the next unlock, also
     /// after a restart).
     LockVault {},
+    /// Sets the locked private vault aside after the person confirmed a forgotten password: one folder rename,
+    /// nothing deleted; answers where it is kept. Refused for an open, shared or remembered vault. User-only.
+    SetAsideVault {},
     /// Turns "Lock the vault when Vibe Work quits" on or off (takes effect at the quit).
     SetLockVaultOnQuit {
         /// On: quitting locks the vault and deletes its kept key.
@@ -442,6 +445,11 @@ pub(crate) fn reason(error: &KeyError) -> &'static str {
             VaultError::Conflict { .. } => "conflict",
             VaultError::Corrupt(_) => "corrupt",
             VaultError::Io { .. } => "io",
+            VaultError::SetAsideRefused(why) => match why {
+                vw_vault::SetAsideRefusal::VaultOpen => "vaultOpen",
+                vw_vault::SetAsideRefusal::SharedVault => "sharedVault",
+                vw_vault::SetAsideRefusal::RememberedVault => "rememberedVault",
+            },
         },
         KeyError::KeyInUse => "keyInUse",
         KeyError::NoKey => "noKey",
@@ -535,6 +543,14 @@ pub(crate) async fn execute(
             keys.lock();
             done
         }
+        KeyRequest::SetAsideVault {} => Ok(CommandResult::VaultSetAside {
+            kept_at: keys
+                .set_aside_vault()
+                .await
+                .map_err(map)?
+                .to_string_lossy()
+                .into_owned(),
+        }),
         KeyRequest::SetVaultUnlockMethod {
             unlock_method,
             passphrase,

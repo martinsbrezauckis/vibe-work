@@ -32,10 +32,6 @@ use crate::git_view::{
 };
 use crate::worktrees::blocking;
 
-/// The model that drafts commit messages unless the config names another: Mistral Large 4.
-/// The pinned `mistral-large-4` id avoids changes to a floating `latest` alias.
-pub const DEFAULT_COMMIT_MODEL: &str = "mistral-large-4";
-
 struct CommitInput {
     paths: Vec<String>,
     message: String,
@@ -319,12 +315,12 @@ impl Core {
         let folder = session
             .cwd
             .clone()
-            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the session has no folder yet"))?;
+            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the chat has no folder yet"))?;
         let located = state::locate(&folder).map_err(git_error)?;
         let Some((root, git_dir)) = located else {
             return Err(CoreError::new(
                 ErrorCode::NotFound,
-                "this session's folder is not in a git repository",
+                "this chat's folder is not in a git repository",
             ));
         };
         let record = self
@@ -384,7 +380,7 @@ impl Core {
             None if repo.is_some() => {
                 return Err(CoreError::new(
                     ErrorCode::NotFound,
-                    "the selected repository was not found in this session's file changes",
+                    "the selected repository was not found in this chat's file changes",
                 ));
             }
             None => {
@@ -396,7 +392,7 @@ impl Core {
                         available: false,
                         reason: Some(unavailable.map_or_else(
                             || {
-                                "this session's recorded file changes have no git repository"
+                                "this chat's recorded file changes have no git repository"
                                     .to_owned()
                             },
                             |error| error.message,
@@ -494,8 +490,7 @@ impl Core {
         };
         if place.running && blocker.is_none() {
             blocker = Some(
-                "Vibe is still working in this session. Commit when the turn has finished."
-                    .to_owned(),
+                "Vibe is still working in this chat. Commit when the turn has finished.".to_owned(),
             );
         }
         let (author, author_problem) = match author {
@@ -535,14 +530,14 @@ impl Core {
         let note = (place.location == GitLocation::Folder).then(|| {
             if enclosing {
                 format!(
-                    "This commits on your branch in the repository {}, which contains this session's folder. The list \
+                    "This commits on your branch in the repository {}, which contains this chat's folder. The list \
                      is every change git sees in that whole repository, also outside this folder; untick what should \
                      not go in.",
                     crate::git_publish::folder_label(&place)
                 )
             } else {
                 "This commits on your branch in your own folder. The list is every change git sees there, also \
-                 changes made outside this session; untick what should not go in."
+                 changes made outside this chat; untick what should not go in."
                     .to_owned()
             }
         });
@@ -583,8 +578,7 @@ impl Core {
         let (selected, place) = self.git_selected_place(session_id, repo)?;
         if place.running {
             return Err(git_error(GitError::Blocked(
-                "Vibe is still working in this session. Commit when the turn has finished."
-                    .to_owned(),
+                "Vibe is still working in this chat. Commit when the turn has finished.".to_owned(),
             )));
         }
         let _one = self.shared.git.lock.lock().await;

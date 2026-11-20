@@ -133,19 +133,7 @@ pub fn this_target() -> String {
 /// Lower-case hex SHA-256 of `bytes`.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
-
-/// Lower-case hex of `bytes`.
-#[must_use]
-pub fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-            let _ = write!(out, "{b:02x}");
-            out
-        })
+    hex::encode(Sha256::digest(bytes))
 }
 
 impl Sources {
@@ -196,5 +184,17 @@ impl Sources {
         let pin: PinFile =
             serde_json::from_str(PIN_JSON).map_err(|e| PinError::Parse(e.to_string()))?;
         Ok(pin.vibe.version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The digest text the pin and the downloads are compared against: lowercase hex (FIPS 180-2 "abc" vector).
+    #[test]
+    fn sha256_hex_is_lowercase_hex_of_the_digest() {
+        assert_eq!(
+            super::sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

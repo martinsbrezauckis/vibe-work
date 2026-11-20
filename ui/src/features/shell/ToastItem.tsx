@@ -132,7 +132,7 @@ export function ToastItem({
         {(toast.guardRefusal !== undefined || docked || preview !== text) && (
           <Button
             data-testid="shell.toast-item-button"
-            appearance="expander"
+            appearance="link"
             data-toast-more="true"
             aria-label={toast.guardRefusal === undefined ? "Open notifications: Show all" : "Show"}
             onClick={onOpen}

@@ -90,7 +90,7 @@ async fn a_failed_turn_invalidates_decisions_without_releasing_held_hooks() {
         shared.asks.get(&handle.ask.id).is_some(),
         "Stop must reach Vibe before settling prompts"
     );
-    super::finished(shared, &stopping);
+    super::finished(shared, &stopping, true);
     assert!(matches!(
         shared.asks.outcome(&handle.ask.id).map(|r| r.outcome),
         Some(Outcome::Cancelled { .. })
@@ -278,7 +278,7 @@ async fn a_stop_by_an_imported_id_cancels_the_current_ids_cards() {
     };
     let stopping = super::requested(shared, &stop);
     let stopped = core.local(Origin::Ui, stop).await;
-    super::finished(shared, &stopping);
+    super::finished(shared, &stopping, true);
     assert!(stopped.is_ok(), "{stopped:?}");
     assert!(
         shared.asks.get(&card.ask.id).is_none(),
@@ -407,7 +407,7 @@ async fn stop_marks_descendants_but_leaves_branches_independent() {
         4,
         "no held hook released before runtime Stop"
     );
-    super::finished(shared, &stopping);
+    super::finished(shared, &stopping, true);
     assert_eq!(shared.asks.list().len(), 1);
     assert_eq!(shared.asks.list()[0].session.as_deref(), Some("branch"));
 }
@@ -461,4 +461,157 @@ fn stopped_refusal_is_recognized_by_code_after_wording_changes() {
         "Not sent: the chat was stopped after this continuation was scheduled.",
     );
     assert!(!super::refused_as_stopped(&unrelated));
+}
+
+fn upsert(shared: &crate::core::Shared, turn: &str, status: &str) {
+    super::observe(
+        shared,
+        &vw_session::Change::TurnUpserted {
+            session_id: "s".into(),
+            turn: json!({"id": turn, "status": status}),
+        },
+    );
+}
+
+/// The person's queued message (`session/turn/enqueue`, as voice chat sends every message) as Vibe accepted it.
+fn queued_by_person(shared: &crate::core::Shared) {
+    let at_send = super::generation(shared, "s");
+    super::sent(
+        shared,
+        None,
+        at_send,
+        "session/turn/enqueue",
+        &json!({"sessionId": "s", "idempotencyKey": "k", "entries": []}),
+        &json!({"queueItemId": "q1"}),
+    );
+}
+
+/// PREDICT (red before the fix): a person's Stop holds until their next message. Voice chat (and a message typed
+/// while voice chat is on) is queued with `session/turn/enqueue`; only the person's own `turn/start` lifted the Stop,
+/// so after one Stop every later question or approval card of the chat was cancelled the moment it arrived
+/// (`stop_tree::cancel_late`) and the person never saw it. The queued message lifts it when Vibe accepts it, once
+/// the stopped turn has ended; while that turn still ends, a late card of it still closes.
+#[tokio::test]
+async fn the_persons_queued_message_lifts_a_stop_once_the_stopped_turn_ended() {
+    let core = crate::offline_core::start("stops-queued-lifts").await;
+    let shared = &core.shared;
+    let _ = shared.store.load(
+        chat("s", &[("t1", "in_progress")]),
+        vw_session::LoadKind::New,
+    );
+    upsert(shared, "t1", "in_progress");
+    super::stopped(shared, "s");
+    assert!(
+        crate::stop_tree::cancel_late(shared, "s", "s", None),
+        "right after the Stop a late card closes"
+    );
+    // Queued while the stopped turn still ends: a late card of that turn still closes.
+    queued_by_person(shared);
+    assert!(
+        crate::stop_tree::cancel_late(shared, "s", "s", None),
+        "a late card of the stopped turn still closes"
+    );
+    upsert(shared, "t1", "interrupted");
+    queued_by_person(shared);
+    assert!(
+        !super::personally_stopped(shared, "s"),
+        "the person's next message lifts their Stop"
+    );
+    assert!(
+        !crate::stop_tree::cancel_late(shared, "s", "s", None),
+        "a question of the person's next turn stays open, even before its turn shows"
+    );
+}
+
+/// The stopped turn's end event never reached the core (a lagged subscription, a closed channel), but the chat no
+/// longer runs it: the person's queued message still lifts the Stop. While the Stop has not finished, a later turn
+/// (`stops_turn_tests.rs` covers a finished one) and an app continuation do not lift it.
+#[tokio::test]
+async fn a_queued_message_lifts_a_stop_without_the_end_event_and_nothing_else_does() {
+    let core = crate::offline_core::start("stops-queued-missed-end").await;
+    let shared = &core.shared;
+    let _ = shared.store.load(
+        chat("s", &[("t1", "in_progress")]),
+        vw_session::LoadKind::New,
+    );
+    upsert(shared, "t1", "in_progress");
+    super::stopped(shared, "s");
+    let _ = shared.store.load(
+        chat("s", &[("t1", "interrupted")]),
+        vw_session::LoadKind::Resume,
+    );
+    upsert(shared, "t2", "in_progress");
+    assert!(
+        super::personally_stopped(shared, "s"),
+        "a turn during an unfinished Stop does not lift it"
+    );
+    let checked = super::generation(shared, "s");
+    super::sent(
+        shared,
+        Some(checked),
+        checked,
+        "session/turn/enqueue",
+        &json!({"sessionId": "s", "idempotencyKey": "k", "entries": []}),
+        &json!({"queueItemId": "q1"}),
+    );
+    assert!(
+        super::personally_stopped(shared, "s"),
+        "an app continuation does not lift it"
+    );
+    queued_by_person(shared);
+    assert!(!super::personally_stopped(shared, "s"));
+}
+
+/// PREDICT (red before the fix): a Stop the person pressed while their message was on its way (counted after the
+/// send was read, `at_send`) was lifted by that same message once Vibe accepted it, so the cards of the turn the Stop
+/// was meant for were shown. A message lifts only a Stop that came before it was sent.
+#[tokio::test]
+async fn a_stop_pressed_while_the_message_is_on_its_way_holds() {
+    let core = crate::offline_core::start("stops-during-send").await;
+    let shared = &core.shared;
+    let _ = shared.store.load(chat("s", &[]), vw_session::LoadKind::New);
+    for method in ["session/turn/enqueue", "turn/start"] {
+        let at_send = super::generation(shared, "s");
+        super::stopped(shared, "s");
+        super::sent(
+            shared,
+            None,
+            at_send,
+            method,
+            &json!({"sessionId": "s", "idempotencyKey": "k", "entries": []}),
+            &json!({}),
+        );
+        assert!(
+            super::personally_stopped(shared, "s"),
+            "{method}: the Stop pressed during the send holds"
+        );
+    }
+}
+
+/// The stopped turn's end, seen while the person's message is on its way, raises the chat's generation; it is not a
+/// new Stop, so the message still lifts the Stop it followed.
+#[tokio::test]
+async fn the_stopped_turns_end_seen_during_the_send_does_not_keep_the_stop() {
+    let core = crate::offline_core::start("stops-end-during-send").await;
+    let shared = &core.shared;
+    let _ = shared.store.load(chat("s", &[]), vw_session::LoadKind::New);
+    upsert(shared, "t1", "in_progress");
+    super::stopped(shared, "s");
+    for method in ["session/turn/enqueue", "turn/start"] {
+        let at_send = super::generation(shared, "s");
+        upsert(shared, "t1", "interrupted");
+        super::sent(
+            shared,
+            None,
+            at_send,
+            method,
+            &json!({"sessionId": "s", "idempotencyKey": "k", "entries": []}),
+            &json!({}),
+        );
+        assert!(
+            !super::personally_stopped(shared, "s"),
+            "{method}: the person's message lifts the Stop"
+        );
+        super::stopped(shared, "s");
+    }
 }

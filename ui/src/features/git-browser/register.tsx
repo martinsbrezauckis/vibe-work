@@ -21,6 +21,7 @@ import { registerExplorerRoute } from "../explorer/explorerRoute";
 import { bindFiles } from "../explorer/filesBridge";
 import { setFilesTabSource } from "../files/panelRead";
 import { actionStep, nextStep, stateWords, type BrowserAction, type BrowserTarget } from "./model";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 type View = {
   projectId: string | null;
@@ -260,10 +261,9 @@ export function registerGitBrowser(app: App): () => void {
   });
   const search = () => {
     app.shell.actions.openTab("git");
-    setTimeout(
-      () => document.querySelector<HTMLInputElement>('[data-testid="explorer.search"]')?.focus(),
-      50,
-    );
+    focusWhenMounted({
+      find: () => document.querySelector<HTMLInputElement>('[data-testid="explorer.search"]'),
+    });
   };
   const removeSearch = app.commands.register({
     id: "files.search",

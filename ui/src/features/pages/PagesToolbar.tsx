@@ -49,7 +49,8 @@ export function PagesToolbar({
       <Button
         data-testid="pages.pages-toolbar-pages-btn"
         type="button"
-        appearance="page"
+        shape="outlined"
+        placement="page"
         aria-pressed={!onPage}
         title="The project handbook: every page, grouped by kind"
         onClick={actions.hub}
@@ -98,7 +99,8 @@ export function PagesToolbar({
         <Button
           data-testid="pages.pages-toolbar-pages-btn-2"
           type="button"
-          appearance="page"
+          shape="outlined"
+          placement="page"
           title={`Open the current plan (${formatKeys("Mod+Shift+P")})`}
           disabled={busy}
           onClick={actions.plan}
@@ -109,7 +111,8 @@ export function PagesToolbar({
           <Button
             data-testid="pages.pages-toolbar-pages-btn-3"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={actions.cancelPick}
           >
             Cancel pick
@@ -119,7 +122,8 @@ export function PagesToolbar({
             <Button
               data-testid="pages.pages-toolbar-pages-btn-4"
               type="button"
-              appearance="page"
+              shape="outlined"
+              placement="page"
               title="Select text or click a section of the page, then write a comment for Vibe"
               disabled={!onPage || busy}
               onClick={actions.comment}
@@ -129,7 +133,8 @@ export function PagesToolbar({
             <Button
               data-testid="pages.pages-toolbar-pages-btn-5"
               type="button"
-              appearance="page"
+              shape="outlined"
+              placement="page"
               title="Select text or click a section: it is added to your next message"
               disabled={!onPage || busy}
               onClick={actions.point}

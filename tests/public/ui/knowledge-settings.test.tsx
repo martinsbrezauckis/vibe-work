@@ -99,6 +99,9 @@ describe("Knowledge base page", () => {
       }),
     ).toBeInTheDocument();
     expect(page).toHaveTextContent(
+      "When you say “look at our library”, the agent looks there first",
+    );
+    expect(page).toHaveTextContent(
       "it gives the agent no extra access, and nothing is copied",
     );
     expect(
@@ -148,7 +151,8 @@ describe("Knowledge base page", () => {
     fireEvent.change(within(page).getByLabelText("Name you use for it"), {
       target: { value: "Team drive" },
     });
-    fireEvent.change(within(page).getByLabelText("Connector"), {
+    // This fake core has no connectors, so the form offers the connector's name as typed text.
+    fireEvent.change(await within(page).findByLabelText("Connector name"), {
       target: { value: "Google Drive" },
     });
     fireEvent.change(

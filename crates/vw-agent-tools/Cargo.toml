@@ -45,3 +45,6 @@ rustix = { workspace = true, default-features = true, features = ["process"] }
 [target.'cfg(windows)'.dependencies]
 # The `bash.exe` mode's kill-on-close job (`vw_platform::kill_job`): the one crate allowed the Win32 calls it needs.
 vw-platform = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

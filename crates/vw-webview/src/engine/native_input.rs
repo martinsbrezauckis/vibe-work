@@ -106,7 +106,7 @@ impl TauriEngine {
     ) -> Result<(), EngineError> {
         crate::agent_frames::install(webview).await?;
         self.install_dialogs(webview, label).await?;
-        let requests = crate::request_log::install(webview).await;
+        let requests = crate::request_log::install(webview, label, self.hooks()?).await;
         self.request_logs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

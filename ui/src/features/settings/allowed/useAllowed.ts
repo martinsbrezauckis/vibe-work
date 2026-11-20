@@ -13,6 +13,7 @@ import { useCoreState } from "../../shell/hooks";
 import { allowedEntries } from "./entries";
 import { allowedFor, keptGroups, sessionInfos, sourcesOf } from "./store";
 import { pageView, summaryView } from "./view";
+import { focusWhenMounted } from "../../../hooks/focusWhenMounted";
 
 /** The store, its state and the derived entries, page view and summary (the lists are read while mounted). */
 export function useAllowed() {
@@ -47,20 +48,20 @@ export function useAllowedFocus(): void {
   const request = useStore(allowed.state, (s) => s.focus);
   useEffect(() => {
     if (request === null) return;
-    const frame = requestAnimationFrame(() => {
-      const all = [...document.querySelectorAll<HTMLElement>("[data-allowed-focus]")];
-      for (const target of request.targets) {
-        const el = all.find((e) => e.getAttribute("data-allowed-focus") === target);
-        if (el !== undefined) {
-          el.focus();
-          break;
+    // The first requested element that is on the page; the request clears once focus moved or nothing appeared.
+    return focusWhenMounted({
+      find: () => {
+        const all = [...document.querySelectorAll<HTMLElement>("[data-allowed-focus]")];
+        for (const target of request.targets) {
+          const el = all.find((e) => e.getAttribute("data-allowed-focus") === target);
+          if (el !== undefined) return el;
         }
-      }
-      allowed.focused();
+        return null;
+      },
+      settled: () => {
+        allowed.focused();
+      },
     });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
   }, [request, allowed]);
 }
 

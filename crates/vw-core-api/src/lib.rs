@@ -60,6 +60,7 @@ mod browser_local;
 mod browser_outcomes;
 mod browser_popups;
 mod browser_recording;
+mod browser_ref_origins;
 mod browser_secret;
 mod browser_settings;
 mod browser_shields;
@@ -83,6 +84,7 @@ mod clock;
 mod command;
 mod command_result;
 mod date_text;
+mod developer_permissions;
 mod read_exclusions;
 #[cfg(test)]
 mod release_modules_tests;
@@ -99,6 +101,7 @@ mod connectors;
 mod connectors_config;
 mod connectors_project;
 mod connectors_view;
+mod consent_gate;
 mod context_composition;
 mod core;
 mod core_config;
@@ -248,6 +251,7 @@ mod protected_changes_view;
 pub use protected_changes_view::{
     ProtectedChangeProblem, ProtectedChangeStatus, ProtectedChangeView, ProtectedFileView,
 };
+mod desktop_chats;
 #[cfg(test)]
 mod feature_test_core;
 mod history_loading;
@@ -344,6 +348,7 @@ mod terminals;
 mod title_guard;
 mod tools_list;
 mod transport;
+mod utility_models;
 mod vault_scope;
 mod vibe_install;
 mod vibe_processes;
@@ -365,7 +370,9 @@ pub mod ts;
 
 pub use agent_tools::AgentToolsConfig;
 pub use app_settings::write_app_settings;
-pub use browser_view::{BrowserRequest, BrowserResult, BrowserShot, LocalNetworkSite};
+pub use browser_view::{
+    BrowserRequest, BrowserResult, BrowserShot, LocalNetworkSite, UnansweredSite,
+};
 pub use changes_facts::path_key;
 pub use changes_slots::ChangesTestHooks;
 pub use changes_view::{
@@ -392,7 +399,6 @@ pub use files_read::{FileKind, FileRead, IMAGE_LIMIT, TEXT_LIMIT, fingerprint, r
 pub use files_view::{
     FileChoice, FileContent, FileRefView, FilesRequest, FilesResult, MAX_RESOLVE,
 };
-pub use git_cmd::DEFAULT_COMMIT_MODEL;
 pub use git_view::{
     BringPlanView, CommitPlanView, DraftSource, GitIdentitySettings, GitIdentitySource,
     GitLocation, GitRepoView, GitRequest, GitResult, GitSettings, GitStatusView, PrCreatedView,

@@ -21,6 +21,8 @@ pub(crate) fn start(
     if !instance::admit(app, hand_over)? {
         return Ok(());
     }
+    // Before the window exists: a start whose window never comes up is reloaded or restarted, never left silent.
+    crate::start_watch::start(app.handle());
     #[cfg(target_os = "macos")]
     crate::feedback_entry::setup(app.handle())?;
     tray::setup(app.handle())?;
@@ -38,6 +40,16 @@ pub(crate) fn start(
         &tauri::async_runtime::handle().inner().clone(),
         startup::host_config(app.handle(), confirmer),
     );
+    let video_host = handle.clone();
+    let video_bridge = app
+        .state::<crate::browser_video::BrowserVideo>()
+        .inner()
+        .clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(core) = video_host.get().await.core() {
+            core.set_browser_video_bridge(std::sync::Arc::new(video_bridge));
+        }
+    });
     // The window is created in code (its config has `create: false`) so that opening
     // further windows (`window.open`, `target=_blank`) can be refused. Its config also has
     // `dragDropEnabled: false`: Tauri's own file-drop handler took every OLE drop on Windows
@@ -63,6 +75,12 @@ pub(crate) fn start(
         .build()?;
     vw_webview::prepare_child_views(&window)?;
     vw_webview::enable_media_capture(&window)?;
+    // A page process that ends under the window is reloaded and the person told (macOS: lib's builder hook).
+    let crashes = app.handle().clone();
+    vw_webview::on_page_crash(
+        &window,
+        std::sync::Arc::new(move |crash| crate::page_crash::crashed(&crashes, crash)),
+    )?;
     if let Some(native) = app.handle().get_window("main") {
         report_native_window_visibility(&native);
     }

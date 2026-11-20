@@ -28,6 +28,12 @@ const PUBLISHED_WINDOWS: ReadonlyMap<string, string> = new Map([
  * An explicit non-Mistral provider uses its configured count. Missing/invalid custom counts stay unknown.
  */
 export function contextWindowLabel(model: Obj): string {
+  const count = model["maxContextLength"];
+  if (model["source"] === "catalog") {
+    return typeof count === "number" && Number.isSafeInteger(count) && count > 0
+      ? `Context: ${count.toLocaleString("en-US")} tokens`
+      : "Context: not reported";
+  }
   const name = model["name"];
   const provider = model["provider"];
   const published =
@@ -39,7 +45,6 @@ export function contextWindowLabel(model: Obj): string {
           ? PUBLISHED_WINDOWS.get(name)
           : undefined;
   if (published !== undefined) return `Context: ${published} tokens`;
-  const count = model["maxContextLength"];
   return typeof count === "number" && Number.isSafeInteger(count) && count > 0
     ? `Context: ${count.toLocaleString("en-US")} tokens`
     : "Context: not reported";

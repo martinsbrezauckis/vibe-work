@@ -6,7 +6,7 @@ use serde_json::json;
 #[tokio::test]
 async fn inactive_profiles_are_not_choices_and_their_pairings_survive_reconnect() {
     let profiles = json!([
-        {"profileId":"chrome:healthy","connected":true,"extensionVersion":"0.1.6"},
+        {"profileId":"chrome:healthy","connected":true,"extensionVersion":"0.2.6"},
         {"profileId":"chrome:deleted","connected":false},
         {"profileId":"chrome:closed","connected":false}
     ]);
@@ -42,7 +42,7 @@ async fn inactive_profiles_are_not_choices_and_their_pairings_survive_reconnect(
     // Closing a browser is never an unpair operation. Its ID returns on the next live status.
     shared.chrome_control.owner.answering(|_, _| {
         json!({"structuredContent":{"profiles":[
-            {"profileId":"chrome:closed","connected":true,"extensionVersion":"0.1.6"}
+            {"profileId":"chrome:closed","connected":true,"extensionVersion":"0.2.6"}
         ]}})
     });
     let reply = gateway::call(shared, "s", "chrome_status", json!({}))

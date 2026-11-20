@@ -16,6 +16,35 @@ impl Browser {
         by: Actor,
         native_sent: Arc<AtomicBool>,
     ) -> Result<Value, ActError> {
+        let raw_read = match action {
+            Action::PageScript(_) | Action::Storage(crate::site_storage::Request::Read { .. }) => {
+                true
+            }
+            // Cookie values: a page can copy a typed card number into its own cookie; names and attributes
+            // (`cookies.metadata`) stay readable.
+            Action::Cookies(request) => request.name() == "cookies.read",
+            Action::Network(request) => request.unredacted_headers(),
+            Action::Diagnostics(request) => {
+                matches!(request.name(), "console.read" | "page.errors")
+            }
+            _ => false,
+        };
+        if crate::protected_origins::raw_on_site(action) {
+            self.refuse_remembered_site(session)?;
+        }
+        if raw_read {
+            let count = self
+                .protected_field_count(session)
+                .await
+                .map_err(crate::driver::refused)?;
+            if count > 0 {
+                self.remember_page_site(session, crate::protected_origins::Why::Seen);
+                let mut error =
+                    crate::driver::refused(crate::protected_capture::protected_read_refused());
+                error.protected_values_withheld = Some(count);
+                return Err(error);
+            }
+        }
         match action {
             Action::Recording(request) => self.recording(session, request, by).await,
             Action::TabAudio(muted) => {
@@ -39,7 +68,9 @@ impl Browser {
             }
             Action::Media(request) => self.playback(session, request, by).await,
             Action::Network(request) => self.network(session, request, by).await,
-            Action::PageScript(request) => self.page_script(session, request, by).await,
+            Action::PageScript(request) => {
+                self.page_script_checked(session, request, by, nav).await
+            }
             Action::Viewport(request) => self.viewport(session, request, by).await,
             Action::Inspect(request) => self.inspect_element(session, request, by).await,
             Action::Diagnostics(request) => self.diagnostics(session, request, by).await,

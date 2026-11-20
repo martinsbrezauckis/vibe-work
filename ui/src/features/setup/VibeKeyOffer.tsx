@@ -39,7 +39,7 @@ export function UseVibeKey(props: {
       <Button
         data-testid="setup.vibe-key-offer-on-use"
         type="button"
-        appearance="dialog"
+        variant="primary"
         disabled={props.busy}
         onClick={() => {
           props.onUse(props.found.source);

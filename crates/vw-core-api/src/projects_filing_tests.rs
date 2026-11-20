@@ -223,3 +223,35 @@ async fn every_temporary_chat_sits_in_one_temporary_chats_project() {
     }
     core.shutdown().await;
 }
+
+/// PREDICT (red before the change): the reconcile sweep filed every chat of Vibe's full session list, so a chat made
+/// in Vibe Desktop (hidden from the chat list) still made an automatic project for its folder (Projects card and an
+/// empty sidebar group "No chats here"). After it the sweep reads a page as the listing does: Desktop-made chats are
+/// left out before filing, and a chat with no stamp is filed as before.
+#[tokio::test]
+async fn the_sweep_files_no_chat_made_in_vibe_desktop() {
+    const DESKTOP: &str = "9c9660d5-07c5-63f1-8e5a-966f77f09519";
+    const OURS: &str = "6532e742-0000-4000-8000-000000000001";
+    let core = crate::offline_core::start("filing-desktop").await;
+    let shared = &core.shared;
+    let save = shared.deletes.save_dir().to_path_buf();
+    for (id, stamp) in [(DESKTOP, "session_api"), (OURS, "direct")] {
+        let chat = save.join("unified").join(id);
+        std::fs::create_dir_all(&chat).unwrap();
+        std::fs::write(
+            chat.join("meta.json"),
+            json!({ "runtime_path": stamp }).to_string(),
+        )
+        .unwrap();
+    }
+    let seen = super::page_seen(
+        shared,
+        vec![
+            json!({"id": DESKTOP, "cwd": "/owner/VibeWork"}),
+            json!({"id": OURS, "cwd": "/code/app"}),
+        ],
+    )
+    .await;
+    let ids: Vec<&str> = seen.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec![OURS], "only the chat Vibe Work can open is filed");
+}

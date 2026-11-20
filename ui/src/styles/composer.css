@@ -425,26 +425,12 @@
 .chrome-tabs > :not(.slash-list) {
   flex-shrink: 0;
 }
-.chrome-tabs .it {
+.chrome-tabs .menu-item {
+  display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-  width: 100%;
-  margin: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-size: var(--text-base);
-  text-align: left;
-}
-.chrome-tabs .it:hover,
-.chrome-tabs .it:focus-visible {
-  background: var(--hover);
-  color: var(--text);
 }
 /* A tab of another profile than the chat's: listed for orientation, disabled, its reason in place of the address. */
-.chrome-tabs .it[data-profile="other"]:hover {
-  background: transparent;
-}
 .chrome-tab-title {
   color: var(--text);
   overflow: hidden;

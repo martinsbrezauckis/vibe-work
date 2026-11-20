@@ -29,6 +29,7 @@ import { watchMarket } from "./marketWatch";
 import { createPluginNotices } from "./pluginNotices";
 import type { Toasts } from "./toastStore";
 import type { Shell } from "./shellStore";
+import { focusWhenMounted } from "../hooks/focusWhenMounted";
 
 /** Which tab of the Tools page shows. */
 export type ToolsTab = "connectors" | "marketplace" | "skills";
@@ -228,12 +229,12 @@ export function createMarket(deps: {
       const a = origin === "ui" ? connectors.actions : connectors.debugApi;
       if (!connectors.store.get().open) await a.open();
       await reload(origin);
-      requestAnimationFrame(() => {
-        const row = [...document.querySelectorAll<HTMLElement>(".local-plugin")].find(
-          (node) => node.dataset.itemId === path,
-        );
-        row?.scrollIntoView({ block: "center" });
-        row?.querySelector<HTMLButtonElement>("button")?.focus();
+      focusWhenMounted({
+        find: () =>
+          [...document.querySelectorAll<HTMLElement>(".local-plugin")]
+            .find((node) => node.dataset.itemId === path)
+            ?.querySelector<HTMLButtonElement>("button"),
+        center: true,
       });
     },
     /** Installs or updates a pack or plugin without an offer (the window asks the native dialog first). */

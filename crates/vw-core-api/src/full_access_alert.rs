@@ -92,7 +92,7 @@ impl Core {
             self.shared.emit(CoreEvent::Alert {
                 session_id: session_id.map(str::to_owned),
                 kind: AlertKind::BypassToolPermissions,
-                message: "The default access mode for new sessions runs every tool without asking (its profile turns tool permissions off).".to_owned(),
+                message: "The default access mode for new chats runs every tool without asking (its profile turns tool permissions off).".to_owned(),
             });
         }
     }

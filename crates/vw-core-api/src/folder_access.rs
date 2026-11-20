@@ -15,7 +15,7 @@ impl Core {
         let denied = || {
             CoreError::new(
                 ErrorCode::Denied,
-                "that folder does not belong to any session or project",
+                "that folder does not belong to any chat or project",
             )
         };
         // Platform validation rejects network/device forms before touching the filesystem and again

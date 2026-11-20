@@ -21,7 +21,12 @@ import {
   turnIdOf,
 } from "../features/transcript/model/entries";
 import { queuedTurns, runningTurnId } from "../features/composer/model/session";
-import { approvalPrompt, questionPrompt } from "../features/voice/voiceChatText";
+import {
+  approvalPrompt,
+  approvalQuestionSaid,
+  questionPrompt,
+} from "../features/voice/voiceChatText";
+import { approvalQuestion, approvalSummary } from "../features/ask/model";
 import { type SessionEntry, statusType } from "./sessionSummary";
 
 /**
@@ -108,6 +113,8 @@ export function sessionClosed(entry: SessionEntry): boolean {
 export interface OpenPrompt {
   callbackId: string;
   text: string;
+  /** The reading when the card is answered by voice (an approval: question and target without choices). */
+  lead: string;
 }
 
 /** The open callbacks of a session as spoken prompts, in history order. */
@@ -133,6 +140,11 @@ export function openPrompts(
       keep_both: "Keep both",
     };
     const isQuestion = obj(e["detail"])?.["kind"] === "user_input";
+    const cardLead = isQuestion
+      ? ""
+      : `${approvalQuestionSaid(approvalQuestion(e))} ${approvalSummary(e)
+          .trim()
+          .replace(/[.!?]+$/, "")}.`;
     const text = isQuestion
       ? questions
           .map((q) =>
@@ -143,9 +155,10 @@ export function openPrompts(
           )
           .join(" ")
       : approvalPrompt(
-          str(e["title"] ?? null) ?? "",
+          cardLead,
           offeredDecisions(e, offers).map((d) => labels[d]),
         );
-    return [{ callbackId: id, text }];
+    const lead = isQuestion ? text : cardLead;
+    return [{ callbackId: id, text, lead }];
   });
 }

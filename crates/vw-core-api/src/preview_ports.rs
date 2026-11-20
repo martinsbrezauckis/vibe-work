@@ -297,7 +297,7 @@ pub(crate) fn port_owner(
     match shared.procmon.leases().holder(port) {
         Some(holder) if holder == session_id => PortOwner::ThisSession,
         Some(holder) => {
-            PortOwner::OtherSession(crate::agent_tools::session::session_name(shared, &holder))
+            PortOwner::OtherSession(crate::agent_tools::session::chat_name(shared, &holder))
         }
         None => PortOwner::Nobody,
     }
@@ -312,7 +312,7 @@ pub(crate) fn busy_view(
 ) -> BusyPortView {
     let holder_item = explanation.holders.first();
     let holder = match holder_item.map(|h| &h.owner) {
-        Some(Owner::Session { session_id }) if session_id == asking => "this session".to_owned(),
+        Some(Owner::Session { session_id }) if session_id == asking => "this chat".to_owned(),
         Some(owner) => owner_text(shared, owner),
         None if explanation.hidden_holder => "unknown (not visible to Vibe Work)".to_owned(),
         None => "nothing (the port is free now)".to_owned(),
@@ -398,7 +398,7 @@ impl crate::core::Core {
             return Err(CoreError::new(
                 ErrorCode::Denied,
                 format!(
-                    "nothing on port {port} can be stopped from Vibe Work (it is not one of its sessions' processes)"
+                    "nothing on port {port} can be stopped from Vibe Work (it is not one of its chats' processes)"
                 ),
             ));
         };
@@ -438,7 +438,14 @@ mod tests {
         if std::env::var_os(CHILD).is_none() {
             return;
         }
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener =
+            socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        share_port(&listener);
+        listener
+            .bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into())
+            .unwrap();
+        listener.listen(8).unwrap();
+        let listener = std::net::TcpListener::from(listener);
         let kept = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         println!("{}", listener.local_addr().unwrap().port());
         let mut line = String::new();
@@ -447,6 +454,42 @@ mod tests {
         println!("closed");
         let _kept = kept;
         std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    /// Lets a second socket bind the port while the first still listens: on Unix both set `SO_REUSEPORT`, which the
+    /// kernel honours only between sockets of the same user that all set it; on Windows both set `SO_REUSEADDR`
+    /// (Windows refuses the second binding with "access denied" unless the listener set it too). Another program's
+    /// ordinary bind still cannot take the port, and no ephemeral port choice lands on a bound port.
+    fn share_port(socket: &socket2::Socket) {
+        #[cfg(unix)]
+        socket.set_reuse_port(true).unwrap();
+        #[cfg(windows)]
+        socket.set_reuse_address(true).unwrap();
+    }
+
+    /// This test process's hold on the stand-in server's port, taken while the server still listens: a bound socket
+    /// that does not listen. No other program can bind the port while the server closes its socket, and the socket
+    /// tables list listening sockets only, so the port's checks do not see it. [`Reservation::listen`] makes it a
+    /// listener of this process on the port (the takeover).
+    struct Reservation {
+        socket: socket2::Socket,
+    }
+
+    impl Reservation {
+        fn on(port: u16) -> Self {
+            let socket =
+                socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+            share_port(&socket);
+            socket
+                .bind(&std::net::SocketAddr::from(([127, 0, 0, 1], port)).into())
+                .unwrap();
+            Self { socket }
+        }
+
+        fn listen(self) -> std::net::TcpListener {
+            self.socket.listen(8).unwrap();
+            self.socket.into()
+        }
     }
 
     /// A stand-in server: this test binary itself, so the test needs no tool on PATH on any platform.
@@ -535,12 +578,17 @@ mod tests {
     /// PREDICT (before the check asked who listens on the port now): a server that closed its listening socket but
     /// kept running left its port admitted, because only the process was checked; a program that then took the port
     /// received the App preview's requests until the next scan.
+    ///
+    /// PREDICT (before the port was reserved): the takeover re-bound the vacated port after the reuse wait, so any
+    /// other program that bound it in between (a busy machine reuses its few ephemeral ports quickly) failed the
+    /// test with "address in use"; the reservation keeps the port for this process from before the close.
     #[test]
     fn a_port_leaves_when_its_server_closes_the_socket_and_keeps_running() {
         if std::env::var_os(CHILD).is_some() {
             return;
         }
         let mut server = Server::start();
+        let reservation = Reservation::on(server.port);
         let process = vw_procmon::identity(server.child.id());
         assert!(process.is_some());
         let alive = super::server_alive([(server.port, vec![process])].into_iter().collect());
@@ -553,7 +601,7 @@ mod tests {
         );
         assert!(!alive(server.port), "its server no longer listens there");
         // Another program (this test process) takes the port over.
-        let other = std::net::TcpListener::bind(("127.0.0.1", server.port)).unwrap();
+        let other = reservation.listen();
         std::thread::sleep(super::ABSENT_REUSE);
         assert!(
             !alive(server.port),
@@ -571,6 +619,7 @@ mod tests {
             return;
         }
         let mut server = Server::start();
+        let reservation = Reservation::on(server.port);
         let process = vw_procmon::identity(server.child.id());
         let alive = super::server_alive([(server.port, vec![process])].into_iter().collect());
         assert!(alive(server.port), "its server listens");
@@ -584,7 +633,7 @@ mod tests {
             started.elapsed() / 200
         );
         server.close_socket();
-        let other = std::net::TcpListener::bind(("127.0.0.1", server.port)).unwrap();
+        let other = reservation.listen();
         assert!(
             !alive(server.port),
             "a listener of another process on the port, at once, is not the chat's server"

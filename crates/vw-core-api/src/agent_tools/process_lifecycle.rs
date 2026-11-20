@@ -132,7 +132,7 @@ pub(super) fn processes_list(
                 "name": l.listener.pid.and_then(|p| snapshot.processes.get(&p)).and_then(vw_procmon::ProcessInfo::exe_name),
                 "port": l.listener.port,
                 "url": url(l.listener.address, l.listener.port),
-                "startedBy": if l.attributed.provenance == Some(ProcessClass::Agent) { "the agent outside process_start" } else { "unknown (found in this session's folder)" },
+                "startedBy": if l.attributed.provenance == Some(ProcessClass::Agent) { "the agent outside process_start" } else { "unknown (found in this chat's folder)" },
             })
         })
         .collect();
@@ -386,7 +386,7 @@ pub(crate) fn restart_launch(
             crate::GuardKind::Process,
             crate::guard_refusals::step(shared, session_id, None),
             &format!(
-                "pid {pid} was not started with process_start in this session; only those can be restarted \
+                "pid {pid} was not started with process_start in this chat; only those can be restarted \
              (process_stop stops it)"
             ),
         ));

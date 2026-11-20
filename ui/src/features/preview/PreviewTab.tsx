@@ -19,7 +19,7 @@ import { DelegationReceipts } from "./DelegationReceipts";
 import { AddressBar } from "./AddressBar";
 import { BrowserOverlayLayer } from "./BrowserOverlayLayer";
 import { AgentStrip } from "./AgentStrip";
-import { AgentFrame, frameColour, frameState } from "./AgentFrame";
+import { AgentFrame, frameColour, useFrameState } from "./AgentFrame";
 import { usePausedTools } from "../../state/usePausedTools";
 import { runningTurnId } from "../composer/model/session";
 import { sessionTitle } from "../../state/sessionSummary";
@@ -89,8 +89,18 @@ export function PreviewTab({
   const colour = useCoreState((s) =>
     sessionId === null ? undefined : s.chromeControl?.frameColours?.[sessionId],
   );
-  const turnRunning = runningTurnId(entry?.state ?? null, entry?.session) !== null;
-  const frame = frameState(agent, turnRunning, pausedTools.browser !== null);
+  const turnId = runningTurnId(entry?.state ?? null, entry?.session);
+  const stopRequested = useStore(app.composer.store, (s) =>
+    sessionId === null ? undefined : s.stopRequested[sessionId],
+  );
+  const stopping = stopRequested !== undefined && (turnId === null || stopRequested === turnId);
+  const frame = useFrameState(
+    agent,
+    turnId !== null,
+    pausedTools.browser !== null,
+    stopping,
+    sessionId,
+  );
   useEffect(() => {
     if (sessionId === null) return;
     void previews.load(sessionId);
@@ -315,6 +325,8 @@ export function PreviewTab({
         onPause={() => void pausedTools.pause("the built-in browser")}
         onResume={() => void pausedTools.resume()}
         onStop={() => void app.composer.actions?.stop(sessionId)}
+        // Always, so the native page keeps its place at every turn start and end.
+        reserve
       />
       {local && <Annotations browser={browser} sessionId={sessionId} controls={false} />}
       {open && <PreviewNotes preview={preview} showRefused={!stopped} />}

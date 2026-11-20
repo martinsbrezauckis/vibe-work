@@ -24,6 +24,7 @@ export const SETTING_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   ],
   "error-detail": ["verbose errors", "raw error", "error details"],
   "save-before-send": ["auto save", "autosave", "unsaved files"],
+  "keyboard-shortcuts": ["shortcuts", "keys", "keybindings", "hotkeys", "command palette"],
   "gh-reads": ["github cli", "gh auth", "github token", "pull requests"],
   "keep-awake": ["prevent sleep", "stay awake", "caffeinate", "keep awake"],
   "send-to": ["context menu", "shell integration", "send to", "services menu", "ask vibe work"],
@@ -160,6 +161,7 @@ export const SETTING_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   // Updates, Developer, About
   "update-status": ["check now", "software update", "upgrade", "update now"],
   "auto-update": ["auto update", "automatic updates", "auto-update"],
+  "developer-permissions": ["agent push", "git push", "developer access"],
   "debug-api": ["remote debugging", "automation api", "developer mode"],
   "debug-token": ["api token", "automation token"],
   "data-retention": ["storage", "where data is stored", "local data", "chat history"],

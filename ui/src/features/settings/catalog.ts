@@ -159,6 +159,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     keywords: "editor save unsaved files send message disk before",
   },
   {
+    id: "keyboard-shortcuts",
+    category: "general",
+    label: "Keyboard shortcuts",
+    description: "The command palette lists every command with its shortcut.",
+    keywords: "keyboard shortcuts keys hotkeys key bindings combination commands palette",
+  },
+  {
     id: "gh-reads",
     category: "general",
     label: "Let Vibe read GitHub with your gh login",
@@ -541,7 +548,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     id: "usage-data",
     category: "privacy",
     label: "Send usage data to Mistral",
-    description: "Sends anonymous usage, errors and timings to Mistral.",
+    description: "Disabled while Vibe runs in Vibe Work.",
     keywords: "telemetry analytics usage data privacy",
   },
   {
@@ -597,6 +604,13 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
     label: "Download updates automatically",
     description: "A new version downloads in the background; nothing installs without your click.",
     keywords: "update automatic background download",
+  },
+  {
+    id: "developer-permissions",
+    category: "developer",
+    label: TEXT.developerPermissionsName,
+    description: TEXT.developerPermissionsDescription,
+    keywords: "agent push git developer permissions full access restricted",
   },
   {
     id: "debug-api",

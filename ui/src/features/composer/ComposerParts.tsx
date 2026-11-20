@@ -38,7 +38,7 @@ export function RunBar({
         {waiting && onShowPrompt !== undefined ? (
           <Button
             data-testid="composer.run-bar-show-prompt"
-            appearance="text-link"
+            appearance="link"
             onClick={onShowPrompt}
           >
             {status}

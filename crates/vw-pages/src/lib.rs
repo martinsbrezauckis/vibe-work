@@ -108,15 +108,8 @@ pub use viewer::{ViewerView, allowed as viewer_allows};
 /// can assert which crate they are looking at.
 pub const CRATE_ROLE: &str = "project handbook: format, validator, hub, overview, page server, comments, plan profile, viewer";
 
-/// Milliseconds since the Unix epoch for comment, answer and check times; 0 when the clock is before the epoch or
-/// past `u64::MAX` milliseconds.
-pub(crate) fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
+/// Milliseconds since the Unix epoch for comment, answer and check times; 0 when the clock is before the epoch.
+pub(crate) use vw_platform::wall_clock::unix_ms as now_ms;
 
 /// Returns the crate version from Cargo metadata (the workspace version).
 #[must_use]

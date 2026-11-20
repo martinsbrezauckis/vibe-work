@@ -67,7 +67,15 @@ id: string,
 /**
  * The new name.
  */
-name: string, } | { "op": "remove",
+name: string, } | { "op": "setNote",
+/**
+ * The place.
+ */
+id: string,
+/**
+ * The new note (empty: no note).
+ */
+note: string, } | { "op": "remove",
 /**
  * The place.
  */

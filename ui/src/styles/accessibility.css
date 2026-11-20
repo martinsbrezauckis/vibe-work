@@ -58,6 +58,7 @@ select,
     content: none;
   }
   [aria-selected="true"],
+  .plist li[data-active="true"],
   [aria-pressed="true"],
   [aria-checked="true"],
   [aria-current="page"],

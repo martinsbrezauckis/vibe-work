@@ -2,7 +2,9 @@
 //! vw-platform. Called from setup and window events; every Open path uses `reveal_main_window`.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager};
 use vw_host::tray::{TrayPreferences, TrayView, WindowAction};
 use vw_platform::Notifier;
@@ -13,6 +15,7 @@ pub(crate) const RESTART: &str = "restart";
 pub(crate) const QUIT: &str = "quit";
 /// The tray's Restart item (only the tray says it; the shared vocabulary's sentences already say "Restart Vibe Work").
 const RESTART_VIBE_WORK: &str = "Restart Vibe Work";
+const MAIN_PAGE_LOAD_LIMIT: Duration = Duration::from_secs(30);
 
 /// The tray menu's last items, in order (after Open and Feedback): Restart beside Quit. Both ask first while agent work
 /// runs (`quit_guard`); Restart stops the app exactly as Quit does, then starts it again.
@@ -22,11 +25,48 @@ pub(crate) const END_ITEMS: [(&str, &str); 2] =
 pub(crate) struct TrayState {
     preferences: Mutex<TrayPreferences>,
     icon: AtomicBool,
+    activation: ActivationGate,
     /// The tray host as the startup probe and the Linux host watch last saw it; Settings reads it without a bus probe.
     host: vw_platform::tray::HostCache,
     notifications: AtomicBool,
     pending_notice: AtomicBool,
     closing: Mutex<Option<tauri::ipc::Channel<()>>>,
+}
+
+/// When the tray icon is created at start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Creation {
+    /// During setup, before the main window exists (macOS). On macOS 26 and later a status item is a system
+    /// menu-bar scene: set up while the app finishes launching it is ready at once; created from a queued
+    /// main-thread task instead, the system's scene setup waits on the main thread and can block it, so the window
+    /// never paints and takes no input.
+    AtSetup,
+    /// After the main page's first Finished event, or after `MAIN_PAGE_LOAD_LIMIT` (Windows, Linux): a tray menu
+    /// opened while the page loads would take the UI thread the page needs.
+    AfterMainPage,
+}
+
+/// The creation time on `os` (`std::env::consts::OS`).
+fn creation(os: &str) -> Creation {
+    if os == "macos" {
+        Creation::AtSetup
+    } else {
+        Creation::AfterMainPage
+    }
+}
+
+/// A native menu needs the main page to finish loading before it can take the UI thread.
+#[derive(Default)]
+struct ActivationGate(AtomicBool);
+
+impl ActivationGate {
+    fn claim(&self, event: PageLoadEvent) -> bool {
+        event == PageLoadEvent::Finished && self.claim_timeout()
+    }
+
+    fn claim_timeout(&self) -> bool {
+        !self.0.swap(true, Ordering::AcqRel)
+    }
 }
 
 /// Reveals even a window holding child webviews. macOS retains its regular Dock activation policy.
@@ -119,19 +159,58 @@ pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(TrayState {
         preferences: Mutex::new(TrayPreferences::load(&path)),
         icon: AtomicBool::new(false),
+        activation: ActivationGate::default(),
         host: vw_platform::tray::HostCache::default(),
         notifications: AtomicBool::new(false),
         pending_notice: AtomicBool::new(false),
         closing: Mutex::new(None),
     });
-    if !tauri::async_runtime::block_on(vw_platform::tray::host_available()) {
+    if creation(std::env::consts::OS) == Creation::AtSetup {
+        // Claimed now: the main page's load events then create nothing more.
+        app.state::<TrayState>().activation.claim_timeout();
+        activate(app);
         return Ok(());
+    }
+    // If WebView2 reports no finished page, keep a Quit route once its load has had time to
+    // recover. Dispatch through the UI loop so tray creation never interrupts window setup.
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(MAIN_PAGE_LOAD_LIMIT).await;
+        if app.state::<TrayState>().activation.claim_timeout() {
+            queue_activation(&app);
+        }
+    });
+    Ok(())
+}
+
+/// Runs only after the main page has loaded. Queueing on the UI loop lets window construction return first.
+/// On macOS the tray already exists from setup (`Creation::AtSetup`) and this does nothing.
+pub(crate) fn main_page_event(app: &AppHandle, event: PageLoadEvent) {
+    if !app.state::<TrayState>().activation.claim(event) {
+        return;
+    }
+    queue_activation(app);
+}
+
+fn queue_activation(app: &AppHandle) {
+    let app = app.clone();
+    let dispatch = app.clone();
+    if let Err(error) = dispatch.run_on_main_thread(move || {
+        activate(&app);
+    }) {
+        tracing::warn!(%error, "tray could not be queued; closing the window will quit");
+    }
+}
+
+fn activate(app: &AppHandle) {
+    if !tauri::async_runtime::block_on(vw_platform::tray::host_available()) {
+        return;
     }
     // AppIndicator dlopens its library and panics if it is missing; that must leave a usable window.
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(app)));
     if !matches!(built, Ok(Ok(()))) {
         tracing::warn!("tray could not be created; closing the window will quit");
-        return Ok(());
+        return;
     }
     let state = app.state::<TrayState>();
     state.host.update(true);
@@ -157,7 +236,6 @@ pub(crate) fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             .await;
         });
     }
-    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -374,6 +452,47 @@ fn first_notice(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    /// PREDICT: A tray activation before the main page finishes must be refused, and a repeated
+    /// finish must not create a second menu. The window still needs the UI thread while it loads.
+    #[test]
+    fn tray_activation_waits_for_main_page() {
+        use tauri::webview::PageLoadEvent;
+
+        let gate = super::ActivationGate::default();
+        assert!(!gate.claim(PageLoadEvent::Started));
+        assert!(gate.claim(PageLoadEvent::Finished));
+        assert!(!gate.claim(PageLoadEvent::Finished));
+    }
+
+    /// PREDICT: A failed main page load still leaves a Quit path after the startup limit.
+    #[test]
+    fn tray_activation_falls_back_when_page_never_finishes() {
+        use tauri::webview::PageLoadEvent;
+
+        let gate = super::ActivationGate::default();
+        assert!(!gate.claim(PageLoadEvent::Started));
+        assert!(gate.claim_timeout());
+        assert!(!gate.claim(PageLoadEvent::Finished));
+        assert!(!gate.claim_timeout());
+
+        let loaded = super::ActivationGate::default();
+        assert!(loaded.claim(PageLoadEvent::Finished));
+        assert!(!loaded.claim_timeout());
+    }
+
+    /// PREDICT: macOS creates its tray icon during setup, before the main window loads. A status item
+    /// created later from a queued main-thread task makes the system's menu-bar scene setup wait on the main
+    /// thread (about a second on every start, and sometimes without end: the window never paints and takes no
+    /// input). Windows and Linux keep the creation after the main page has loaded.
+    #[test]
+    fn macos_creates_the_tray_during_setup_other_systems_after_the_main_page() {
+        use super::Creation;
+
+        assert_eq!(super::creation("macos"), Creation::AtSetup);
+        assert_eq!(super::creation("windows"), Creation::AfterMainPage);
+        assert_eq!(super::creation("linux"), Creation::AfterMainPage);
+    }
+
     /// Restart sits beside Quit at the end of the tray menu, worded as the owner chose, on every system.
     #[test]
     fn the_tray_offers_restart_beside_quit() {

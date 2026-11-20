@@ -354,6 +354,10 @@ pub enum BrowserResult {
     LocalNetworkSites {
         /// Every remembered site and its answer, sorted by site.
         sites: Vec<LocalNetworkSite>,
+        /// Sites not answered yet (sorted by site): refused because a request did not say which open page sent it, or
+        /// because the site's own question was not answered (`asked`), each with the chat whose page it is (the chat's
+        /// card). The person may answer each (`setLocalNetworkSite`); none is allowed by default.
+        unanswered: Vec<UnansweredSite>,
     },
     /// Confirmed native ad filtering.
     Shields {
@@ -429,6 +433,20 @@ pub enum BrowserResult {
     },
     /// `cancelAnnotate` or `cancelSecret`.
     Done {},
+}
+
+/// A site waiting for the person's Local Network Access answer, and the chat whose page it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct UnansweredSite {
+    /// The site (`https://example.com`).
+    pub site: String,
+    /// The chat whose open page it is.
+    pub session_id: String,
+    /// `true`: the site's own question was shown and not answered; `false`: a request did not say which open site
+    /// sent it. The chat's card says which.
+    pub asked: bool,
 }
 
 /// One remembered Local Network Access answer.

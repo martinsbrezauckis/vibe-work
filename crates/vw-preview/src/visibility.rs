@@ -77,17 +77,17 @@ pub(crate) fn screenshot_reason(
         }
         if report.selected_session_id.is_none() {
             return Some(CaptureBlock::AnotherPage.because(format!(
-                "The user is viewing another page, so {label} cannot be captured. Ask the user to open this session, or {check}."
+                "The user is viewing another page, so {label} cannot be captured. Ask the user to open this chat, or {check}."
             )));
         }
         if report.selected_session_id.as_deref() != Some(owner) && on_new_chat {
             return Some(CaptureBlock::NoChatSelected.because(format!(
-                "No chat is selected, so {label} cannot be captured. Ask the user to open this session, or {check}."
+                "No chat is selected, so {label} cannot be captured. Ask the user to open this chat, or {check}."
             )));
         }
         if report.selected_session_id.as_deref() != Some(owner) {
             return Some(CaptureBlock::AnotherSession.because(format!(
-                "The user is viewing another session, so {label} cannot be captured. Ask the user to open this session, or {check}."
+                "The user is viewing another chat, so {label} cannot be captured. Ask the user to open this chat, or {check}."
             )));
         }
         if !report.browser_panel_open {

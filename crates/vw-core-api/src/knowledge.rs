@@ -4,7 +4,8 @@
 //! Places are saved in the app's `settings.json` (key `knowledgePlaces`) through the single settings writer, and
 //! reach the agent as a short list in the session facts added before every model turn (`app_context::append`).
 //!
-//! Depends on: `knowledge_view` (types), `app_settings` (the writer), `read_exclusions` (vault and app-state
+//! Depends on: `knowledge_view` (types), `app_settings` (the writer), `event` (`knowledgeChanged` after a saved
+//! change), `read_exclusions` (vault and app-state
 //! folders), vw-git (credential-like words), vw-secrets (stored secret values). Called by: `dispatch`
 //! (`Command::Knowledge`), `app_context` (the agent text).
 //! Invariants:
@@ -181,13 +182,7 @@ fn check_folder(location: &str, rules: &dyn FolderRules) -> Result<String, Strin
 fn new_id() -> Result<String, String> {
     let mut bytes = [0_u8; 8];
     getrandom::fill(&mut bytes).map_err(|_| "Could not add the place. Try again.".to_owned())?;
-    Ok(format!(
-        "kb-{}",
-        bytes.iter().fold(String::new(), |mut hex, b| {
-            let _ = write!(hex, "{b:02x}");
-            hex
-        })
-    ))
+    Ok(format!("kb-{}", hex::encode(bytes)))
 }
 
 /// The list after `request`, or the reason it was refused (plain text for the user).
@@ -260,6 +255,17 @@ pub(crate) fn apply(
                 .ok_or_else(|| "This place is no longer in the list.".to_owned())?;
             place.name = name;
         }
+        KnowledgeRequest::SetNote { id, note } => {
+            let note = Some(note)
+                .filter(|n| !n.trim().is_empty())
+                .map(|n| check_note(&n))
+                .transpose()?;
+            let place = next
+                .iter_mut()
+                .find(|p| p.id == id)
+                .ok_or_else(|| "This place is no longer in the list.".to_owned())?;
+            place.note = note;
+        }
         KnowledgeRequest::Remove { id } => {
             let before = next.len();
             next.retain(|p| p.id != id);
@@ -284,21 +290,22 @@ fn save(settings: &Path, places: &[KnowledgePlace]) -> std::io::Result<()> {
     )
 }
 
-/// Loads, applies `request` and saves when it changed something; the list after it.
+/// Loads, applies `request` and saves when it changed something; the list after it, and whether it changed.
 pub(crate) fn run(
     settings: &Path,
     request: KnowledgeRequest,
     rules: &dyn FolderRules,
-) -> Result<Vec<KnowledgePlace>, CoreError> {
+) -> Result<(Vec<KnowledgePlace>, bool), CoreError> {
     let _edit = EDIT.lock_or_recover();
     let places = load(settings);
     let next = apply(&places, request, rules).map_err(|m| refused(&m))?;
-    if next != places {
+    let changed = next != places;
+    if changed {
         save(settings, &next).map_err(|_| {
             CoreError::new(ErrorCode::Internal, "Could not save the knowledge base.")
         })?;
     }
-    Ok(next)
+    Ok((next, changed))
 }
 
 fn refused(message: &str) -> CoreError {
@@ -390,12 +397,17 @@ impl crate::Core {
             };
         };
         let shared = self.shared.clone();
-        let places =
+        let (places, changed) =
             tokio::task::spawn_blocking(move || run(&settings, request, &ChatRules(&shared)))
                 .await
                 .map_err(|_| {
                     CoreError::new(ErrorCode::Internal, "Could not save the knowledge base.")
                 })??;
+        // Every window's open Knowledge base page re-reads the list (a change from another window, the Debug API
+        // or any other client of this core); a refused or no-op request says nothing.
+        if changed {
+            self.shared.emit(crate::CoreEvent::KnowledgeChanged {});
+        }
         Ok(crate::CommandResult::Knowledge {
             view: KnowledgeView { places },
         })

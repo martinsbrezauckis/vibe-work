@@ -30,7 +30,7 @@ const VIBE_TAIL: u64 = 16_000;
 fn not_here() -> CoreError {
     CoreError::new(
         ErrorCode::NotFound,
-        "that process is not one of this session's (it may have ended)",
+        "that process is not one of this chat's (it may have ended)",
     )
 }
 

@@ -3,7 +3,7 @@ import { useErrorText } from "../../state/errorDetail";
 import { builtinSkillText } from "../../state/builtinToolsText";
 import { useEffect, useRef } from "react";
 import { Button, LinkButton } from "../../components/Controls";
-import { ToolsTabs } from "../connectors/ToolsTabs";
+import { ToolsTabs, ToolsTitle } from "../connectors/ToolsTabs";
 import { useApp } from "../shell/AppContext";
 import { SKILLS_BUSY } from "../../state/skills";
 import { SkillRow } from "./SkillRow";
@@ -40,6 +40,7 @@ export function SkillsPage() {
   return (
     <div className="cpage" data-testid="skills-page" ref={root}>
       <div className="cmain">
+        <ToolsTitle />
         <div className="chead">
           <ToolsTabs />
           <p className="cmuted">
@@ -129,9 +130,32 @@ export function SkillsPage() {
                 </p>
               ) : !installed && view !== null && (!view.catalogLoaded || count === 0) ? (
                 <p className="server-note">
-                  {view.catalogLoaded
-                    ? "Mistral's catalog has no skills to install right now."
-                    : "Mistral's catalog is not available right now."}
+                  {view.catalogLoaded ? (
+                    "Mistral's catalog has no skills to install right now."
+                  ) : (
+                    <>
+                      Mistral's catalog is not available right now.{" "}
+                      <Button
+                        data-testid="skills.retry-catalog"
+                        shape="outlined"
+                        onClick={() => void skills?.actions.load()}
+                      >
+                        Try again
+                      </Button>
+                    </>
+                  )}
+                </p>
+              ) : installed && view !== null && s.error === null && count === 0 ? (
+                // Vibe always has its built-in skills, so an empty answer is never a quiet, finished list.
+                <p className="server-note" role="status">
+                  Vibe listed no skills for this folder.{" "}
+                  <Button
+                    data-testid="skills.retry-list"
+                    shape="outlined"
+                    onClick={() => void skills?.actions.load()}
+                  >
+                    Try again
+                  </Button>
                 </p>
               ) : null}
               <div className="skills-list">

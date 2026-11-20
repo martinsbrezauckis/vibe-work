@@ -235,13 +235,9 @@ impl Pump {
                     // Not while the core restores the session's profile: right after a resume Vibe
                     // reports the profile the resume ran with, which must not replace what the session had.
                     if let Some(sid) = session.filter(|sid| !shared.channels.is_restoring(sid)) {
-                        let previous_mode = crate::chrome_control::check::mode(&shared, sid);
+                        let previous_mode = crate::chrome_control::chat_mode(&shared, sid);
                         shared.access.observe_runtime(sid, &n.params["runtime"]);
-                        crate::chrome_control::check::mode_changed(
-                            &shared,
-                            sid,
-                            previous_mode.as_deref(),
-                        );
+                        crate::chrome_control::mode_changed(&shared, sid, previous_mode.as_deref());
                     }
                 }
                 // Before any projection changes the entry: the receipt as Vibe reported it on this channel.
@@ -250,13 +246,17 @@ impl Pump {
                 #[cfg(feature = "video")]
                 crate::video_projection::apply(&shared, &mut n.params);
                 crate::edit_preview::project(&shared, &mut n.params);
-                crate::chrome_control::approval::project(&shared, &mut n.params);
+                crate::chrome_control::project_approvals(&shared, &mut n.params);
                 crate::paused_tools_gate::mark_held_calls(&shared, &mut n.params);
                 // A title or preview change (an auto-title, a rename) holds no vault value from here on.
                 crate::title_guard::withhold_in(&shared, &mut n.params);
+                let completed = (n.method == "turn/completed").then(|| n.params.clone());
                 let session = item.key.and_then(|key| shared.channels.session_of(key));
                 let applied = warnings::apply(&shared.store, n, session);
                 self.after_apply(&shared, &applied);
+                if let Some(params) = completed {
+                    crate::model_choices::provider_completed(&shared, &params);
+                }
             }
             Some(Inbound::Gap(reason)) => {
                 warn!(?reason, channel = ?item.key, "protocol data lost; resyncing");
@@ -293,7 +293,7 @@ impl Pump {
                 // session from the lobby to show what Vibe stored.
                 if let Some(id) = shared.channels.lost(key) {
                     warn!(channel = key.1, "a session channel ended on its own");
-                    shared.asks.cancel_session(Some(&id), "the session closed");
+                    shared.asks.cancel_session(Some(&id), "the chat closed");
                     shared.gate.session_closed(&id);
                     self.open_callbacks.remove(&id);
                     self.resync(shared, &id);
@@ -398,7 +398,7 @@ impl Pump {
                 self.open_callbacks.remove(session_id);
                 shared
                     .asks
-                    .cancel_session(Some(session_id), "the session closed");
+                    .cancel_session(Some(session_id), "the chat closed");
                 shared.gate.session_closed(session_id);
                 crate::ask::grants::session_ended(shared, session_id);
             }

@@ -2,9 +2,10 @@
 //! does not reach this computer through an address literal unless the person allowed its site (Local Network Access).
 //! `WebKit` on macOS sends `127.0.0.1`, `[::1]`, `localhost`, this computer's own interface addresses and link-local
 //! literals (`169.254.0.0/16`, `fe80::/10`) around the guard's proxy, so the guard's question (and its refusal of a
-//! blocked site) can never see those requests; the rules hold them instead (no question is possible there: an allowed
-//! site is listed in `unless-frame-url`: the requesting frame's own URL). Other literals and every host name go through
-//! the proxy, where the person is asked. Vibe Work's own ports ([`set_internal_ports`]) are held for every page,
+//! blocked site) can never see those requests; the rules hold them instead. This computer's own interface addresses
+//! are held for web pages even when a site was allowed: an allowed frame cannot be attributed safely when another
+//! undecided site shares the store. Loopback and link-local retain the allowed-site frame exception. Other literals
+//! and every host name go through the proxy, where the person is asked. Vibe Work's own ports ([`set_internal_ports`]) are held for every page,
 //! whatever the person answered, on every spelling of this computer; every guard's listeners ([`crate::listeners`])
 //! are among them.
 //! Called by native webviews; generation tracking prevents stale asynchronous rule installs. The inputs of the lists
@@ -88,8 +89,11 @@ const LINK_LOCAL_HOSTS: &[&str] = &[
     r"^[a-z]+://\[64:ff9b::a9fe:[0-9a-f]*\]",
 ];
 
-/// Subresource types a page loads by itself (fetch, XHR and WebSocket are `raw`); a frame is a `document` in a child
-/// frame. The page itself (the top frame) is never held: opening a local page remounts it as a local page.
+/// Every request type a page makes by itself, in `WebKit`'s content-rule names: `raw` covers fetch, XHR,
+/// WebSocket, beacons and pings; `csp-report` is a Content-Security-Policy violation report, which `raw` does not
+/// cover (`WebKit` `ResourceLoadInfo.cpp`); `other` is anything else; `popup` a window the page opens. A frame is a
+/// `document` in a child frame. The page itself (the top frame) is never held: opening a local page remounts it as a
+/// local page. A test pins this exact set, so a type cannot be left out unnoticed.
 const SUBRESOURCES: &[&str] = &[
     "image",
     "style-sheet",
@@ -98,6 +102,12 @@ const SUBRESOURCES: &[&str] = &[
     "raw",
     "svg-document",
     "media",
+    "popup",
+    "ping",
+    "fetch",
+    "websocket",
+    "other",
+    "csp-report",
 ];
 
 /// Sets the sites the person allowed (origin text such as `https://example.com`); web pages mounted from now on
@@ -247,7 +257,12 @@ fn held_triggers(host: &str, extra: &Value) -> [Value; 2] {
 /// A page from the web: `hosts` held, except for a request made by a frame (the page itself or a frame inside it)
 /// whose own URL is on an allowed site. A frame of another site inside an allowed page stays held: its own frame URL
 /// decides, never the top page's.
-fn web_rule_list(rules: &mut Vec<Value>, hosts: &[String], allowed: &[String]) {
+fn web_rule_list(
+    rules: &mut Vec<Value>,
+    hosts: &[String],
+    own_hosts: &[String],
+    allowed: &[String],
+) {
     let unless: Vec<String> = allowed
         .iter()
         .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
@@ -260,6 +275,11 @@ fn web_rule_list(rules: &mut Vec<Value>, hosts: &[String], allowed: &[String]) {
     };
     for host in hosts {
         for trigger in held_triggers(host, &extra) {
+            rules.push(json!({"trigger": trigger, "action": {"type": "block"}}));
+        }
+    }
+    for host in own_hosts {
+        for trigger in held_triggers(host, &Value::Null) {
             rules.push(json!({"trigger": trigger, "action": {"type": "block"}}));
         }
     }
@@ -321,11 +341,19 @@ pub fn content_rules(page: &RulePage) -> Value {
 pub fn content_rules_for(page: &RulePage, inputs: &RuleInputs) -> Value {
     let mut rules = Vec::new();
     let hosts = this_computer_hosts(&inputs.own_addresses);
-    let mut held = hosts.clone();
+    let mut held = hosts[..LOOPBACK_FILTERS.len()].to_vec();
     held.extend(LINK_LOCAL_HOSTS.iter().map(|h| (*h).to_owned()));
     match page {
-        RulePage::Web => web_rule_list(&mut rules, &held, &inputs.allowed_sites),
-        RulePage::App { ports } => app_rule_list(&mut rules, &held, ports),
+        RulePage::Web => web_rule_list(
+            &mut rules,
+            &held,
+            &hosts[LOOPBACK_FILTERS.len()..],
+            &inputs.allowed_sites,
+        ),
+        RulePage::App { ports } => {
+            held.extend(hosts[LOOPBACK_FILTERS.len()..].iter().cloned());
+            app_rule_list(&mut rules, &held, ports);
+        }
         RulePage::Local { .. } | RulePage::Lan { .. } => {}
     }
     rules.push(credential_rule());

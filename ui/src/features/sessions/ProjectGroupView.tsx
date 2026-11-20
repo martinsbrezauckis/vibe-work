@@ -268,7 +268,7 @@ export function ProjectGroupView({
               <Button
                 data-testid="sessions.project-group-view-link-btn"
                 type="button"
-                appearance="text-link"
+                appearance="link"
                 onClick={newHere}
               >
                 start one
@@ -279,7 +279,7 @@ export function ProjectGroupView({
               <Button
                 data-testid="sessions.project-group-view-choose-folder"
                 type="button"
-                appearance="text-link"
+                appearance="link"
                 onClick={() => void groups?.chooseFolder(id)}
               >
                 Choose main folder…

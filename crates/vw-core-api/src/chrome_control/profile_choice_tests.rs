@@ -24,12 +24,12 @@ fn status() -> Value {
     ]})
 }
 
-async fn core(name: &str) -> (crate::Core, Arc<std::sync::Mutex<Vec<(String, Value)>>>) {
+pub(super) async fn core(name: &str) -> (crate::Core, Arc<std::sync::Mutex<Vec<(String, Value)>>>) {
     core_with(name, status()).await
 }
 
 /// The fixture with the helper reporting `helper` as its status (which profiles are connected now).
-async fn core_with(
+pub(super) async fn core_with(
     name: &str,
     helper: Value,
 ) -> (crate::Core, Arc<std::sync::Mutex<Vec<(String, Value)>>>) {
@@ -71,7 +71,7 @@ async fn core_with(
 }
 
 /// The open profile card of chat `s`, once the held open has published it.
-async fn card(shared: &Arc<crate::core::Shared>) -> Value {
+pub(super) async fn card(shared: &Arc<crate::core::Shared>) -> Value {
     for _ in 0..200 {
         let state = crate::sessions::snapshot(shared, "s").unwrap();
         let entry = serde_json::to_value(&state)
@@ -105,7 +105,9 @@ fn answered(shared: &Arc<crate::core::Shared>, id: &str) -> Value {
         .unwrap()
 }
 
-fn open(shared: &Arc<crate::core::Shared>) -> tokio::task::JoinHandle<Result<Value, String>> {
+pub(super) fn open(
+    shared: &Arc<crate::core::Shared>,
+) -> tokio::task::JoinHandle<Result<Value, String>> {
     let shared = shared.clone();
     tokio::spawn(async move {
         super::gateway::call(
@@ -118,7 +120,11 @@ fn open(shared: &Arc<crate::core::Shared>) -> tokio::task::JoinHandle<Result<Val
     })
 }
 
-fn answer(shared: &Arc<crate::core::Shared>, id: &str, output: &Value) -> Result<(), String> {
+pub(super) fn answer(
+    shared: &Arc<crate::core::Shared>,
+    id: &str,
+    output: &Value,
+) -> Result<(), String> {
     tool_calls::answer_by(
         shared,
         crate::Origin::Ui,
@@ -131,7 +137,7 @@ fn answer(shared: &Arc<crate::core::Shared>, id: &str, output: &Value) -> Result
     .map_err(|error| error.message)
 }
 
-fn selected(core: &crate::Core) -> Option<String> {
+pub(super) fn selected(core: &crate::Core) -> Option<String> {
     core.shared
         .chrome_control
         .chat_profiles
@@ -248,6 +254,14 @@ fn no_profile_text_tells_the_agent_to_choose_in_this_chat() {
         ("profile_agent.rs", include_str!("profile_agent.rs")),
         ("commands.rs", include_str!("commands.rs")),
         ("profiles.rs", include_str!("profiles.rs")),
+        ("profiles_observe.rs", include_str!("profiles_observe.rs")),
+        ("profiles_removal.rs", include_str!("profiles_removal.rs")),
+        ("profiles_view.rs", include_str!("profiles_view.rs")),
+        (
+            "profile_bindings_status.rs",
+            include_str!("profile_bindings_status.rs"),
+        ),
+        ("commands_request.rs", include_str!("commands_request.rs")),
     ] {
         for line in source.lines().filter(|line| line.contains('"')) {
             let lower = line.to_lowercase();
@@ -313,6 +327,8 @@ async fn a_chat_whose_profile_the_browser_deleted_asks_for_another_on_the_card()
     core.shutdown().await;
 }
 
+/// PREDICT: the card's pick guides the first shorthand open; after that actual
+/// open, an exact different profile cannot replace the chat's live binding.
 #[tokio::test]
 async fn the_card_waits_in_the_authenticated_hook_before_the_open_runs() {
     let (core, seen) = core("profile-choice-hook").await;
@@ -342,7 +358,15 @@ async fn the_card_waits_in_the_authenticated_hook_before_the_open_runs() {
         .unwrap()
         .unwrap();
     assert_eq!(selected(&core).as_deref(), Some("chrome:personal"));
-    // The agent's exact other profile is refused with the chat's next step; the shorthand opens the picked one.
+    // The shorthand uses the card's pick for first use.
+    open(&core.shared).await.unwrap().unwrap();
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|(_, args)| args["action"] == "open" && args["profileId"] == "chrome:personal")
+    );
+    // Once opened, an exact other profile is refused.
     let refused = super::gateway::call(
         &core.shared,
         "s",
@@ -352,15 +376,9 @@ async fn the_card_waits_in_the_authenticated_hook_before_the_open_runs() {
     .await
     .unwrap_err();
     assert!(
-        refused.contains("The user picked Personal for this chat"),
+        refused.contains("Close that browser session first")
+            && refused.contains("built-in browser in parallel"),
         "{refused}"
-    );
-    open(&core.shared).await.unwrap().unwrap();
-    assert!(
-        seen.lock()
-            .unwrap()
-            .iter()
-            .any(|(_, args)| args["action"] == "open" && args["profileId"] == "chrome:personal")
     );
     core.shutdown().await;
 }
@@ -418,169 +436,6 @@ async fn the_hook_asks_again_when_the_browser_deleted_the_chats_profile() {
         .unwrap()
         .unwrap();
     assert_eq!(selected(&core).as_deref(), Some("chrome:personal"));
-    core.shutdown().await;
-}
-
-/// An offline profile is never a choice: the card offers only profiles that are usable now. A chat whose profile the
-/// browser deleted gets no card when no other profile is connected.
-///
-/// PREDICT (written before the change): fails. With no default, one connected and one offline paired profile, the
-/// base binds the chat to the connected one without a card (`choice_needed` counts connected profiles only), so the
-/// person never learns that the other paired profile was skipped. After the change that open asks on the card, which
-/// offers only the connected profile and says the other profiles' windows are closed.
-#[tokio::test]
-async fn an_offline_profile_is_not_offered_but_the_card_still_asks() {
-    let (core, _) = core_with(
-        "profile-choice-asleep",
-        json!({"profiles":[{"profileId":"chrome:work","connected":true},{"profileId":"chrome:personal","connected":false}]}),
-    )
-    .await;
-    let held = open(&core.shared);
-    let entry = card(&core.shared).await;
-    let effect = &entry["detail"]["effect"];
-    let offered: Vec<_> = effect["choices"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| row["profileId"].clone())
-        .collect();
-    assert_eq!(offered, [json!("chrome:work")], "{entry}");
-    assert_eq!(effect["closedOthers"], true, "{entry}");
-    assert!(effect["closedDefault"].is_null(), "{entry}");
-    answer(
-        &core.shared,
-        entry["callbackId"].as_str().unwrap(),
-        &json!({"type":"approval","decision":{"type":"approve"},"profileId":"chrome:work"}),
-    )
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(10), held)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert_eq!(selected(&core).as_deref(), Some("chrome:work"));
-    // A chat bound to a profile the browser deleted: the only other profile is offline, so there is nothing to offer.
-    core.shared
-        .chrome_control
-        .profiles
-        .lock()
-        .unwrap()
-        .records
-        .get_mut("chrome:work")
-        .unwrap()
-        .deleted = true;
-    assert!(
-        super::profile_seeding::choice_needed(&core.shared, "s", &json!({"profileId":"chrome"}))
-            .is_none()
-    );
-    core.shutdown().await;
-}
-
-/// With no default and exactly one paired profile there is nothing to choose: no card, the open runs there.
-#[tokio::test]
-async fn one_paired_profile_needs_no_card() {
-    let (core, seen) = core("profile-choice-single").await;
-    core.shared
-        .chrome_control
-        .profiles
-        .lock()
-        .unwrap()
-        .records
-        .get_mut("chrome:personal")
-        .unwrap()
-        .removed = true;
-    assert!(
-        super::profile_seeding::choice_needed(&core.shared, "s", &json!({"profileId":"chrome"}))
-            .is_none(),
-        "one paired profile needs no card"
-    );
-    tokio::time::timeout(Duration::from_secs(10), open(&core.shared))
-        .await
-        .expect("no card holds the open")
-        .unwrap()
-        .unwrap();
-    assert!(
-        seen.lock()
-            .unwrap()
-            .iter()
-            .any(|(_, args)| args["action"] == "open" && args["profileId"] == "chrome:work")
-    );
-    core.shutdown().await;
-}
-
-/// An explicit default is never silently replaced: when its window is closed the card asks, offering the connected
-/// profiles and saying the default's window is closed; the chat binds only to what the person picks.
-///
-/// PREDICT (written before the change): fails. With Default = Work offline and Personal connected, `choice_needed`
-/// sees one connected profile and asks nothing, and `resolve` takes the only eligible row, so the open runs in
-/// Personal without any card (`card()` panics "no browser profile card opened"); `resolve` called directly binds
-/// Personal instead of refusing.
-#[tokio::test]
-async fn a_default_whose_window_is_closed_is_never_replaced_silently() {
-    let helper = json!({"profiles":[
-        {"profileId":"chrome:work","connected":false},
-        {"profileId":"chrome:personal","connected":true}
-    ]});
-    let (core, seen) = core_with("profile-choice-closed-default", helper.clone()).await;
-    core.shared
-        .chrome_control
-        .profiles
-        .lock()
-        .unwrap()
-        .defaults
-        .insert("chrome".into(), "chrome:work".into());
-    // The binding step itself never picks past the default, whichever route reaches it.
-    let mut args = json!({"action":"open","profileId":"chrome"});
-    let refused =
-        super::profile_seeding::resolve(&core.shared, "s", &mut args, &helper).unwrap_err();
-    assert!(
-        refused.contains("Work") && refused.contains("no action ran"),
-        "{refused}"
-    );
-    assert_eq!(selected(&core), None);
-    let held = open(&core.shared);
-    let entry = card(&core.shared).await;
-    let effect = &entry["detail"]["effect"];
-    let offered: Vec<_> = effect["choices"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| row["profileId"].clone())
-        .collect();
-    assert_eq!(offered, [json!("chrome:personal")], "{entry}");
-    assert_eq!(effect["closedDefault"], "Work", "{entry}");
-    assert!(
-        !seen
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(_, args)| args["action"] == "open"),
-        "nothing opens before the person answers"
-    );
-    answer(
-        &core.shared,
-        entry["callbackId"].as_str().unwrap(),
-        &json!({"type":"approval","decision":{"type":"approve"},"profileId":"chrome:personal"}),
-    )
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(10), held)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert_eq!(selected(&core).as_deref(), Some("chrome:personal"));
-    // The default stays the person's default for later chats.
-    assert_eq!(
-        core.shared
-            .chrome_control
-            .profiles
-            .lock()
-            .unwrap()
-            .defaults
-            .get("chrome")
-            .map(String::as_str),
-        Some("chrome:work")
-    );
     core.shutdown().await;
 }
 

@@ -244,7 +244,7 @@ export const AssistantRow = memo(function AssistantRow({
         <Button
           data-testid="transcript.message-rows-toggle"
           type="button"
-          appearance="expander"
+          appearance="link"
           aria-label="Show full message as plain text"
           title="Show full message as plain text"
           onClick={() => {

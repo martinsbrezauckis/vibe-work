@@ -35,20 +35,20 @@ pub(crate) fn describe(method: &str, params: &Value) -> Option<String> {
             let alias = quoted(params, "alias");
             if off(params) {
                 format!(
-                    "Turn off the Mistral connector {alias}{tool} in Vibe: sessions stop using it."
+                    "Turn off the Mistral connector {alias}{tool} in Vibe: chats stop using it."
                 )
             } else {
                 format!(
-                    "Turn on the Mistral connector {alias}{tool} in Vibe: sessions may use it (in each session's access mode)."
+                    "Turn on the Mistral connector {alias}{tool} in Vibe: chats may use it (in each chat's access mode)."
                 )
             }
         }
         "mcp_catalog/toggle" | "mcp/toggle" => {
             let name = quoted(params, "name");
             if off(params) {
-                format!("Turn off the MCP server {name}{tool}: sessions stop using it.")
+                format!("Turn off the MCP server {name}{tool}: chats stop using it.")
             } else {
-                format!("Turn on the MCP server {name}{tool}: sessions may use its tools.")
+                format!("Turn on the MCP server {name}{tool}: chats may use its tools.")
             }
         }
         "mcp_catalog/logout" | "mcp/logout" => format!(
@@ -90,7 +90,7 @@ pub(crate) fn describe(method: &str, params: &Value) -> Option<String> {
                 "Unencrypted HTTP is not allowed."
             };
             format!(
-                "Add the MCP server at {}{name} to Vibe's config. Vibe will connect to it in your sessions; if it asks for a sign-in, the sign-in page opens in your browser and the token stays in the system keychain. {transport} {scopes} {insecure}",
+                "Add the MCP server at {}{name} to Vibe's config. Vibe will connect to it in your chats; if it asks for a sign-in, the sign-in page opens in your browser and the token stays in the system keychain. {transport} {scopes} {insecure}",
                 quoted(params, "url"),
             )
         }

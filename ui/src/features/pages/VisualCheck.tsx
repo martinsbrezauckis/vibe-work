@@ -88,7 +88,8 @@ export function VisualCheck({
       <Button
         data-testid="pages.visual-check-pages-btn"
         type="button"
-        appearance="page"
+        shape="outlined"
+        placement="page"
         disabled={checking}
         onClick={check}
       >

@@ -11,6 +11,7 @@
 //! back once the file was readable again: the test fails on `hint` being `None`. After: the unsaved removal answers
 //! with the same hint as a failed save.
 use super::*;
+use serde_json::json;
 use vw_platform::sync::LockRecover;
 
 /// A core with Chrome and Edge set up on one shared helper and `chrome:one` paired; the helper answers every Remove.

@@ -36,13 +36,12 @@ fn core_error(error: &LineCommentError) -> CoreError {
 fn place(view: &ChangesView, comment: &vw_changes::LineComment) -> LineCommentState {
     if view.mode != ChangesMode::Git {
         return LineCommentState::Outdated {
-            reason: "this session has no line-by-line review right now".to_owned(),
+            reason: "this chat has no line-by-line review right now".to_owned(),
         };
     }
     let Some(file) = view.files.iter().find(|f| f.path == comment.path) else {
         return LineCommentState::Outdated {
-            reason: "the file has no changes against the session's starting point any more"
-                .to_owned(),
+            reason: "the file has no changes against the chat's starting point any more".to_owned(),
         };
     };
     match locate(file, &comment.anchor) {

@@ -1,5 +1,6 @@
 /** Announce completed turns once, never snapshots or streaming patches. Uses the shared announcer and preferences. */
 import { announce } from "../../state/announcer";
+import { turnDeclinedLine } from "../../state/declineAnnounce";
 import { finalAnswer } from "../../state/voiceChatTurns";
 import { declinedTurns } from "./model/build";
 import { arr, obj, str } from "./model/entries";
@@ -34,11 +35,12 @@ export function startReplyAnnouncements(app: App): () => void {
       return;
     }
     if (status === "interrupted") {
-      // A turn that ended at the person's No is declined; "stopped" is kept for Stop.
+      // A turn that ended at the person's No is declined (said with the card's line when that came moments
+      // before or comes moments after: declineAnnounce); "stopped" is kept for Stop.
       const history = arr(core.store.get().sessions[sessionId]?.state?.["history"]);
       announce(
         ended !== null && declinedTurns(history, [ended]).has(id)
-          ? "Declined. The turn ended."
+          ? turnDeclinedLine(sessionId)
           : "Vibe stopped.",
       );
       return;

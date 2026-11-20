@@ -386,11 +386,13 @@ export function createSendActions(deps: {
         (ask) => cardIdOf(ask) !== null && hostOf(state, ask) === sessionId,
       );
       if (turnId === null && !waiting) return false;
+      composer.setStopRequested(sessionId, turnId ?? "");
       try {
         if (turnId === null) await core.run({ type: "stopSession", sessionId });
         else await core.run({ type: "interruptTurn", sessionId, expectedTurnId: turnId });
         return true;
       } catch (thrown) {
+        composer.setStopRequested(sessionId, null);
         fail(sessionId, "stop", toCallError(thrown));
         return false;
       }

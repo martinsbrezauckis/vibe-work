@@ -162,3 +162,37 @@ export function createVoiceReplyStream(
     return result;
   };
 }
+
+/**
+ * The reply streams of voice chat's turns: one stream per answer message, one shared speech budget per turn (a
+ * turn's answers together stay within the limit). `take` returns the new speakable sentences of one answer.
+ */
+export function createTurnReplies() {
+  const streams = new Map<string, ReturnType<typeof createVoiceReplyStream>>();
+  const budgets = new Map<string, VoiceReplyBudget>();
+  return {
+    take(turnId: string, answerId: string, raw: string, done: boolean): string[] {
+      const key = `${turnId}/${answerId}`;
+      let take = streams.get(key);
+      if (take === undefined) {
+        let budget = budgets.get(turnId);
+        if (budget === undefined) {
+          budget = { chars: 0, truncated: false };
+          budgets.set(turnId, budget);
+        }
+        take = createVoiceReplyStream(budget);
+        streams.set(key, take);
+      }
+      return take(raw, done);
+    },
+    /** Drops a finished turn's streams and budget. */
+    forget(turnId: string): void {
+      for (const key of streams.keys()) if (key.startsWith(`${turnId}/`)) streams.delete(key);
+      budgets.delete(turnId);
+    },
+    clear(): void {
+      streams.clear();
+      budgets.clear();
+    },
+  };
+}

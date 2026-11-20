@@ -13,7 +13,7 @@ async fn browser_actions_name_the_app_modal_before_any_browser_dispatch() {
         serde_json::json!({"action":"click","ref":"r"}),
     )
     .await;
-    let connected = crate::chrome_control::gateway::call(
+    let connected = crate::chrome_control::call_tool(
         &core.shared,
         "s",
         "chrome_execute",

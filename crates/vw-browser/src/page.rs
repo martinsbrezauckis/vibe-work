@@ -77,14 +77,22 @@ impl Browser {
     /// front page that refreshes itself, or a tab released for memory and reloaded for a read); a load that never
     /// ends is still read afterwards and says `loading`.
     pub(crate) async fn wait_loaded(&self, session_id: &str) {
-        let start = tokio::time::Instant::now();
-        while start.elapsed() < PAGE_SWAP_WAIT
-            && self
-                .service
-                .load_state(session_id)
-                .is_some_and(|s| s.loading)
+        let deadline = tokio::time::Instant::now() + PAGE_SWAP_WAIT;
+        // Woken by every loading change of the page (subscribed before the first read).
+        let Some(mut changes) = self.service.load_changes(session_id) else {
+            return;
+        };
+        while self
+            .service
+            .load_state(session_id)
+            .is_some_and(|s| s.loading)
         {
-            tokio::time::sleep(Duration::from_millis(60)).await;
+            if !matches!(
+                tokio::time::timeout_at(deadline, changes.changed()).await,
+                Ok(Ok(()))
+            ) {
+                break;
+            }
         }
     }
 

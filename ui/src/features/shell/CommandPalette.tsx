@@ -15,8 +15,12 @@
  * components/Icon, components/Highlight. Called by: Shell.
  * Invariants: opens fresh every time (selection reset; the query starts with the words a scoped search carried
  * over, else empty); Enter runs the highlighted entry and closes; Escape and a click outside close; focus returns
- * to where it was (the modal-focus hook). The field names an active option (`aria-activedescendant`) only after
- * the arrow keys moved the highlight, and typing clears it, so a screen reader opening the palette is in the field.
+ * to where it was (the modal-focus hook). The combobox opens with the first row already active for the eye
+ * (`data-active`, the row Enter runs) and no option named, so a screen reader opening the palette is in the field;
+ * every arrow press moves the highlight and names the option it moved to (`aria-activedescendant`, `aria-selected`).
+ * Once named, an option stays named while the person types (the highlighted row follows the results): WebKitGTK
+ * reports the named option as the focus, and dropping it would move the focus back to the field and make Orca say
+ * the whole dialog again.
  * With an empty query the list shows every action, then every session, as
  * before (nothing hides behind a filter). Selection follows the result identity while answers arrive; surviving
  * rows update in place and new hits append within their group.
@@ -83,6 +87,7 @@ function PaletteDialog(): ReactElement {
   const { active, selected, select } = usePaletteSelection(rows);
   // The field names the highlighted option for screen readers only after the arrow keys moved it: while an option
   // is named, WebKitGTK reports that option as the focus, so a reader opening the palette would not land in the field.
+  // It is never un-named while the palette is open: that focus change makes Orca announce the dialog again.
   const [navigated, setNavigated] = useState(false);
 
   // Searching covers every page: while a query is typed and Vibe has older pages, load them (capped).
@@ -160,17 +165,15 @@ function PaletteDialog(): ReactElement {
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            setNavigated(false);
           }}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
+              // Every press moves the highlight (the first row is already active, so the first Down goes to the
+              // second) and names the row it moved to.
               setNavigated(true);
-              select(Math.min(active + 1, rows.length - 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setNavigated(true);
-              select(Math.max(active - 1, 0));
+              if (e.key === "ArrowDown") select(Math.min(active + 1, rows.length - 1));
+              else select(Math.max(active - 1, 0));
             } else if (e.key === "Enter") {
               e.preventDefault();
               run(rows[active]?.result);
@@ -237,7 +240,7 @@ function PaletteDialog(): ReactElement {
                   <Button
                     data-testid="shell.command-palette-set-filter"
                     type="button"
-                    appearance="expander"
+                    appearance="link"
                     tabIndex={-1}
                     onClick={() => {
                       setFilter(group);
@@ -255,7 +258,9 @@ function PaletteDialog(): ReactElement {
                 key={result.id}
                 id={optionId(i)}
                 role="option"
-                aria-selected={i === active}
+                // Highlighted for the eye always; selected for a screen reader only once the arrows moved it.
+                data-active={i === active}
+                aria-selected={navigated && i === active}
                 aria-label={`${result.title}, ${result.path.join(" › ")}${result.hint === undefined ? "" : `, ${result.hint}`}`}
                 data-kind={group}
                 onMouseMove={() => {

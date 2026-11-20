@@ -29,7 +29,7 @@ fn continuation_guard(
     owner_watch: tokio::sync::watch::Receiver<u64>,
     page_watch: tokio::sync::watch::Receiver<u64>,
 ) -> Arc<dyn Fn() -> bool + Send + Sync> {
-    let mode = crate::chrome_control::check::mode(shared, owner);
+    let mode = crate::chrome_control::chat_mode(shared, owner);
     let weak = Arc::downgrade(shared);
     let owner = owner.to_owned();
     Arc::new(move || {
@@ -39,7 +39,7 @@ fn continuation_guard(
                 shared.browser_settings.enabled()
                     && shared.store.view(&owner).is_some()
                     && shared.asks.question_hold(&owner).is_none()
-                    && crate::chrome_control::check::mode(&shared, &owner) == mode
+                    && crate::chrome_control::chat_mode(&shared, &owner) == mode
             })
     })
 }

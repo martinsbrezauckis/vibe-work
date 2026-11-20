@@ -76,7 +76,7 @@ pub struct Annotation {
     /// A PNG of that area (base64), when the screenshot worked.
     #[serde(default)]
     pub crop_png_base64: Option<String>,
-    /// Why the picture was left out, when the page showed a protected value below Full access (the capture
+    /// Why the picture was left out, when the page showed a protected value (the capture
     /// refusal's wording); the note and position are kept. Absent (not null) otherwise, matching the optional
     /// TypeScript field the UI checks with `!== undefined`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

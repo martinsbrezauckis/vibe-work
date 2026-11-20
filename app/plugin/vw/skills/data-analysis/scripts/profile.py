@@ -174,7 +174,7 @@ def main(argv):
         else:
             sys.exit(f"unknown argument {args[i]!r} (see --help)")
     if not os.path.isfile(path):
-        sys.exit(f"no file {path!r} in {os.getcwd()} (run from the session's working folder, or give the full path)")
+        sys.exit(f"no file {path!r} in {os.getcwd()} (run from the chat's working folder, or give the full path)")
     try:
         header, rows, notes = load(path, sheet)
     except (OSError, UnicodeDecodeError, ValueError, KeyError, zipfile.BadZipFile, json.JSONDecodeError) as e:

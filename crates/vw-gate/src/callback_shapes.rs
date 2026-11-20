@@ -102,7 +102,7 @@ pub(crate) fn approval(output: &Value, offer: &ApprovalOffer) -> Result<(), Call
     }
     if KEPT_BY_VIBE.contains(&kind) {
         return Err(malformed(
-            "`decision.type` would make Vibe keep a rule; Vibe Work answers once and keeps session grants itself",
+            "`decision.type` would make Vibe keep a rule; Vibe Work answers once and keeps chat grants itself",
         ));
     }
     if !offer.choices.is_empty() && !offer.choices.iter().any(|c| c == kind) {

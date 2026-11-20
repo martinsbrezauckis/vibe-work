@@ -81,7 +81,7 @@ fn closed_browser_outcomes_keep_the_same_recovery_without_trusting_helper_words(
     for (code, expected) in [
         (
             "window_closed",
-            "The browser window or session is no longer available. Open a new browser session before trying again.",
+            "The browser window or browser session is no longer available. Open a new browser session before trying again.",
         ),
         (
             "TARGET_CLOSED",

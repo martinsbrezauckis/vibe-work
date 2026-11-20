@@ -83,6 +83,20 @@ export function spokenReply(answer: string, max = MAX_SPOKEN_CHARS): string {
   return cap(sentences.join(" "), max);
 }
 
+/**
+ * The approval as read when it is answered by voice: the question and its target only. The choice labels and the
+ * scope words stay on the card; the spoken choices ("Say allow 3, or no") follow.
+ */
+export function approvalLead(title: string): string {
+  const what = title.replace(/\s+/g, " ").trim().slice(0, 90);
+  return what === "" ? "Vibe asks for your approval." : `Vibe asks for your approval: ${what}.`;
+}
+
+/** A card's question as the voice says it: "Allow this command?" is worded as "Run this command?" (the first is refused as speech). */
+export function approvalQuestionSaid(question: string): string {
+  return question === "Allow this command?" ? "Run this command?" : question;
+}
+
 /** Short text the voice says when an approval opens (the card in the chat is still how the user answers). */
 export function approvalPrompt(
   title: string,
@@ -90,7 +104,9 @@ export function approvalPrompt(
 ): string {
   const what = title.replace(/\s+/g, " ").trim().slice(0, 90);
   const question =
-    what === "" ? "Vibe asks for your approval." : `Vibe asks for your approval: ${what}.`;
+    what === ""
+      ? "Vibe asks for your approval."
+      : `Vibe asks for your approval: ${what}${/[.!?]$/.test(what) ? "" : "."}`;
   return `${question} ${choices.join(", ")}. Answer on the card in the chat.`;
 }
 

@@ -26,24 +26,24 @@ export function SettingsRow(props: Omit<HTMLAttributes<HTMLDivElement>, "classNa
   return <div {...props} className="check" />;
 }
 
+/**
+ * One look per job (sticker:gap-buttons, sticker:button-presets). Besides the plain button (`shape` ghost or outlined)
+ * and `variant="primary"`, an appearance names a job with its own size or role: a compact action, a link, a menu
+ * item, an icon, the status-bar vault control and a file reference.
+ */
 const BUTTON_APPEARANCE = {
-  expander: "ext-link show-all-btn",
   compact: "tb-btn mini",
-  page: "tb-btn pages-btn",
-  preview: "tb-btn preview-btn",
-  project: "tb-btn pj-btn",
-  choice: "tb-btn cbtn",
-  dialog: "tb-btn btn-primary",
-  "key-link": "ext-link key-link",
-  "text-link": "ext-link link-btn",
   link: "ext-link",
-  "browser-menu": "browser-menu-item",
-  "menu-option": "it",
+  menu: "menu-item",
   icon: "ibtn",
   status: "sb-vault",
   "file-reference": "fref",
 } as const;
+/** Layout hooks only: feature CSS may place these buttons, never restyle them. */
 const BUTTON_PLACEMENT = {
+  page: "pages-btn",
+  preview: "preview-btn",
+  project: "pj-btn",
   stop: "stop",
   "detail-close": "cdetail-close",
   "pr-title": "pr-title",
@@ -56,9 +56,9 @@ const BUTTON_PLACEMENT = {
 } as const;
 
 /**
- * Shared actions use one visual style per job; legacy placement names retain layout hooks only. `shape` names the
- * plain button's two shapes: "ghost" (default; borderless, the toolbar button) and "outlined" (1 px border, 30 px
- * high: the Settings, dialog and form button).
+ * Shared actions use one visual style per job; placement names add layout hooks only. `shape` names the plain
+ * button's two shapes: "ghost" (default; borderless, the toolbar button) and "outlined" (1 px border, 30 px high: the
+ * Settings, dialog and form button). `variant="primary"` is the one filled action of a view or dialog.
  */
 export function Button({
   variant,
@@ -70,17 +70,16 @@ export function Button({
   variant?: "primary" | "danger" | undefined;
   shape?: "ghost" | "outlined";
   appearance?: keyof typeof BUTTON_APPEARANCE | undefined;
-  placement?: keyof typeof BUTTON_PLACEMENT;
+  placement?: keyof typeof BUTTON_PLACEMENT | undefined;
 }) {
   const base = appearance === undefined ? "tb-btn" : BUTTON_APPEARANCE[appearance];
   const resolvedShape = shape ?? (appearance === undefined ? "ghost" : "outlined");
-  const emphasis = variant ?? (appearance === "dialog" ? "primary" : undefined);
   return (
     <button
       type="button"
       {...props}
       data-testid={props["data-testid"]}
-      className={[base, emphasis, placement && BUTTON_PLACEMENT[placement]]
+      className={[base, variant, placement && BUTTON_PLACEMENT[placement]]
         .filter(Boolean)
         .join(" ")}
       data-shape={resolvedShape}

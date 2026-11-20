@@ -361,7 +361,7 @@ function PermissionCard(props: AskCardProps): ReactElement {
                 title={name}
                 onClick={onClick}
                 {...press}
-                appearance="choice"
+                shape="outlined"
                 variant={b.choice === "once" ? "primary" : undefined}
               >
                 {label}

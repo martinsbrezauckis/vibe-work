@@ -86,7 +86,11 @@ streamId: string, } | { "op": "cancel",
 /**
  * The stream.
  */
-streamId: string, } | { "op": "speak",
+streamId: string, } | { "op": "heard",
+/**
+ * The heard words, or the reason the audio could not be turned into words; cut to 200 characters.
+ */
+text: string, } | { "op": "speak",
 /**
  * At most 2,000 characters.
  */
@@ -106,9 +110,14 @@ ticket: string | null,
  */
 number: number | null, } | { "kind": "promptAnswer",
 /**
- * allowed, refused, retry, repeat or card. Only the first two answered the card.
+ * allowed, refused, retry, repeat, ended or card. Only the first two answered the card.
  */
-status: string, } | { "kind": "screenReader",
+status: string,
+/**
+ * For an answer that was not understood (`retry`, or the `card` after the last miss): the words heard, cut
+ * to 200 characters (empty when nothing was heard), so the window can say what it heard. Absent otherwise.
+ */
+heard?: string, } | { "kind": "screenReader",
 /**
  * True while a screen reader is enabled.
  */
@@ -132,7 +141,11 @@ mode: DictationMode,
 /**
  * The longest dictation, in seconds.
  */
-maxSeconds: number, } | { "kind": "appended",
+maxSeconds: number,
+/**
+ * Core-owned answer capture duration in milliseconds; present only for a permission prompt.
+ */
+answerWindowMs?: number, } | { "kind": "appended",
 /**
  * Seconds of audio so far.
  */

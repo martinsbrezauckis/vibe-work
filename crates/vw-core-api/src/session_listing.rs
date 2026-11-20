@@ -77,6 +77,9 @@ impl Core {
             self.listed_children(origin, &items, include_archived, &mut ownership)
                 .await?,
         );
+        // Chats made in Vibe Desktop cannot be opened here, so they are not listed (`desktop_chats`).
+        let items =
+            crate::desktop_chats::hide(self.shared.deletes.save_dir().to_path_buf(), items).await;
         self.shared.names.note_listing(&items);
         crate::plan_profile::note_listing(&self.shared, &items);
         // sessions seen for the first time are filed by their folder.
@@ -178,7 +181,7 @@ impl Core {
             let (parent, rows) = result.map_err(|error| {
                 CoreError::new(
                     ErrorCode::Internal,
-                    format!("could not list child sessions: {error}"),
+                    format!("could not list child chats: {error}"),
                 )
             })?;
             let rows = rows?;
@@ -232,7 +235,7 @@ impl Core {
             if !seen.insert(next.to_owned()) {
                 return Err(CoreError::new(
                     ErrorCode::ServerError,
-                    "Vibe repeated a child-session listing cursor",
+                    "Vibe repeated a child-chat listing cursor",
                 ));
             }
             cursor = Some(next.to_owned());

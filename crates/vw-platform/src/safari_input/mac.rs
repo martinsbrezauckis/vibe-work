@@ -110,6 +110,13 @@ fn attempt(
             || check(r),
             |window, live| window.activate(live),
         )?;
+        // The page's accessibility tree may not exist yet right after Safari came forward (geometry::await_exposed).
+        super::geometry::await_exposed(
+            Duration::from_millis(1500),
+            || window.web_areas(&r.url).map(|found| found.len()),
+            || check(r),
+            || std::thread::sleep(Duration::from_millis(25)),
+        )?;
         check(r)?;
         let mut bytes = [0u8; 16];
         getrandom::fill(&mut bytes)

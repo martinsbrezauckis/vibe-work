@@ -291,6 +291,7 @@ async fn serve_one(
         port,
         initiator.as_deref(),
         nested,
+        matches!(head.target, Target::Tunnel { .. }) && TUNNEL_IS_TLS,
     )
     .await
     {
@@ -336,6 +337,11 @@ fn initiator(headers: &[(String, String)]) -> Option<String> {
 /// there it is never taken for the page's top-level navigation: it is decided like the page's other requests.
 const TUNNEL_MAY_BE_FRAME: bool = cfg!(target_os = "linux");
 
+/// True where the browser engine opens a tunnel (`CONNECT`) only for TLS (HTTPS, secure WebSocket requests): Linux `WebKitGTK`
+/// and Windows `WebView2` send plain http as a forward request. macOS `WebKit` (`nw_proxy_config_create_http_connect`)
+/// tunnels plain http too, so there a tunnel does not say whether the page speaks TLS.
+const TUNNEL_IS_TLS: bool = !cfg!(target_os = "macos");
+
 /// True when the engine marks a plain request as a nested document (a frame's, an embed's): its one `Sec-Fetch-Dest`
 /// is present and not `document`. A page cannot write this header; an engine that sends none says nothing.
 fn nested(headers: &[(String, String)]) -> bool {
@@ -376,13 +382,20 @@ impl Decided<'_> {
 
     /// Records a refusal and answers its page text.
     fn refuse(&self, reason: &str) -> String {
-        // Under the mount it came from (a store's only member; several members: none, see `Inner::refusal_key`).
-        self.inner.record(
-            self.inner.refusal_key(self.who).as_deref(),
-            self.bare,
-            self.port,
-            reason,
-        );
+        // Under the mount it came from (a store's only member; several members: none, see `Inner::refusal_key`),
+        // and then under every member that could have sent it.
+        let key = self.inner.refusal_key(self.who);
+        self.inner
+            .record(key.as_deref(), self.bare, self.port, reason);
+        if key.is_none()
+            && let Who::Store(store, generation) = self.who
+            && let Some(context) = self.inner.context.get()
+        {
+            let members = self.inner.store_members(store, *generation);
+            if members.len() > 1 {
+                context.refused_unattributed(&members, self.bare, self.port, reason);
+            }
+        }
         format!("Vibe Work's browser does not open this address: {reason}.")
     }
 }

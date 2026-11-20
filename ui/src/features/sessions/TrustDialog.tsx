@@ -79,7 +79,7 @@ export function TrustDialog({ cwd, onClose }: { cwd: string; onClose: () => void
         <Button
           data-testid="sessions.trust-dialog-trust"
           type="button"
-          appearance="dialog"
+          variant="primary"
           disabled={trusted}
           onClick={() => {
             void sessions?.trust(cwd).then((ok) => {

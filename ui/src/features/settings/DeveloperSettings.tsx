@@ -11,6 +11,7 @@ import { toCallError } from "../../protocol/client/types";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
+import { TEXT } from "../../vocabulary";
 
 /** The Developer section. */
 export function DeveloperSettings(): ReactElement {
@@ -22,6 +23,42 @@ export function DeveloperSettings(): ReactElement {
   const canSwitch = core?.client.kind === "tauri";
   const [tokenState, setTokenState] = useState("Reading…");
   const [busy, setBusy] = useState(false);
+  const [permissions, setPermissions] = useState<boolean | null>(null);
+  const [permissionsBusy, setPermissionsBusy] = useState(false);
+  useEffect(() => {
+    if (core === null || !canSwitch) return;
+    let live = true;
+    void core.run({ type: "developerPermissions", enabled: null }).then(
+      (result) => {
+        if (live && result.type === "developerPermissions") setPermissions(result.enabled);
+      },
+      (thrown: unknown) => {
+        if (live)
+          toasts.push({
+            kind: "error",
+            bellKind: "failure",
+            text: toCallError(thrown).error.message,
+          });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [core, canSwitch, toasts]);
+  const flipPermissions = async () => {
+    if (core === null || permissions === null || permissionsBusy) return;
+    setPermissionsBusy(true);
+    try {
+      const result = await core.run({ type: "developerPermissions", enabled: !permissions });
+      if (result.type === "developerPermissions") setPermissions(result.enabled);
+    } catch (thrown: unknown) {
+      const error = toCallError(thrown).error;
+      if (error.code !== "confirmationDeclined")
+        toasts.push({ kind: "error", bellKind: "failure", text: error.message });
+    } finally {
+      setPermissionsBusy(false);
+    }
+  };
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;
@@ -72,6 +109,23 @@ export function DeveloperSettings(): ReactElement {
   return (
     <section aria-labelledby="developer-title">
       <h3 id="developer-title">Developer</h3>
+      <div className="check" data-setting="developer-permissions">
+        <span>
+          {TEXT.developerPermissionsName}
+          <span className="d">{permissions ? "On" : "Off"}</span>
+        </span>
+        <div className="set-actions">
+          <Switch
+            data-testid="settings.developer-permissions-switch"
+            aria-label={TEXT.developerPermissionsName}
+            aria-checked={permissions === true}
+            disabled={!canSwitch || permissions === null || permissionsBusy}
+            onClick={() => {
+              void core?.trackAction(flipPermissions());
+            }}
+          />
+        </div>
+      </div>
       <div className="check" data-setting="debug-api">
         <span>
           Debug API

@@ -83,6 +83,19 @@ export function announce(text: string, options: { assertive?: boolean } = {}): v
   if (!busy[region]) show(region);
 }
 
+/** Removes an obsolete announcement that has not yet been said, including one saved for focus return. */
+export function cancelAnnouncement(text: string): void {
+  const words = text.trim();
+  if (words === "") return;
+  lastSaid.delete(words);
+  unheard = unheard.filter((item) => item.text !== words);
+  for (const region of ["polite", "assertive"] as const) {
+    queues[region] = queues[region].filter((item) => item !== words);
+    if (announcerStore.get()[region].trim() === words)
+      announcerStore.set((state) => ({ ...state, [region]: "" }));
+  }
+}
+
 /**
  * Keeps messages said in the next `ms` as unheard although the window has the focus: right after the window got the
  * focus back, the screen reader may still present only the app's native windows (Orca after its own confirmation

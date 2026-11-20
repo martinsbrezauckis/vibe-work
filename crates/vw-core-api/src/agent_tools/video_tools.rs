@@ -89,7 +89,7 @@ async fn save(
     let cwd = shared
         .names
         .cwd_of(&shared.store, owner)
-        .ok_or("The session folder is unavailable.")?;
+        .ok_or("The chat folder is unavailable.")?;
     let (source, call_id) = (source.to_owned(), call_id.to_owned());
     tokio::task::spawn_blocking(move || {
         tools

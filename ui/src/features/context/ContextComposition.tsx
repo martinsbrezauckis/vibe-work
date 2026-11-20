@@ -77,7 +77,7 @@ export function ContextComposition({
             <span>
               {breakdown.measured
                 ? contextShare(breakdown.usedTokens, breakdown.contextWindow)
-                : "—"}
+                : "-"}
             </span>
           </div>
           {breakdown.measured &&

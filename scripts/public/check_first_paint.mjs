@@ -15,7 +15,12 @@ import { join } from "node:path";
 
 import { REPO_ROOT } from "./lib_files.mjs";
 
-const BUDGET = 2_000_000;
+// 2_000_000 -> 2_010_000 on purpose: the accessibility focus handover (agent frame Pause/Resume, palette
+// selection, paused-tools replies) passed the old budget by 656 bytes. The command palette must stay in the first paint: keys typed
+// right after Ctrl+K land in its field.
+// 2_010_000 -> 2_015_000 on purpose for the 0.1.15 last fixes: voice chat silent-microphone notice and wait, page-crash notice,
+// knowledge-base edits. 0.1.16 moves voice-chat code out of the eager chunk.
+const BUDGET = 2_015_000;
 // A class name only CodeMirror's view package carries; survives minification.
 const EDITOR_MARK = "cm-scroller";
 

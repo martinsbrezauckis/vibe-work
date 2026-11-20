@@ -27,7 +27,7 @@ use vw_agent_tools::killparse::{KillScan, KillTarget, NameMatch, scan};
 use vw_gate::ConfirmationRequest;
 use vw_procmon::{Attribution, Inputs, ProcessInfo, Snapshot};
 
-use super::session::session_name;
+use super::session::chat_name;
 use crate::core::Shared;
 use crate::one_ask::Asked;
 
@@ -222,7 +222,7 @@ async fn hold(
 
 fn hold_summary(title: &str, command: &str, why: &[String]) -> String {
     format!(
-        "The agent of the session {} wants to run a command that may stop processes. It runs as you.\n\nWhy approval is needed: {}.\n\nCommand:\n{}",
+        "The agent of the chat {} wants to run a command that may stop processes. It runs as you.\n\nWhy approval is needed: {}.\n\nCommand:\n{}",
         vw_gate::dialog_chat_quote(title),
         why.iter()
             .map(|reason| vw_gate::dialog_line(reason))
@@ -289,7 +289,7 @@ impl Judge<'_> {
                 }
             }
             KillTarget::AllProcesses => self.object(
-                "kill -1 signals every process of this user, other sessions and apps included"
+                "kill -1 signals every process of this user, other chats and apps included"
                     .to_owned(),
             ),
             KillTarget::Name { name, how } => {
@@ -326,7 +326,7 @@ impl Judge<'_> {
 
     fn pid(&mut self, pid: u32) {
         if pid <= 1 {
-            self.object(format!("pid {pid} is not a process this session may stop"));
+            self.object(format!("pid {pid} is not a process this chat may stop"));
             return;
         }
         let Some(info) = self.snapshot.alive(pid) else {
@@ -339,7 +339,7 @@ impl Judge<'_> {
         }
         if self.inputs.vibe_servers.iter().any(|s| s.pid == pid) {
             self.object(format!(
-                "pid {pid} ({name}) is Vibe's app server, which runs every session"
+                "pid {pid} ({name}) is Vibe's app server, which runs every chat"
             ));
             return;
         }
@@ -349,7 +349,7 @@ impl Judge<'_> {
             Some(other) => {
                 let text = format!(
                     "pid {pid} ({name}) belongs to {}",
-                    session_name(self.shared, other)
+                    chat_name(self.shared, other)
                 );
                 self.object(text);
             }
@@ -365,9 +365,9 @@ impl Judge<'_> {
                             .into_iter()
                             .map(|c| {
                                 if c == self.session {
-                                    "this session".to_owned()
+                                    "this chat".to_owned()
                                 } else {
-                                    session_name(self.shared, c)
+                                    chat_name(self.shared, c)
                                 }
                             })
                             .collect()
@@ -394,7 +394,7 @@ fn not_attributed(pid: u32, name: &str, candidates: &[String], started_by_app: b
         format!("pid {pid} ({name}) belongs to another app")
     } else if candidates.len() > NAMED_CANDIDATES + 1 {
         format!(
-            "pid {pid} ({name}) may belong to {} or one of {} other sessions",
+            "pid {pid} ({name}) may belong to {} or one of {} other chats",
             candidates[..NAMED_CANDIDATES].join(" or "),
             candidates.len() - NAMED_CANDIDATES
         )
@@ -437,13 +437,10 @@ mod kg1_tests {
             not_attributed(
                 435_229,
                 "sleep",
-                &[
-                    "this session".to_owned(),
-                    "another session ('util')".to_owned()
-                ],
+                &["this chat".to_owned(), "another chat ('util')".to_owned()],
                 false,
             ),
-            "pid 435229 (sleep) may belong to this session or another session ('util')"
+            "pid 435229 (sleep) may belong to this chat or another chat ('util')"
         );
         assert_eq!(
             not_attributed(12, "firefox", &[], true),
@@ -459,15 +456,15 @@ mod kg1_tests {
     /// one of them, 17 names joined by "or". The first three are named and the rest are counted.
     #[test]
     fn a_long_candidate_list_names_three_and_counts_the_rest() {
-        let mut candidates = vec!["this session".to_owned()];
-        candidates.extend((1..17).map(|i| format!("another session ('chat {i}')")));
+        let mut candidates = vec!["this chat".to_owned()];
+        candidates.extend((1..17).map(|i| format!("another chat ('chat {i}')")));
         assert_eq!(
             not_attributed(64_213, "sleep", &candidates, false),
-            "pid 64213 (sleep) may belong to this session or another session ('chat 1') or another session ('chat 2') or one of 14 other sessions"
+            "pid 64213 (sleep) may belong to this chat or another chat ('chat 1') or another chat ('chat 2') or one of 14 other chats"
         );
         assert_eq!(
             not_attributed(64_213, "sleep", &candidates[..4], false),
-            "pid 64213 (sleep) may belong to this session or another session ('chat 1') or another session ('chat 2') or another session ('chat 3')"
+            "pid 64213 (sleep) may belong to this chat or another chat ('chat 1') or another chat ('chat 2') or another chat ('chat 3')"
         );
     }
 

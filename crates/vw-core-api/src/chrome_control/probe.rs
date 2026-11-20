@@ -493,3 +493,7 @@ impl Prober {
 #[cfg(test)]
 #[path = "probe_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "probe_receipt_tests.rs"]
+mod receipt_tests;

@@ -151,11 +151,11 @@ fn open_leaf(parent: &Dir, leaf: &str, shown: &Path) -> Result<Dir, String> {
 fn open_base(session: &Path, create: bool) -> Result<(PathBuf, Dir), String> {
     let session = session
         .canonicalize()
-        .map_err(|e| format!("the session folder is not available: {e}"))?;
+        .map_err(|e| format!("the chat folder is not available: {e}"))?;
     let base = session.join("capture");
     real_dir(&base, &base, create)?;
     let root = Dir::open_ambient_dir(&session, cap_std::ambient_authority())
-        .map_err(|e| format!("the session folder is not available: {e}"))?;
+        .map_err(|e| format!("the chat folder is not available: {e}"))?;
     let handle = open_leaf(&root, "capture", &base)?;
     Ok((base, handle))
 }

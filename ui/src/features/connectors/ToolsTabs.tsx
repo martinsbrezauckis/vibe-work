@@ -14,6 +14,11 @@ const TABS = [
   { id: "skills", label: "Skills" },
 ] as const;
 
+/** The Tools page title: first on each Tools tab, like the Libraries and Projects page titles. */
+export function ToolsTitle(): ReactElement {
+  return <h2 className="ctitle">Tools</h2>;
+}
+
 /** The tab strip. */
 export function ToolsTabs(): ReactElement {
   const tab = useMarket((s) => s.tab);

@@ -76,7 +76,7 @@ pub(crate) async fn call_prepared(
     }
     if names::BROWSER_TOOLS.contains(&tool) {
         if shared.store.view(session_id).is_none() {
-            return Err("this session is not open in Vibe Work right now".to_owned());
+            return Err("this chat is not open in Vibe Work right now".to_owned());
         }
         return super::browser_tools::call(shared, session_id, tool, args).await;
     }
@@ -85,7 +85,7 @@ pub(crate) async fn call_prepared(
     }
     if names::PREVIEW_TOOLS.contains(&tool) {
         if shared.store.view(session_id).is_none() {
-            return Err("this session is not open in Vibe Work right now".to_owned());
+            return Err("this chat is not open in Vibe Work right now".to_owned());
         }
         return super::preview_tools::call(shared, session_id, tool, &args).await;
     }
@@ -104,7 +104,7 @@ pub(crate) async fn call_prepared(
     let (id, tool) = (session_id.to_owned(), tool.to_owned());
     let job = tokio::task::spawn_blocking(move || {
         if shared.store.view(&id).is_none() {
-            return Err("this session is not open in Vibe Work right now".to_owned());
+            return Err("this chat is not open in Vibe Work right now".to_owned());
         }
         match tool.as_str() {
             names::PROCESSES_LIST => processes_list(&shared, &tools, &id),
@@ -165,22 +165,22 @@ async fn small_tool(
         return Some(super::video_tools::call(shared, tools, session_id, args.clone()).await);
     }
     if names::is_chrome(tool) && !shared.chrome_control.config.available() {
-        let browser =
-            crate::chrome_control::agent_browser::selected(shared, session_id, tool, args);
+        let browser = crate::chrome_control::selected_browser(shared, session_id, tool, args);
         return Some(Err(
-            crate::chrome_control::agent_browser::Fixed::Unavailable.text(browser),
+            crate::chrome_control::FixedText::Unavailable.text(browser)
         ));
     }
     if tool == names::CHROME_TOOL_LIST {
-        return Some(Ok(crate::chrome_control::gateway::list(shared)));
+        return Some(Ok(crate::chrome_control::list_tools(shared)));
     }
     if names::CHROME_TOOLS.contains(&tool) {
         return Some(
-            crate::chrome_control::gateway::call(shared, session_id, tool, args.clone()).await,
+            crate::chrome_control::call_tool(shared, session_id, tool, args.clone()).await,
         );
     }
 
     Some(match tool {
+        names::PUSH => super::push_tool::unprepared(shared),
         names::SESSION_STATUS
         | names::CONNECTORS_LIST
         | names::CONNECTOR_SUGGEST

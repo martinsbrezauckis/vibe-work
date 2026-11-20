@@ -4,8 +4,8 @@
  * AND no new realtime transcript words came for `pauseMs` (including quiet speech below the energy threshold).
  * No model-based turn detection.
  * The threshold adapts to the room: it is the larger of a fixed floor and `NOISE_RATIO` × the noise floor, which
- * the first chunk sets and then follows the quietest chunks (drops at once, rises slowly), so steady background noise
- * does not count as speech.
+ * the first chunk sets and then follows the quietest chunks (drops at once, rises slowly, and far more slowly while the
+ * chunk is speech), so steady background noise does not count as speech and long speech never raises the bar.
  * The rule arms only once speech was heard (`MIN_SPEECH_MS` above the threshold, or a transcript word), so a user
  * who has not started talking is never cut off.
  * Depends on: nothing. Called by: state/voiceChat (one detector per listening stretch), tests (synthetic PCM).
@@ -16,8 +16,11 @@
 export const PAUSE_MIN_MS = 800;
 /** Longest pause a user can choose. */
 export const PAUSE_MAX_MS = 2_500;
-/** The default pause. */
-export const PAUSE_DEFAULT_MS = 800;
+/**
+ * The default pause: longer than the short pause people make to think inside a sentence, so a turn does not end
+ * on half a sentence. The shortest choice (0.8 s) stays available for quicker turns.
+ */
+export const PAUSE_DEFAULT_MS = 1_200;
 
 /** RMS (0..1) below which a chunk is quiet in any room. */
 const FLOOR_RMS = 0.01;
@@ -25,8 +28,13 @@ const FLOOR_RMS = 0.01;
 const NOISE_RATIO = 3;
 /** Speech heard (above the threshold) before a pause can end the turn. */
 const MIN_SPEECH_MS = 300;
-/** How fast the noise floor rises towards louder chunks (share of the gap per chunk of ~250 ms). */
+/** How fast the noise floor rises towards a louder quiet chunk (share of the gap per 250 ms of audio). */
 const RISE = 0.03;
+/**
+ * How fast it rises while the chunk counts as speech (share of the gap per 250 ms of audio). Far slower than `RISE`:
+ * continuous speech must never lift the threshold above the speech itself, whatever the chunk size.
+ */
+const RISE_SPEECH = 0.002;
 
 /** RMS (0..1) of 16-bit little-endian PCM. */
 export function pcmRms(pcm: Uint8Array): number {
@@ -72,11 +80,14 @@ export function createTurnEnd(options: { pauseMs: number; words: boolean }) {
         noise = rms;
         return;
       }
-      if (rms >= threshold() && rms > FLOOR_RMS) {
+      const loud = rms >= threshold() && rms > FLOOR_RMS;
+      if (loud) {
         speechMs += durationMs;
         lastLoud = now;
       }
-      noise = rms < noise ? rms : noise + (rms - noise) * RISE;
+      // The rise is per second of audio, not per chunk: the chunk size of a microphone must not change the rule.
+      const share = 1 - (1 - (loud ? RISE_SPEECH : RISE)) ** (durationMs / 250);
+      noise = rms < noise ? rms : noise + (rms - noise) * share;
     },
     /** The live transcript changed at `now` (new words). */
     words(now: number): void {

@@ -1,24 +1,21 @@
 /**
  * The two privacy switches: Vibe's usage telemetry (`enable_telemetry`) and its
- * experiments (`experiments.enable`), read with `config/fields/read` and written with `config/write`
- * through a session. Mistral's remote experiments decide which features an account gets, and they only
+ * experiments (`experiments.enable`). Mistral's remote experiments decide which features an account gets, and they only
  * run with telemetry on, so telemetry off also hides rollout features such as smart
  * approve and extra models. The screen says that in plain words; this module computes the facts it
  * shows.
- * Depends on: coreStore, modelChoice (`sessionForPick`), vibeSettings (`readSettingsFields`), protocol/core types.
+ * Depends on: coreStore, protocol/core types.
  * Called by:
  * features/settings/PrivacySettings, settingsRoutes.
  * Invariants:
- * - Turning a switch OFF is sent as is. Turning it ON (data leaves the machine again) needs the native
- *   confirmation: this module asks for it first and sends the call with the token.
- * - A value that a higher layer sets (`environment`, `admin`, `overrides`) is shown as set by someone
- *   else and is not editable here: a write to the user layer would be shadowed.
+ * - The guarded runtime disables usage telemetry and remote experiments. This screen reports both off
+ *   and managed by Vibe Work even if a saved configuration contains an opt-in.
+ * - Raw field parsing retains the upstream layer names. The managed policy takes precedence in this screen.
  * - Parsing is defensive: the result is untyped JSON from Vibe; what is not recognised is "unknown".
  */
 import type { JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
-import { readSettingsFields } from "./vibeSettings";
 
 /** Layers that shadow what this screen writes. */
 const SHADOWING = new Set(["environment", "admin", "overrides"]);
@@ -78,18 +75,12 @@ export function parsePrivacy(result: JsonValue): PrivacyView | null {
   };
 }
 
-/** Reads the switches through `sessionId` (`null`: no chat at all); rejects with a plain-words `Error`. */
-export async function readPrivacy(
-  core: CoreController,
-  sessionId: string | null,
-): Promise<PrivacyView> {
-  try {
-    const parsed = parsePrivacy(await readSettingsFields(core, sessionId));
-    if (parsed === null) throw new Error("Vibe's config did not list the privacy switches.");
-    return parsed;
-  } catch (thrown) {
-    throw new Error(toCallError(thrown).error.message, { cause: thrown });
-  }
+/** Reports the guarded runtime's policy without depending on a chat or upstream config fields. */
+export function readPrivacy(): Promise<PrivacyView> {
+  return Promise.resolve({
+    telemetry: { on: false, setBy: "environment" },
+    experiments: { on: false, setBy: "environment" },
+  });
 }
 
 /** Which switch. */
@@ -101,8 +92,8 @@ const PATHS: Record<SwitchName, string> = {
 };
 
 /**
- * Sets a switch; rejects with a plain-words `Error`. `reloadRuntime` makes Vibe re-derive the session's
- * settings now, so the access menu and model list follow (smart approve appears only with telemetry on).
+ * Saves an explicit opt-out; enabling is refused before sending a core command.
+ * `reloadRuntime` makes Vibe re-derive the session's settings.
  */
 export async function writePrivacy(
   core: CoreController,
@@ -110,34 +101,21 @@ export async function writePrivacy(
   which: SwitchName,
   on: boolean,
 ): Promise<void> {
+  if (on) throw new Error("Usage data and experiments are disabled by Vibe Work.");
   const params = {
     sessionId,
     ops: [{ op: "set", path: PATHS[which], value: on }],
-    reason: on ? "privacy switch on" : "privacy switch off",
+    reason: "privacy switch off",
     reloadRuntime: true,
   } satisfies Record<string, JsonValue>;
-  const send = (token?: string) =>
+  const send = () =>
     core.run({
       type: "call",
       method: "config/write",
       params,
-      ...(token === undefined ? {} : { confirmationToken: token }),
     });
   try {
-    let result;
-    if (on) {
-      // Turning data sharing on is an escalation the gate answers with `confirmationRequired`; asking for
-      // the confirmation first avoids a refused call (and its "refused" notice) on the way.
-      const answer = await core
-        .run({ type: "requestConfirmation", method: "config/write", params })
-        .catch((thrown: unknown) => {
-          if (toCallError(thrown).error.code === "confirmationNotApplicable") return null;
-          throw thrown;
-        });
-      result = await send(answer?.type === "confirmation" ? answer.token : undefined);
-    } else {
-      result = await send();
-    }
+    const result = await send();
     if (result.type === "reply") {
       const body = asObject(result.result);
       if (body?.["rejected"] === true) throw new Error("Vibe did not accept the change.");

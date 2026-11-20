@@ -92,6 +92,9 @@ describe("agent frame", () => {
     expect(screen.getByTestId("preview.agent-frame")).toHaveTextContent(
       frameText("paused", "Order shoes"),
     );
+    expect(frameText("paused", "Order shoes")).toBe(
+      "Paused: you are using the browser · Order shoes",
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Resume browser access" }),
     );

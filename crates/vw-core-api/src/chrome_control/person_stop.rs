@@ -19,13 +19,13 @@ pub(super) struct Stopped {
 }
 
 /// Helper `suspensionReason` values that end a session without anyone pressing Stop: the browser's adapter
-/// disconnected or its owned window closed (`ADAPTER_DISCONNECTED`), the browser session was replaced
-/// (`SESSION_CHANGED`), or the lease ran out (`LEASE_EXPIRED`). `STOP_REQUESTED`, an absent reason (older
+/// disconnected (`ADAPTER_DISCONNECTED`), its owned window closed (`WINDOW_CLOSED`), the browser session
+/// was replaced (`SESSION_CHANGED`), or the lease ran out (`LEASE_EXPIRED`). `STOP_REQUESTED`, an absent reason (older
 /// helpers) and unknown values keep the person attribution.
 pub(super) fn connection_ended(row: &Value) -> bool {
     matches!(
         row["suspensionReason"].as_str(),
-        Some("ADAPTER_DISCONNECTED" | "SESSION_CHANGED" | "LEASE_EXPIRED")
+        Some("ADAPTER_DISCONNECTED" | "WINDOW_CLOSED" | "SESSION_CHANGED" | "LEASE_EXPIRED")
     )
 }
 
@@ -111,6 +111,33 @@ pub(super) fn received(shared: &Arc<Shared>, stopped: &[Stopped]) {
     }
 }
 
+/// The helper answers `CONTROL_SUSPENDED` for every session that is not active. The person's Stop in the browser
+/// reaches Vibe Work only with the next status poll, so a call sent just after it can come back first. One fresh
+/// status read records a Stop the helper already holds; the call's own `finish` then gives the person-stop refusal.
+pub(super) async fn read_stop_behind(
+    shared: &Arc<Shared>,
+    tool: &str,
+    answer: &super::owner::Answer,
+) {
+    let super::owner::Answer::Helper(value) = answer else {
+        return;
+    };
+    if tool != "chrome_execute" {
+        return;
+    }
+    let body = &value["structuredContent"];
+    if body["error"]["code"] != "CONTROL_SUSPENDED"
+        && body["hostError"]["code"] != "CONTROL_SUSPENDED"
+    {
+        return;
+    }
+    let started = tokio::time::Instant::now();
+    let status = shared.chrome_control.owner.call("chrome_status", json!({}));
+    if let Ok(status) = tokio::time::timeout(std::time::Duration::from_secs(3), status).await {
+        super::owner::update_work(&Arc::downgrade(shared), status.value(), started);
+    }
+}
+
 /// The turn and stop intent of one helper call, captured before sending and checked before binding its result.
 pub(super) struct PendingCall {
     pub turn: Option<String>,
@@ -183,7 +210,7 @@ impl PendingCall {
         }
         if self.browser_disabled(shared, browser) {
             return Some(format!(
-                "{} work was stopped by its switch. Open a fresh {} session after it is enabled.",
+                "{} work was stopped by its switch. Open a fresh {} browser session after it is enabled.",
                 browser.short_name(),
                 browser.short_name()
             ));
@@ -221,11 +248,10 @@ impl PendingCall {
                 .lock_or_recover()
                 .stop_refused(id, chat);
         }
-        let stopped = shared
-            .chrome_control
-            .stopped_by_person(chat, browser, self.turn.as_deref());
-        if stopped
-            || self.refusal(shared, chat, browser).is_some()
+        // One pass over the invalidators: `refusal` covers the profile binding, the profile and browser switches and
+        // the person's Stop (in that order); the rest end the turn's authority without a reason of their own.
+        let refused = self.refusal(shared, chat, browser);
+        if refused.is_some()
             || self.generation != crate::stops::generation(shared, chat)
             || self.active != active_turn(shared, chat)
             || shared.store.view(chat).is_none()
@@ -239,13 +265,7 @@ impl PendingCall {
                     .owner
                     .control(json!({"action":"stop","sessionId":id}));
             }
-            return Err(if let Some(reason) = self.refusal(shared, chat, browser) {
-                reason
-            } else if stopped {
-                refusal(browser)
-            } else {
-                ended(browser)
-            });
+            return Err(refused.unwrap_or_else(|| ended(browser)));
         }
         Ok(())
     }

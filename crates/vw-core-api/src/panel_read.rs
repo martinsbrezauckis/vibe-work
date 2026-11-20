@@ -84,12 +84,12 @@ pub(crate) async fn tool(shared: &Shared, session: &str, args: &Value) -> Result
         Value::Object(map) if map.is_empty() => {}
         _ => {
             return Err(
-                "panel_read takes no arguments: it reads this session's side panel.".to_owned(),
+                "panel_read takes no arguments: it reads this chat's side panel.".to_owned(),
             );
         }
     }
     if shared.store.view(session).is_none() {
-        return Err("this session is not open in Vibe Work right now".to_owned());
+        return Err("this chat is not open in Vibe Work right now".to_owned());
     }
     let (request_id, reply) = shared.panel_reads.begin(session);
     shared.emit(CoreEvent::PanelRead {
@@ -254,7 +254,7 @@ mod tests {
         };
         assert!(
             !pending.answer("b", &id, view.clone()),
-            "another session's window"
+            "another chat's window"
         );
         assert!(reply.try_recv().is_err());
         assert!(pending.answer("a", &id, view.clone()));

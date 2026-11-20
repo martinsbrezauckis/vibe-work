@@ -80,7 +80,7 @@ export function ResultStep() {
         {test.phase === "ok" && (
           <Button
             type="button"
-            appearance="dialog"
+            variant="primary"
             data-testid="setup.continue"
             disabled={busy || status?.keyState !== "ready"}
             onClick={() => {
@@ -94,7 +94,7 @@ export function ResultStep() {
           <>
             <Button
               type="button"
-              appearance="dialog"
+              variant="primary"
               data-testid="setup.retry"
               disabled={busy}
               onClick={() => {

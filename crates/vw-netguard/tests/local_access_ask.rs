@@ -28,6 +28,8 @@ struct Person {
     asked: Mutex<Vec<Asked>>,
     /// Whether each asked request was marked as a nested document.
     nested: Mutex<Vec<bool>>,
+    /// Whether each asked request was said to speak TLS.
+    tls: Mutex<Vec<bool>>,
 }
 
 impl PageContext for Person {
@@ -49,6 +51,7 @@ impl PageContext for Person {
             request.initiator.map(str::to_owned),
         ));
         self.nested.lock().unwrap().push(request.nested);
+        self.tls.lock().unwrap().push(request.tls);
         let mut answer = self.answer.clone();
         Box::pin(async move {
             let given = answer
@@ -97,6 +100,7 @@ fn setup(internal: Option<u16>) -> (NetGuard, Arc<Person>, watch::Sender<Option<
         answer,
         asked: Mutex::new(Vec::new()),
         nested: Mutex::new(Vec::new()),
+        tls: Mutex::new(Vec::new()),
     });
     let guard = NetGuard::bind(Arc::new(SystemResolver)).unwrap();
     guard.set_upstream(Upstream::none());
@@ -169,6 +173,33 @@ async fn a_nested_document_is_marked_for_the_answer() {
     assert_eq!(
         *person.nested.lock().unwrap(),
         vec![true, true, false, false]
+    );
+}
+
+/// The question says "this page asks over HTTPS" only for a request known to speak TLS: a plain request never is; a
+/// CONNECT tunnel is one on Linux and Windows (their engines tunnel only HTTPS and secure WebSocket requests) but not on macOS,
+/// where `WebKit` sends plain http through the same tunnel, so the tunnel does not say which it carries.
+/// PREDICT (before the change): every tunnel is reported `tls: true`, so on macOS a page opened over http:// was told
+/// it asks over HTTPS; this test's macOS row fails.
+#[tokio::test]
+async fn only_a_request_known_to_speak_tls_is_said_to() {
+    let (guard, person, tell) = setup(None);
+    tell.send_replace(Some(false));
+    let address = proxy_client::addr(&guard.proxy_url_for_store("web", "page").unwrap());
+    let _ = read_all(send(address, 9, "").await).await;
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(&proxy_client::authorize(
+            address,
+            b"CONNECT 127.0.0.1:9 HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n",
+        ))
+        .await
+        .unwrap();
+    let answer = read_all(client).await;
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert_eq!(
+        *person.tls.lock().unwrap(),
+        vec![false, !cfg!(target_os = "macos")]
     );
 }
 
@@ -274,6 +305,7 @@ async fn every_non_public_class_is_asked_and_public_is_not() {
             80,
             Some("https://a.example"),
             false,
+            false,
         )
         .await
         .unwrap();
@@ -289,7 +321,7 @@ async fn every_non_public_class_is_asked_and_public_is_not() {
         );
     }
     let scope = Record::default();
-    decide_for(&resolver, &scope, "93.184.216.34", 443, None, false)
+    decide_for(&resolver, &scope, "93.184.216.34", 443, None, false, true)
         .await
         .unwrap();
     assert!(scope.0.lock().unwrap().is_empty(), "public is never asked");

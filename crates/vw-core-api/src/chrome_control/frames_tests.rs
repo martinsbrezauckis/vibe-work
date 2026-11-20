@@ -43,6 +43,9 @@ async fn fixture(name: &str) -> (crate::Core, Seen) {
         if tool == "chrome_execute" {
             json!({"content":[{"type":"text","text":"page text"}],
                    "structuredContent":{"sessionId":args["sessionId"],"status":"completed"}})
+        } else if tool == "chrome_session" && args["action"] == "frame" {
+            json!({"structuredContent":{"sessionId":args["sessionId"],"state":"active",
+                   "frame":{"state":args["state"],"label":args["label"],"colour":args["colour"]}}})
         } else {
             json!({"structuredContent":{"sessionId":args["sessionId"],"state":"active"}})
         }
@@ -139,6 +142,90 @@ async fn working_frame_once_then_off_at_turn_end_with_the_session_kept() {
     core.shutdown().await;
 }
 
+/// PREDICT: after an idle turn has switched the frame off, the first awaited browser action
+/// enters the helper before the next working frame is queued. The person has no visible Stop
+/// until that action finishes, even though the chat turn is running.
+#[tokio::test]
+async fn first_script_of_a_followup_turn_queues_working_frame_before_action() {
+    let (core, seen) = fixture("frame-before-first-script").await;
+    super::sync_chat(&core.shared, "a");
+    turn(&core, "a", "one", false);
+    crate::chrome_control::end_turn(&core.shared, "a");
+    assert_eq!(frames(&seen).await.last().unwrap()["state"], "off");
+    turn(&core, "a", "two", true);
+    let result = gateway::call(
+        &core.shared,
+        "a",
+        "chrome_execute",
+        json!({"sessionId":"task-a","action":"raw.execute","args":{"expression":"new Promise(()=>{})"}}),
+    ).await;
+    let calls = seen.lock().unwrap().clone();
+    let tail: Vec<_> = calls
+        .iter()
+        .filter(|(name, args)| {
+            name == "chrome_execute" && args["action"] == "raw.execute"
+                || name == "chrome_session"
+                    && args["action"] == "frame"
+                    && args["state"] == "working"
+        })
+        .collect();
+    assert!(
+        result.is_ok(),
+        "first script did not reach the fake helper: {result:?}"
+    );
+    assert_eq!(
+        tail.len(),
+        3,
+        "expected old working, new working, and raw action: {calls:?}"
+    );
+    assert_eq!(
+        tail[1].0, "chrome_session",
+        "working frame must precede the script: {calls:?}"
+    );
+    assert_eq!(tail[1].1["state"], "working");
+    assert_eq!(tail[2].0, "chrome_execute", "{calls:?}");
+    core.shutdown().await;
+}
+
+/// PREDICT: a rejected or mismatched frame answer lets a raw script reach the helper while the
+/// person still lacks confirmed controls. The action must end before dispatch in either case.
+#[tokio::test]
+async fn first_script_refuses_when_its_frame_cannot_be_confirmed() {
+    for frame_state in ["wrong", "rejected"] {
+        let (core, _) = fixture(&format!("frame-unconfirmed-{frame_state}")).await;
+        let seen = test_support::answering(&core.shared, move |tool, args| {
+            if tool == "chrome_session" && args["action"] == "frame" {
+                if frame_state == "rejected" {
+                    json!({"isError":true,"structuredContent":{"error":{"code":"CONTROL_STATE"}}})
+                } else {
+                    json!({"structuredContent":{"sessionId":args["sessionId"],"frame":{"state":"off"}}})
+                }
+            } else {
+                json!({"structuredContent":{"sessionId":args["sessionId"],"status":"completed","state":"active"}})
+            }
+        });
+        let result = gateway::call(
+            &core.shared,
+            "a",
+            "chrome_execute",
+            json!({"sessionId":"task-a","action":"raw.execute","args":{"expression":"new Promise(()=>{})"}}),
+        ).await;
+        assert!(
+            result.unwrap_err().starts_with("Not run:"),
+            "unconfirmed controls must refuse {frame_state}"
+        );
+        assert!(
+            !seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(tool, _)| tool == "chrome_execute"),
+            "script reached the helper after {frame_state} frame receipt"
+        );
+        core.shutdown().await;
+    }
+}
+
 #[tokio::test]
 async fn a_person_pause_row_pauses_once_and_is_acknowledged() {
     let (core, seen) = fixture("frame-person-pause").await;
@@ -173,6 +260,88 @@ async fn a_person_pause_row_pauses_once_and_is_acknowledged() {
     assert_eq!(
         (last["state"].as_str(), last["ackPause"].as_u64()),
         (Some("working"), Some(3))
+    );
+    core.shutdown().await;
+}
+
+// PREDICT before the fix: a helper frameControl notification is ignored until a status/action reply arrives.
+#[tokio::test]
+async fn signed_frame_notification_applies_one_chat_immediately_and_ignores_stale_or_malformed_rows()
+ {
+    let (core, _) = fixture("frame-control-notification").await;
+    turn(&core, "b", "two", true);
+    core.shared.chrome_control.work.lock().unwrap().open(
+        "task-b",
+        "b",
+        "active",
+        "chrome:q",
+        Some("two"),
+    );
+    let event = |session: &str, chat: &str, profile: &str, state: &str, seq: Value| {
+        json!({
+            "method":"notifications/owner/frameControl",
+            "params":{"sessionId":session,"clientSessionId":chat,"profileId":profile,"state":"active",
+                      "personPause":{"state":state,"seq":seq}}
+        })
+    };
+    let owner = Arc::downgrade(&core.shared);
+    let pause = event("task-a", "a", "chrome:p", "paused", json!(1));
+    owner::observe(&owner, &pause).unwrap();
+    assert!(
+        core.shared.paused_tools.is_paused("a", BROWSER),
+        "Pause applies before any status poll"
+    );
+    assert!(!core.shared.paused_tools.is_paused("b", BROWSER));
+    for invalid in [
+        event("task-a", "b", "chrome:p", "paused", json!(2)),
+        event("task-a", "a", "chrome:q", "paused", json!(2)),
+        event("missing", "a", "chrome:p", "paused", json!(2)),
+        event("task-a", "a", "chrome:p", "stopped", json!(2)),
+        event("task-a", "a", "chrome:p", "paused", json!("two")),
+    ] {
+        owner::observe(&owner, &invalid).unwrap();
+        assert!(
+            core.shared.paused_tools.is_paused("a", BROWSER),
+            "{invalid}"
+        );
+        assert!(
+            !core.shared.paused_tools.is_paused("b", BROWSER),
+            "{invalid}"
+        );
+    }
+    owner::observe(
+        &owner,
+        &event("task-a", "a", "chrome:p", "resumed", json!(2)),
+    )
+    .unwrap();
+    assert!(!core.shared.paused_tools.is_paused("a", BROWSER));
+    owner::observe(&owner, &pause).unwrap();
+    assert!(
+        !core.shared.paused_tools.is_paused("a", BROWSER),
+        "stale seq must not replay Pause"
+    );
+    owner::observe(
+        &owner,
+        &event("task-b", "b", "chrome:q", "paused", json!(1)),
+    )
+    .unwrap();
+    assert!(core.shared.paused_tools.is_paused("b", BROWSER));
+    assert!(!core.shared.paused_tools.is_paused("a", BROWSER));
+    core.shared.chrome_control.work.lock().unwrap().open(
+        "task-a",
+        "a",
+        "stopped",
+        "chrome:p",
+        Some("one"),
+    );
+    super::observe(
+        &core.shared,
+        &[json!({"sessionId":"task-a","state":"active",
+        "personPause":{"state":"paused","seq":3}})],
+    );
+    assert!(
+        !core.shared.paused_tools.is_paused("a", BROWSER),
+        "a stale active row must not pause current stopped work"
     );
     core.shutdown().await;
 }

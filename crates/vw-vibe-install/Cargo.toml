@@ -24,12 +24,14 @@ vw-mistral = { workspace = true }
 # and the `initialize` parameters of the version probe.
 vw-supervisor = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
-# Loopback check of redirect targets (already in Cargo.lock through reqwest and vw-host).
+# The download host rule of every request and redirect hop (download_hosts; already in Cargo.lock through reqwest).
 url = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# Lowercase hex of digests and offer ids (same crate as vw-market and vw-pages).
+hex = { workspace = true }
 # The offer id (OS random source), as vw-debug-api and vw-agent-tools.
 getrandom = { workspace = true }
 thiserror = { workspace = true }

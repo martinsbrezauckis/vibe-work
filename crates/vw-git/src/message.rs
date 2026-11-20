@@ -171,7 +171,7 @@ pub fn prompt(
         user.push('\n');
     }
     if !title.trim().is_empty() {
-        user.push_str("\nThe task of the session that made the change: ");
+        user.push_str("\nThe task of the chat that made the change: ");
         user.push_str(title.trim());
         user.push('\n');
     }

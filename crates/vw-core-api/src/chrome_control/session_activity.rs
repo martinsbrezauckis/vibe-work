@@ -41,7 +41,7 @@ async fn resume(
         || result["structuredContent"]["sessionId"] != id
     {
         return Ok(Some(owner::own(
-            "Not run: the browser did not confirm control of this retained session. Use chrome_session get to check its state before trying another action.",
+            "Not run: the browser did not confirm control of this retained browser session. Use chrome_session get to check its state before trying another action.",
             "SESSION_NOT_READY",
         )));
     }

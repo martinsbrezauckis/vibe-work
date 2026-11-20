@@ -9,7 +9,6 @@
 //! - Every preview webview label starts with [`LABEL_PREFIX`]; the navigation guard of the app refuses any other
 //!   non-`main` label.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -56,11 +55,7 @@ impl StorageKey {
     /// Lowercase hex (32 characters): the folder name and the label middle.
     #[must_use]
     pub fn hex(self) -> String {
-        let mut text = String::with_capacity(32);
-        for byte in self.0 {
-            let _ = write!(text, "{byte:02x}");
-        }
-        text
+        hex::encode(self.0)
     }
 
     /// The session's data folder under `root` (`root/<hex>`).
@@ -81,4 +76,19 @@ impl StorageKey {
 #[must_use]
 pub fn is_preview_label(label: &str) -> bool {
     label.starts_with(LABEL_PREFIX)
+}
+
+#[cfg(test)]
+mod tests {
+    /// A session's folder and label name stay the same across versions: the first 16 bytes of the domain-separated
+    /// digest, as 32 lowercase hex digits (an existing session's saved data is found under it).
+    #[test]
+    fn a_storage_key_reads_as_lowercase_hex_of_its_bytes() {
+        let key = super::StorageKey::of("chat-1");
+        assert_eq!(key.hex(), "caa8611034345e3795859686ed90fa27");
+        assert_eq!(
+            key.data_dir(std::path::Path::new("root")),
+            std::path::Path::new("root").join(key.hex())
+        );
+    }
 }

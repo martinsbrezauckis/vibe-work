@@ -184,12 +184,7 @@ pub(crate) fn hash_bytes(repo: &Repo, index: &Path, bytes: &[u8]) -> Result<Stri
 pub(crate) fn blob_id(format: &str, content: &[u8]) -> String {
     use sha1::Digest as _;
     let header = format!("blob {}\0", content.len());
-    let hex = |bytes: &[u8]| {
-        bytes.iter().fold(String::new(), |mut out, b| {
-            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{b:02x}"));
-            out
-        })
-    };
+    let hex = |bytes: &[u8]| hex::encode(bytes);
     if format == "sha256" {
         let mut hasher = sha2::Sha256::new();
         hasher.update(header.as_bytes());

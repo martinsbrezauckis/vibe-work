@@ -3,7 +3,7 @@
  * viewport-bound menu. A containing popover owns its menu so both share the top layer.
  * Depends on React, ReactDOM and Icon; callers own values and side effects.
  * Keyboard arrows/Home/End move, Enter/Space pick, Escape closes and restores trigger focus.
- * The trigger's tooltip is withdrawn while the menu is open, so it never lies over the first choices.
+ * Names and descriptions remain accessible without native tooltips, which can stay painted over an open menu.
  * `align="end"` lines a wider menu up with the trigger's right edge (a trigger at the end of a Settings row).
  * An option's label stays on one line inside its row (the menu is as wide as its widest row, up to the window).
  * An option's accessible name is its visible label alone; its description line is its accessible description,
@@ -226,7 +226,6 @@ export function Selector<T extends string>({
         aria-expanded={open && !disabled}
         aria-controls={open && !disabled ? id : undefined}
         disabled={disabled}
-        title={open ? undefined : (title ?? label)}
         onClick={() => {
           if (open) close();
           else show();
@@ -303,7 +302,7 @@ export function Selector<T extends string>({
                 type="button"
                 value={option.value}
                 role="option"
-                title={option.tooltip}
+                aria-description={option.tooltip}
                 aria-selected={option.value === value}
                 disabled={option.disabled}
                 tabIndex={i === index ? 0 : -1}

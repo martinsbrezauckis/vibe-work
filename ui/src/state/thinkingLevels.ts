@@ -7,12 +7,10 @@
  * so both keep the list Vibe reports like every other model. Only a Large 4 row whose report offers Off (an entry a
  * person wrote without levels reports Off and High) or reports nothing is offered High only, and a saved Off or Low
  * shows and runs as High there.
- * While Vibe Work's own `large-4` entry is listed, Mistral's own Large 4 entry (from Mistral's lists: `growthbook` or
- * `catalog`, the row `crates/vw-core-api/src/model_check.rs` fills with facts) is left out of the composer and
- * Settings lists: it is the same model, and its alias comes from the account's list, which can name an id Mistral no
- * longer serves and leaves the list when "Take part in Mistral's experiments" is off. A chat or default already on
- * that alias keeps it: its list shows that entry as its one Large 4 in place of ours (nothing moves), and it takes the
- * usual fallback when the entry is gone.
+ * The pickers show Vibe's catalog and person-owned config rows together. The startup migration removes only the
+ * app's exact old Large 4 fallback row. An older experiment row is shown for a chat or default already using it.
+ * Mistral's catalog may list one model under two ids with one label (`zai-glm-5-3-flash` and its
+ * `zai-glm-5-3-flash-vibe-free` twin): catalog rows that share a label are listed once, the one in use, else the first.
  * Depends on nothing. Called by: composer/model/models (the composer menu and new-chat preference),
  * modelChoice (Settings, the default-model card).
  * Invariants: pure; an unknown model shape is never treated as Large 4.
@@ -37,16 +35,22 @@ const isMistrals = (row: Row): boolean =>
   (row?.["source"] === "growthbook" || row?.["source"] === "catalog");
 
 /**
- * A filter for a model list (`ModelConfigView` rows) that keeps one Large 4 where Vibe Work's own `large-4` entry is
- * in the same list: ours, or, when `inUse` (the chat's model or the Settings default) is Mistral's own Large 4 entry,
- * that entry in place of ours. True for every other row.
+ * A filter for older experiment model lists. Catalog-backed views use Vibe's rows without hiding a person's
+ * configured model. For older experiment rows, an in-use row takes precedence over the local fallback.
  */
 export function listedRows(
   rows: readonly Row[],
   inUse: string | null = null,
 ): (row: Row) => boolean {
+  const twin = catalogTwins(rows, inUse);
+  const large4 = large4Rows(rows, inUse);
+  return (row) => !twin.has(row) && large4(row);
+}
+
+function large4Rows(rows: readonly Row[], inUse: string | null): (row: Row) => boolean {
   const ours = rows.some((row) => row?.["alias"] === OWN_ALIAS && isLarge4(row));
   if (!ours) return () => true;
+  if (rows.some((row) => row?.["source"] === "catalog")) return () => true;
   if (!rows.some((row) => isMistrals(row) && row?.["alias"] === inUse)) {
     return (row) => !isMistrals(row);
   }
@@ -55,8 +59,48 @@ export function listedRows(
 }
 
 /**
- * True for a Large 4 model row (`ModelConfigView`: `name`, `provider`, `thinkingLevels`) whose report offers Off or
- * no levels: High is its only true choice there.
+ * The catalog rows a picker leaves out because another catalog row has the same label: of each such group the row
+ * in use stays, else the first in Vibe's order. Rows of other sources (a person's own) are never left out here.
+ */
+function catalogTwins(rows: readonly Row[], inUse: string | null): ReadonlySet<Row> {
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const label = row?.["displayName"];
+    if (row?.["source"] !== "catalog" || typeof label !== "string" || label.trim() === "") continue;
+    groups.set(label.trim(), [...(groups.get(label.trim()) ?? []), row]);
+  }
+  const left = new Set<Row>();
+  for (const group of groups.values()) {
+    const kept = group.find((row) => row?.["alias"] === inUse) ?? group[0];
+    for (const row of group) if (row !== kept) left.add(row);
+  }
+  return left;
+}
+
+/**
+ * True when Vibe's warning that the retired `large-4` alias "is not available" needs no notice: the list has no row
+ * of that alias and exactly one catalog Large 4 (not a preview), the model Core puts such a chat back on without a
+ * notice (`crates/vw-core-api/src/model_choices/retired.rs`). Core alerts on its own when that does not work.
+ */
+export function retiredAliasSettled(alias: string, rows: readonly Row[]): boolean {
+  if (alias !== OWN_ALIAS || rows.some((row) => row?.["alias"] === OWN_ALIAS)) return false;
+  const catalog = rows.filter((row) => {
+    const label = row?.["displayName"];
+    const id = row?.["alias"];
+    return (
+      row?.["source"] === "catalog" &&
+      isLarge4(row) &&
+      typeof id === "string" &&
+      id !== "" &&
+      !(typeof label === "string" && label.toLowerCase().includes("preview"))
+    );
+  });
+  return catalog.length === 1;
+}
+
+/**
+ * True for a non-catalog Large 4 model row (`ModelConfigView`: `name`, `provider`, `thinkingLevels`) whose report
+ * offers Off or no levels: High is its only true choice there. Catalog rows use their reported levels.
  */
 export function alwaysThinks(
   model: { readonly [key: string]: unknown } | null | undefined,
@@ -67,6 +111,7 @@ export function alwaysThinks(
   return (
     typeof name === "string" &&
     LARGE_4.has(name) &&
+    model?.["source"] !== "catalog" &&
     (provider === undefined || provider === "mistral") &&
     (!Array.isArray(levels) || levels.includes("off"))
   );

@@ -135,6 +135,11 @@ class TrustSnapshot:
     def is_file(self):
         return True
 
+    def resolve(self):
+        # The trust reader asks for a sidecar lock before reading. The
+        # snapshot is immutable, so the lock is unnecessary and must not write.
+        raise PermissionError("The trust snapshot has no writable lock")
+
     def open(self, mode):
         if mode != "rb":
             raise PermissionError("The trust snapshot is read-only")

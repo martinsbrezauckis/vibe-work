@@ -178,7 +178,7 @@ export function BrowserProfileAsk({
               <Button
                 key={choice.profileId}
                 type="button"
-                appearance="choice"
+                shape="outlined"
                 data-testid="ask.browser-profile-choice"
                 data-item-id={choice.profileId}
                 aria-description={shownAccount(choice) ?? undefined}
@@ -199,7 +199,7 @@ export function BrowserProfileAsk({
           <Button
             data-testid="ask.browser-profile-no"
             type="button"
-            appearance="choice"
+            shape="outlined"
             disabled={disabled}
             onClick={() => {
               send({ decision: "deny" });

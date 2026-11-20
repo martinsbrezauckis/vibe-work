@@ -369,11 +369,18 @@ pub(super) fn core_decls(cfg: &Config) -> Vec<String> {
             .map(str::trim_end)
             .collect::<Vec<_>>()
             .join("\n"),
-        CoreError::decl(cfg),
-        ErrorCode::decl(cfg),
         Origin::decl(cfg),
         // Shared by skills.ts and market.ts (one-click install offers).
         crate::ToolsInstallOffer::decl(cfg),
+    ]
+}
+
+/// The error and alert kinds, in their own module so `index.ts` stays within the 800-line size limit (`index.ts`
+/// re-exports them; `events.ts` imports them from here).
+pub(super) fn errors_decls(cfg: &Config) -> Vec<String> {
+    vec![
+        CoreError::decl(cfg),
+        ErrorCode::decl(cfg),
         AlertKind::decl(cfg),
     ]
 }

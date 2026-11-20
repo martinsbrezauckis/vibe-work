@@ -5,6 +5,7 @@ import { useStore } from "../../state/createStore";
 import { useApp } from "../shell/AppContext";
 import { rowEntries, type Row } from "./model/build";
 import { entryId } from "./model/entries";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 /** Resolve a history id or tool-call id without using a search query or command arguments. */
 export function useStepTarget(
@@ -50,17 +51,21 @@ export function useStepTarget(
     if (id !== null) app.transcript.toggle(`step:${id}`, true);
     list.current?.scrollToIndex(index, { align: "center" });
     let element: HTMLElement | undefined;
-    const timer = window.setTimeout(() => {
-      element = [...document.querySelectorAll<HTMLElement>(".tx-list [data-entry-id]")].find(
-        (node) => node.dataset["entryId"] === id,
-      );
-      if (element === undefined) return;
-      element.classList.add("find-current");
-      element.tabIndex = -1;
-      element.focus({ preventScroll: true });
-    }, 60);
+    // The virtual list mounts the row after it scrolled there: focus it once it exists.
+    const cancel = focusWhenMounted({
+      find: () =>
+        [...document.querySelectorAll<HTMLElement>(".tx-list [data-entry-id]")].find(
+          (node) => node.dataset["entryId"] === id,
+        ),
+      preventScroll: true,
+      prepare: (node) => {
+        element = node;
+        node.classList.add("find-current");
+        node.tabIndex = -1;
+      },
+    });
     return () => {
-      window.clearTimeout(timer);
+      cancel();
       element?.classList.remove("find-current");
     };
   }, [app, sessionId, index, id, group, list, target, pauseFollow]);

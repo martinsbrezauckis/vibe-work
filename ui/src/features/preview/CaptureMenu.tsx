@@ -115,7 +115,8 @@ export function CaptureMenu({
           data-testid="preview.capture-menu-set-open"
           ref={button}
           type="button"
-          appearance={compact ? "browser-menu" : "preview"}
+          appearance={compact ? "menu" : undefined}
+          shape="outlined"
           placement="browser-capture"
           role={compact ? "menuitem" : undefined}
           aria-haspopup="menu"

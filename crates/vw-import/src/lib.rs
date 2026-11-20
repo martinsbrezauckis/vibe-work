@@ -221,4 +221,8 @@ pub fn fingerprint(parts: &[&[u8]]) -> String {
 mod tests;
 
 #[cfg(test)]
+#[path = "link_tests.rs"]
+mod link_tests;
+
+#[cfg(test)]
 mod credential_tests;

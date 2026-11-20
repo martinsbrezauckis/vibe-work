@@ -38,6 +38,9 @@ impl Request {
                     .ok_or(
                         "The wait target is invalid or too long. Choose a bounded target string.",
                     )?;
+                if name == "selector" && tests_field_values(value) {
+                    return Err(VALUE_SELECTOR.into());
+                }
                 if name == "ref" && !crate::model::is_ref(value) {
                     return Err(
                         "Wait needs a current observed ref. Read the page and choose its ref."
@@ -150,6 +153,171 @@ impl Browser {
                 (tokio::time::Instant::now() + Duration::from_millis(100)).min(deadline),
             )
             .await;
+        }
+    }
+}
+
+/// A wait matches the live page, so a selector that tests a field's value would answer questions about it one wait at a
+/// time (`#card[value^="4"]`, also inside `:has()`), including a card number, PIN or password. Such selectors are
+/// refused on every page: the wait cannot know the page before it runs.
+pub(crate) const VALUE_SELECTOR: &str = "This wait selector tests a field's value or validity. Wait for an element, its visibility or a class instead; read field values with page.read.";
+
+/// Attributes a wait selector may compare: element identity and labels, never a field's state.
+const IDENTITY_ATTRIBUTES: &[&str] = &[
+    "id",
+    "class",
+    "name",
+    "type",
+    "role",
+    "for",
+    "href",
+    "lang",
+    "dir",
+    "title",
+    "alt",
+    "aria-label",
+    "aria-labelledby",
+    "aria-describedby",
+    "aria-controls",
+    "aria-expanded",
+    "aria-selected",
+    "aria-hidden",
+    "aria-disabled",
+    "data-testid",
+    "data-test-id",
+    "data-test",
+    "data-qa",
+    "data-cy",
+];
+
+/// Whether a CSS selector may test a field value: any `value` attribute test, a comparison on an attribute outside
+/// [`IDENTITY_ATTRIBUTES`], or a value-dependent pseudo-class, after CSS
+/// escapes are resolved; any comment is refused.
+pub(crate) fn tests_field_values(selector: &str) -> bool {
+    // A comment can hide part of a selector inside a quoted string, where it is not a comment: refused outright.
+    if selector.contains("/*") {
+        return true;
+    }
+    let mut plain = String::with_capacity(selector.len());
+    let mut chars = selector.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            plain.extend(c.to_lowercase());
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6 && chars.peek().is_some_and(char::is_ascii_hexdigit) {
+            hex.push(chars.next().unwrap_or('0'));
+        }
+        if hex.is_empty() {
+            if let Some(next) = chars.next() {
+                plain.extend(next.to_lowercase());
+            }
+            continue;
+        }
+        if chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        let decoded = u32::from_str_radix(&hex, 16)
+            .ok()
+            .and_then(char::from_u32)
+            .unwrap_or('\u{fffd}');
+        plain.extend(decoded.to_lowercase());
+    }
+    let squeezed: String = plain.chars().filter(|c| !c.is_whitespace()).collect();
+    let attribute = squeezed.match_indices('[').any(|(at, _)| {
+        let rest = &squeezed[at + 1..];
+        // An optional namespace prefix (`ns|value`, `*|value`, `|value`), never the `|=` operator.
+        let name = match rest.find('|') {
+            Some(bar)
+                if !rest[bar + 1..].starts_with('=')
+                    && rest[..bar]
+                        .chars()
+                        .all(|c| c == '*' || c == '-' || c == '_' || c.is_alphanumeric()) =>
+            {
+                &rest[bar + 1..]
+            }
+            _ => rest,
+        };
+        let end = name
+            .find([']', '=', '~', '|', '^', '$', '*'])
+            .unwrap_or(name.len());
+        let (attribute, operator) = (&name[..end], !name[end..].starts_with(']'));
+        // A page can mirror a field's value into any attribute: only identity attributes may be compared, and the
+        // value attribute may not even be tested for presence.
+        attribute == "value" || operator && !IDENTITY_ATTRIBUTES.contains(&attribute)
+    });
+    // A custom element state (`:state(...)`) is whatever the page sets, a field's value included.
+    attribute
+        || squeezed.contains(":state(")
+        || [
+            ":placeholder-shown",
+            ":valid",
+            ":invalid",
+            ":user-valid",
+            ":user-invalid",
+            ":in-range",
+            ":out-of-range",
+            ":blank",
+            ":empty",
+            ":-moz-placeholder",
+            ":-moz-ui-invalid",
+            ":-moz-ui-valid",
+            ":autofill",
+            ":-webkit-autofill",
+        ]
+        .iter()
+        .any(|pseudo| {
+            squeezed.match_indices(pseudo).any(|(at, _)| {
+                !squeezed[at + pseudo.len()..]
+                    .starts_with(|c: char| c == '-' || c.is_alphanumeric())
+            })
+        })
+}
+
+#[cfg(test)]
+mod value_selector_tests {
+    // PREDICT (before the fix): a selector wait that tests a field's value is admitted, so `#card[value^="4"]` waits
+    // answer a protected value one character at a time.
+    #[test]
+    fn selector_waits_that_test_field_values_are_refused() {
+        for selector in [
+            "#card[value^=\"4\"]",
+            "form:has(#card[value*=\"0566\"])",
+            "#pin[*|value=\"8812\"]",
+            "#pin[value|=\"88\"]",
+            "#pin[v\\61lue^=\"8\"]",
+            "#pin[val/**/ue]",
+            "[data-x=\"/*\"] #card[value^=\"4\"] [data-y=\"*/\"]",
+            "#card:placeholder-shown",
+            "#pin:INVALID",
+            "span[contenteditable]:empty",
+            "[value]",
+            "[data-value=\"4000\"]",
+            "[aria-valuetext*=\"4\"]",
+            "#card:-webkit-autofill",
+            "pay-field:state(filled)",
+            "#pin[data-state=filled]",
+        ] {
+            let refused = super::Request::parse(&serde_json::json!({ "selector": selector }));
+            assert_eq!(
+                refused.err().as_deref(),
+                Some(super::VALUE_SELECTOR),
+                "{selector}"
+            );
+        }
+        for selector in [
+            "#order-confirmed",
+            "input[name=card]",
+            "[data-testid=done]",
+            "input[disabled]",
+            "button:enabled",
+            "#valid",
+        ] {
+            assert!(
+                super::Request::parse(&serde_json::json!({ "selector": selector })).is_ok(),
+                "{selector}"
+            );
         }
     }
 }

@@ -247,7 +247,7 @@ async fn a_persons_exact_tab_binds_its_verified_profile_even_when_another_is_def
     .unwrap();
     test_support::answering(
         &core.shared,
-        |_, _| json!({"structuredContent":{"requestId":"picked","status":"completed","data":{"url":"https://example.test","title":"Page","text":"Selected"}}}),
+        |_, _| json!({"structuredContent":{"requestId":"picked","status":"completed","data":{"url":"https://example.test","title":"Page","text":"Selected"},"agentData":{"url":"https://example.test","title":"Page","text":"Selected"}}}),
     );
     super::tabs::pick(
         &core.shared,
@@ -324,7 +324,7 @@ async fn switching_off_a_profile_during_a_bound_tab_read_discards_that_read() {
             .generations
             .entry("chrome:work".into())
             .or_default() += 1;
-        json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Page","text":"Read after Off"}}})
+        json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Page","text":"Read after Off"},"agentData":{"url":"https://page.test/","title":"Page","text":"Read after Off"}}})
     });
     let result = super::tabs::pick(
         &core.shared,
@@ -363,7 +363,7 @@ async fn debug_tab_context_cannot_bypass_the_persons_profile_selection() {
     let core = fixture("profile-debug-tab", profiles()).await;
     test_support::answering(
         &core.shared,
-        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Page","text":"Read"}}}),
+        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Page","text":"Read"},"agentData":{"url":"https://page.test/","title":"Page","text":"Read"}}}),
     );
     let result = core
         .chrome_control(

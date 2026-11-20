@@ -24,4 +24,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 # Random project ids; getrandom 0.3 is already in the lock file (vw-gate, vw-pages,...).
 getrandom = { workspace = true }
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["serde-json-impl", "no-serde-warnings"] }

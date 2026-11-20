@@ -50,12 +50,14 @@ pub(super) fn register_browser(
         .ok_or("Browser setup is unavailable")?;
     let mut made = Made::default();
     let result = (|| {
+        let replaced = super::prior::check(config, &target, state)?;
         if let Some(hosts) = target.hosts {
             let path = hosts.join(format!("{HOST_NAME}.json"));
-            super::registration::ensure_manifest(
+            super::registration::ensure_manifest_over(
                 config,
                 &path,
                 &manifest_for(&helper, config, browser),
+                replaced.as_ref().and_then(|s| s.manifest_bytes.as_deref()),
             )?;
             made.written
                 .push((path.clone(), manifest_for(&helper, config, browser)));
@@ -70,10 +72,11 @@ pub(super) fn register_browser(
                 made.files.push(file.clone());
             }
             let key = format!(r"{root}\{HOST_NAME}");
-            registry_set(&key, &file)?;
+            registry_set(&key, &file, replaced.as_ref())?;
             made.keys.push((key.clone(), file));
             receipt.registry_keys.push(key);
         }
+        made.notice = replaced.map(|s| s.notice);
         receipt.files.extend(made.files.clone());
         receipt.browsers.push(target.name.into());
         receipt.selected_browsers = Some(receipt.browsers.clone());
@@ -83,6 +86,8 @@ pub(super) fn register_browser(
     })();
     if result.is_err() {
         made.undo(config);
+    } else if let Some(notice) = made.notice.take() {
+        config.setup_notice.set(notice);
     }
     result
 }

@@ -60,7 +60,8 @@
   color: var(--orange-2);
   font-weight: var(--weight-bold);
   font-size: var(--text-lg);
-  line-height: 1.2;
+  /* glyph box geometry (was 1.2 x 16 px), not a text leading */
+  line-height: 19px;
 }
 .u-meta {
   display: flex;
@@ -121,7 +122,7 @@
 .a-msg {
   margin: 4px 0 22px;
   font-size: var(--text-reading);
-  line-height: 1.65;
+  line-height: var(--leading-reading);
   overflow-wrap: anywhere;
 }
 .a-msg p {
@@ -150,10 +151,6 @@
 .a-msg td {
   border: 1px solid var(--line-2);
   padding: 4px 8px;
-}
-.a-msg a,
-.narr a {
-  color: var(--blue);
 }
 .md-image-blocked {
   color: var(--text-3);
@@ -333,7 +330,7 @@ pre.cmd {
   padding: 9px 12px;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.55;
+  line-height: var(--leading-copy);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-2);
@@ -570,4 +567,23 @@ pre.out.plain {
   font-size: var(--text-sm);
   color: var(--text-3);
   background: var(--panel);
+}
+
+/* The local-network card: one row per waiting site, its answers beside it; long site names wrap. */
+.local-network-sites {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.local-network-sites li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-control-gap);
+  padding: var(--space-control-gap) 0;
+}
+.local-network-sites .summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

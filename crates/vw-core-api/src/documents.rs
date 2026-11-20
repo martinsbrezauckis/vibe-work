@@ -228,10 +228,7 @@ pub(crate) async fn execute(
                 .names
                 .cwd_of(&shared.store, &session_id)
                 .ok_or_else(|| {
-                    CoreError::new(
-                        ErrorCode::NotFound,
-                        "attachment session has no project folder",
-                    )
+                    CoreError::new(ErrorCode::NotFound, "attachment chat has no project folder")
                 })?;
             let owned = shared.clone();
             let document_id = id.clone();

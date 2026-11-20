@@ -85,7 +85,7 @@ async fn menu_page_uses_the_picker_and_checks_the_original_document_before_hando
     let core = fixture().await;
     let calls = test_support::answering(
         &core.shared,
-        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Read-back page context"}}}),
+        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Read-back page context"},"agentData":{"url":"https://page.test/","title":"Shared page","text":"Read-back page context"}}}),
     );
     deliver(&core, "page", &page());
     assert!(
@@ -134,7 +134,7 @@ async fn page_share_for_a_missing_chat_claims_the_current_draft_owner() {
     let core = fixture().await;
     let calls = test_support::answering(
         &core.shared,
-        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Current page"}}}),
+        |_, _| json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Current page"},"agentData":{"url":"https://page.test/","title":"Shared page","text":"Current page"}}}),
     );
     let mut share = page();
     share["clientSessionId"] = json!("deleted");
@@ -163,7 +163,7 @@ async fn page_share_respects_browser_disable_before_and_during_its_read() {
             let shared = weak.upgrade().unwrap();
             shared.chrome_control.set_enabled(false).unwrap();
             shared.chrome_control.set_enabled(true).unwrap();
-            json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Stale read"}}})
+            json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Stale read"},"agentData":{"url":"https://page.test/","title":"Shared page","text":"Stale read"}}})
         });
         if !during {
             core.shared.chrome_control.set_enabled(false).unwrap();
@@ -190,7 +190,7 @@ async fn a_deleted_receiving_chat_cannot_accept_a_pending_page_read() {
     let weak = Arc::downgrade(&core.shared);
     test_support::answering(&core.shared, move |_, _| {
         let _ = weak.upgrade().unwrap().store.remove("chat");
-        json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Read for a deleted chat"}}})
+        json!({"structuredContent":{"requestId":"read","status":"completed","data":{"url":"https://page.test/","title":"Shared page","text":"Read for a deleted chat"},"agentData":{"url":"https://page.test/","title":"Shared page","text":"Read for a deleted chat"}}})
     });
     deliver(&core, "deleted", &page());
     assert!(claim(&core, "deleted").await.is_err());

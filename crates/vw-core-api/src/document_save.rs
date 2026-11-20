@@ -64,11 +64,11 @@ fn child_dir(parent: &Dir, name: &str) -> Result<Dir, String> {
 
 fn session_dir(cwd: &Path, session_id: &str) -> Result<(PathBuf, Dir), String> {
     if !safe_id(session_id) {
-        return Err("invalid attachment session id".to_owned());
+        return Err("invalid attachment chat ID".to_owned());
     }
     let root = canonical_plain(cwd).map_err(|e| e.to_string())?;
     if !root.is_dir() {
-        return Err("session folder is not a directory".to_owned());
+        return Err("chat folder is not a directory".to_owned());
     }
     let project =
         Dir::open_ambient_dir(&root, cap_std::ambient_authority()).map_err(|e| e.to_string())?;
@@ -81,7 +81,7 @@ fn saved_path(root: &Path, session_id: &str, leaf: &str) -> Result<PathBuf, Stri
     let path = root.join("attachments").join(session_id).join(leaf);
     let resolved = canonical_plain(&path).map_err(|e| e.to_string())?;
     if !resolved.starts_with(root) {
-        return Err("attachment resolved outside the session folder".to_owned());
+        return Err("attachment resolved outside the chat folder".to_owned());
     }
     Ok(resolved)
 }

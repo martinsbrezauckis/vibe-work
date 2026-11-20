@@ -129,7 +129,8 @@ pub(crate) async fn prepare(
     super::gateway::validate_session(shared, chat, "chrome_execute", &args)?;
     let mode = super::check::mode(shared, chat);
     let current = mode.as_deref().and_then(vw_ask::chrome::Tier::from_mode);
-    let consent = if current.is_some_and(|tier| tier < vw_ask::chrome::Tier::FullAccess) {
+    let (consent, grant_id) = if current.is_some_and(|tier| tier < vw_ask::chrome::Tier::FullAccess)
+    {
         let tier = steps(&args)?
             .iter()
             .filter_map(|step| super::mapping::ask_required("chrome_execute", step))
@@ -140,15 +141,17 @@ pub(crate) async fn prepare(
             step["sessionId"] = args["sessionId"].clone();
             super::check::authorize_read(shared, chat, "chrome_execute", &step, Some(&consent))?;
         }
-        if Some(tier) > current {
-            crate::ask::tool_calls::approve(shared,chat,source,call,json!({"kind":"approval","vwBrowserTier":tier as u8,
-                "effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]})).await?;
-        }
-        Some(consent)
+        let grant_id = if Some(tier) > current {
+            crate::ask::tool_calls::approve_grant(shared,chat,source,call,json!({"kind":"approval","vwBrowserTier":tier as u8,
+                "effect":{"kind":"tool","toolName":"mcp_vw.chrome_execute","input":args},"requiredPermissions":[]})).await?
+        } else {
+            None
+        };
+        (Some(consent), grant_id)
     } else {
-        None
+        (None, None)
     };
-    let mut prepared = prepare_logins(shared, chat, &args, consent).await?;
+    let mut prepared = prepare_logins(shared, chat, &args, consent, grant_id.as_deref()).await?;
     let shared = std::sync::Arc::downgrade(shared);
     let chat = chat.to_owned();
     let (source, call) = (source.to_owned(), call.to_owned());
@@ -166,30 +169,36 @@ pub(crate) async fn prepare(
                 let chat = &chat;
                 let (source, call) = (&source, &call);
                 let action_clock = &action_clock;
+                let grant_id = grant_id.as_deref();
                 async move {
-                    match prepared {
-                        Some(execution) => execution.await,
-                        None => {
-                            if let Some(consent) = consent {
-                                if super::interaction_consent::checks(&step) {
-                                    super::interaction_consent::run(
-                                        shared,
-                                        chat,
-                                        source,
-                                        call,
-                                        step,
-                                        Some(consent),
-                                        Some(action_clock),
-                                    )
-                                    .await
+                    dispatch_with_grant(&shared.ask_grants, grant_id, async move {
+                        match prepared {
+                            Some(execution) => execution.await,
+                            None => {
+                                if let Some(consent) = consent {
+                                    if super::interaction_consent::checks(&step) {
+                                        super::interaction_consent::run(
+                                            shared,
+                                            chat,
+                                            source,
+                                            call,
+                                            step,
+                                            Some(consent),
+                                            Some(action_clock),
+                                        )
+                                        .await
+                                    } else {
+                                        super::read_consent::execute(shared, chat, step, consent)
+                                            .await
+                                    }
                                 } else {
-                                    super::read_consent::execute(shared, chat, step, consent).await
+                                    super::gateway::call_one(shared, chat, "chrome_execute", step)
+                                        .await
                                 }
-                            } else {
-                                super::gateway::call_one(shared, chat, "chrome_execute", step).await
                             }
                         }
-                    }
+                    })
+                    .await
                 }
             },
             || {
@@ -201,6 +210,7 @@ pub(crate) async fn prepare(
             clock,
         )
         .await;
+        drop(prepared);
         if super::output_cache::observation(&answer["vwMcpResult"]) {
             super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
         }
@@ -218,6 +228,7 @@ async fn prepare_logins(
     chat: &str,
     args: &Value,
     consent: Option<super::read_consent::Consent>,
+    grant_id: Option<&str>,
 ) -> Result<std::collections::VecDeque<Option<crate::ask::tool_calls::receipts::Execution>>, String>
 {
     let mut prepared = std::collections::VecDeque::new();
@@ -225,7 +236,7 @@ async fn prepare_logins(
         step["sessionId"] = args["sessionId"].clone();
         prepared.push_back(
             if ["auth.fill", "auth.basic"].contains(&step["action"].as_str().unwrap_or_default()) {
-                Some(super::login::prepare(shared, chat, step, consent).await?)
+                Some(super::login::prepare_with_grant(shared, chat, step, consent, grant_id).await?)
             } else {
                 None
             },
@@ -234,10 +245,113 @@ async fn prepare_logins(
     Ok(prepared)
 }
 
+async fn dispatch_with_grant<F: Future<Output = Result<Value, String>>>(
+    grants: &crate::ask::grants::Grants,
+    grant_id: Option<&str>,
+    work: F,
+) -> Result<Value, String> {
+    if grant_id.is_some_and(|id| !grants.contains(id)) {
+        return Ok(revoked_receipt());
+    }
+    match work.await {
+        Err(reason) if reason == crate::ask::tool_calls::REVOKED_BROWSER_GRANT => {
+            Ok(revoked_receipt())
+        }
+        other => other,
+    }
+}
+
+fn revoked_receipt() -> Value {
+    let mut receipt = owner::failure(
+        crate::ask::tool_calls::REVOKED_BROWSER_GRANT,
+        "CONSENT_REVOKED",
+    );
+    receipt["structuredContent"]["status"] = json!("not_run");
+    json!({"vwMcpResult":receipt})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+    /// PREDICT: a batch keeps its prepared login executions after the chat grant is revoked,
+    /// so the second saved-login field is sent despite Revoke.
+    #[tokio::test]
+    async fn revoked_batch_grant_stops_the_next_prepared_fill() {
+        for revoke in [true, false] {
+            let grants = std::sync::Arc::new(crate::ask::grants::Grants::default());
+            let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+                "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","steps":[
+                    {"action":"auth.fill","args":{"ref":"u2","login":"Demo"}},
+                    {"action":"auth.fill","args":{"ref":"u3","login":"Demo"}},
+                    {"action":"page.read","args":{}}]}},
+                "requiredPermissions":[]}});
+            grants.note_callback("card", "s", "s", crate::ask::grants::scope_of(&card));
+            let grant = grants
+                .keep(grants.claim("card").unwrap(), vw_ask::AnsweredBy::Person, 1)
+                .unwrap();
+            grants.note_callback(
+                "other-card",
+                "other-chat",
+                "other-chat",
+                crate::ask::grants::scope_of(&card),
+            );
+            let other_grant = grants
+                .keep(
+                    grants.claim("other-card").unwrap(),
+                    vw_ask::AnsweredBy::Person,
+                    1,
+                )
+                .unwrap();
+            let sent = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let result = run(
+                vec![json!({"action":"auth.fill","args":{"ref":"u2"}}),
+                     json!({"action":"auth.fill","args":{"ref":"u3"}}),
+                     json!({"action":"page.read","args":{}})],
+                |_| {
+                    let id = grant.id.clone();
+                    let grants = grants.clone();
+                    let sent = sent.clone();
+                    async move {
+                        let sent_for_execution = sent.clone();
+                        let grants_for_execution = grants.clone();
+                        let id_for_execution = id.clone();
+                        let execution: crate::ask::tool_calls::receipts::Execution = Box::pin(async move {
+                            let number = sent_for_execution.fetch_add(1, Ordering::SeqCst) + 1;
+                            if revoke && number == 1 {
+                                grants_for_execution.remove(&id_for_execution);
+                            }
+                            Ok(json!({"vwMcpResult":{"structuredContent":{"status":"completed","data":{"filled":true}}}}))
+                        });
+                        dispatch_with_grant(&grants, Some(&id), execution).await
+                    }
+                },
+                || panic!("not timed out"),
+                super::super::batch_wait::Clock::default(),
+            ).await;
+            assert_eq!(sent.load(Ordering::SeqCst), if revoke { 1 } else { 3 });
+            assert!(grants.contains(&other_grant.id));
+            let body = &result["vwMcpResult"]["structuredContent"];
+            assert_eq!(body["steps"][0]["result"]["status"], "completed");
+            assert_eq!(body["status"], if revoke { "stopped" } else { "completed" });
+            assert_eq!(
+                body["steps"].as_array().unwrap().len(),
+                if revoke { 2 } else { 3 }
+            );
+            assert_eq!(
+                body["steps"][1]["result"]["status"],
+                if revoke { "not_run" } else { "completed" }
+            );
+            if revoke {
+                assert!(
+                    body["steps"][1]["result"]["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Ask the user")
+                );
+            }
+        }
+    }
     #[test]
     fn rejects_empty_oversized_and_mixed_batches() {
         for args in [

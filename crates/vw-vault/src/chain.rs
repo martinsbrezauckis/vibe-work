@@ -55,6 +55,12 @@ fn went_back(detail: &str) -> VaultError {
 }
 
 impl ChainGuard {
+    /// Forgets the accepted head. Only for a vault folder that was set aside on the person's request: a new vault
+    /// created in the same folder starts its own chain.
+    pub(crate) fn forget(&self) {
+        *self.known.lock_or_recover() = None;
+    }
+
     /// Reads `repo`'s head and opens it, accepting it only along the chain (module docs). `None` = empty repository
     /// that never had a head in this process.
     ///

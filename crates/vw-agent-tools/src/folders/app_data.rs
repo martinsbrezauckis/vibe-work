@@ -68,7 +68,7 @@ pub(super) fn copy_permit(
     permits: &Permits<'_>,
 ) -> Result<(), String> {
     if scratch(layout).is_some() {
-        Err("temporary chats do not own a session copy".to_owned())
+        Err("temporary chats do not own a chat copy".to_owned())
     } else {
         permits(copy, is_own)
     }

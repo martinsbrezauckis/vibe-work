@@ -214,7 +214,7 @@ impl Captures {
             .or_default()
             .clone()
             .try_lock_owned()
-            .map_err(|_| "A capture is already running in this session.".to_owned())
+            .map_err(|_| "A capture is already running in this chat.".to_owned())
     }
 
     pub(crate) fn set_before(&self, session_id: &str, before: Before) {

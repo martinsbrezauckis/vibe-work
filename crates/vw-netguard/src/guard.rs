@@ -93,8 +93,14 @@ pub trait PageContext: Send + Sync {
     }
 
     /// A final request refusal, after policy and owner checks; never includes URL paths or bodies.
-    fn refused(&self, key: Option<&str>, reason: &str) {
-        let _ = (key, reason);
+    fn refused(&self, key: Option<&str>, host: &str, port: u16, reason: &str) {
+        let _ = (key, host, port, reason);
+    }
+
+    /// A final refusal of a request that the listener cannot tell apart (a store with several mounts): `keys` are the
+    /// mounts whose page could have sent it. Called next to [`Self::refused`] with no key; never URL paths or bodies.
+    fn refused_unattributed(&self, keys: &[String], host: &str, port: u16, reason: &str) {
+        let _ = (keys, host, port, reason);
     }
 
     /// `Ok` when the webview mounted as `key` (its label) may reach `127.0.0.1:<port>` now (its page class and the
@@ -153,7 +159,7 @@ pub(crate) struct Inner {
     stores: Mutex<HashMap<String, StoreListener>>,
     generation: AtomicU64,
     tasks: Mutex<Vec<JoinHandle<()>>>,
-    context: OnceLock<Arc<dyn PageContext>>,
+    pub(crate) context: OnceLock<Arc<dyn PageContext>>,
     internal: Mutex<HashSet<u16>>,
     log: Mutex<VecDeque<Refusal>>,
     seq: AtomicU64,
@@ -234,7 +240,7 @@ impl Inner {
         }
         drop(log);
         if let Some(context) = self.context.get() {
-            context.refused(session, reason);
+            context.refused(session, host, port, reason);
         }
     }
 
@@ -288,7 +294,7 @@ impl Inner {
 
     /// The mounts registered on the store `key` now (a snapshot); empty when there are more than [`MEMBER_LIMIT`]
     /// (never a partial list: every member must be asked, so too many grant nothing).
-    fn store_members(&self, key: &str, generation: u64) -> Vec<String> {
+    pub(crate) fn store_members(&self, key: &str, generation: u64) -> Vec<String> {
         lock(&self.stores)
             .get(key)
             .filter(|s| s.generation == generation && s.members.len() <= MEMBER_LIMIT)

@@ -18,3 +18,12 @@ debug = false
 # equal. Ignored on Linux and Windows; a value already in the environment wins (no `force`).
 [env]
 MACOSX_DEPLOYMENT_TARGET = "14.0"
+
+# Windows: every program this workspace builds (the app, vw-agent-tools, vw-video-helper, tests) links the C runtime
+# statically, so it starts on a Windows that has no Visual C++ Redistributable (Windows ships the Universal CRT but not
+# vcruntime140.dll). Without it a program that imports VCRUNTIME140.dll cannot start there at all (0xC0000135). The app
+# crate's tauri-build adds its own static vcruntime link arguments on top (libcmt + libvcruntime); both select the same
+# static libraries. The Windows release bundle refuses any shipped program that still imports VCRUNTIME140*/MSVCP140*.
+# cargo-xwin keeps these flags and appends its own.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

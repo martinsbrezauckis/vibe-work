@@ -9,6 +9,7 @@ use vw_ask::{AnsweredBy, Outcome, Scope};
 use vw_platform::sync::LockRecover;
 
 const PREFIX: &str = "vw-tool-";
+pub(crate) const REVOKED_BROWSER_GRANT: &str = "Not run: this chat's browser permission was revoked while the batch was running. Ask the user to allow this browser action again before retrying.";
 mod announced;
 mod browser_requests;
 mod profile_choice;
@@ -54,6 +55,7 @@ fn asks_inside(tool: &str, args: &Value) -> bool {
     matches!(
         tool,
         names::SECRET_RUN
+            | names::PUSH
             | names::SESSION_STATUS
             | names::CONNECTORS_LIST
             | names::CONNECTOR_SUGGEST
@@ -128,7 +130,7 @@ pub(crate) async fn permission(
     let mode = shared.access.remembered(owner);
     if tool == names::BROWSER_ACT {
         vw_agent_tools::browser_input::validate(tool, args)?;
-        crate::chrome_control::builtin::check_full(mode.as_deref(), args)?;
+        crate::chrome_control::builtin_check_full(mode.as_deref(), args)?;
         // The authenticated hook settles the ordinary policy separately for every step.
         if args.get("steps").is_some() {
             return Ok(());
@@ -136,7 +138,7 @@ pub(crate) async fn permission(
     }
     let ask = mode.as_deref() == Some("ask");
     let browser_tier = (tool == names::BROWSER_ACT)
-        .then(|| crate::chrome_control::builtin::approval_tier(mode.as_deref(), args))
+        .then(|| crate::chrome_control::builtin_approval_tier(mode.as_deref(), args))
         .flatten();
     let browser_write = browser_tier.is_some();
     let headless = ask && tool == names::USE_HEADLESS_BROWSER;
@@ -151,7 +153,7 @@ pub(crate) async fn permission(
     if ask
         && (matches!(tool, names::BROWSER_READ | names::BROWSER_CAPTURE)
             || tool == names::BROWSER_ACT
-                && crate::chrome_control::builtin::ask_required(args)
+                && crate::chrome_control::builtin_ask_required(args)
                     == Some(vw_ask::chrome::Tier::Ask))
         && !stricter_rule(shared, owner, tool).await
     {
@@ -168,7 +170,7 @@ pub(crate) async fn permission(
         return Ok(());
     }
     if (accepts_edits(tool, args)
-        || (tool == names::BROWSER_ACT && crate::chrome_control::builtin::accepts_edits(args)))
+        || (tool == names::BROWSER_ACT && crate::chrome_control::builtin_accepts_edits(args)))
         && (mode.as_deref() == Some("accept-edits")
             || tool == names::BROWSER_ACT && mode.as_deref() == Some("smart-approve"))
         && !stricter_rule(shared, owner, tool).await
@@ -209,6 +211,30 @@ pub(crate) async fn approve(
     call: &str,
     detail: Value,
 ) -> Result<(), String> {
+    approve_inner(shared, session, source, call, detail, false)
+        .await
+        .map(|_| ())
+}
+
+/// Returns the chat grant that authorized this call, so prepared work can stop if it is revoked.
+pub(crate) async fn approve_grant(
+    shared: &Arc<Shared>,
+    session: &str,
+    source: &str,
+    call: &str,
+    detail: Value,
+) -> Result<Option<String>, String> {
+    approve_inner(shared, session, source, call, detail, true).await
+}
+
+async fn approve_inner(
+    shared: &Arc<Shared>,
+    session: &str,
+    source: &str,
+    call: &str,
+    detail: Value,
+    require_grant: bool,
+) -> Result<Option<String>, String> {
     let id = format!(
         "{PREFIX}{}",
         vw_agent_tools::credential::new_credential().map_err(|e| e.to_string())?
@@ -222,14 +248,14 @@ pub(crate) async fn approve(
     if source != session {
         entry["vwSourceSession"] = json!(source);
     }
-    crate::chrome_control::approval::project(shared, &mut entry);
+    crate::chrome_control::project_approvals(shared, &mut entry);
     if let Some(grant) = shared.ask_grants.matching(session, &entry) {
         shared
             .ask_grants
             .record_use(&grant.id, shared.asks.now_ms());
         shared.emit(super::grants::event(shared));
         carry_over(shared, session, &id, &entry);
-        return Ok(());
+        return Ok(Some(grant.id));
     }
     let stop = crate::stops::generation(shared, session);
     {
@@ -268,7 +294,24 @@ pub(crate) async fn approve(
         ledger.note_allowed(&[source, session], call);
     }
     carry_over(shared, session, &id, &entry);
-    Ok(())
+    if matches!(
+        outcome,
+        Outcome::Allowed {
+            scope: Scope::Session,
+            ..
+        }
+    ) {
+        let grant = shared
+            .ask_grants
+            .matching(session, &entry)
+            .map(|grant| grant.id);
+        if require_grant && grant.is_none() {
+            return Err(REVOKED_BROWSER_GRANT.to_owned());
+        }
+        Ok(grant)
+    } else {
+        Ok(None)
+    }
 }
 
 fn carry_over(shared: &Shared, session: &str, id: &str, entry: &Value) {
@@ -457,6 +500,9 @@ pub(crate) fn overlay(shared: &Shared, session: &str, state: &mut Value) {
             .iter()
             .position(|e| e["createdAt"].as_u64() > entry["createdAt"].as_u64());
         history.insert(next.unwrap_or(history.len()), entry);
+    }
+    if let Some(tools) = &shared.agent_tools {
+        tools.pushes.overlay(session, state);
     }
 }
 pub(crate) fn changed(shared: &Shared, session: &str) {

@@ -28,6 +28,8 @@ tracing = { workspace = true }
 url = { workspace = true }
 # Stable per-session storage identifiers (already used by vw-changes).
 sha2 = { workspace = true }
+# Lowercase hex of the session storage identifiers (same crate as vw-market and vw-pages).
+hex = { workspace = true }
 # Screenshot shaping: decode, downscale, re-encode (0.18.1 is already in the lockfile through tauri).
 png = { workspace = true }
 # Screenshots travel as base64 in command results and MCP image content (0.22.1 already in the lockfile).

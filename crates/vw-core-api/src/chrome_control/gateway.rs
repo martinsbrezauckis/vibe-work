@@ -17,8 +17,11 @@ mod scope;
 pub(crate) use args::validate_execute_args;
 pub(super) use args::{validate_public_args, validate_session_args};
 use ownership::lease_refusal;
+#[path = "gateway_steps.rs"]
+mod steps;
 pub(super) use ownership::validate_session;
-pub(super) use scope::{recheck, scope_result};
+pub(super) use scope::{halted, recheck, scope_result};
+use steps::{confirm_open_answer, prepare_frame, wait_for_browser};
 
 pub(crate) fn is_tool(name: &str) -> bool {
     owner::TOOLS.contains(&name)
@@ -51,9 +54,11 @@ async fn call_entry(
 ) -> Result<Value, String> {
     super::firefox_sharing::refuse_agent_reach(tool, &args)?;
     let browser = agent_browser::selected(shared, session, tool, &args);
+    // Stop points of one call (A2-02): `chrome_execute` here, before anything else answers; `chrome_session` in
+    // `call_selected` after its arguments are checked; both again at every point where the call resumes after a
+    // wait (`call_prepared`, `recheck`); the reply is admitted by `PendingCall::finish`.
     if tool == "chrome_execute" {
-        super::reconnect::stopped(shared, session, browser)?;
-        shared.browser_dialogs.check()?;
+        halted(shared, session, browser, tool)?;
     }
     if matches!(tool, "chrome_status" | "chrome_execute")
         && let Some(action) = args["action"].as_str()
@@ -166,8 +171,9 @@ pub(super) async fn call_selected(
         return Err("Not run: this chat is not open in Vibe Work. Open the chat in Vibe Work, then try again.".to_owned());
     }
     // Tool calls racing the interrupt keep the person's reason, including session get/cancel/stop.
-    if tool != "chrome_status" {
-        super::reconnect::stopped(shared, session, browser)?;
+    // `chrome_execute` was checked on entry (`call_entry`, the only caller with that tool) with no wait since.
+    if !matches!(tool, "chrome_status" | "chrome_execute") {
+        halted(shared, session, browser, tool)?;
     }
     // A frozen receipt cannot revive an ended session. It only reads the app's existing buffer.
     if tool == "chrome_execute" && super::output_cache::is_continuation(&args) {
@@ -235,8 +241,9 @@ fn local_reply(
     }
     // The gateway's own checks decide; the card only words a refusal while nothing usable is connected
     // (`availability::refusal`). The person's switch and an outdated extension refuse first, even when live.
-    if tool != "chrome_status" {
-        super::reconnect::stopped(shared, session, browser)?;
+    // `chrome_execute` was checked by `call_prepared` just before (its only caller), with no wait since.
+    if !matches!(tool, "chrome_status" | "chrome_execute") {
+        halted(shared, session, browser, tool)?;
     }
     super::profile_agent::check(shared, session, tool, args)?;
     if let Some(refusal) = super::availability::refusal(shared, browser, true) {
@@ -268,35 +275,19 @@ pub(super) async fn call_one(
 ) -> Result<Value, String> {
     let request = args.clone();
     let mut answer = call_one_inner(shared, session, tool, args, None, None).await?;
+    if tool == "chrome_execute" {
+        // References this read returned belong to the person's browser, never to the built-in one.
+        shared.browser_ref_origins.note(
+            session,
+            Some(agent_browser::selected(shared, session, tool, &request)),
+            super::output_cache::read_refs(shared, session, &answer["vwMcpResult"]),
+        );
+    }
     super::receipt::stamp(shared, tool, &request, &mut answer["vwMcpResult"]);
     if tool != "chrome_status" {
         super::output::guard(&mut answer["vwMcpResult"]);
     }
     Ok(answer)
-}
-
-async fn wait_for_browser(
-    shared: &Arc<Shared>,
-    session: &str,
-    tool: &str,
-    args: &Value,
-    browser: Browser,
-    consent: Option<&super::read_consent::Consent>,
-) -> Result<Option<Value>, String> {
-    let acts = tool != "chrome_status"
-        && !(tool == "chrome_session"
-            && matches!(args["action"].as_str(), Some("get" | "cancel" | "stop")));
-    if acts {
-        if let Some(reply) = super::browser_start::wait(shared, session, browser).await? {
-            return Ok(Some(reply));
-        }
-        if let Some(retry) = super::reconnect::wait(shared, session, browser).await? {
-            return Ok(Some(retry));
-        }
-        // Waiting for a native port grants no authority: mode and the person's Stop are checked again.
-        recheck(shared, session, browser, tool, args, consent)?;
-    }
-    Ok(None)
 }
 
 pub(super) async fn call_one_inner(
@@ -366,9 +357,9 @@ async fn call_prepared(
     previous: Option<&str>,
 ) -> Result<Value, String> {
     let browser = agent_browser::selected(shared, session, tool, &args);
+    // The call resumes here after the pause wait and the profile card.
     if tool == "chrome_execute" {
-        super::reconnect::stopped(shared, session, browser)?;
-        shared.browser_dialogs.check()?;
+        halted(shared, session, browser, tool)?;
     }
     if let Some(reply) = local_reply(shared, session, tool, &args, consent)? {
         return Ok(reply);
@@ -423,9 +414,13 @@ async fn call_prepared(
     if let Some(previous) = previous {
         args["_preflightOperationId"] = json!(previous);
     }
+    prepare_frame(shared, session, tool, browser, &args, consent)
+        .await
+        .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;
     let mut answer = super::output_file::send(shared, session, tool, args, consent)
         .await
         .map_err(|reason| pending.refusal(shared, session, browser).unwrap_or(reason))?;
+    super::person_stop::read_stop_behind(shared, tool, &answer).await;
     if request {
         answer = super::session_start::fresh(
             shared,
@@ -436,6 +431,7 @@ async fn call_prepared(
             answer,
         )
         .await?;
+        confirm_open_answer(shared, session, &output_request, &answer)?;
     }
     scope_result(
         shared,

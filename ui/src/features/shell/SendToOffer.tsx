@@ -1,7 +1,7 @@
 /**
  * The one-time question about the right-click menus, as one row on the setup screen and the start screen (an
  * update from a version without them shows it once on the start screen): Add turns the "Right-click menus" switch
- * on, Not now ends the question; both are remembered by the host. Depends on the shared switch state
+ * on, Skip right-click menus ends the question; both are remembered by the host. Depends on the shared switch state
  * (`state/sendTo`) and the `key-notice` row; called by SetupScreen and Content.
  * Invariant: nothing is written before Add; after either answer the row is gone for good (Settings keeps the
  * switch).
@@ -37,7 +37,7 @@ export function SendToOffer() {
         disabled={pending}
         onClick={() => void sendToRequest(client, { op: "notNow" })}
       >
-        Not now
+        Skip right-click menus
       </Button>
       {error !== null && (
         <p className="key-problem" role="alert">

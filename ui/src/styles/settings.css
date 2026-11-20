@@ -83,6 +83,11 @@
   color: var(--text-2);
   cursor: pointer;
 }
+/* Local network sites: everything after the label (empty state, lists, the macOS line) takes the full row width under
+   it. In the label's control column a long line would squeeze the label to one word per line. */
+[data-setting="browser-local-network-sites"] > :not(:first-child) {
+  grid-column: 1 / -1;
+}
 [data-setting="browser-profile"] {
   flex-wrap: wrap;
   gap: 10px;

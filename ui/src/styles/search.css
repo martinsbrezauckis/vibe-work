@@ -114,7 +114,7 @@
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: var(--text-base);
-  line-height: 1.55;
+  line-height: var(--leading-copy);
   tab-size: 4;
   background: var(--bg);
   color: var(--text);

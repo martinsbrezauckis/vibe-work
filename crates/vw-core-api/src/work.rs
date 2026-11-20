@@ -49,9 +49,10 @@ pub const MAX_QUESTION_CHARS: usize = 4_000;
 pub struct WorkConfig {
     /// Folder of `work.json` (user-only); `None`: kept in memory for this run (tests).
     pub dir: Option<PathBuf>,
-    /// The model that runs library searches and writes the answer.
+    /// The model that runs library searches and writes the answer. When Mistral refuses it, the search runs once
+    /// more with the chat's active model (`utility_models`).
     pub library_model: String,
-    /// The model that drives the image tool.
+    /// The model that drives the image tool; refused, the chat's active model, as for `library_model`.
     pub image_model: String,
     /// Where generated images may be downloaded from.
     pub image_fetch: FetchPolicy,
@@ -65,7 +66,8 @@ impl Default for WorkConfig {
     fn default() -> Self {
         Self {
             dir: None,
-            // Mistral Medium (GA alias) runs the built-in tools in Mistral's own docs; Large 4 is a preview model.
+            // Mistral's own moving alias (Mistral decides which Medium it names), which runs the built-in tools in
+            // Mistral's docs. Never a fixed model name: a refused alias falls back to the chat's active model.
             library_model: "mistral-medium-latest".to_owned(),
             image_model: "mistral-medium-latest".to_owned(),
             image_fetch: FetchPolicy::default(),
@@ -383,9 +385,11 @@ pub fn tokens_of(usage: &serde_json::Value) -> u64 {
         .sum()
 }
 
-/// Asks across `libraries` and builds the answer (shared by the `ask` command and the agent's `library_search`).
+/// Asks across `libraries` and builds the answer (shared by the `ask` command and the agent's `library_search`, which
+/// names its chat as `session`).
 pub(crate) async fn ask(
     shared: &Shared,
+    session: Option<&str>,
     question: &str,
     libraries: Vec<String>,
 ) -> Result<LibrariesResult, CoreError> {
@@ -401,10 +405,19 @@ pub(crate) async fn ask(
         ));
     }
     let keys = keys(shared)?;
-    let answer = keys
-        .library_search(&shared.config.work.library_model, question, &libraries)
-        .await
-        .map_err(|e| failure(&e))?;
+    let model = &shared.config.work.library_model;
+    let answer = match keys.library_search(model, question, &libraries).await {
+        Err(error) if crate::utility_models::model_refused(&error) => {
+            let Some(active) = crate::utility_models::retry_model(shared, session, model).await
+            else {
+                return Err(failure(&error));
+            };
+            info!(refused = %model, model = %active, "library search: model refused, using the chat's model");
+            keys.library_search(&active, question, &libraries).await
+        }
+        other => other,
+    }
+    .map_err(|e| failure(&e))?;
     let tokens = tokens_of(&answer.usage);
     info!(
         libraries = libraries.len(),
@@ -476,7 +489,7 @@ pub(crate) async fn libraries(
             } else {
                 library_ids
             };
-            ask(shared, &question, libraries).await?
+            ask(shared, None, &question, libraries).await?
         }
         LibrariesRequest::Documents { .. }
         | LibrariesRequest::DeleteDocument { .. }

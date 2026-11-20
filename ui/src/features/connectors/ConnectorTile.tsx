@@ -55,7 +55,7 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
           <Button
             data-testid="connectors.connector-tile-sign-in"
             type="button"
-            variant="primary"
+            shape="outlined"
             disabled={keyBlocked}
             onClick={() => {
               void actions?.signIn(tile.alias);
@@ -68,7 +68,7 @@ export function ConnectorTile({ tile, selected }: { tile: Tile; selected: boolea
           <Button
             data-testid="connectors.connector-tile-connect"
             type="button"
-            variant="primary"
+            shape="outlined"
             disabled={keyBlocked}
             onClick={() => {
               void actions?.connect(tile.alias, tile.meta.name);

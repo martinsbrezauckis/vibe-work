@@ -8,14 +8,13 @@
 //! Restart: the app writes [`RESTART_MARK`] before it relaunches itself; the new process then waits for the old
 //! owner's lock instead of focusing the closing window or refusing the folder, and removes the mark once it owns it.
 
-use std::fmt::Write as _;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -110,13 +109,7 @@ pub fn mark_restart(data: &Path) -> io::Result<()> {
         .map_err(io::Error::other)
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-        })
-}
+use vw_platform::wall_clock::unix_ms as now_ms;
 
 /// A fresh restart mark is present.
 fn restarting(data: &Path) -> bool {
@@ -183,12 +176,7 @@ pub fn start(
     getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
     let endpoint = Endpoint {
         port: wake.port(),
-        instance: random
-            .iter()
-            .fold(String::with_capacity(64), |mut text, byte| {
-                let _ = write!(text, "{byte:02x}");
-                text
-            }),
+        instance: hex::encode(random),
     };
     vw_platform::replace_private(&endpoint_path, &serde_json::to_vec(&endpoint)?)
         .map_err(io::Error::other)?;

@@ -158,7 +158,7 @@ fn for_vibe(
     }
     match output["decision"]["type"].as_str() {
         Some("approve_permanently") => Err(refusal(
-            "Always allow is not offered: Vibe Work does not keep lasting Vibe rules. Allow once or for this session.",
+            "Always allow is not offered: Vibe Work does not keep lasting Vibe rules. Allow once or for this chat.",
         )),
         Some("approve_for_session") => {
             let offered = shared

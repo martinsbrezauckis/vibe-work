@@ -22,6 +22,7 @@ import type {
 import { announce } from "../../state/announcer";
 import { TEXT, wording } from "../../vocabulary";
 import { useApp } from "../shell/AppContext";
+import { useSessionSummaries, useShellState } from "../shell/hooks";
 
 const GROUPS: ReadonlyArray<{ kinds: Kind[]; title: string }> = [
   { kinds: ["instructions"], title: "Instructions" },
@@ -62,6 +63,9 @@ async function lastBring(
 /** The plan's rows, ticks and the last bring. */
 export function ImportSettings(): ReactElement {
   const { core } = useApp();
+  // The selected chat's folder: its project's own setups (CLAUDE.md, skills, .mcp.json) are scanned and brought too.
+  const selected = useShellState((s) => s.selected);
+  const project = useSessionSummaries().find((s) => s.id === selected)?.cwd ?? undefined;
   const [rows, setRows] = useState<Found[] | null>(null);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [summary, setSummary] = useState<ImportSummary | null>(null);
@@ -83,7 +87,10 @@ export function ImportSettings(): ReactElement {
     }
   };
   const scan = async (said = true) => {
-    const result: ImportResult | null = await run({ type: "importSetup", request: { op: "scan" } });
+    const result: ImportResult | null = await run({
+      type: "importSetup",
+      request: { op: "scan", ...(project === undefined ? {} : { project }) },
+    });
     if (result?.kind === "plan") {
       setRows(result.rows);
       setPicked(new Set());
@@ -124,7 +131,10 @@ export function ImportSettings(): ReactElement {
     const picks = (rows ?? [])
       .filter((r) => picked.has(r.id))
       .map((r) => ({ id: r.id, fingerprint: r.fingerprint }));
-    const result = await run({ type: "importSetup", request: { op: "apply", picks } });
+    const result = await run({
+      type: "importSetup",
+      request: { op: "apply", picks, ...(project === undefined ? {} : { project }) },
+    });
     if (result?.kind === "brought") {
       setSummary(result.summary);
       await scan(false);
@@ -165,7 +175,7 @@ export function ImportSettings(): ReactElement {
           Brought {summary.brought}, changed {summary.changed}, left {summary.left.length}.{" "}
           <Button
             data-testid="settings.import-undo"
-            appearance="key-link"
+            appearance="link"
             disabled={busy}
             onClick={() => void undo(summary.bring)}
           >
@@ -214,7 +224,7 @@ export function ImportSettings(): ReactElement {
                     {row.keys.length > 0 && row.status !== "cantBring" && (
                       <> · {TEXT.importKeyToVault}</>
                     )}
-                    {row.note !== null && <span className="d"> — {row.note}</span>}
+                    {row.note !== null && <span className="d">: {row.note}</span>}
                   </li>
                 ))}
               </ul>

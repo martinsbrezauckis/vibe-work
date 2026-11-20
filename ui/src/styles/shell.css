@@ -285,6 +285,9 @@ kbd {
   color: var(--text-3);
   padding: 12px 8px 4px;
 }
+.sec > p {
+  margin: 0;
+}
 .needs-row {
   display: flex;
   align-items: center;

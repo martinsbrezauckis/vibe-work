@@ -293,3 +293,43 @@ pub fn recheck_in(scope: &Scope, path: &Path, fs: &dyn ScopeFs) -> Option<Hit> {
 pub fn recheck(scope: &Scope, path: &Path) -> Option<Hit> {
     recheck_in(scope, path, &RealFs)
 }
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::lexical;
+    use std::path::{Path, PathBuf};
+
+    /// The one lexical cleaner of file scope and the Files browser: no disk access, absolute paths only, and a `..`
+    /// never climbs above the root.
+    #[test]
+    fn cleans_dots_and_refuses_relative_or_climbing_paths() {
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        let at = |text: &str| PathBuf::from(format!("{root}{text}"));
+        assert_eq!(lexical(&at("a/./b/../c")), Some(at("a").join("c")));
+        assert_eq!(lexical(&at("a/..")), Some(at("")));
+        assert_eq!(lexical(&at("..")), None, "above the root");
+        assert_eq!(lexical(&at("a/../..")), None, "above the root after a hop");
+        assert_eq!(lexical(Path::new("a/b")), None, "relative");
+        assert_eq!(
+            lexical(Path::new("a/..")),
+            None,
+            "relative, even when it cleans to nothing"
+        );
+        assert_eq!(lexical(Path::new("")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn keeps_a_windows_prefix_and_refuses_a_drive_relative_path() {
+        assert_eq!(
+            lexical(Path::new(r"\\?\C:\a\..\b")),
+            Some(PathBuf::from(r"\\?\C:\b"))
+        );
+        assert_eq!(
+            lexical(Path::new(r"\\server\share\a\..\b")),
+            Some(PathBuf::from(r"\\server\share\b"))
+        );
+        assert_eq!(lexical(Path::new(r"C:a\b")), None, "drive-relative");
+        assert_eq!(lexical(Path::new(r"C:\..")), None);
+    }
+}

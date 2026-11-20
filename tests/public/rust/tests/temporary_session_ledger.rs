@@ -322,9 +322,7 @@ async fn start_fails_as_internal_and_the_new_session_is_deleted_when_ownership_c
     assert_eq!(error.code, ErrorCode::Internal, "{error:?}");
     assert_eq!(error.server_code, None, "{error:?}");
     assert!(
-        error
-            .message
-            .starts_with("Could not check session ownership"),
+        error.message.starts_with("Could not check chat ownership"),
         "{}",
         error.message
     );

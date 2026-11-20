@@ -198,6 +198,24 @@ function article(name: string) {
 }
 
 describe("Skills", () => {
+  it("keeps chat skills visibly scoped and read only", async () => {
+    await setup(
+      view({
+        skills: [
+          {
+            ...registry,
+            source: "session",
+            scope: "session",
+            locked: true,
+            lockReason: "Managed by this chat",
+          },
+        ],
+      }),
+    );
+    expect(screen.getByText("This chat")).toBeInTheDocument();
+    expect(within(article("release-notes")).getByRole("switch")).toBeDisabled();
+  });
+
   it("provides the third Tools tab, exact text, groups, sources, palette and disclosure", async () => {
     const r = await setup();
     expect(screen.getByRole("tab", { name: "Skills" })).toHaveAttribute(

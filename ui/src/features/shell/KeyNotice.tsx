@@ -47,8 +47,7 @@ export function KeyNotice({
       <Button
         data-testid="shell.key-notice-go-home"
         type="button"
-        appearance={inSettings ? undefined : "dialog"}
-        variant={inSettings ? "primary" : undefined}
+        variant="primary"
         onClick={() => {
           if (state.destination === "retry") {
             void keys?.load();

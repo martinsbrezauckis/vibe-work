@@ -99,7 +99,7 @@ impl<T: Transport, C: crate::Confirmer> Gate<T, C> {
         removals: &[ToolRuleRemoval],
     ) -> Result<Reply, GateError> {
         if session_id.is_empty() || session_id.len() > 128 {
-            return Err(invalid("needs the helper session"));
+            return Err(invalid("needs the helper chat"));
         }
         if removals.is_empty() || removals.len() > MAX_PATTERNS {
             return Err(invalid("between 1 and 1024 rules per write"));

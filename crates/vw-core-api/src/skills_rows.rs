@@ -14,6 +14,9 @@ pub(crate) fn representative(row: &vw_skills::SkillView) -> Option<&vw_skills::S
 }
 /// Why a row cannot be changed here: a plugin or Vibe's settings file sets it.
 pub(crate) fn lock_reason(row: &vw_skills::SkillView) -> Option<String> {
+    if representative(row).is_some_and(|skill| skill.scope == vw_skills::SkillScope::Session) {
+        return Some("Managed by this chat".to_owned());
+    }
     row.installations
         .iter()
         .chain(row.active.iter())
@@ -40,6 +43,7 @@ pub(crate) fn row_view(row: &vw_skills::SkillView) -> SkillRow {
             vw_skills::SkillScope::Builtin => "builtin",
             vw_skills::SkillScope::Global => "global",
             vw_skills::SkillScope::Project => "project",
+            vw_skills::SkillScope::Session => "session",
         }
         .to_owned()
     });
@@ -59,6 +63,7 @@ pub(crate) fn row_view(row: &vw_skills::SkillView) -> SkillRow {
                     vw_skills::SkillsSource::Builtin => "builtin",
                     vw_skills::SkillsSource::User => "user",
                     vw_skills::SkillsSource::Project => "project",
+                    vw_skills::SkillsSource::Session => "session",
                     vw_skills::SkillsSource::Plugin => "plugin",
                     vw_skills::SkillsSource::Catalog => "catalog",
                 }
@@ -111,5 +116,39 @@ pub(crate) fn board(
         catalog_loaded: view.catalog_loaded,
         authenticated,
         busy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn session_skills_keep_their_scope_and_have_no_global_actions_or_file_time() {
+        for source in ["local", "registry"] {
+            let skill: vw_skills::SkillSummary = serde_json::from_value(json!({
+                "name":"chat-skill", "description":"Current chat", "prompt":"Do work",
+                "source":source, "scope":"session",
+                "registry": if source == "registry" { json!({"skillId":"skill-chat", "version":1}) } else { json!(null) }
+            })).unwrap();
+            let skills = vec![skill.clone()];
+            let view = vw_skills::SkillsView::merge(
+                &vw_skills::SkillsInstalledResponse {
+                    skills: skills.clone(),
+                },
+                &serde_json::from_value(json!({"skills":[]})).unwrap(),
+                &vw_skills::SkillsUpdatesResponse { updates: vec![] },
+                &vw_skills::SkillsListResponse { skills },
+                &[],
+            );
+            let row = row_view(&view.skills[0]);
+            assert_eq!(row.source.as_deref(), Some("session"));
+            assert_eq!(row.scope.as_deref(), Some("session"));
+            assert!(row.locked);
+            assert_eq!(row.lock_reason.as_deref(), Some("Managed by this chat"));
+            let unused = std::path::Path::new("unused-session-skill-location");
+            assert_eq!(SkillPlaces::new(unused, unused).modified_ms(&skill), None);
+        }
     }
 }

@@ -37,7 +37,7 @@ function ReadyAction({ core, title, text, onOpen }: Props & { core: CoreControll
     <Button
       data-testid="feedback.failure"
       data-item-id={title}
-      appearance="expander"
+      appearance="link"
       disabled={busy}
       onClick={() => {
         void feedback

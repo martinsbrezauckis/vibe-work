@@ -1,8 +1,8 @@
 /**
  * Settings › Browser: reads the browser pool and saves its live tab limit.
  * Depends on: AppContext and the typed browser command. Called by: SettingsPage.
- * Invariants: a failed save keeps the last confirmed selection; the cap comes from the core
- * and refresh while the section is open.
+ * Invariants: a failed save keeps the last confirmed selection; the cap comes from the core and is read when the
+ * section opens, on each browserChanged event and after a lagged event stream.
  */
 import { type ReactElement, useEffect, useState } from "react";
 
@@ -58,13 +58,13 @@ export function BrowserPoolSettings({
         });
     };
     read();
-    const timer = window.setInterval(read, 5_000);
+    // Read on open and on each browserChanged; after `lagged` the core's events were missed, so read again. No timer
+    // (a 5 s poll read the same pool between events).
     const stop = core.listen((event) => {
-      if (event.type === "browserChanged") read();
+      if (event.type === "browserChanged" || event.type === "lagged") read();
     });
     return () => {
       live = false;
-      window.clearInterval(timer);
       stop();
     };
   }, [core, busy]);

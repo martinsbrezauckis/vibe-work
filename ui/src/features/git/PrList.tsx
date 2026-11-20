@@ -69,7 +69,7 @@ export function PrList({ git, sessionId }: { git: Git; sessionId: string }): Rea
                 <Button
                   data-testid="git.pr-list-row"
                   type="button"
-                  appearance="key-link"
+                  appearance="link"
                   aria-expanded={shown === card.number}
                   onClick={() => {
                     setShown((n) => (n === card.number ? null : card.number));
@@ -93,7 +93,7 @@ export function PrList({ git, sessionId }: { git: Git; sessionId: string }): Rea
                       <Button
                         data-testid="git.pr-list-open"
                         type="button"
-                        appearance="key-link"
+                        appearance="link"
                         title={httpsLink(card.url)?.host ?? "not https"}
                         onClick={() => {
                           visit(card);

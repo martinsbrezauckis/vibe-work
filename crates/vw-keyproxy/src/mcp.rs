@@ -41,7 +41,7 @@
 use std::sync::{Arc, RwLock};
 
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, HeaderName, HeaderValue};
+use axum::http::header::{HeaderName, HeaderValue};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
@@ -197,12 +197,8 @@ fn refusal_response(refusal: McpRefusal) -> Response {
 }
 
 /// True when `headers` carry `token` as `Authorization: Bearer <token>` and it is the current one.
-fn token_ok(headers: &HeaderMap, accepts: &(dyn Fn(&str) -> bool + Sync)) -> bool {
-    headers
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| accepts(t.trim()))
+pub(crate) fn token_ok(headers: &HeaderMap, accepts: &(dyn Fn(&str) -> bool + Sync)) -> bool {
+    crate::bearer::token(headers).is_some_and(accepts)
 }
 
 /// Handles one request on [`MCP_PREFIX`] (module docs for the order).

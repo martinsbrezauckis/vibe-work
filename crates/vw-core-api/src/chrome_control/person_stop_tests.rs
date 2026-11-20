@@ -111,7 +111,7 @@ async fn a_new_turn_never_receives_the_previous_stopped_session() {
                 "fresh"
             );
         } else {
-            assert!(result.unwrap_err().contains("stopped session"));
+            assert!(result.unwrap_err().contains("stopped browser session"));
         }
         assert_eq!(opens.load(std::sync::atomic::Ordering::SeqCst), 3);
         assert_eq!(
@@ -168,7 +168,7 @@ async fn stopped_open_recovery_never_replays_an_unknown_or_newly_stopped_open() 
                 "unknown"
             );
         } else {
-            assert!(result.unwrap_err().contains("stopped session"));
+            assert!(result.unwrap_err().contains("stopped browser session"));
         }
         assert_eq!(
             seen.lock()
@@ -214,7 +214,7 @@ async fn reusing_an_ended_id_as_active_is_not_replayed_or_claimed_not_run() {
     )
     .await
     .unwrap_err();
-    assert!(reason.contains("reused an ended session"));
+    assert!(reason.contains("reused an ended browser session"));
     assert!(!reason.contains("Not run"));
     assert_eq!(
         seen.lock()
@@ -350,7 +350,7 @@ async fn interrupted_once(profile: &str, browser: &str) {
         assert_eq!(
             reason,
             format!(
-                "Not run: this {browser} session was stopped; open a new one with chrome_session."
+                "Not run: this {browser} browser session was stopped; open a new one with chrome_session."
             )
         );
     }
@@ -415,277 +415,4 @@ async fn refusal_names_your_stop_and_ends_browser_calls() {
         }
         core.shutdown().await;
     }
-}
-
-async fn next_turn(kind: &str, delay: u64) {
-    let core = fixture(&format!("browser-stop-next-{kind}-{delay}"), "chrome:p").await;
-    let old_poll = Instant::now();
-    match kind {
-        "person" => status(&core, "stopping", Instant::now()),
-        "agent" => {
-            gateway::call(
-                &core.shared,
-                "a",
-                "chrome_session",
-                json!({"action":"stop","sessionId":"task-a"}),
-            )
-            .await
-            .unwrap();
-        }
-        _ => {}
-    }
-    super::end_turn(&core.shared, "a");
-    turn(&core, "a", "one", false);
-    // A poll already in flight, then a fresh poll before the helper processes cleanup, can both say active.
-    status(&core, "active", old_poll);
-    status(&core, "active", Instant::now());
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(delay)).await;
-    tokio::time::resume();
-    turn(&core, "a", "two", true);
-    status(&core, "stopped", Instant::now());
-    let reply = gateway::call(
-        &core.shared,
-        "a",
-        "chrome_session",
-        json!({"action":"open","profileId":"chrome:p"}),
-    )
-    .await;
-    assert!(
-        reply.is_ok(),
-        "{kind} stop leaked into next turn after {delay}s: {reply:?}"
-    );
-    assert!(
-        !core
-            .shared
-            .chrome_control
-            .stopped_by_person("a", Browser::Chrome, Some("two"))
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn cleanup_stop_never_becomes_a_person_stop_in_the_next_turn() {
-    for delay in [0, 19] {
-        next_turn("cleanup", delay).await;
-    }
-}
-#[tokio::test]
-async fn agent_stop_never_becomes_a_person_stop_in_the_next_turn() {
-    for delay in [0, 19] {
-        next_turn("agent", delay).await;
-    }
-}
-#[tokio::test]
-async fn person_stop_cannot_leak_into_the_next_turn() {
-    for delay in [0, 19] {
-        next_turn("person", delay).await;
-    }
-}
-
-#[tokio::test]
-async fn an_idle_chat_has_no_turn_to_interrupt() {
-    let core = fixture("person-stop-idle", "chrome:p").await;
-    turn(&core, "a", "one", false);
-    status(&core, "stopped", Instant::now());
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(crate::stops::generation(&core.shared, "a"), 0);
-    turn(&core, "a", "two", true);
-    assert!(
-        gateway::call(
-            &core.shared,
-            "a",
-            "chrome_session",
-            json!({"action":"open","profileId":"chrome:p"})
-        )
-        .await
-        .is_ok()
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_delayed_interrupt_does_not_take_the_next_turn() {
-    let core = fixture("browser-delayed-interrupt", "chrome:p").await;
-    let calls = runtime(&core);
-    status(&core, "stopping", Instant::now());
-    // No yield: the next turn starts before the interrupt task gets its first poll.
-    turn(&core, "a", "two", true);
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(calls.lock().unwrap().is_empty());
-    assert_eq!(crate::stops::generation(&core.shared, "a"), 0);
-    assert!(
-        gateway::call(
-            &core.shared,
-            "a",
-            "chrome_session",
-            json!({"action":"open","profileId":"chrome:p"})
-        )
-        .await
-        .is_ok()
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_stop_status_for_an_older_turn_cannot_fence_the_current_turn() {
-    let core = fixture("browser-delayed-status", "chrome:p").await;
-    turn(&core, "a", "two", true);
-    status(&core, "stopped", Instant::now());
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(crate::stops::generation(&core.shared, "a"), 0);
-    assert!(
-        gateway::call(
-            &core.shared,
-            "a",
-            "chrome_session",
-            json!({"action":"open","profileId":"chrome:p"})
-        )
-        .await
-        .is_ok()
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn an_agent_stop_survives_an_active_poll_before_acknowledgement() {
-    let core = fixture("browser-agent-stop-pending", "chrome:p").await;
-    let weak = Arc::downgrade(&core.shared);
-    core.shared.chrome_control.owner.answering(move |_, _| {
-        let shared = weak.upgrade().unwrap();
-        for state in ["active", "stopping", "stopped"] {
-            owner::update_work_for_test(
-                &shared,
-                &json!({"structuredContent":{"sessions":[
-                    {"sessionId":"task-a","state":state}, {"sessionId":"task-b","state":"active"}
-                ]}}),
-            );
-        }
-        json!({"structuredContent":{"sessionId":"task-a","state":"stopped"}})
-    });
-    gateway::call(
-        &core.shared,
-        "a",
-        "chrome_session",
-        json!({"action":"stop","sessionId":"task-a"}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(crate::stops::generation(&core.shared, "a"), 0);
-    assert!(
-        !core
-            .shared
-            .chrome_control
-            .stopped_by_person("a", Browser::Chrome, Some("one"))
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn an_inflight_reply_keeps_the_person_stop_reason_after_turn_end() {
-    let core = fixture("browser-inflight-stop-reason", "chrome:p").await;
-    let weak = Arc::downgrade(&core.shared);
-    core.shared.chrome_control.owner.answering(move |_, _| {
-        let shared = weak.upgrade().unwrap();
-        owner::update_work_for_test(
-            &shared,
-            &json!({"structuredContent":{"sessions":[{"sessionId":"task-a","state":"stopped"}]}}),
-        );
-        super::end_turn(&shared, "a");
-        json!({"structuredContent":{"error":{"code":"CONTROL_SUSPENDED"}}})
-    });
-    let reason = gateway::call(
-        &core.shared,
-        "a",
-        "chrome_execute",
-        json!({"sessionId":"task-a","action":"page.read","args":{}}),
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(reason, super::person_stop::refusal(Browser::Chrome));
-    core.shutdown().await;
-}
-
-#[cfg(feature = "your-edge")]
-#[tokio::test(start_paused = true)]
-async fn stops_of_both_browsers_share_one_turn_interrupt() {
-    let core = fixture("browser-both-stop", "chrome:p").await;
-    core.shared.chrome_control.work.lock().unwrap().open(
-        "edge-task",
-        "a",
-        "active",
-        "edge:p",
-        Some("one"),
-    );
-    core.shared
-        .chrome_control
-        .tasks
-        .lock()
-        .unwrap()
-        .insert("edge-task".into(), "a".into());
-    let calls = runtime(&core);
-    owner::update_work_for_test(
-        &core.shared,
-        &json!({"structuredContent":{"sessions":[
-            {"sessionId":"task-a","state":"stopped"}, {"sessionId":"edge-task","state":"stopped"}, {"sessionId":"task-b","state":"active"}
-        ]}}),
-    );
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(60)).await;
-    tokio::task::yield_now().await;
-    assert_eq!(calls.lock().unwrap().len(), 1);
-    core.shutdown().await;
-}
-
-/// A session the helper ended because its browser connection was lost (its owned window closed:
-/// `suspensionReason` `ADAPTER_DISCONNECTED`) still ends the turn once, but the chat never says the person stopped it.
-async fn connection_end_is_not_attributed_to_the_person(profile: &str, browser: &str) {
-    let core = fixture(&format!("connection-ended-{browser}"), profile).await;
-    let mut events = core.subscribe(None);
-    let calls = runtime(&core);
-    owner::update_work_for_test(
-        &core.shared,
-        &json!({"structuredContent":{"sessions":[
-            {"sessionId":"task-a","state":"stopped","suspensionReason":"ADAPTER_DISCONNECTED"},
-            {"sessionId":"task-b","state":"active","suspensionReason":null}
-        ]}}),
-    );
-    let notice = tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let value = serde_json::to_value(events.next().await.unwrap()).unwrap();
-            if value["change"]["kind"] == "notice" {
-                break value;
-            }
-        }
-    })
-    .await
-    .expect("the ended browser session must leave a notice in its chat");
-    assert_eq!(notice["change"]["sessionId"], "a");
-    assert_eq!(
-        notice["change"]["params"]["warning"]["message"],
-        format!("Stopped in Your {browser}: the browser connection ended")
-    );
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while core.shared.store.view("a").unwrap().state["turns"][0]["status"] != "interrupted" {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("a lost browser connection still ends the turn");
-    assert_eq!(
-        *calls.lock().unwrap(),
-        vec![json!({"sessionId":"a","expectedTurnId":"one"})]
-    );
-    core.shutdown().await;
-}
-
-#[tokio::test]
-async fn chrome_connection_end_is_not_attributed_to_the_person() {
-    connection_end_is_not_attributed_to_the_person("chrome:p", "Chrome").await;
-}
-
-#[cfg(feature = "your-firefox")]
-#[tokio::test]
-async fn owned_firefox_window_end_is_not_attributed_to_the_person() {
-    connection_end_is_not_attributed_to_the_person("firefox:agent", "Firefox").await;
 }

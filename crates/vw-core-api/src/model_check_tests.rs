@@ -15,7 +15,7 @@ impl Confirmer for NoPrompt {
     }
 }
 
-const LOBBY: &str = r"#!/usr/bin/env python3
+const LOBBY: &str = r#"#!/usr/bin/env python3
 import json, os, pathlib, sys
 home = pathlib.Path(os.environ['VIBE_HOME'])
 for line in sys.stdin:
@@ -31,13 +31,21 @@ for line in sys.stdin:
     elif message['method'] == 'session/list':
         result = {'items': [], 'nextCursor': None}
     elif message['method'] == 'config/read':
-        (home / 'read-config.toml').write_bytes((home / 'config.toml').read_bytes())
-        result = {'config': {'models': json.loads((home / 'rows.json').read_text())}}
+        config_text = (home / 'config.toml').read_text()
+        (home / 'read-config.toml').write_text(config_text)
+        if (home / 'reply.json').exists():
+            config = json.loads((home / 'reply.json').read_text())
+            if 'active_model = "mistral-large-4-0"' in config_text:
+                config['validationWarnings'] = []
+                config['activeModel'] = next(row for row in config['models'] if row['alias'] == 'mistral-large-4-0')
+            result = {'config': config}
+        else:
+            result = {'config': {'models': json.loads((home / 'rows.json').read_text())}}
     else:
         raise AssertionError(message['method'])
     frame['message'] = {'jsonrpc': '2.0', 'id': message['id'], 'result': result}
     print(json.dumps(frame), flush=True)
-";
+"#;
 
 /// A core over a disposable Vibe home whose `config/read` copies the config it saw to `read-config.toml`.
 async fn start(name: &str) -> (crate::Core, std::path::PathBuf, std::path::PathBuf) {
@@ -49,7 +57,8 @@ async fn start(name: &str) -> (crate::Core, std::path::PathBuf, std::path::PathB
     let program = root.join("lobby.py");
     std::fs::write(&program, LOBBY).unwrap();
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let core = crate::Core::start(
+    // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let core = Box::pin(crate::Core::start(
         vw_supervisor::SupervisorConfig::new(program, home.clone(), root.clone()),
         Arc::new(vw_supervisor::NoSecret),
         NoPrompt,
@@ -59,18 +68,137 @@ async fn start(name: &str) -> (crate::Core, std::path::PathBuf, std::path::PathB
             },
             ..crate::CoreConfig::default()
         },
-    )
+    ))
     .await
     .unwrap();
     (core, root, home)
 }
 
-async fn check(core: &crate::Core) {
+async fn check(core: &crate::Core) -> serde_json::Value {
     let result = core
         .execute(crate::Origin::Ui, crate::Command::CheckDefaultModel {})
         .await
         .unwrap();
-    assert!(matches!(result, crate::CommandResult::Reply { .. }));
+    let crate::CommandResult::Reply { result, .. } = result else {
+        panic!("launch check must reply")
+    };
+    result
+}
+
+// PREDICT: after startup removes the exact old app row, `active_model=large-4` is still an
+// unresolved alias. The catalog recommends Medium, so Vibe picks Medium instead of preserving
+// the person's Large 4 choice even though the catalog offers the same model by its current id.
+#[tokio::test]
+async fn known_large_4_choice_uses_the_catalog_id_without_following_a_different_recommendation() {
+    let (core, root, home) = Box::pin(start("catalog-legacy-choice")).await;
+    let file = home.join("config.toml");
+    std::fs::write(
+        &file,
+        "experimental_enable_model_catalog = true\nactive_model = \"large-4\"\n",
+    )
+    .unwrap();
+    let large = json!({"alias":"mistral-large-4-0","name":"mistral-large-4-0",
+        "source":"catalog","displayName":"Mistral Large 4"});
+    let medium = json!({"alias":"mistral-medium-latest","name":"mistral-medium-latest",
+        "source":"catalog","displayName":"Mistral Medium"});
+    std::fs::write(
+        home.join("rows.json"),
+        json!([large.clone(), medium.clone()]).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        home.join("reply.json"),
+        json!({"models":[large,medium],
+        "activeModel":medium,"defaultModelAlias":"mistral-medium-latest",
+        "validationWarnings":["Model 'large-4' is not available"]})
+        .to_string(),
+    )
+    .unwrap();
+    let result = check(&core).await;
+    assert!(result["gone"].is_null(), "{result}");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("active_model = \"mistral-large-4-0\""),
+        "{text}"
+    );
+    assert!(!text.contains("[[models]]"), "{text}");
+    core.shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_choice_migration_requires_an_unambiguous_large_4_row_and_no_personal_row() {
+    let old = "experimental_enable_model_catalog = true\nactive_model = 'large-4'\n";
+    let large = json!({"alias":"mistral-large-4-0","name":"mistral-large-4-0",
+        "source":"catalog","displayName":"Mistral Large 4"});
+    let warning = json!(["Model 'large-4' is not available"]);
+    let view = json!({"models":[large.clone()], "validationWarnings":warning.clone()});
+    assert_eq!(
+        super::legacy_catalog_choice(old, &view).as_deref(),
+        Some("mistral-large-4-0")
+    );
+    for text in [
+        "experimental_enable_model_catalog = true\n",
+        "experimental_enable_model_catalog = true\nactive_model = ''\n",
+        "experimental_enable_model_catalog = false\nactive_model = 'large-4'\n",
+        "experimental_enable_model_catalog = true\nactive_model = 'large-4'\n[[models]]\nalias = 'large-4'\nname = 'my-model'\nprovider = 'personal'\n",
+    ] {
+        assert!(
+            super::legacy_catalog_choice(text, &view).is_none(),
+            "{text}"
+        );
+    }
+    // PREDICT: without the catalog (no key yet, offline) Vibe still offers its own built-in Large 4, but only a catalog
+    // row was taken, so an upgraded person was asked to choose a model ("large-4 is no longer offered").
+    let builtin = json!({"alias":"mistral-large-4-0","name":"mistral-large-4-0","source":"local","displayName":"Mistral Large 4"});
+    let offline = json!({"models":[{"alias":"mistral-medium-3.5","name":"mistral-vibe-cli-latest","source":"local"}, builtin.clone()],
+        "validationWarnings":warning.clone()});
+    assert_eq!(
+        super::legacy_catalog_choice(old, &offline).as_deref(),
+        Some("mistral-large-4-0")
+    );
+    // The catalog's row wins over the built-in one; a row the person wrote is never the built-in one.
+    let both = json!({"models":[builtin.clone(), {"alias":"large-4-cat","name":"mistral-large-4","source":"catalog"}],
+        "validationWarnings":warning.clone()});
+    assert_eq!(
+        super::legacy_catalog_choice(old, &both).as_deref(),
+        Some("large-4-cat")
+    );
+    let persons = "experimental_enable_model_catalog = true\nactive_model = 'large-4'\n[[models]]\nalias = 'mistral-large-4-0'\nname = 'mistral-large-4-0'\nprovider = 'mistral'\n";
+    assert!(super::legacy_catalog_choice(persons, &offline).is_none());
+    for rows in [
+        json!([]),
+        json!([{"alias":"mistral-large-4-0","name":"mistral-large-4-0","source":"catalog","displayName":"Mistral Large 4 Preview"}]),
+        json!([large.clone(), {"alias":"mistral-large-4","name":"mistral-large-4","source":"catalog"}]),
+    ] {
+        let view = json!({"models":rows,"validationWarnings":warning.clone()});
+        assert!(super::legacy_catalog_choice(old, &view).is_none(), "{view}");
+    }
+    let no_warning = json!({"models":[large],"validationWarnings":[]});
+    assert!(super::legacy_catalog_choice(old, &no_warning).is_none());
+}
+
+// PREDICT: the launch check currently writes Large 4 facts into config.toml even when the row
+// came from Vibe's catalog, replacing the catalog's own model facts on the next read.
+#[tokio::test]
+async fn catalog_large_4_does_not_get_an_app_owned_facts_row() {
+    let (core, root, home) = Box::pin(start("catalog-facts")).await;
+    let file = home.join("config.toml");
+    let original = "experimental_enable_model_catalog = true\n";
+    std::fs::write(&file, original).unwrap();
+    std::fs::write(
+        home.join("rows.json"),
+        json!([{"alias":"mistral-large-4","name":"mistral-large-4",
+            "source":"catalog","displayName":"Mistral Large 4",
+            "maxContextLength":500_000}])
+        .to_string(),
+    )
+    .unwrap();
+    check(&core).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    assert!(crate::model_facts::recorded(&home).is_none());
+    core.shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

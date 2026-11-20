@@ -107,7 +107,7 @@ export function MarketCard({
             data-testid="marketplace.market-card-add-server"
             ref={opener}
             type="button"
-            variant="primary"
+            shape="outlined"
             disabled={busy && action !== "add" && action !== "addKey"}
             onClick={() => {
               if (action === "add") void actions?.addServer(e.entry.id);

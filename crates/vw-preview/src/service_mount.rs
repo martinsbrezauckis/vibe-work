@@ -58,7 +58,7 @@ impl PreviewService {
                 drop(pool);
                 if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
                     entry.browser_mount = BrowserMountState::Waiting;
-                    entry.loading = false;
+                    entry.set_loading(false);
                 }
                 self.inner.changed(session_id);
                 return Err(PreviewError::BrowserBusy);
@@ -206,7 +206,7 @@ impl PreviewService {
                 }
             }
             if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
-                entry.loading = false;
+                entry.set_loading(false);
             }
             return Err(error.into());
         }

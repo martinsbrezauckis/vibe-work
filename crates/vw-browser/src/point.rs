@@ -8,6 +8,56 @@ use crate::{
 use serde_json::json;
 use std::sync::{Arc, atomic::AtomicBool};
 
+fn native_select_popup(
+    native_popup_platform: bool,
+    by: Actor,
+    tag: &str,
+    keyboard: Option<&str>,
+    hover: bool,
+) -> bool {
+    native_popup_platform
+        && by == Actor::Agent
+        && tag == "select"
+        && !hover
+        && !matches!(keyboard, Some("Tab" | "Escape"))
+}
+
+fn refuse_native_select_popup(
+    by: Actor,
+    tag: &str,
+    keyboard: Option<&serde_json::Value>,
+    options: vw_preview::ClickOptions,
+) -> Result<(), ActError> {
+    if native_select_popup(
+        cfg!(any(target_os = "macos", target_os = "linux")),
+        by,
+        tag,
+        keyboard.and_then(|input| input["key"].as_str()),
+        options == vw_preview::ClickOptions::HOVER,
+    ) {
+        Err(refused(crate::answers::NATIVE_SELECT_POPUP))
+    } else {
+        Ok(())
+    }
+}
+
+/// The refusal the final and event-time guards give when the actual hit (or its label's control) is a select: the
+/// observed node may be a container, and a select the page placed inside it since the read gets the same policy.
+fn select_refusal_at_hit(
+    by: Actor,
+    keyboard: Option<&serde_json::Value>,
+    options: vw_preview::ClickOptions,
+) -> Option<&'static str> {
+    native_select_popup(
+        cfg!(any(target_os = "macos", target_os = "linux")),
+        by,
+        "select",
+        keyboard.and_then(|input| input["key"].as_str()),
+        options == vw_preview::ClickOptions::HOVER,
+    )
+    .then_some(crate::answers::NATIVE_SELECT_POPUP)
+}
+
 impl Browser {
     pub(crate) async fn native_ref_click(
         &self,
@@ -252,8 +302,10 @@ impl Browser {
         let keyboard = consent
             .and_then(|token| token.get("keyboard"))
             .filter(|input| input.is_object());
+        refuse_native_select_popup(by, &item.tag, keyboard, options)?;
+        let select_refusal = select_refusal_at_hit(by, keyboard, options);
         let expected = expected_events(keyboard, options);
-        let request = json!({"keyboard":keyboard,"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,
+        let request = json!({"keyboard":keyboard,"receipt":receipt,"page":page,"checks":checks,"singleFrame":true,"ref":reference,"nativeSelectPopup":select_refusal,
             "allowSend":consent.is_none_or(|token|token["allowSend"]!=false),
             "consent":consent.filter(|token|token.get("snapshot").is_some()),"nativeUser":by == Actor::User,"click":options,"expected":expected});
         let validation = json!({"framePointValidation":true,"page":page,"script":crate::scripts::point_validation(&request),
@@ -422,5 +474,81 @@ fn expected_events(
         }
     } else {
         options.events()
+    }
+}
+
+#[cfg(test)]
+mod native_select_popup_tests {
+    #[cfg(target_os = "linux")]
+    use super::refuse_native_select_popup;
+    use super::{Actor, native_select_popup};
+
+    // PREDICT: coordinate input bypasses the ref-act script and reaches native dispatch for a
+    // select, so a popup can open even after ordinary click and press were refused.
+    #[test]
+    fn mac_agent_select_input_is_refused_before_native_dispatch() {
+        assert!(native_select_popup(
+            true,
+            Actor::Agent,
+            "select",
+            None,
+            false
+        ));
+        assert!(native_select_popup(
+            true,
+            Actor::Agent,
+            "select",
+            Some("ArrowDown"),
+            false
+        ));
+        assert!(!native_select_popup(
+            true,
+            Actor::Agent,
+            "select",
+            Some("Tab"),
+            false
+        ));
+        assert!(!native_select_popup(
+            true,
+            Actor::Agent,
+            "select",
+            None,
+            true
+        ));
+        assert!(!native_select_popup(
+            false,
+            Actor::Agent,
+            "select",
+            None,
+            false
+        ));
+        assert!(!native_select_popup(
+            true,
+            Actor::User,
+            "select",
+            None,
+            false
+        ));
+        assert!(!native_select_popup(
+            true,
+            Actor::Agent,
+            "button",
+            None,
+            false
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_agent_select_click_is_refused_before_native_dispatch() {
+        assert!(
+            refuse_native_select_popup(
+                Actor::Agent,
+                "select",
+                None,
+                vw_preview::ClickOptions::default(),
+            )
+            .is_err()
+        );
     }
 }

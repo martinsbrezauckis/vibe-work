@@ -20,6 +20,7 @@ import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { useTranscriptUi } from "../transcript/hooks";
 import { chipText, childIds, childName, grantDetail, grantWords, grantsOf } from "./grantsModel";
+import { focusWhenMounted } from "../../hooks/focusWhenMounted";
 
 /** The transcript-store key of the list's open state (also what the `ui/transcript` route toggles). */
 export const grantsKey = (sessionId: string): string => `grants:${sessionId}`;
@@ -44,13 +45,21 @@ export function GrantsChip({ sessionId }: { sessionId: string }): ReactElement |
   if (none) return null;
 
   const revoke = async (grantId: string, index: number) => {
+    const shown = list.current?.querySelectorAll("[data-grant-revoke]").length ?? 0;
     if (!(await app.transcript.revokeGrant(sessionId, grantId))) return;
     // The list re-renders from the core's event: focus the next row's Revoke, else the previous, else the composer.
-    requestAnimationFrame(() => {
-      const buttons = list.current?.querySelectorAll<HTMLButtonElement>("[data-grant-revoke]");
-      const next = buttons?.[Math.min(index, (buttons.length || 1) - 1)];
-      if (next !== undefined) next.focus();
-      else requestComposerFocus(sessionId);
+    // Wait until the revoked row has left the list: before that its own button is still there and would take focus.
+    focusWhenMounted({
+      find: () => {
+        const buttons = [
+          ...(list.current?.querySelectorAll<HTMLButtonElement>("[data-grant-revoke]") ?? []),
+        ];
+        if (buttons.length >= shown) return null;
+        return buttons[Math.min(index, buttons.length - 1)] ?? false;
+      },
+      fallback: () => {
+        requestComposerFocus(sessionId);
+      },
     });
   };
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {

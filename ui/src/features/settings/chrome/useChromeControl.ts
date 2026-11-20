@@ -171,10 +171,13 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
         });
         if (offer.type !== "chromeControl" || offer.offer === null)
           throw new Error(`${browser} setup unavailable`);
-        await core.run({
+        const done = await core.run({
           type: "chromeControl",
           request: { op: browser === "Edge" ? "setupEdge" : "setup", offerId: offer.offer.offerId },
         });
+        // Connect replaced an old registration that pointed to a missing file: said once, and kept after pairing.
+        if (done.type === "chromeControl" && done.hint)
+          setStatus({ text: done.hint, alert: false });
       } else if (
         setup?.addon?.action === "turnOn" ||
         (setup?.addon === undefined && setup?.pairingState === "paired")

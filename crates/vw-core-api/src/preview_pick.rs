@@ -145,7 +145,7 @@ pub(crate) async fn pick_in_tab(
         || !service.web_tabs(session_id).iter().any(|key| key == tab)
     {
         return Err(invalid(
-            "tabId is not a web page of this session's Browser tab",
+            "tabId is not a web page of this chat's Browser tab",
         ));
     }
     let id = service
@@ -180,7 +180,7 @@ pub(crate) async fn copy_text(
         || !service.web_tabs(session_id).iter().any(|key| key == tab)
     {
         return Err(invalid(
-            "tabId is not a web page of this session's Browser tab",
+            "tabId is not a web page of this chat's Browser tab",
         ));
     }
     let id = service

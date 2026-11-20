@@ -1,4 +1,5 @@
-//! Chrome URL arguments use normal browser permissions. Legacy network fields are sent only for Store compatibility.
+//! Chrome URL arguments use normal browser permissions; no network rule goes to the helper or the extension (every
+//! supported extension, 0.1.7 and later, decides addresses with the browser's own site permissions).
 //! The helper and extension retain site grants, access modes, ownership, protected pages and Stop.
 use crate::core::Shared;
 use serde_json::{Value, json};
@@ -12,11 +13,6 @@ const URL_ACTIONS: [&str; 4] = [
     "files.download",
     "auth.basic",
 ];
-
-/// The rule sent with one call.
-pub(super) fn policy(_local_network: bool, loopback_ports: &[u16]) -> Value {
-    json!({"localNetwork": true, "loopbackPorts": loopback_ports})
-}
 
 /// Checks the call's `url` argument, if its action has one.
 ///
@@ -37,7 +33,7 @@ pub(super) fn check_url(url_policy: &UrlPolicy, args: &Value) -> Result<(), Stri
     Ok(())
 }
 
-/// Adds legacy compatibility fields and checks URL schemes and credentials. Browser DNS is not an admission gate.
+/// Checks URL schemes and credentials (and a Firefox local document). Browser DNS is not an admission gate.
 ///
 /// # Errors
 /// The refusal text.
@@ -66,13 +62,6 @@ pub(super) async fn prepare(
         }
         return Ok(());
     }
-    let local_network = shared.chrome_control.local_network();
-    let (scan, id) = (shared.clone(), session.to_owned());
-    let ports =
-        tokio::task::spawn_blocking(move || crate::preview_ports::session_ports(&scan, &id))
-            .await
-            .map_err(|_| "Not run: could not read this chat's servers.".to_owned())?
-            .map_err(|_| "Not run: could not read this chat's servers.".to_owned())?;
     let default_policy = UrlPolicy::default();
     let url_policy = shared
         .preview
@@ -131,7 +120,6 @@ pub(super) async fn prepare(
         }
         check_url(url_policy, &destination)?;
     }
-    args["_netPolicy"] = policy(local_network, &ports.allowed(true));
     Ok(())
 }
 
@@ -223,71 +211,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_transport_is_permissive_and_non_url_actions_stay_unchanged() {
+    fn non_url_actions_stay_unchanged() {
         let read = json!({"sessionId":"s","action":"page.read","args":{"url":"http://10.1.1.1/"}});
         assert!(check_url(&UrlPolicy::default(), &read).is_ok());
-        assert_eq!(
-            policy(false, &[5173]),
-            json!({"localNetwork":true,"loopbackPorts":[5173]})
-        );
-    }
-}
-
-#[cfg(test)]
-mod switch_delivery_tests {
-    use serde_json::{Value, json};
-    use std::sync::{Arc, Mutex};
-
-    /// The person turns Local network pages off while the helper does not take the change (a busy owner pipe
-    /// answers BUSY without sending it). The change must stay pending and be sent again until the helper acknowledges
-    /// that value. PREDICT (before the change): one delivery, never retried.
-    #[tokio::test]
-    async fn a_switch_change_the_helper_did_not_take_is_sent_again_until_acknowledged() {
-        let core = crate::offline_core::start_with("chrome-switch-retry", |config, dir| {
-            config.chrome_control.package = Some(dir.join("chrome-package"));
-        })
-        .await;
-        let shared = &core.shared;
-        let deliveries: Arc<Mutex<Vec<Value>>> = Arc::default();
-        let log = deliveries.clone();
-        let _seen = super::super::test_support::answering(shared, move |_, args| {
-            let Some(change) = args.get("_netPolicyChange") else {
-                return json!({"isError":false,"content":[],"structuredContent":{}});
-            };
-            let mut log = log.lock().unwrap();
-            log.push(change.clone());
-            if log.len() == 2 {
-                // The first "off": not taken (the core's own BUSY has this shape).
-                json!({"isError":false,"content":[{"type":"text","text":"Not run: Chrome is busy."}],
-                    "structuredContent":{"error":{"code":"BUSY","message":"Not run: Chrome is busy."}}})
-            } else {
-                json!({"isError":false,"content":[],"structuredContent":{"revision":log.len(),"pendingProfiles":[]}})
-            }
-        });
-        for on in [true, false] {
-            shared.chrome_control.set_local_network(on);
-            super::super::send_local_network(shared).await;
-        }
-        // Not taken yet: the view says so.
-        assert!(!super::super::commands::view(shared).local_network_applied);
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
-        while deliveries.lock().unwrap().len() < 3 && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-        let seen = deliveries.lock().unwrap().clone();
-        assert_eq!(seen.len(), 3, "the refused 'off' is sent again: {seen:?}");
-        assert_eq!(seen[2], json!({"localNetwork":true,"generation":2}));
-        let applied = async { super::super::commands::view(shared).local_network_applied };
-        let mut ok = applied.await;
-        for _ in 0..20 {
-            if ok {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            ok = super::super::commands::view(shared).local_network_applied;
-        }
-        assert!(ok, "acknowledged: applied");
-        core.shutdown().await;
     }
 }
 

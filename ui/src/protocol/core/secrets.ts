@@ -293,7 +293,12 @@ logins: Array<LoginView>,
 /**
  * The "always for this site" fill grants in force (empty while the vault is locked).
  */
-fillGrants: Array<FillGrantView>, } | { "kind": "loginStored",
+fillGrants: Array<FillGrantView>,
+/**
+ * A note about the selected project folder for the person (git is not installed, so a linked copy's link to
+ * its main project cannot be checked: it uses only its own entries); absent otherwise.
+ */
+projectNote?: string, } | { "kind": "loginStored",
 /**
  * The stored login.
  */

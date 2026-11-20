@@ -201,14 +201,22 @@ pub(crate) async fn execute(
 /// grant went. Ids already gone are skipped.
 ///
 /// # Errors
-/// `notFound` when none of them was revoked; the vault's errors (locked, storage) stop at the first.
+/// `notFound` when none was revoked. Site grant errors are returned after the remaining grants are
+/// attempted; MCP key errors stop the request at the first failure.
 async fn revoke_grants(shared: &Shared, ids: &[String]) -> Result<(), CoreError> {
     let mut revoked = 0usize;
     let mut servers = false;
+    let mut first_error = None;
     for id in ids {
         // Only site and MCP grants remain; entry permission is edited directly.
         let done = if vw_vault::fill_grant::is_grant_id(id) {
-            crate::fill_grants::revoke(shared, id).await?
+            match crate::fill_grants::revoke(shared, id).await {
+                Ok(done) => done,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    continue;
+                }
+            }
         } else if vw_vault::mcp_binding::is_binding_id(id) {
             let done = crate::mcp_keys::revoke(shared, id).await?;
             servers |= done;
@@ -220,6 +228,10 @@ async fn revoke_grants(shared: &Shared, ids: &[String]) -> Result<(), CoreError>
     }
     if servers {
         crate::connectors::refresh_servers(shared).await;
+    }
+    if let Some(error) = first_error {
+        shared.emit(CoreEvent::SecretsChanged {});
+        return Err(error);
     }
     if revoked == 0 {
         return Err(CoreError::new(ErrorCode::NotFound, "no such grant"));
@@ -289,6 +301,9 @@ async fn list(
         server_grants,
         logins,
         fill_grants,
+        project_note: project
+            .filter(|identity| identity.link_unverified)
+            .map(|_| vw_vocabulary::texts::PROJECT_LINK_UNVERIFIED.to_owned()),
     })
 }
 
@@ -451,7 +466,7 @@ async fn logins(
         }
         SecretsRequest::RemoveLogin { id } => {
             keys.remove_login(id.clone()).await.map_err(map)?;
-            let revoked = crate::fill_grants::revoke_login(shared, &id).await;
+            let revoked = crate::fill_grants::revoke_login(shared, &id).await?;
             tracing::info!(revoked, "login removed with its fill grants");
             SecretsResult::Done {}
         }

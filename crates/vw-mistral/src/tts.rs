@@ -9,6 +9,7 @@
 //! Depends on: reqwest, base64, `serde_json`, `auth`. Called by: vw-keys (`KeyService::speak|voices`).
 //! Invariants: the key only in the `Authorization` header (`auth::bearer`); error texts carry a status and
 //! a fixed sentence, never a response body (a 4xx body may echo the text); the audio answer is capped.
+//! A 403 body is read (capped) only to tell Mistral's content moderation from a plan or permission problem.
 
 use std::time::Duration;
 
@@ -64,11 +65,12 @@ pub enum SpeechError {
     /// HTTP 401.
     #[error("{}", crate::status_text::KEY_REJECTED)]
     Unauthorized,
-    /// HTTP 403: plan, permission or Mistral's content moderation (the TTS docs answer 403 for refused text).
-    #[error(
-        "Mistral refused this speech request (403): the key's plan or permissions, or its content moderation."
-    )]
+    /// HTTP 403: the key's plan or permissions.
+    #[error("Mistral refused this speech request (403): the key's plan or permissions.")]
     Forbidden,
+    /// HTTP 403 with a `guardrail_violation` body: Mistral's content moderation refused this text, whatever the key.
+    #[error("Mistral's safety filter refused to read this text aloud.")]
+    Guardrail,
     /// HTTP 402.
     #[error("This key's workspace cannot use speech right now (402). Check its plan and billing.")]
     Payment,
@@ -108,6 +110,19 @@ pub fn status_error(status: u16) -> SpeechError {
         500..=599 => SpeechError::Server(status),
         other => SpeechError::Unexpected(other),
     }
+}
+
+/// Largest 403 body read to classify it.
+const FORBIDDEN_BODY_CAP: usize = 8 * 1024;
+
+/// True when a 403 `body` is Mistral's moderation answer (`type` `guardrail_violation`, or code `1920`).
+#[must_use]
+pub fn is_guardrail_body(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body).is_ok_and(|v| {
+        v.get("type").and_then(Value::as_str) == Some("guardrail_violation")
+            || v.get("code")
+                .is_some_and(|c| c.as_str() == Some("1920") || c.as_u64() == Some(1920))
+    })
 }
 
 /// A short reason for a transport failure (never the URL or anything from the request).
@@ -171,6 +186,17 @@ pub async fn speak(
         .await
         .map_err(|e| network(&e))?;
     let status = response.status().as_u16();
+    if status == 403 {
+        // The body is only classified, never shown: it echoes the refused text.
+        let body = read_capped(response, FORBIDDEN_BODY_CAP)
+            .await
+            .unwrap_or_default();
+        return Err(if is_guardrail_body(&body) {
+            SpeechError::Guardrail
+        } else {
+            SpeechError::Forbidden
+        });
+    }
     if !(200..300).contains(&status) {
         return Err(status_error(status));
     }

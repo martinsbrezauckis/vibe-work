@@ -25,13 +25,13 @@ pub(crate) fn check(home: &Path, state: &Value, previous: Option<&Value>) -> Res
         });
     if let Some(copy) = copy {
         if !Path::new(copy).is_absolute() || !Path::new(cwd).is_absolute() {
-            return Err("session copy and cwd must be absolute".to_owned());
+            return Err("chat copy and working folder must be absolute".to_owned());
         }
         let root = resolve(Path::new(copy)).map_err(|e| e.to_string())?;
         let here = resolve(Path::new(cwd)).map_err(|e| e.to_string())?;
         if !here.starts_with(&root) {
             return Err(format!(
-                "session folder {cwd} resolves outside its copy {copy}"
+                "chat folder {cwd} resolves outside its copy {copy}"
             ));
         }
     }

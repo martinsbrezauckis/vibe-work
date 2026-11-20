@@ -123,6 +123,11 @@ pub enum CommandResult {
         /// Models the key can use.
         model_count: u32,
     },
+    /// `keys` / `setAsideVault`: the old vault was moved, not deleted.
+    VaultSetAside {
+        /// The folder the old vault is kept in now.
+        kept_at: String,
+    },
     /// `keys` / `detectVibeKey`.
     VibeKeys {
         /// Where Vibe itself holds a key (no values).
@@ -314,6 +319,11 @@ pub enum CommandResult {
         view: crate::SecretScanView,
         /// File paths for Developer error detail only; absent from finding events and the bell.
         file_errors: Vec<String>,
+    },
+    /// Current global Developer permissions state.
+    DeveloperPermissions {
+        /// Whether the person enabled developer operations.
+        enabled: bool,
     },
     /// `safety`.
     Safety {

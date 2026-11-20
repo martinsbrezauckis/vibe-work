@@ -33,6 +33,7 @@
 //! - while no key is available (vault locked, key not set up) a request waits (bounded) and the
 //!   owner is told once per waiting request; it is never forwarded with the placeholder.
 
+mod bearer;
 mod compaction;
 mod connector_bodies;
 pub mod connectors;

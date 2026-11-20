@@ -152,7 +152,7 @@
   grid-template-columns: 1fr 1fr;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.65;
+  line-height: var(--leading-reading);
 }
 .split > div {
   min-width: 0;

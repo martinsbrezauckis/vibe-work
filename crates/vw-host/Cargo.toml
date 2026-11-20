@@ -11,6 +11,11 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Test builds only: an update channel may name https endpoints outside Vibe Work's release server (the private tests'
+# example channels). Never enabled by the app; scripts/public/check_release_features.mjs refuses it in release builds.
+update-test-channels = []
+
 [dependencies]
 vw-vocabulary = { workspace = true }
 # Binds its loopback listeners as Vibe Work's own ports (refused for every browser page).
@@ -38,6 +43,8 @@ tracing = { workspace = true }
 # Random instance ids (`instance.rs`): getrandom 0.3 is already in the
 # lock file (vw-gate, vw-debug-api, ...).
 getrandom = { workspace = true }
+# Lowercase hex of ids, digests and tokens (the workspace hex crate, as vw-market and vw-pages).
+hex = { workspace = true }
 # URL parsing for the navigation guard; already in the tree through tauri (MIT/Apache-2.0).
 url = { workspace = true }
 # Update packages kept on disk are verified again by us before they are offered or installed: the
@@ -51,6 +58,10 @@ semver = { workspace = true }
 # already in the tree (vw-core-api, tauri).
 toml = { workspace = true }
 toml_edit = { workspace = true, features = ["parse", "display"] }
+
+[target.'cfg(windows)'.dependencies]
+# The installer's uninstall entry (install_check: an interrupted install can leave it out).
+winreg = { workspace = true }
 
 [dev-dependencies]
 # Scratch folders for the hand-over checks (`hand_over_tests.rs`); already in the lockfile.

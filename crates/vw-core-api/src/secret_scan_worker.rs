@@ -129,7 +129,7 @@ fn inputs(shared: &Shared) -> Result<Vec<VaultScanSecret>, CoreError> {
             secret_scan::status(shared, SecretScanStatus::Locked);
             CoreError::new(ErrorCode::KeyService, "Waits for the Vault to be unlocked.")
         } else {
-            failure("Could not read the Vault for the session log check.")
+            failure("Could not read the Vault for the chat log check.")
         }
     })?;
     let (secrets, skipped) = filter_inputs(secrets);
@@ -137,7 +137,7 @@ fn inputs(shared: &Shared) -> Result<Vec<VaultScanSecret>, CoreError> {
     Ok(secrets)
 }
 
-/// True when the session log file `path` lies in the configured session log `folder`.
+/// True when the chat log file `path` lies in the configured session log `folder`.
 ///
 /// Both sides are compared in their canonical forms (`std::fs::canonicalize`), because one folder can be written
 /// several ways: the folder may be configured through a symlinked folder (or, on macOS, below the `/var` link),
@@ -234,7 +234,7 @@ impl Worker {
                 continue;
             }
             let report = vw_logscan::scan_files(vec![path.clone()], owned(&secrets))
-                .map_err(|_| failure("Could not check the session log file."))?;
+                .map_err(|_| failure("Could not check the chat log file."))?;
             if !report.skipped_files.is_empty() {
                 errors.push(path.clone());
                 failed += 1;

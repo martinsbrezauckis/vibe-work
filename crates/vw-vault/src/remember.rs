@@ -47,6 +47,10 @@ pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// What a call that ran out of time says.
 pub const NO_ANSWER: &str = "the system keyring did not answer";
+
+/// How long a keyring that did not answer is not asked again (Linux).
+#[cfg(target_os = "linux")]
+const SILENT_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 /// Why the app's fallback store keeps nothing (no OS credential store could be opened).
 pub const NO_STORE: &str = "this computer has no system keyring";
 /// What the person reads when the OS credential store itself failed (no Secret Service, no default collection, a
@@ -257,11 +261,16 @@ fn remember_error(error: &keyring_core::Error) -> VaultError {
 /// [`VaultError::Remember`] when the platform has no usable store (e.g. no Secret Service session
 /// on Linux).
 pub fn os_credential_store() -> Result<Arc<keyring_core::api::CredentialStore>, VaultError> {
-    // Linux: a store that did not answer once is not waited for again in this run (the app opens it twice at start).
+    // Linux: a store that did not answer is not waited for again for a while (the app opens it twice at start); a
+    // later open (a keyring set up while the app runs, `remember_late`) tries again.
     #[cfg(target_os = "linux")]
-    static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static SILENT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
     #[cfg(target_os = "linux")]
-    if SILENT.load(std::sync::atomic::Ordering::SeqCst) {
+    if SILENT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some_and(|at| at.elapsed() < SILENT_FOR)
+    {
         return Err(VaultError::Remember(NO_ANSWER.to_owned()));
     }
     #[cfg(target_os = "linux")]
@@ -272,7 +281,8 @@ pub fn os_credential_store() -> Result<Arc<keyring_core::api::CredentialStore>, 
     })
     .map_err(|error| {
         if error == NO_ANSWER {
-            SILENT.store(true, std::sync::atomic::Ordering::SeqCst);
+            *SILENT.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some(std::time::Instant::now());
         }
         store_failure(error)
     })?;

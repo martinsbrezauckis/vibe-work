@@ -135,7 +135,7 @@ export function SaveNameDialog({
           <Button
             data-testid="preview.save-name-dialog-btn-primary"
             type="submit"
-            appearance="dialog"
+            variant="primary"
             data-vault-save-confirm
             disabled={busy || name.trim() === ""}
           >

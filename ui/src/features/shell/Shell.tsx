@@ -57,6 +57,10 @@ export function Shell() {
     layout.editorSplit ? `slot-${layout.slot}` : "",
     (layout.chatFolded || layout.maximized) && !settings ? "chat-folded" : "",
     layout.panelOpen && !overview ? "has-panel" : "",
+    // A narrow window (list hidden) that still has room for the chat and the panel side by side: the panel docks.
+    layout.panelOpen && layout.drawer && !layout.panelOverlay && !layout.editorSplit
+      ? "panel-docked"
+      : "",
     layout.listVisible && (!overview || settings) ? "" : "no-col",
     overview && !settings ? "is-overview" : "",
     settings ? "is-settings" : "",

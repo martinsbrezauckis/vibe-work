@@ -463,6 +463,13 @@
       return result("unsupportedPicker", { target });
     if (REQ.nativeKeyboard && action === "press" && (nativeKeyWrites(el, REQ.keyboard) || REQ.keyboard?.editor) && secretKind(el))
       return result("secret", { kind: secretKind(el), target });
+    if (REQ.nativeSelectPopup && !REQ.nativeUser && el.localName === "select" &&
+        (action === "click" || action === "press" && !["Tab", "Escape"].includes(REQ.key)))
+      return result("nativeSelectPopup", { target });
+    // Enter in a payment card field can send the payment (the form's implicit submission or the page's own key
+    // handler). Paying is the person's step: refused before any key reaches the page.
+    if (REQ.nativeKeyboard && action === "press" && REQ.keyboard?.key === "Enter" && secretKind(el) === "card")
+      return result("cardEnter", { target });
     if (action === "press" && el.localName === "input" &&
         ["color", "date", "time", "datetime-local", "month", "week"].includes(el.type) &&
         !["Tab", "Escape"].includes(REQ.key) && (el.type === "color" || REQ.key !== "Enter"))
@@ -492,7 +499,13 @@
       // WebKit may deliver cross-frame focus asynchronously. Prepare it before final native validation;
       // this bounded wait never inserts text, and the event-time guard still requires the exact target.
       if (!el.ownerDocument.hasFocus()) viewOf(el).focus();
-      if (REQ.focusWait !== false && !pageSawFocus(el)) return result("focusPending", { target });
+      if (REQ.focusWait !== false && !pageSawFocus(el)) {
+        // Sample the geometry while focus is pending. A field already focused in a document without OS focus
+        // (the app's pane while the chat has it) never sees a new focus event; the host's final no-wait run
+        // after the bounded focus wait then needs an older sample, not its first one, to prove stability.
+        nativeClickPoint(el, hitPoint);
+        return result("focusPending", { target });
+      }
       const prepared = nativeClickPoint(el, hitPoint);
       if (prepared.failed) return result("notActionable", { ...prepared, target });
       return result("done", { ...prepared, target, ref: refOf(el) });

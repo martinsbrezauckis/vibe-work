@@ -18,6 +18,23 @@ async fn recording_bytes_become_a_chat_file_before_the_receipt_is_returned() {
     assert_eq!(file["mime"], "image/gif");
     core.shutdown().await;
 }
+
+// PREDICT: the private WebM payload is removed from a browser receipt and saved through the same checked chat writer.
+#[tokio::test]
+async fn webm_recording_bytes_become_a_chat_file() {
+    let (core, folder) = super::read_output_tests::fixture("webm-recording-file-receipt").await;
+    let bytes = b"\x1a\x45\xdf\xa3fixture";
+    let mut receipt = json!({"ok":true,"recording":{"frames":1},"_vwRecordingWebm":base64::engine::general_purpose::STANDARD.encode(bytes)});
+    crate::browser_recording::save(&core.shared, "s", &mut receipt).unwrap();
+    assert!(receipt.get("_vwRecordingWebm").is_none());
+    let file = &receipt["recording"]["file"];
+    assert_eq!(
+        std::fs::read(folder.join(file["path"].as_str().unwrap())).unwrap(),
+        bytes
+    );
+    assert_eq!(file["mime"], "video/webm");
+    core.shutdown().await;
+}
 #[test]
 fn page_capture_is_an_ordinary_read_in_all_modes() {
     for action in ["capture.page", "capture.media"] {

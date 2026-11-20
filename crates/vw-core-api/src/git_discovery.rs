@@ -43,7 +43,7 @@ impl Core {
         let cwd = session
             .cwd
             .as_ref()
-            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the session has no folder yet"))?;
+            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "the chat has no folder yet"))?;
         if cwd
             .symlink_metadata()
             .is_ok_and(|m| m.file_type().is_symlink())
@@ -53,7 +53,7 @@ impl Core {
         {
             return Err(CoreError::new(
                 ErrorCode::Denied,
-                "the session folder is a symbolic link",
+                "the chat folder is a symbolic link",
             ));
         }
         let mut found = BTreeMap::new();
@@ -160,7 +160,7 @@ impl Core {
             .ok_or_else(|| {
                 CoreError::new(
                     ErrorCode::NotFound,
-                    "the selected repository was not found in this session's file changes",
+                    "the selected repository was not found in this chat's file changes",
                 )
             })
     }
@@ -174,7 +174,7 @@ impl Core {
         if selected != "." {
             return Err(CoreError::new(
                 ErrorCode::Denied,
-                "Bring into the base is only available for the session repository",
+                "Bring into the base is only available for the chat repository",
             ));
         }
         Ok(())

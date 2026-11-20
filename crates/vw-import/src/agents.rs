@@ -4,7 +4,8 @@
 //! live in `~/.claude.json`, an account file this scan never opens (one row says so); a project's `CLAUDE.md`,
 //! `.mcp.json` and `.claude/skills/`. Codex: `$CODEX_HOME` or `~/.codex/` (`AGENTS.md`, `config.toml`, `skills/`,
 //! `prompts/`; never `auth.json`). OpenCode: `<config>/opencode/` (`AGENTS.md`, `opencode.json(c)`, `skill(s)/`,
-//! `agent(s)/`) and a project's `opencode.json(c)`. Cursor: `~/.cursor/mcp.json` and a project's `.cursor/mcp.json`
+//! `agent(s)/`) and a project's `opencode.json(c)` or `.opencode/opencode.json(c)`. Cursor:
+//! `~/.cursor/mcp.json` and a project's `.cursor/mcp.json`
 //! and `.cursor/rules/`. These are the same on Windows, macOS and Linux: both tools' documentation names only
 //! `~/.config/opencode/` and `~/.cursor/`, with `~` the user's home folder (`%USERPROFILE%` on Windows).
 //!
@@ -58,8 +59,61 @@ fn cant(row: &Row<'_>, why: &str) -> (Found, Payload) {
     )
 }
 
-fn text(fs: &dyn Fs, path: &Path) -> Option<String> {
-    fs.read(path)
+fn linked_row(agent: Agent, kind: Kind, path: &Path, out: &mut Vec<(Found, Payload)>) {
+    let source = path.display().to_string();
+    let note = vw_vocabulary::text("link").unwrap_or_default();
+    if out.iter().any(|(row, _)| {
+        row.agent == agent && row.source == source && row.note.as_deref() == Some(note)
+    }) {
+        return;
+    }
+    out.retain(|(row, _)| row.agent != agent || row.source != source);
+    let name = file_name(path);
+    let row = Row {
+        agent,
+        kind,
+        name: &name,
+        source: path,
+        bytes: b"",
+    };
+    out.push(cant(&row, note));
+}
+
+fn scan_read(
+    fs: &dyn Fs,
+    agent: Agent,
+    kind: Kind,
+    path: &Path,
+    out: &mut Vec<(Found, Payload)>,
+) -> Option<Vec<u8>> {
+    if let Ok(bytes) = fs.read_checked(path) {
+        bytes
+    } else {
+        linked_row(agent, kind, path, out);
+        None
+    }
+}
+
+fn scan_list(
+    fs: &dyn Fs,
+    agent: Agent,
+    kind: Kind,
+    path: &Path,
+    out: &mut Vec<(Found, Payload)>,
+) -> Vec<crate::fs::Entry> {
+    if let Ok(entries) = fs.list_checked(path) {
+        for entry in entries.iter().filter(|entry| entry.linked) {
+            linked_row(agent, kind, &entry.path, out);
+        }
+        entries
+    } else {
+        linked_row(agent, kind, path, out);
+        Vec::new()
+    }
+}
+
+fn text(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(Found, Payload)>) -> Option<String> {
+    scan_read(fs, agent, Kind::Instructions, path, out)
         .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
@@ -71,7 +125,7 @@ fn file_name(path: &Path) -> String {
 
 /// A personal instructions file: appended under a heading.
 fn instructions(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(Found, Payload)>) {
-    let Some(body) = text(fs, path) else {
+    let Some(body) = text(fs, agent, path, out) else {
         return;
     };
     if body.trim().is_empty() {
@@ -100,7 +154,7 @@ fn instructions(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(Found, Pa
 
 /// A project's own instructions file: Vibe reads the project's `AGENTS.md`, nothing is copied.
 fn project_instructions(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(Found, Payload)>) {
-    if let Some(body) = text(fs, path) {
+    if let Some(body) = text(fs, agent, path, out) {
         let row = Row {
             agent,
             kind: Kind::Instructions,
@@ -117,10 +171,13 @@ fn project_instructions(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(F
 
 /// Every `<root>/<name>/SKILL.md` folder: copied whole into Vibe Work's skills folder.
 fn skills(fs: &dyn Fs, agent: Agent, root: &Path, out: &mut Vec<(Found, Payload)>) {
-    for folder in fs.list(root).into_iter().filter(|e| e.dir) {
+    for folder in scan_list(fs, agent, Kind::Skill, root, out)
+        .into_iter()
+        .filter(|e| e.dir)
+    {
         let name = file_name(&folder.path);
         let manifest = folder.path.join("SKILL.md");
-        let Some(head) = fs.read(&manifest) else {
+        let Some(head) = scan_read(fs, agent, Kind::Skill, &manifest, out) else {
             continue;
         };
         let mut files = Vec::new();
@@ -129,7 +186,12 @@ fn skills(fs: &dyn Fs, agent: Agent, root: &Path, out: &mut Vec<(Found, Payload)
         let mut too_big = false;
         // The walk stops at the first file it cannot take or at a limit, and keeps nothing it read.
         'walk: while let Some(dir) = pending.pop() {
-            for entry in fs.list(&dir) {
+            let entries = scan_list(fs, agent, Kind::Skill, &dir, out);
+            if entries.iter().any(|entry| entry.linked) {
+                too_big = true;
+                break 'walk;
+            }
+            for entry in entries {
                 if entry.dir {
                     pending.push(entry.path);
                     if pending.len() > SKILL_FILES {
@@ -137,7 +199,7 @@ fn skills(fs: &dyn Fs, agent: Agent, root: &Path, out: &mut Vec<(Found, Payload)
                         break 'walk;
                     }
                 } else if entry.file {
-                    let Some(bytes) = fs.read(&entry.path) else {
+                    let Some(bytes) = scan_read(fs, agent, Kind::Skill, &entry.path, out) else {
                         too_big = true;
                         break 'walk;
                     };
@@ -189,7 +251,10 @@ fn listed(
     why: &str,
     out: &mut Vec<(Found, Payload)>,
 ) {
-    for entry in fs.list(root).into_iter().filter(|e| e.file) {
+    for entry in scan_list(fs, agent, kind, root, out)
+        .into_iter()
+        .filter(|e| e.file)
+    {
         let name = file_name(&entry.path);
         let row = Row {
             agent,
@@ -283,7 +348,7 @@ fn json_servers(
     from_project: bool,
     out: &mut Vec<(Found, Payload)>,
 ) {
-    let Some(raw) = fs.read(path) else {
+    let Some(raw) = scan_read(fs, agent, Kind::McpServer, path, out) else {
         return;
     };
     let Some(value) = std::str::from_utf8(&raw).ok().and_then(mcp::jsonc) else {
@@ -365,7 +430,7 @@ fn claude(fs: &dyn Fs, homes: &Homes, out: &mut Vec<(Found, Payload)>) {
 
 /// Permission and hook settings in a JSON settings file: listed, not brought.
 fn settings_rows(fs: &dyn Fs, agent: Agent, path: &Path, out: &mut Vec<(Found, Payload)>) {
-    let Some(raw) = fs.read(path) else {
+    let Some(raw) = scan_read(fs, agent, Kind::Permissions, path, out) else {
         return;
     };
     let Some(value) = std::str::from_utf8(&raw).ok().and_then(mcp::jsonc) else {
@@ -422,7 +487,7 @@ fn codex(fs: &dyn Fs, homes: &Homes, out: &mut Vec<(Found, Payload)>) {
         out,
     );
     let config = root.join("config.toml");
-    let Some(raw) = fs.read(&config) else {
+    let Some(raw) = scan_read(fs, Agent::Codex, Kind::McpServer, &config, out) else {
         return;
     };
     let Some(table) = std::str::from_utf8(&raw)
@@ -479,6 +544,8 @@ fn opencode(fs: &dyn Fs, homes: &Homes, out: &mut Vec<(Found, Payload)>) {
         configs.extend([
             project.join("opencode.json"),
             project.join("opencode.jsonc"),
+            project.join(".opencode/opencode.json"),
+            project.join(".opencode/opencode.jsonc"),
         ]);
     }
     for config in configs {

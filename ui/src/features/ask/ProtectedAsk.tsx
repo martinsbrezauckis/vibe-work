@@ -70,7 +70,7 @@ function ShowAllFiles({ p }: { p: ProtectedChangeView }): ReactElement {
     <Button
       data-testid="transcript.protected-change-show-all"
       type="button"
-      appearance="expander"
+      appearance="link"
       onClick={() => {
         transcript.toggle(`protected:${p.id}`, true);
       }}
@@ -131,7 +131,7 @@ function DecidedProtected({ p, line }: { p: ProtectedChangeView; line: AuditLine
           data-testid="transcript.protected-change-changes"
           data-protected-changes=""
           type="button"
-          appearance="expander"
+          appearance="link"
           aria-expanded={shown}
           onClick={() => {
             transcript.toggle(`${key}:changes`, !shown);

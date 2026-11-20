@@ -30,6 +30,7 @@ pub fn send(
         window.isVisible() && !base.isHiddenOrHasHiddenAncestor(),
         NSApplication::sharedApplication(main).isActive() && window.isKeyWindow(),
     )?;
+    super::super::macos::refuse_open_menu()?;
     let bounds = base.bounds();
     if !(0.0..1.0).contains(&point.0)
         || !(0.0..1.0).contains(&point.1)

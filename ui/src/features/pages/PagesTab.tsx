@@ -89,7 +89,8 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
           <Button
             data-testid="pages.pages-tab-open-external"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={() => {
               tab.openExternal(tab.viewer?.external ?? "");
             }}
@@ -99,7 +100,8 @@ function SessionPages({ pages, sessionId }: { pages: Pages; sessionId: string })
           <Button
             data-testid="pages.pages-tab-pages-btn"
             type="button"
-            appearance="page"
+            shape="outlined"
+            placement="page"
             onClick={tab.dismissExternal}
           >
             Dismiss

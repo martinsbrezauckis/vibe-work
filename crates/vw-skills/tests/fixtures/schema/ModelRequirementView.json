@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "higher_plan",
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "ModelRequirementView",
+  "type": "object"
+}

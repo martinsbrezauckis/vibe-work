@@ -290,4 +290,6 @@ mod tests;
 
 #[path = "extension_host_registry.rs"]
 mod host_registration;
-pub use host_registration::{host, remove_host};
+pub use host_registration::{
+    FOREIGN_HOST, HostOutcome, host, host_replacing, host_value, remove_host,
+};

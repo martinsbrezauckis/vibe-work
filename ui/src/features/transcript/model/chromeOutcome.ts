@@ -8,11 +8,13 @@
  * Pure. Depends on: entries. Called by: StepItem.
  * Invariant: `null` for a step that is not Chrome Control's or still runs.
  * Receipt-owned error reasons use a short sanitised line. From the untrusted page envelope only the error code is
- * read, as a key into a closed list; page messages and details never become an outcome line.
+ * normally read as a key into a closed list. Safari's extension-copy line also checks one exact, closed cause value;
+ * page messages, URLs and arbitrary details never become an outcome line.
  */
 import { TEXT, term } from "../../../vocabulary";
 import { type Obj, detailOf, effectView, inputOf, obj, outputOf, outputText, str } from "./entries";
 import { chromeErrorReason } from "./chromeErrorReason";
+import { SAFARI_EXTENSION_CONFLICT_NOTICE } from "../../settings/chrome/safariConflict";
 
 const CHROME_TOOL = /^mcp_vw\.chrome_(status|session|execute)$/i;
 
@@ -115,7 +117,23 @@ function field(answer: Obj | null, name: string): string | null {
 const REFUSED = "Not done: Chrome refused it.";
 const NO_CHROME = "Not done: no Chrome is connected to Vibe Work right now.";
 const DISCONNECTED = "Not done: Chrome was disconnected.";
-const PAUSED = "Paused in Chrome. Vibe waits until you press Resume.";
+/** The chat's browser session was not active when the call arrived (`CONTROL_SUSPENDED`): never "Paused". */
+const NOT_RUNNING = TEXT.browserNotRunningCall;
+/** The helper refused the call because the person paused that tab (`PERSON_PAUSED`): it did not run, nothing waits. */
+const PAUSED_TAB = TEXT.browserPausedTabCall;
+/** The core's refusal of an agent call after the person's Stop in the browser (person_stop.rs `refusal`). */
+const STOPPED_BY_PERSON =
+  /^Not run: the user pressed Stop in (?:Your )?(Chrome|Edge|Firefox|Safari)\. /u;
+
+/** The person's line for the core's plain-text Stop refusal, in the browser it names; else `null`. */
+function stoppedByPerson(entry: Obj): string | null {
+  const content = outputOf(entry)?.["content"];
+  const text = Array.isArray(content)
+    ? content.map((part) => str(obj(part)?.["text"]) ?? "").join("")
+    : outputText(entry);
+  const browser = STOPPED_BY_PERSON.exec(text.trim())?.[1];
+  return browser === undefined ? null : TEXT.browserStoppedCall.replace(/\bChrome\b/gu, browser);
+}
 const LOST = TEXT.chromeLost;
 const LATE = TEXT.chromeLate;
 const UNKNOWN = TEXT.chromeUnknown;
@@ -151,7 +169,8 @@ const LINES: readonly (readonly [string, readonly string[]])[] = [
   ],
   [NO_CHROME, ["ADAPTER_UNAVAILABLE", "OWNER_REQUIRED"]],
   [DISCONNECTED, ["ADAPTER_DISCONNECTED", "disconnected"]],
-  [PAUSED, ["CONTROL_SUSPENDED"]],
+  [NOT_RUNNING, ["CONTROL_SUSPENDED"]],
+  [PAUSED_TAB, ["PERSON_PAUSED"]],
   [LOST, ["TRANSPORT_LOST", "EMPTY_RESPONSE"]],
   [LATE, ["ACTION_TIMEOUT", "timeout", "operation_timeout", "page_tool_timeout"]],
   [
@@ -210,6 +229,20 @@ function failureLine(answer: Obj | null, status: string | null): string | null {
   return status === "unknown" && !line.startsWith("Not known:") ? UNKNOWN : line;
 }
 
+/** The helper's exact Safari world-mismatch code and cause, without its free text or page data. */
+function safariExtensionConflict(answer: Obj | null, status: string | null): string | null {
+  if (!str(answer?.["profileId"])?.startsWith("safari:")) return null;
+  const error = obj(obj(answer?.["untrustedPageContent"])?.["error"]);
+  const code = str(error?.["code"]);
+  const cause = str(obj(error?.["details"])?.["cause"]);
+  if (cause !== "extension_world_mismatch") return null;
+  if (status === "failed" && code === "SAFARI_EXTENSION_CONFLICT")
+    return SAFARI_EXTENSION_CONFLICT_NOTICE;
+  if (status === "unknown" && code === "OUTCOME_UNKNOWN")
+    return `Outcome unknown. ${SAFARI_EXTENSION_CONFLICT_NOTICE}`;
+  return null;
+}
+
 const BY_STATUS: Readonly<Record<string, string>> = {
   queued: TEXT.chromeQueued,
   pending: TEXT.chromeQueued,
@@ -233,6 +266,9 @@ export function chromeOutcome(entry: Obj): string | null {
   if (!CHROME_TOOL.test(tool)) return null;
   const view = effectView(entry);
   if (view.live || view.status === "skipped") return null;
+  // The core's own plain-text refusal after the person's Stop: the person's line, never the agent's instruction.
+  const stopped = stoppedByPerson(entry);
+  if (stopped !== null) return stopped;
   const batch = answerOf(entry);
   const steps = batch?.["steps"];
   const last = Array.isArray(steps) ? obj(obj(steps.at(-1))?.["result"]) : null;
@@ -242,6 +278,18 @@ export function chromeOutcome(entry: Obj): string | null {
       ? last
       : batch;
   const status = field(answer, "status")?.toLowerCase() ?? null;
+  const safariConflict = safariExtensionConflict(answer, status);
+  if (safariConflict !== null) return safariConflict;
+  const code = field(answer, "code") ?? field(obj(answer?.["untrustedPageContent"]), "code");
+  // A failed wait reached a result: the condition was not met. An unknown status still means the action's
+  // outcome was not established, regardless of the same timeout code.
+  if (
+    status === "failed" &&
+    code === "timeout" &&
+    ["page.wait", "page.wait_for"].includes(str(inputOf(entry)?.["action"]) ?? "")
+  )
+    return "The wait ended: the page did not show what the agent waited for in time.";
+  if (status === "failed" && code === "timeout") return browserWords(entry, ANY_PROBLEM);
   const failure = failureLine(answer, status);
   const reason = chromeErrorReason(answer, status, failure?.startsWith("Not known:") ?? false);
   if (reason !== null) return reason;

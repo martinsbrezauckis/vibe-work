@@ -142,7 +142,7 @@ pub struct SkillRow {
     pub name: String,
     /// Unclipped description.
     pub description: String,
-    /// Display origin: builtin, user, project, plugin, catalog; absent if ambiguous.
+    /// Display origin: builtin, user, project, session, plugin, catalog; absent if ambiguous.
     pub source: Option<String>,
     /// Installed, including ambiguous copies.
     pub installed: bool,

@@ -34,6 +34,10 @@
   if (!hover && check.target && !REQ.nativeUser && REQ.allowSend === false && (!REQ.keyboard || ["Enter", "Space"].includes(REQ.keyboard.key)) && postsForm(hit, REQ.keyboard?.key === "Enter"))
     return fail("browser send approval required");
   const control = hit.closest?.("label")?.control || hit;
+  // A select inside an observed container (or a label's select) would open a popup only the person can use.
+  if (REQ.nativeSelectPopup && check.target && !REQ.nativeUser
+    && (control?.localName === "select" || hit.closest?.("select")))
+    return fail(REQ.nativeSelectPopup);
   if (!hover && !REQ.keyboard && check.target && !REQ.nativeUser && control?.localName === "input" && control.type === "color")
     return fail("native colour picker unsupported; use browser_read for the field ref, then browser_act type with #RRGGBB text");
   if (!hover && check.target && !REQ.nativeUser && (authorizationPage() || REQ.consent)) {

@@ -30,6 +30,11 @@ pub(crate) struct Inner {
     pub(crate) shields: Mutex<crate::shields::Saved>,
     /// The person's Local Network Access answers per site (`local_access`).
     pub(crate) site_answers: Mutex<crate::local_access::SiteAnswers>,
+    /// Sites refused while undecided or after a native question timed out, as (site, chat): one row per chat that had
+    /// the site open; listed for the person's answer until changed in Settings (this run only).
+    pub(crate) unanswered: Mutex<crate::local_access::Waiting>,
+    /// Sites whose bounded question ended unanswered. Further requests refuse until a person changes that site.
+    pub(crate) timed_out_sites: Mutex<std::collections::BTreeSet<String>>,
     pub(crate) guard_refused: Mutex<Option<RefusalListener>>,
     pub(crate) state: Mutex<State>,
     pub(crate) policy: UrlPolicy,
@@ -46,6 +51,8 @@ pub(crate) struct Inner {
     /// One URL-rule refresh at a time (each computes from the newest state and finishes before the
     /// next starts, so an older, wider list can never be applied after a newer one).
     pub(crate) rules_lock: tokio::sync::Mutex<()>,
+    /// The documents each mount's frames were allowed to load (`document_journal`).
+    pub(crate) documents: Mutex<crate::document_journal::Journal>,
 }
 
 impl Inner {
@@ -117,6 +124,33 @@ impl Hooks {
                 "browser background request refused"
             );
         }
+    }
+
+    /// A request barrier can refuse a saved Block answer before the egress proxy sees the request. Keep the same
+    /// host-owned receipt the proxy writes, without guessing the frame's initiator from the page URL.
+    fn record_barrier_refusal(&self, label: &str, url: &Url, reason: &str) {
+        let Some(host) = url.host().map(|host| match host {
+            url::Host::Domain(host) => host.to_owned(),
+            url::Host::Ipv4(host) => host.to_string(),
+            url::Host::Ipv6(host) => host.to_string(),
+        }) else {
+            return;
+        };
+        let Some(port) = url.port_or_known_default() else {
+            return;
+        };
+        let session = {
+            let mut state = self.0.lock();
+            let Some(session) = state.session_of(label).map(str::to_owned) else {
+                return;
+            };
+            let Some(entry) = state.entries.get_mut(&session) else {
+                return;
+            };
+            entry.note_request_refused(&host, port, reason);
+            session
+        };
+        self.0.changed(&session);
     }
     /// The policy part of a top-level navigation decision (under the registry lock, never waiting).
     pub(crate) fn pre(&self, label: &str, url: &Url) -> Pre {
@@ -271,6 +305,36 @@ fn add_layer(entry: &mut crate::state::Entry, layer: GuardLayer) {
 pub(crate) struct Hooks(pub(crate) Arc<Inner>);
 
 impl PreviewHooks for Hooks {
+    fn content_rule_refused_own_address(&self, label: &str, host: &str, port: u16) {
+        const REASON: &str = "web pages cannot reach this Mac's own network address on macOS";
+        let (session, first) = {
+            let mut state = self.0.lock();
+            let Some(session) = state.session_of(label).map(str::to_owned) else {
+                return;
+            };
+            let Some(entry) = state.entries.get_mut(&session) else {
+                return;
+            };
+            if entry.mount_class() != crate::policy::PageClass::Web {
+                return;
+            }
+            // The person's notice names no target: once per page. The agent gets a receipt for every request.
+            let first = !entry
+                .request_refusals_on_page()
+                .iter()
+                .any(|row| row.target_class == "own-address");
+            entry.note_request_refused(host, port, REASON);
+            (session, first)
+        };
+        self.0.changed(&session);
+        if first {
+            self.0.guard_refused(
+                &session,
+                "A web page request to this Mac's own network address was refused. On macOS, web pages cannot reach this Mac's own network addresses.",
+            );
+        }
+    }
+
     fn current_url(&self, label: &str) -> Option<Url> {
         let state = self.0.lock();
         let session = state.session_of(label)?;
@@ -316,7 +380,10 @@ impl PreviewHooks for Hooks {
 
     fn allow_frame_navigation(&self, label: &str, url: &Url) -> bool {
         match self.decide_in(label, url, true) {
-            Ok(()) => true,
+            Ok(()) => {
+                self.document_allowed(label, url);
+                true
+            }
             Err(None) => false,
             Err(Some((session, reason))) => {
                 self.record(&session, url, &reason, Seen::Navigation);
@@ -329,6 +396,7 @@ impl PreviewHooks for Hooks {
         self.begin_navigation(label);
         match self.decide(label, url) {
             Ok(()) => {
+                self.document_allowed(label, url);
                 // A fresh navigation is the only evidence that the replaced page's URL may be
                 // current again. Its late load callbacks otherwise remain stale after open ends.
                 let mut state = self.0.lock();
@@ -369,18 +437,26 @@ impl PreviewHooks for Hooks {
     }
 
     fn request_allowed(&self, label: &str, url: &Url) -> bool {
-        let allowed = self.request_pre(label, url).is_ok();
-        if !allowed {
-            self.record_request(label, url);
+        match self.request_pre(label, url) {
+            Ok(()) => true,
+            Err(reason) => {
+                self.record_request(label, url);
+                if let Some(reason) = reason {
+                    self.record_barrier_refusal(label, url, &reason);
+                }
+                false
+            }
         }
-        allowed
     }
 
     fn request_check(&self, label: &str, url: &Url, document: bool) -> RequestCheck {
         let allowed = if document {
             let Pre::Done(result) = self.pre(label, url);
             match result {
-                Ok(()) => true,
+                Ok(()) => {
+                    self.document_allowed(label, url);
+                    true
+                }
                 Err(reason) => {
                     if let Some((session, reason)) = reason {
                         self.record(&session, url, &reason, Seen::Document);
@@ -486,7 +562,7 @@ impl PreviewHooks for Hooks {
                     url.as_str(),
                     "the page ended up outside what this browser opens",
                 );
-                entry.loading = false;
+                entry.set_loading(false);
                 entry.title = None;
                 tracing::info!(session = %session, "preview page outside its ports: unloaded");
                 keep = false;
@@ -515,7 +591,7 @@ impl PreviewHooks for Hooks {
                 }
                 entry.reset_console();
                 entry.favicon = None;
-                entry.loading = true;
+                entry.set_loading(true);
                 if url.as_str() != "about:blank" {
                     entry.url = Some(url);
                 }
@@ -533,7 +609,7 @@ impl PreviewHooks for Hooks {
                 entry.pending_requested_admitted = None;
                 entry.pending_admitted_urls.clear();
                 entry.pending_started = false;
-                entry.loading = false;
+                entry.set_loading(false);
                 if url.as_str() != "about:blank" {
                     entry.url = Some(url);
                 }

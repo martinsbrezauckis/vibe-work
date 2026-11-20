@@ -108,7 +108,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
         <Button
           data-testid="marketplace.market-detail-add-server"
           type="button"
-          appearance="dialog"
+          variant="primary"
           onClick={() => void actions?.addServer(e.entry.id)}
         >
           Add and sign in
@@ -118,7 +118,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
         <Button
           data-testid="marketplace.market-detail-add-key-server"
           type="button"
-          appearance="dialog"
+          variant="primary"
           onClick={() => void actions?.addKeyServer(e.entry.id)}
         >
           Add with your key
@@ -129,7 +129,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
           data-testid="marketplace.market-detail-install"
           ref={confirm}
           type="button"
-          appearance="dialog"
+          variant="primary"
           disabled={installing !== null || (offer !== undefined && offer.phase !== "shown")}
           onClick={() =>
             void (action === "install"

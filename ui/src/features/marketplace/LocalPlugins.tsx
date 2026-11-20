@@ -110,7 +110,7 @@ export function LocalPlugins(): ReactElement | null {
             <p className="cmuted">
               {p.scope === "project" ? term("workNames", "projectTab").name : "This computer"} ·{" "}
               {p.locked
-                ? "Off — set elsewhere"
+                ? "Off: set elsewhere"
                 : p.off
                   ? p.scope === "global" && p.nativeEnabled !== false
                     ? "Off: found outside the marketplace"

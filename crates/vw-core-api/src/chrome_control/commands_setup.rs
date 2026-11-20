@@ -77,6 +77,8 @@ impl Core {
             return Err(invalid(reason));
         }
         let _held = chrome.lifecycle.lock().await;
+        // A line left by an earlier Connect that did not finish is not this Connect's.
+        let _ = chrome.config.setup_notice.take();
         let installed = chrome
             .dir()
             .is_some_and(|dir| dir.join("setup.json").is_file());
@@ -107,7 +109,7 @@ impl Core {
                     .await
                     .map_err(|reason| invalid(&reason))?;
             }
-            return Ok(self.chrome_result(None));
+            return Ok(self.with_setup_notice(self.chrome_result(None)));
         }
         let keys = self
             .shared
@@ -146,7 +148,28 @@ impl Core {
                 setup_failure_message(&reason)
             }));
         }
-        self.finish_browser_setup(origin, edge).await
+        let result = self.finish_browser_setup(origin, edge).await?;
+        Ok(self.with_setup_notice(result))
+    }
+
+    /// The result line says once that Connect replaced a stale browser connection (helper registration).
+    fn with_setup_notice(&self, result: CommandResult) -> CommandResult {
+        let notice = self.shared.chrome_control.config.setup_notice.take();
+        match (result, notice) {
+            (
+                CommandResult::ChromeControl {
+                    view,
+                    offer,
+                    hint: None,
+                },
+                Some(notice),
+            ) => CommandResult::ChromeControl {
+                view,
+                offer,
+                hint: Some(notice),
+            },
+            (result, _) => result,
+        }
     }
 
     async fn finish_browser_setup(

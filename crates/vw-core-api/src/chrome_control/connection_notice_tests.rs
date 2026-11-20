@@ -96,7 +96,7 @@ async fn edge_reconnect_notifies_even_when_chrome_keeps_another_owner_diagnosis(
     owner.pairing.lock().unwrap().0 = crate::chrome_control::PairingState::OtherOwner;
     crate::chrome_control::owner::update_pairing(
         &Arc::downgrade(&core.shared),
-        &json!({"structuredContent":{"profiles":[{"profileId":"edge:p","connected":true,"extensionVersion":"0.1.5"}]}}),
+        &json!({"structuredContent":{"profiles":[{"profileId":"edge:p","connected":true,"extensionVersion":"0.2.5"}]}}),
     );
     assert!(
         owner.connection_waiting.0.lock().unwrap().is_empty(),

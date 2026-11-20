@@ -28,7 +28,7 @@ function SettingsButton({ projectId }: { projectId: string }) {
     <Button
       data-testid="projects.project-detail-open-settings"
       type="button"
-      appearance="project"
+      placement="project"
       shape="outlined"
       onClick={() => {
         projects?.openSettings(projectId);
@@ -129,7 +129,7 @@ function NoFolderDetail({
           <Button
             data-testid="projects.project-detail-pj-btn"
             type="button"
-            appearance="project"
+            placement="project"
             shape="outlined"
             variant="primary"
             onClick={actions.chooseFolder}
@@ -139,7 +139,7 @@ function NoFolderDetail({
           <Button
             data-testid="projects.project-detail-pj-btn-2"
             type="button"
-            appearance="project"
+            placement="project"
             shape="outlined"
             onClick={actions.newSession}
           >
@@ -257,7 +257,7 @@ function FolderDetail({
           {actions.openFiles && (
             <Button
               data-testid="projects.open-files"
-              appearance="project"
+              placement="project"
               shape="outlined"
               onClick={actions.openFiles}
             >
@@ -267,7 +267,7 @@ function FolderDetail({
           {actions.openTerminal && (
             <Button
               data-testid="projects.open-terminal"
-              appearance="project"
+              placement="project"
               shape="outlined"
               onClick={actions.openTerminal}
             >
@@ -278,7 +278,7 @@ function FolderDetail({
             <Button
               data-testid="projects.project-detail-start"
               type="button"
-              appearance="project"
+              placement="project"
               shape="outlined"
               variant="primary"
               onClick={(event) => {
@@ -293,7 +293,7 @@ function FolderDetail({
             <Button
               data-testid="projects.project-detail-open-handbook"
               type="button"
-              appearance="project"
+              placement="project"
               shape="outlined"
               variant="primary"
               title="Opens Work in this folder with the Project tab on the handbook"
@@ -307,7 +307,7 @@ function FolderDetail({
           <Button
             data-testid="projects.project-detail-pj-btn-4"
             type="button"
-            appearance="project"
+            placement="project"
             shape="outlined"
             onClick={actions.newSession}
           >
@@ -316,7 +316,7 @@ function FolderDetail({
           <Button
             data-testid="projects.project-detail-pj-btn-5"
             type="button"
-            appearance="project"
+            placement="project"
             shape="outlined"
             onClick={actions.reveal}
           >

@@ -71,16 +71,10 @@ struct File {
 /// The file name stem of a session (first 16 bytes of SHA-256 of a domain tag and the id, hex).
 #[must_use]
 pub fn session_key(session_id: &str) -> String {
-    use std::fmt::Write as _;
     let mut hasher = Sha256::new();
     hasher.update(b"vibe-work-line-comments\0");
     hasher.update(session_id.as_bytes());
-    hasher.finalize()[..16]
-        .iter()
-        .fold(String::with_capacity(32), |mut out, b| {
-            let _ = write!(out, "{b:02x}");
-            out
-        })
+    hex::encode(&hasher.finalize()[..16])
 }
 
 /// The line comments of every session, in `dir`.
@@ -163,7 +157,7 @@ impl LineCommentStore {
         let mut file = self.load(session_id)?;
         if file.comments.len() >= MAX_PER_SESSION {
             return Err(LineCommentError::Invalid(
-                "this session has too many comments; delete some first".to_owned(),
+                "this chat has too many comments; delete some first".to_owned(),
             ));
         }
         let created_ms = now_ms();

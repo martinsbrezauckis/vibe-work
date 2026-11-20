@@ -565,6 +565,11 @@ pub enum SecretsResult {
         logins: Vec<LoginView>,
         /// The "always for this site" fill grants in force (empty while the vault is locked).
         fill_grants: Vec<FillGrantView>,
+        /// A note about the selected project folder for the person (git is not installed, so a linked copy's link to
+        /// its main project cannot be checked: it uses only its own entries); absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        project_note: Option<String>,
     },
     /// `addLogin`.
     LoginStored {

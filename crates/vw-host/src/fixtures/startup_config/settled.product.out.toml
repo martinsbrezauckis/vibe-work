@@ -1,0 +1,24 @@
+# Vibe Work: unsupported experimental features stay off.
+# Vibe Work: Vibe checks HTTPS certificates with your system's certificate store, not the copy bundled with
+# Vibe's Python packages, which can lag behind removed certificate authorities.
+enable_system_trust_store = true
+
+# Vibe Work: the agent's commits carry no "Co-Authored-By: Mistral Vibe" line unless you set this to true.
+# (Your own commits: the Commit dialog's credit switch, per project.)
+include_commit_signature = false
+
+active_model = "large-4"
+default_agent = "accept-edits"
+experimental_enable_registry_skills = true
+experimental_enable_mistral_mcp_connector = false
+experimental_local_runtime_session_api = false
+experimental_enable_document_library_connector = false
+experimental_enable_model_catalog = true
+experimental_enable_local_projects = false
+experimental_enable_tab_status = false
+enable_pr_monitoring = false
+
+# Vibe Work: each chat's own model writes its session title.
+# Name a model alias here to title every chat with that model instead.
+[utility_models]
+title = "active"

@@ -35,12 +35,12 @@ impl Pump {
                 if first {
                     warn!(
                         session_id,
-                        "too many resyncs; pausing re-reads of this session"
+                        "too many resyncs; pausing re-reads of this chat"
                     );
                     shared.emit(CoreEvent::Alert {
                         session_id: Some(session_id.to_owned()),
                         kind: AlertKind::ResyncPaused,
-                        message: "A session's data kept changing under the app, so it stopped re-reading it for a while. What you see may be out of date.".to_owned(),
+                        message: "A chat's data kept changing under the app, so it stopped re-reading it for a while. What you see may be out of date.".to_owned(),
                     });
                 }
                 return;

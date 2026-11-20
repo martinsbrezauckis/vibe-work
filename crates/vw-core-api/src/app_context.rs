@@ -127,7 +127,7 @@ pub(crate) async fn append(shared: &std::sync::Arc<Shared>, method: &str, params
     let ports = shared.procmon.leases().of(id);
     let network = crate::network_facts::read(shared).await;
     let mut text = format!(
-        "Vibe Work session facts. {facts}\nNetwork settings for commands: {network}\nSession preview ports: {ports:?}. preview_list reports current canOpen/leasedFree ports."
+        "Vibe Work chat facts. {facts}\nNetwork settings for commands: {network}\nChat preview ports: {ports:?}. preview_list reports current canOpen/leasedFree ports."
     );
     // A key server Vibe dropped because its key is not allowed: the agent learns which one and the person's step.
     if let Some(keys) = crate::mcp_keys::facts::for_turn(shared).await {

@@ -30,7 +30,7 @@ import type {
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
 import { type Store, createStore } from "./createStore";
-import { describeProblem, reasonOf } from "./keyText";
+import { describeProblem, reasonOf, setAsideNotice } from "./keyText";
 import { recordedKeyTest } from "./mistralKeys";
 import { type SetupStep, needsSetup, stepOf } from "./keyView";
 
@@ -151,6 +151,8 @@ export interface KeyController {
   removeVibeCopy(source: VibeKeySource): Promise<boolean>;
   testKey(): Promise<boolean>;
   lockNow(): Promise<boolean>;
+  /** Forgotten password: sets the locked private vault aside (moved, never deleted) so setup can start a new one. */
+  setAsideVault(): Promise<boolean>;
   /** Turns "Lock the vault when Vibe Work quits" on or off (no password: nothing is re-wrapped). */
   setLockOnQuit(on: boolean): Promise<boolean>;
   setUnlockMethod(method: VaultUnlockMethod, password: string): Promise<boolean>;
@@ -430,6 +432,13 @@ export function createKeys(
       const ok = await change({ op: "lockVault" }, false);
       if (ok) set({ test: { phase: "idle" } });
       return ok;
+    },
+    async setAsideVault() {
+      const result = await send({ op: "setAsideVault" });
+      if (result?.type !== "vaultSetAside") return false;
+      await load();
+      set({ notice: setAsideNotice(result.keptAt) });
+      return true;
     },
     setUnlockMethod: (unlockMethod, passphrase) =>
       change({ op: "setVaultUnlockMethod", unlockMethod, passphrase }, false),

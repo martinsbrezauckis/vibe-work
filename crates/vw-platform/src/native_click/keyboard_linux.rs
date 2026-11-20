@@ -11,6 +11,9 @@ use webkit2gtk::WebViewExt;
 /// # Errors
 /// [`super::super::NOT_IN_FRONT`] for an inactive or hidden window; refuses unavailable or unfocusable views.
 pub fn send(view: &webkit2gtk::WebView, input: &Keyboard, sent: &AtomicBool) -> Result<(), String> {
+    if super::super::linux_menu_open() {
+        return Err(super::super::MENU_OPEN.to_owned());
+    }
     let widget: &gtk::Widget = view.upcast_ref();
     let top = widget
         .toplevel()

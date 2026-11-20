@@ -1,9 +1,11 @@
 //! Quit and Restart ask the person first while agent work runs. Every way the person ends the app goes through here:
-//! the tray's Quit and Restart, the window's Quit command (Ctrl+Q), and an exit the OS requests on the person's behalf
+//! the tray's Quit and Restart, the window's Quit command (Ctrl+Q, also pressed inside a built-in browser page), and an
+//! exit the OS requests on the person's behalf
 //! (macOS Cmd+Q and the app menu's Quit, closing the last window when the app does not stay in the tray).
 //! The question is the app's own native confirmation (`dialogs::ask_person`): only the person can answer it, never the
 //! agent or the Debug API. Cancel is the default and Escape cancels. With no running work nothing is asked.
-//! Depends on: the host's core (`agent_work_running`), the native dialogs, the tray's restart. Called by: tray, commands,
+//! Depends on: the host's core (`agent_work_running`), the native dialogs, the tray's restart, the browser views' key watch
+//! (`vw_webview::take_quit_from_pages`, for Ctrl+Q in a page). Called by: tray, commands,
 //! lib (window close and exit requests).
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
 /// The question's words; used only by this dialog.
-const QUIT_WHILE_WORKING: &str = "Your agent session is running. Are you sure you want to quit?";
+const QUIT_WHILE_WORKING: &str =
+    "The agent in this chat is running. Are you sure you want to quit?";
 const RESTART_WHILE_WORKING: &str =
-    "Your agent session is running. Are you sure you want to restart?";
+    "The agent in this chat is running. Are you sure you want to restart?";
 const QUIT_DETAIL: &str = "Quitting stops the agent's running work.";
 const RESTART_DETAIL: &str = "Restarting stops the agent's running work.";
 const QUIT: &str = "Quit";
@@ -25,6 +28,19 @@ const CANCEL: &str = "Cancel";
 pub(crate) enum End {
     Quit,
     Restart,
+}
+
+/// Takes the app's Quit shortcut (Ctrl+Q) from built-in browser pages: pressed while a page has the keyboard focus it
+/// never reaches the page and ends the app as the window's own Ctrl+Q does (asking first while agent work runs).
+pub(crate) fn take_from_pages(app: &AppHandle) {
+    let app = app.clone();
+    vw_webview::take_quit_from_pages(move || {
+        let quit = app.clone();
+        // Called on the key watch's thread: the request runs on the main thread.
+        if let Err(error) = app.run_on_main_thread(move || request(&quit, End::Quit)) {
+            tracing::warn!("Quit from a browser page: {error}");
+        }
+    });
 }
 
 /// One question is open at a time: a second Quit while it shows does nothing.
@@ -128,15 +144,15 @@ mod tests {
     fn quit_and_restart_name_running_work_and_offer_cancel_as_the_default() {
         let (quit, quit_buttons) = question(End::Quit);
         assert!(
-            quit.starts_with("Your agent session is running. Are you sure you want to quit?\n\n")
+            quit.starts_with(
+                "The agent in this chat is running. Are you sure you want to quit?\n\n"
+            )
         );
         assert_eq!(quit_buttons, ["Quit", "Cancel"]);
         let (restart, restart_buttons) = question(End::Restart);
-        assert!(
-            restart.starts_with(
-                "Your agent session is running. Are you sure you want to restart?\n\n"
-            )
-        );
+        assert!(restart.starts_with(
+            "The agent in this chat is running. Are you sure you want to restart?\n\n"
+        ));
         assert_eq!(restart_buttons, ["Restart", "Cancel"]);
     }
 
