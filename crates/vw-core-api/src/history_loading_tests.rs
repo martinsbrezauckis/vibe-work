@@ -342,7 +342,7 @@ async fn a_repeated_cursor_stops_after_one_retry() {
     core.shutdown().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn only_the_safety_cap_marks_history_truncated() {
     for count in [20_000, 20_202] {
         let (core, fake) = rig(&format!("history-cap-{count}"), count).await;

@@ -21,7 +21,9 @@
         },
         "enabled": true,
         "locked": false,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       },
       {
         "name": "vibe",
@@ -33,7 +35,9 @@
         "registry": null,
         "enabled": true,
         "locked": true,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       },
       {
         "name": "plugin:notes",
@@ -45,7 +49,9 @@
         "registry": null,
         "enabled": true,
         "locked": true,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       }
     ]
   }

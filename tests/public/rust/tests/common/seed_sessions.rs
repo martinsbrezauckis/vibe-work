@@ -315,14 +315,28 @@ async fn populate(
                 fail(&format!("seed {seed_id}: {method}: {e}"));
             }
         }
-        if let Some(agent) = s["agent"]["name"]
-            .as_str()
-            .filter(|agent| *agent != "custom")
-        {
+        let agent = s["agent"]["name"].as_str();
+        // Older fixtures named the approval mode as the agent. Keep their intended
+        // selected mode while 3.1.4 stores the real agent and policy separately.
+        let legacy_policy = agent.and_then(|name| match name {
+            "ask" | "accept-edits" | "smart-approve" | "auto-approve" => Some(name),
+            "plan" | "vw-plan" => Some("ask"),
+            _ => None,
+        });
+        if let Some(agent) = agent.filter(|agent| *agent != "custom" && legacy_policy.is_none()) {
             call(
                 core,
                 "session/agent/update",
                 json!({"sessionId":sid,"agentName":agent}),
+            )
+            .await
+            .unwrap();
+        }
+        if let Some(policy) = legacy_policy.or_else(|| s["approvalPolicy"]["name"].as_str()) {
+            call(
+                core,
+                "session/approvalPolicy/update",
+                json!({"sessionId":sid,"approvalPolicy":policy}),
             )
             .await
             .unwrap();

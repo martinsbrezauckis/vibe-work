@@ -44,6 +44,7 @@ const NATIVE: &[&str] = &[
     "skills/setLatest",
     "skills/setVersion",
     "session/agent/update",
+    "session/approvalPolicy/update",
     "config/write",
     "session/start",
     "session/resume",
@@ -150,6 +151,15 @@ pub fn policy(kind: &str) -> Option<Policy> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn approval_policy_update_uses_native_confirmation_surface() {
+        let policy = super::policy("session/approvalPolicy/update")
+            .expect("approval policy changes need an explicit permission policy");
+        assert_eq!(policy.surface, crate::Surface::Native);
+        assert!(!policy.person_only);
+        assert_eq!(policy.always_setting, None);
+    }
+
     // PREDICT: Developer permissions is a native, person-only decision with no lasting answer.
     #[test]
     fn developer_permissions_requires_the_person_in_the_native_window() {

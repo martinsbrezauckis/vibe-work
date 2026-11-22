@@ -1,7 +1,8 @@
 //! A saved `large-4` choice is settled against the chat's own model list, which can contain a project's model under
 //! that alias. When the list lacks the alias and the choice names the retired app seed, it resolves to the one catalog
-//! Large 4 row (`model_check::catalog_large_4`) with the chat's thinking level. A matching Vibe session pin without
-//! a saved name also resolves there. Other unavailable models keep the usual fallback and notice.
+//! Large 4 row (`model_check::catalog_large_4`) with the chat's thinking level. A Vibe session pin resolves there
+//! only when the chat's saved choice proves that it used the app's Mistral seed. Other unavailable models keep the
+//! usual fallback and notice.
 //! Called only with the chat's own model list: `restore` (reopen), `live::before` (Send), and a
 //! stored chat's view read for its folder. The saved record is rewritten once at reopen or Send.
 use super::{Choice, Records};
@@ -15,11 +16,11 @@ const SEED_NAME: &str = "mistral-large-4";
 /// `choice` on the catalog Large 4 when it names the retired alias that `runtime`'s model list does not offer.
 /// A chat whose level was never set (read as Off) gets the catalog model's own level when it offers no Off.
 /// `runtime` must be the chat's own model list (reopen, Send, a stored chat's view read for its folder): a choice
-/// that names no model (Vibe's own session pin) is settled by that list, which offers a project's own `large-4`.
+/// that names no model (Vibe's own session pin) needs the saved choice's provider before it can be migrated.
 pub(super) fn resolve(runtime: &Value, choice: &Choice) -> Option<Choice> {
     // A choice that names another model under the alias (a project's own `large-4` row, e.g. a private provider's
     // model) is that model, never Mistral's Large 4, whichever list is read.
-    if choice.alias != OWN_ALIAS || !(choice.name.is_empty() || choice.name == SEED_NAME) {
+    if choice.alias != OWN_ALIAS || choice.name != SEED_NAME || choice.provider != "mistral" {
         return None;
     }
     let config = runtime.get("config")?;
@@ -44,6 +45,8 @@ pub(super) fn resolve(runtime: &Value, choice: &Choice) -> Option<Choice> {
         alias: row["alias"].as_str()?.into(),
         name: row["name"].as_str().unwrap_or_default().into(),
         display_name: row["displayName"].as_str().unwrap_or_default().into(),
+        provider: choice.provider.clone(),
+        provider_key: choice.provider_key.clone(),
         effort,
     })
 }
@@ -79,12 +82,50 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn an_0115_choice_without_provider_does_not_silently_change_provider() {
+        let old: Choice =
+            serde_json::from_value(json!({"alias":"large-4","name":"mistral-large-4",
+            "display_name":"My Large 4","effort":"high"}))
+            .unwrap();
+        let now = runtime(&[row(
+            "mistral-large-4-0",
+            "mistral-large-4-0",
+            "catalog",
+            "Mistral Large 4",
+        )]);
+        assert!(
+            resolve(&now, &old).is_none(),
+            "0.1.15 data is ambiguous after a project row disappears"
+        );
+    }
+
+    #[test]
+    fn a_private_provider_choice_cannot_resolve_to_a_catalog_model_of_the_same_name() {
+        let own: Choice =
+            serde_json::from_value(json!({"alias":"large-4","name":"mistral-large-4",
+            "provider":"llamacpp","display_name":"My Large 4","effort":"high"}))
+            .unwrap();
+        let now = runtime(&[row(
+            "mistral-large-4-0",
+            "mistral-large-4-0",
+            "catalog",
+            "Mistral Large 4",
+        )]);
+        assert!(
+            resolve(&now, &own).is_none(),
+            "a missing project row changed provider"
+        );
+    }
+
     fn choice(alias: &str, effort: &str) -> Choice {
         Choice {
             alias: alias.into(),
             effort: effort.into(),
             display_name: String::new(),
-            name: String::new(),
+            name: SEED_NAME.into(),
+            provider: "mistral".into(),
+            provider_key: String::new(),
         }
     }
 
@@ -123,11 +164,11 @@ mod tests {
         assert!(migrated.is_none(), "project model moved");
         let seed = named("mistral-large-4");
         assert_eq!(resolve(&chat, &seed).unwrap().alias, "mistral-large-4-0");
-        let alias_only = choice("large-4", "high");
-        assert_eq!(
-            resolve(&chat, &alias_only).unwrap().alias,
-            "mistral-large-4-0"
-        );
+        let alias_only = Choice {
+            name: String::new(),
+            ..choice("large-4", "high")
+        };
+        assert!(resolve(&chat, &alias_only).is_none());
     }
 
     #[test]

@@ -262,12 +262,13 @@ impl Core {
             .remembered(id)
             .or_else(|| {
                 state
-                    .pointer("/session/agent/name")
+                    .pointer("/session/approvalPolicy/name")
+                    .or_else(|| state.pointer("/session/agent/name"))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             })
             .unwrap_or_else(|| FALLBACK_PROFILE.to_owned());
-        let mut config = json!({"agent": agent});
+        let mut config = json!({"approvalPolicy": agent, "agent": "default"});
         if let Some(cwd) = state.pointer("/session/cwd").and_then(Value::as_str) {
             config["cwd"] = json!(cwd);
         }
@@ -279,7 +280,7 @@ impl Core {
             .is_err()
         {
             FALLBACK_PROFILE.clone_into(&mut agent);
-            config["agent"] = json!(agent);
+            config["approvalPolicy"] = json!(agent);
         }
         // The continued session stays in the stuck session's project.
         let hint = crate::projects_filing::inherit_hint(&self.shared, id);

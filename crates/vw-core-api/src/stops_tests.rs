@@ -277,7 +277,7 @@ async fn a_stop_by_an_imported_id_cancels_the_current_ids_cards() {
         session_id: "a".into(),
     };
     let stopping = super::requested(shared, &stop);
-    let stopped = core.local(Origin::Ui, stop).await;
+    let stopped = Box::pin(core.local(Origin::Ui, stop)).await;
     super::finished(shared, &stopping, true);
     assert!(stopped.is_ok(), "{stopped:?}");
     assert!(

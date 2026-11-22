@@ -77,6 +77,7 @@ export type * from "./storage_2";
 export type * from "./telemetry";
 export type * from "./tools";
 export type * from "./turn";
+export type * from "./vibebot";
 export type * from "./warning";
 export type * from "./workspace_1";
 export type * from "./workspace_2";

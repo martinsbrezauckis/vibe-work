@@ -8,7 +8,7 @@
 
 use tauri::{AppHandle, Runtime};
 use tokio::sync::oneshot;
-use vw_platform::confirm_window::{self, ConfirmSpec};
+use vw_platform::confirm_window;
 
 /// Shows one confirmation and returns the pressed button's label; `None` when declined without a button (Escape,
 /// the close button), closed, failed, or when there are not 1 to 3 labels. Dropping this future closes its window.
@@ -23,13 +23,7 @@ pub(super) async fn show_dialog<R: Runtime>(
         return None;
     }
     let ordered = vw_host::system_dialog_order(labels);
-    let (heading, body) = vw_host::dialog_heading(&text);
-    let spec = ConfirmSpec {
-        title: vw_host::DIALOG_TITLE.to_owned(),
-        heading,
-        body,
-        buttons: ordered.clone(),
-    };
+    let spec = super::dialog_spec(&text, ordered.clone());
     super::present_for(app, modal);
     // Modal over the main window when it exists; an agent's request is a window of its own (no owner to disable).
     let parent = crate::main_window(app)

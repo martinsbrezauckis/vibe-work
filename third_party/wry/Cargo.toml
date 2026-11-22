@@ -21,6 +21,7 @@ exclude = [
     "/.github",
     "/audits",
     "/wry-logo.svg",
+    "/examples/wgpu.rs",
 ]
 autolib = false
 autobins = false
@@ -126,10 +127,6 @@ name = "transparent"
 path = "examples/transparent.rs"
 
 [[example]]
-name = "wgpu"
-path = "examples/wgpu.rs"
-
-[[example]]
 name = "window_border"
 path = "examples/window_border.rs"
 
@@ -190,9 +187,6 @@ version = "0.10"
 
 [dev-dependencies.tao]
 version = "0.37"
-
-[dev-dependencies.wgpu]
-version = "23"
 
 [dev-dependencies.winit]
 version = "0.30"

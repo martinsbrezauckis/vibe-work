@@ -45,11 +45,17 @@ fn view(paths: &[&str]) -> PanelView {
 async fn fixture() -> Fixture {
     let f = Fixture::new().await;
     f.load("chat", &f.root.join("project"), &[], false);
-    f.core
-        .shared
-        .access
-        .observe_runtime("chat", &json!({"activeAgent":{"name":"accept-edits"}}));
+    set_runtime(&f, "default", "accept-edits");
     f
+}
+
+fn set_runtime(f: &Fixture, agent: &str, policy: &str) {
+    let runtime = json!({"activeAgent":{"name":agent},"activeApprovalPolicy":{"name":policy}});
+    let _ = f.core.shared.store.apply(vw_session::Notification::new(
+        "runtime/updated",
+        json!({"sessionId":"chat","runtime":runtime}),
+    ));
+    f.core.shared.access.observe_runtime("chat", &runtime);
 }
 
 async fn read(f: &Fixture, view: PanelView) -> Value {
@@ -208,11 +214,34 @@ async fn inactive_profiles_do_not_restrict_the_active_mode() {
     );
     let open = view(&["keys/server.pem"]);
     assert_eq!(read(&f, open.clone()).await, agent_answer(open.clone()));
-    f.core
-        .shared
-        .access
-        .observe_runtime("chat", &json!({"activeAgent":{"name":"explore"}}));
+    set_runtime(&f, "explore", "accept-edits");
     withheld(&read(&f, open).await["editors"][0], "keys/server.pem");
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn active_agent_and_approval_policy_both_restrict_panel_reads() {
+    let f = fixture().await;
+    write(
+        &f.root.join("project/.vibe/agents/explore.toml"),
+        "[tools.read_file]\ndenylist = ['**/*.pem']",
+    );
+    write(
+        &f.root.join("project/.vibe/agents/accept-edits.toml"),
+        "[tools.read_file]\ndenylist = ['**/*.secret']",
+    );
+    let open = view(&["keys/server.pem", "keys/token.secret", "src/main.rs"]);
+    let default = read(&f, open.clone()).await;
+    assert_eq!(
+        default["editors"][0],
+        agent_answer(open.clone())["editors"][0]
+    );
+    withheld(&default["editors"][1], "keys/token.secret");
+    set_runtime(&f, "explore", "accept-edits");
+    let answer = read(&f, open.clone()).await;
+    withheld(&answer["editors"][0], "keys/server.pem");
+    withheld(&answer["editors"][1], "keys/token.secret");
+    assert_eq!(answer["editors"][2], agent_answer(open)["editors"][2]);
     f.finish().await;
 }
 

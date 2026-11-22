@@ -26,63 +26,15 @@ impl Confirmer for NoPrompt {
 
 /// Vibe's side: one chat whose runtime starts on `state.json` and follows each session-only model write; the model
 /// list is read from `models.json` at each call.
-const VIBE: &str = r"#!/usr/bin/env python3
-import json, os, pathlib, sys
-home = pathlib.Path(os.environ['VIBE_HOME'])
-def listed(project=False):
-    path = home / ('project-models.json' if project and (home / 'project-models.json').exists() else 'models.json')
-    return json.loads(path.read_text())
-def state():
-    return json.loads((home / 'state.json').read_text())
-def runtime():
-    current = state()
-    rows = listed(current.get('project', False))
-    row = dict(next(row for row in rows if row['alias'] == current['active']))
-    row['thinking'] = current['thinking']
-    return {'config': {'models': rows, 'activeModel': row,
-                       'validationWarnings': current['warnings']}}
-for line in sys.stdin:
-    frame = json.loads(line)
-    message = frame['message']
-    if message is None:
-        print(json.dumps(frame), flush=True)
-        continue
-    if 'id' not in message:
-        continue
-    method = message['method']
-    params = message.get('params') or {}
-    if method == 'initialize':
-        result = {'serverInfo': {'name': 'retired-choice-test', 'version': '0'}}
-    elif method == 'session/list':
-        result = {'items': [], 'nextCursor': None}
-    elif method == 'config/read':
-        rows = listed(bool(params.get('cwd')))
-        default = dict(next(row for row in rows if row['alias'] == state()['default']))
-        result = {'config': {'models': rows, 'activeModel': default, 'validationWarnings': []}}
-    elif method == 'runtime/read':
-        result = {'runtime': runtime()}
-    elif method == 'config/model/write':
-        current = state()
-        if any(row['alias'] == params['modelAlias'] for row in listed(current.get('project', False))):
-            current['active'] = params['modelAlias']
-            current['thinking'] = params['reasoningEffort']
-            current['warnings'] = []
-        current['writes'].append([params['modelAlias'], params['reasoningEffort']])
-        (home / 'state.json').write_text(json.dumps(current))
-        result = {'runtime': runtime(), 'failures': []}
-    else:
-        raise AssertionError(method)
-    frame['message'] = {'jsonrpc': '2.0', 'id': message['id'], 'result': result}
-    print(json.dumps(frame), flush=True)
-";
+const VIBE: &str = include_str!("retired_vibe_fixture.py");
 
 const CHAT: &str = "chat-large-4";
 
 fn models() -> Value {
     json!([
-        {"alias":"mistral-large-4-0","name":"mistral-large-4-0","source":"catalog",
+        {"alias":"mistral-large-4-0","name":"mistral-large-4-0","source":"catalog","provider":"mistral",
          "displayName":"Mistral Large 4","thinking":"high","thinkingLevels":["low","medium","high"]},
-        {"alias":"mistral-medium-latest","name":"mistral-medium-latest","source":"catalog",
+        {"alias":"mistral-medium-latest","name":"mistral-medium-latest","source":"catalog","provider":"mistral",
          "displayName":"Mistral Medium 3.5","thinking":"high","thinkingLevels":["off","high"]}
     ])
 }
@@ -97,6 +49,10 @@ struct Run {
 /// A core whose saved record for [`CHAT`] is `saved` and whose Vibe resumed the chat on the Settings default
 /// (Medium), warning that `pin` is not available.
 async fn start(name: &str, saved: &Value, pin: &str) -> Run {
+    start_with_config(name, saved, pin, None).await
+}
+
+async fn start_with_config(name: &str, saved: &Value, pin: &str, config: Option<&str>) -> Run {
     use std::os::unix::fs::PermissionsExt;
 
     let base = std::env::var_os("VW_TEST_ROOT").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -106,6 +62,9 @@ async fn start(name: &str, saved: &Value, pin: &str) -> Run {
     let sessions = root.join("app-sessions");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&sessions).unwrap();
+    if let Some(config) = config {
+        std::fs::write(home.join("config.toml"), config).unwrap();
+    }
     std::fs::write(home.join("models.json"), models().to_string()).unwrap();
     let warning = format!(
         "Model '{pin}' is not available — running 'Mistral Medium 3.5'. Pick another model to stop this notice."
@@ -194,7 +153,141 @@ fn large_4(effort: &str) -> (String, String) {
 }
 
 fn saved_large_4(effort: &str) -> Value {
-    json!({"remembered":{"alias":"large-4","effort":effort,"display_name":"Mistral Large 4","name":"mistral-large-4"}})
+    json!({"remembered":{"alias":"large-4","effort":effort,"display_name":"Mistral Large 4","name":"mistral-large-4","provider":"mistral"}})
+}
+
+/// Captured 3.1.4 wire omits provider from both activeModel and models. The separate
+/// config/fields/read model row carries it. A project edit can change that field
+/// without changing any visible model row or the saved session alias.
+#[tokio::test]
+async fn a_new_choice_notices_a_same_alias_backend_change_on_reopen() {
+    backend_change_case(false).await;
+}
+
+#[tokio::test]
+async fn a_new_choice_notices_a_same_alias_backend_change_before_send() {
+    backend_change_case(true).await;
+}
+
+async fn backend_change_case(send: bool) {
+    let run = Box::pin(start(
+        if send {
+            "same-alias-send"
+        } else {
+            "same-alias-reopen"
+        },
+        &json!({}),
+        "large-4",
+    ))
+    .await;
+    let mut rows = models();
+    let private = json!({"alias":"large-4","name":"mistral-large-4","source":"project",
+        "provider":"llamacpp","displayName":"My Large 4","thinking":"high",
+        "thinkingLevels":["off","high"]});
+    rows.as_array_mut().unwrap().push(private);
+    std::fs::write(run.home.join("project-models.json"), rows.to_string()).unwrap();
+    let mut state = run.state();
+    state["project"] = json!(true);
+    state["active"] = json!("large-4");
+    state["thinking"] = json!("high");
+    state["warnings"] = json!([]);
+    std::fs::write(run.home.join("state.json"), state.to_string()).unwrap();
+
+    let chosen = run.resumed().await;
+    assert!(chosen["config"]["activeModel"].get("provider").is_none());
+    let picked = super::pick(
+        &run.core.shared,
+        &json!({"sessionId":CHAT,"sessionOnly":true,"modelAlias":"large-4","reasoningEffort":"high"}),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(picked.result["modelChoiceFallback"], Value::Null);
+    let saved = run.saved();
+    assert_eq!(saved["remembered"]["provider"], "llamacpp", "{saved}");
+
+    let mut changed = rows;
+    changed.as_array_mut().unwrap().last_mut().unwrap()["provider"] = json!("mistral");
+    std::fs::write(run.home.join("project-models.json"), changed.to_string()).unwrap();
+    let mut events = run.core.subscribe(Some(CHAT.into()));
+    let reopened = if send {
+        let _ = super::before(&run.core.shared, "turn/start", &json!({"sessionId":CHAT})).await;
+        run.resumed().await
+    } else {
+        let pin = super::recorded(&json!({"model":"large-4","reasoningEffort":"high"}));
+        super::restore(&run.core.shared, CHAT, run.resumed().await, pin).await
+    };
+    assert_eq!(active(&reopened).0, "mistral-medium-latest", "{reopened}");
+    let seen = alerts(&mut events).await;
+    assert_eq!(
+        seen.len(),
+        1,
+        "the backend switch needs one notice: {seen:?}"
+    );
+    run.finish().await;
+}
+
+#[path = "retired_bootstrap_tests.rs"]
+mod bootstrap_tests;
+#[path = "retired_cold_catalog_tests.rs"]
+mod cold_catalog_tests;
+#[path = "retired_cold_configured_tests.rs"]
+mod cold_configured_tests;
+
+/// A 0.1.15 record has no provider. If the project's same-name row vanished, its old identity is ambiguous:
+/// reopening must tell the person and keep the Settings fallback instead of silently selecting catalog Mistral.
+#[tokio::test]
+async fn an_0115_same_name_choice_requires_a_notice_after_its_project_row_disappears() {
+    let legacy = json!({"remembered":{"alias":"large-4","effort":"high",
+        "display_name":"My Large 4","name":"mistral-large-4"}});
+    let run = Box::pin(start("legacy-same-name", &legacy, "large-4")).await;
+    let shared = run.core.shared.clone();
+    let mut events = run.core.subscribe(Some(CHAT.into()));
+    let pin = super::recorded(&json!({"model":"large-4","reasoningEffort":"high"}));
+    let reopened = super::restore(&shared, CHAT, run.resumed().await, pin).await;
+    assert_eq!(active(&reopened).0, "mistral-medium-latest", "{reopened}");
+    assert!(
+        !run.state()["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|write| write[0] == "mistral-large-4-0")
+    );
+    let seen = alerts(&mut events).await;
+    assert_eq!(
+        seen.len(),
+        1,
+        "a missing chosen model needs one notice: {seen:?}"
+    );
+    assert!(seen[0].contains("My Large 4"), "{seen:?}");
+    run.finish().await;
+}
+
+#[tokio::test]
+async fn a_saved_private_provider_gets_a_notice_when_its_same_name_row_disappears() {
+    let private = json!({"remembered":{"alias":"large-4","effort":"high",
+        "display_name":"My Large 4","name":"mistral-large-4","provider":"llamacpp"}});
+    let run = Box::pin(start("private-same-name-gone", &private, "large-4")).await;
+    let shared = run.core.shared.clone();
+    let mut events = run.core.subscribe(Some(CHAT.into()));
+    let pin = super::recorded(&json!({"model":"large-4","reasoningEffort":"high"}));
+    let reopened = super::restore(&shared, CHAT, run.resumed().await, pin).await;
+    assert_eq!(active(&reopened).0, "mistral-medium-latest", "{reopened}");
+    assert!(
+        !run.state()["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|write| write[0] == "mistral-large-4-0")
+    );
+    let seen = alerts(&mut events).await;
+    assert_eq!(
+        seen.len(),
+        1,
+        "a missing chosen model needs one notice: {seen:?}"
+    );
+    assert!(seen[0].contains("My Large 4"), "{seen:?}");
+    run.finish().await;
 }
 
 /// A chat that picked Large 4 by the retired alias (medium thinking here, so its own level is told apart from the
@@ -228,7 +321,7 @@ async fn a_chat_pinned_to_retired_large_4_keeps_catalog_large_4_over_a_different
     );
 
     // A plain Send without touching the picker.
-    super::before(&shared, "turn/start", &json!({"sessionId":CHAT})).await;
+    let _ = super::before(&shared, "turn/start", &json!({"sessionId":CHAT})).await;
     let state = run.state();
     assert_eq!(state["active"], "mistral-large-4-0", "{state}");
     assert_eq!(state["thinking"], "medium", "{state}");
@@ -310,7 +403,7 @@ async fn a_send_with_a_saved_retired_choice_rewrites_it_without_a_notice() {
     let shared = run.core.shared.clone();
     let mut events = run.core.subscribe(Some(CHAT.into()));
 
-    super::before(&shared, "turn/start", &json!({"sessionId":CHAT})).await;
+    let _ = super::before(&shared, "turn/start", &json!({"sessionId":CHAT})).await;
     let seen = alerts(&mut events).await;
     assert!(seen.is_empty(), "{seen:?}");
     let state = run.state();
@@ -321,7 +414,9 @@ async fn a_send_with_a_saved_retired_choice_rewrites_it_without_a_notice() {
 }
 
 /// A project can use the retired alias and wire name for its own provider. The lobby does not read the project's
-/// model row; the chat's own list does. The saved identity must remain intact until that list is available.
+/// model row; the chat's own list does. A legacy record without a provider cannot prove the old
+/// backend. It stays on its same-alias row without an alert on every open; the next confirmed
+/// turn records the backend for later checks.
 /// PREDICT: the launch check rewrites the saved choice to the catalog row before the project list is read.
 #[tokio::test]
 async fn project_provider_same_wire_name_must_not_migrate_at_lobby_launch() {
@@ -350,7 +445,8 @@ async fn project_provider_same_wire_name_must_not_migrate_at_lobby_launch() {
     std::fs::create_dir_all(&project_dir).unwrap();
     let mut project_models = models();
     project_models.as_array_mut().unwrap().push(json!({
-        "alias":"large-4","name":"mistral-large-4","source":"private-provider",
+        "alias":"large-4","name":"mistral-large-4","source":"project",
+        "provider":"llamacpp",
         "displayName":"My Private Large 4","thinking":"medium",
         "thinkingLevels":["off","medium","high"]
     }));
@@ -373,17 +469,48 @@ async fn project_provider_same_wire_name_must_not_migrate_at_lobby_launch() {
     )
     .await
     .unwrap();
-    assert_eq!(detached["activeModel"]["displayName"], "My Private Large 4");
+    assert_eq!(detached["activeModel"]["displayName"], "large-4");
     let shared = run.core.shared.clone();
     let mut events = run.core.subscribe(Some(CHAT.into()));
     let pin = super::recorded(&json!({"model":"large-4","reasoningEffort":"medium"}));
     let last = run.resumed().await;
     let reopened = super::restore(&shared, CHAT, last, pin).await;
-    assert_eq!(active(&reopened), ("large-4".into(), "medium".into()));
-    assert_eq!(run.state()["writes"], json!([]));
-    assert_eq!(run.saved(), private);
+    assert_eq!(active(&reopened).0, "large-4");
+    assert!(
+        !run.state()["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|write| write[0] == "large-4")
+    );
     let seen = alerts(&mut events).await;
-    assert!(seen.is_empty(), "{seen:?}");
+    assert!(
+        seen.is_empty(),
+        "an unproven legacy choice must not nag on each open: {seen:?}"
+    );
+    let _ = shared
+        .store
+        .load(
+            json!({"session":{"id":CHAT,"status":{"type":"idle"}},
+        "history":[],"turns":[]}),
+            vw_session::LoadKind::New,
+        )
+        .unwrap();
+    let _ = shared.store.apply(vw_session::Notification::new(
+        "runtime/updated",
+        json!({"sessionId":CHAT,"runtime":reopened}),
+    ));
+    super::turn_started(&shared, &json!({"sessionId":CHAT})).await;
+    let confirmed = run.saved();
+    assert_eq!(
+        confirmed["remembered"]["provider"], "llamacpp",
+        "{confirmed}"
+    );
+    assert!(
+        confirmed["remembered"]["provider_key"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+    );
     run.finish().await;
 }
 

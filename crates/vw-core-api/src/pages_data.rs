@@ -1,8 +1,8 @@
 //! Project Pages in the core, the stored-data half (split out of `pages`): comments (add, delete, mark
 //! sent), settings, and one page's facts with its comments.
 //!
-//! Depends on: vw-pages, `pages` (errors, blocking helper, the session's project), `plan_profile` (a moved pages
-//! folder changes the profile). Called by: `pages` (`Core::pages`).
+//! Depends on: vw-pages and `pages` (errors, blocking helper, the session's project).
+//! Called by: `pages` (`Core::pages`).
 //! Invariant: a comment's section must exist in the page FILE when it is added (never trusted from the client).
 
 use std::path::Path;
@@ -74,7 +74,6 @@ impl Core {
                     .set_settings(&project, &settings)
                     .await
                     .map_err(err)?;
-                crate::plan_profile::refresh(shared);
                 PagesResult::Settings { settings: saved }
             }
             other => {

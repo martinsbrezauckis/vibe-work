@@ -108,8 +108,12 @@ pub(crate) const UNUSED_FIELDS: &[(&str, &[&str])] = &[
             "sessionOnly",
             "firstTurn",
             "startedBySessionId",
+            "spawnedBySessionId",
         ],
     ),
+    // Vibe 3.1.4 resumes may include recovery context or interrupt an unfinished turn. The app's
+    // resume flow has no UI or state transition for either choice yet.
+    ("session/resume", &["interruptLeftTurn", "code"]),
     ("skills/list", &["cwd", "trustWorkspace"]),
 ];
 

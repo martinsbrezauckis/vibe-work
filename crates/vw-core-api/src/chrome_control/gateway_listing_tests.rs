@@ -118,15 +118,17 @@ async fn the_tool_list_is_the_same_for_every_chat_and_switch_state() {
             .chrome_control
             .set_browser_enabled(super::super::agent_browser::Browser::Edge, enabled)
             .unwrap();
-        for mode in ["ask", "auto-approve", "vw-plan", "explore", "unknown"] {
-            shared
-                .access
-                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        for mode in ["ask", "auto-approve", "future-policy"] {
+            shared.access.observe_request(
+                "session/approvalPolicy/update",
+                "s",
+                &json!({"approvalPolicy":mode}),
+            );
             assert_eq!(super::list(shared), full, "{mode} {enabled}");
             let refused = super::super::check::authorize(shared, "s", "chrome_status", &json!({}));
             assert_eq!(
                 refused.is_err(),
-                !enabled || matches!(mode, "vw-plan" | "explore" | "unknown"),
+                !enabled || mode == "future-policy",
                 "{mode} {enabled}: {refused:?}"
             );
         }

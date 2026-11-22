@@ -47,11 +47,8 @@ export function AgentDefaultsSettings(): ReactElement | null {
               id="default-access-mode"
               label={TEXT.accessMode}
               detail={TEXT.accessDefaultDescription}
-              value={view.defaultAgent.value ?? ""}
+              value={view.defaultApprovalPolicy.value ?? "accept-edits"}
               options={[
-                ...(view.defaultAgent.value === null
-                  ? [{ value: "", label: TEXT.accessDefaultFallback }]
-                  : []),
                 ...ACCESS_MODES.filter((m) => m.id !== "smart-approve").map((m) => ({
                   value: m.id,
                   label: m.label,
@@ -59,10 +56,10 @@ export function AgentDefaultsSettings(): ReactElement | null {
                 })),
               ]}
               disabled={busy}
-              setBy={view.defaultAgent.setBy}
+              setBy={view.defaultApprovalPolicy.setBy}
               onChange={(id) => {
                 set(
-                  [{ op: "set", path: "/default_agent", value: id }],
+                  [{ op: "set", path: "/default_approval_policy", value: id }],
                   "default access mode",
                   id === "auto-approve",
                 );

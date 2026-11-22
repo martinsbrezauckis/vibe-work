@@ -98,7 +98,8 @@ fn append_config_changes(params: &Value, parts: &mut Vec<String>) {
         let named = match path {
             "/enable_telemetry" => Some(("Send usage data to Mistral", "on")),
             "/experiments/enable" => Some(("Take part in Mistral's experiments", "on")),
-            "/default_agent" => Some(("Default access mode", "")),
+            "/default_agent" => Some(("Default agent", "")),
+            "/default_approval_policy" => Some(("Default access mode", "")),
             _ => None,
         };
         let value = op.get("value");
@@ -108,7 +109,7 @@ fn append_config_changes(params: &Value, parts: &mut Vec<String>) {
             }
             (Some((label, _)), "remove", _) => format!("{label}: back to the default"),
             (Some((label, _)), _, Some(value)) => {
-                let display = if path == "/default_agent" {
+                let display = if path == "/default_approval_policy" {
                     value
                         .as_str()
                         .map(|id| dialog_quote(vw_vocabulary::label("accessModes", id)))
@@ -167,13 +168,10 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
     let mut parts = vec![action_sentence(method, params, base).to_owned()];
     for (key, label) in [
         ("sessionId", vw_vocabulary::label("workNames", "session")),
+        ("agentName", "Agent"),
         (
-            "agentName",
-            if method == "session/agent/update" {
-                vw_vocabulary::text("accessMode").unwrap_or_default()
-            } else {
-                "Agent"
-            },
+            "approvalPolicy",
+            vw_vocabulary::text("accessMode").unwrap_or_default(),
         ),
         ("agent", "Agent"),
         ("name", "Name"),
@@ -202,7 +200,7 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
             params,
             key,
             label,
-            method == "session/agent/update" && key == "agentName",
+            method == "session/approvalPolicy/update" && key == "approvalPolicy",
         ) {
             parts.push(value);
         }
@@ -231,9 +229,12 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         );
     }
     if let Some(config) = params.get("agentConfig") {
+        if let Some(name) = named(config, "agent", "Agent", false) {
+            parts.push(name);
+        }
         if let Some(name) = named(
             config,
-            "agent",
+            "approvalPolicy",
             vw_vocabulary::text("accessMode").unwrap_or_default(),
             true,
         ) {

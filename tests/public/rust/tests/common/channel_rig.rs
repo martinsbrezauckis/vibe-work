@@ -18,14 +18,14 @@ pub struct Rig {
     pub channels: PathBuf,
 }
 
-/// The seeded stored sessions `old-1`..`old-4` (no recorded profile).
-/// Four stored chats in Ask. Since Vibe 3.0.1 every turn records the session's agent, and a reopened chat runs in
+/// The seeded stored sessions `old-1`..`old-4` (no custom agent).
+/// Four stored chats in Ask. Every turn records the session's approval policy, and a reopened chat runs in
 /// that record; the seeds pin Ask so their turns keep asking (the seed default would be `accept-edits`).
 pub fn default_seed() -> Vec<Value> {
     (1..=4)
         .map(|n| {
             json!({"id": format!("old-{n}"), "title": format!("Old {n}"), "status": {"type": "idle"},
-                   "createdAt": n, "updatedAt": 100 - n, "cwd": "/work/alpha", "agent": {"name": "ask"}})
+                   "createdAt": n, "updatedAt": 100 - n, "cwd": "/work/alpha", "approvalPolicy": {"name": "ask"}})
         })
         .collect()
 }
@@ -171,7 +171,7 @@ impl Rig {
     pub async fn start(&self) -> String {
         match self
             .run(Command::StartSession {
-                agent_config: Some(json!({"agent":"ask"})),
+                agent_config: Some(json!({"approvalPolicy":"ask"})),
             })
             .await
             .unwrap()
@@ -289,7 +289,7 @@ pub async fn active_agent(r: &Rig, sid: &str) -> String {
     else {
         panic!()
     };
-    result["runtime"]["activeAgent"]["name"]
+    result["runtime"]["activeApprovalPolicy"]["name"]
         .as_str()
         .unwrap_or("?")
         .to_owned()

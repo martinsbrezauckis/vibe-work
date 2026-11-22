@@ -122,7 +122,9 @@ mod tests {
 
     /// Folder shapes synthesized from the research note (no real chat content).
     fn folder() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
+        // The no-follow reader must not encounter macOS's /var -> /private/var temp symlink.
+        let temp = std::env::temp_dir().canonicalize().unwrap();
+        let dir = tempfile::tempdir_in(temp).unwrap();
         for (id, meta) in [
             (
                 DESKTOP,
@@ -144,6 +146,13 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn fixture_folder_uses_canonical_temp_root() {
+        let dir = folder();
+        assert_eq!(dir.path(), dir.path().canonicalize().unwrap());
     }
 
     #[test]

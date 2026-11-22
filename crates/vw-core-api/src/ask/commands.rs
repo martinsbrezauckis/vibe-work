@@ -36,11 +36,14 @@ impl Core {
     /// # Errors
     /// `invalidParams` when no grant has the id (`remove`), when none of the ids is still kept or the list is empty
     /// or longer than 10 000 (`removeMany`).
-    pub(crate) fn ask_grants(&self, request: AskGrantsRequest) -> Result<CommandResult, CoreError> {
+    pub(crate) async fn ask_grants(
+        &self,
+        request: AskGrantsRequest,
+    ) -> Result<CommandResult, CoreError> {
         let removed = match request {
             AskGrantsRequest::List {} => 0,
             AskGrantsRequest::Remove { id } => {
-                if !self.shared.ask_grants.remove(&id) {
+                if !self.shared.ask_grants.remove_wait(&id).await {
                     return Err(invalid("This permission is already gone."));
                 }
                 tracing::info!(grant = %id, "session grant removed");
@@ -50,7 +53,7 @@ impl Core {
                 if ids.is_empty() || ids.len() > 10_000 {
                     return Err(invalid("Name between 1 and 10000 permissions to remove."));
                 }
-                let removed = self.shared.ask_grants.remove_many(&ids);
+                let removed = self.shared.ask_grants.remove_many_wait(&ids).await;
                 if removed == 0 {
                     return Err(invalid("These permissions are already gone."));
                 }

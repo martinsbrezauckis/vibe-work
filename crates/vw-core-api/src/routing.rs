@@ -14,7 +14,7 @@ use serde_json::Value;
 /// Everything else that names a session
 /// works from the lobby for a stored session (read, rename, pin, archive, markAsSeen) or is not
 /// used yet. Session-channel methods include `turn/start`, `callback/result`, and
-/// `session/agent/update`; the others follow Vibe's handler requirements.
+/// `session/agent/update` and `session/approvalPolicy/update`; the others follow Vibe's handler requirements.
 const NEEDS_CHANNEL: &[&str] = &[
     // Runtime reads use an attached session; a deferred key refresh may leave the chat detached.
     "runtime/read",
@@ -48,6 +48,7 @@ const NEEDS_CHANNEL: &[&str] = &[
     "session/turn/queue/resume",
     "session/shellCommand",
     "session/agent/update",
+    "session/approvalPolicy/update",
     "session/context/inject",
     "session/rewind",
     "session/compact",

@@ -21,9 +21,11 @@ pub(super) async fn core(name: &str) -> crate::Core {
             vw_session::LoadKind::New,
         )
         .unwrap();
-    core.shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    core.shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     core.shared
         .chrome_control
         .tasks
@@ -167,7 +169,7 @@ async fn browser_writes_wait_for_once_session_or_no_before_any_helper_effect() {
 }
 
 #[tokio::test]
-async fn write_consent_cannot_survive_a_planning_mode_or_authorize_a_direct_call() {
+async fn write_consent_cannot_survive_an_unsupported_policy_or_authorize_a_direct_call() {
     let core = core("browser-write-mode-change").await;
     let seen = test_support::answering(&core.shared, |_, _| panic!("no helper call"));
     let args = json!({"sessionId":"t","action":"page.commit","args":{}});
@@ -189,9 +191,9 @@ async fn write_consent_cannot_survive_a_planning_mode_or_authorize_a_direct_call
     .unwrap();
     let execution = task.await.unwrap().unwrap().unwrap();
     core.shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"explore"}),
+        &json!({"approvalPolicy":"future-policy"}),
     );
     assert!(execution.await.is_err());
     assert!(seen.lock().unwrap().is_empty());

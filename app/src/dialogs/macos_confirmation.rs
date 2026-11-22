@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tauri::{AppHandle, Runtime};
 use tokio::sync::oneshot;
-use vw_platform::confirm_window::{self, ConfirmSpec};
+use vw_platform::confirm_window;
 
 /// Closes the window when the request is dropped. Main-thread work is queued in order, so this close always runs
 /// after the show it follows; a request dropped before its show ran never shows anything.
@@ -49,13 +49,7 @@ pub(super) async fn show_dialog<R: Runtime>(
         return None;
     }
     let ordered = vw_host::system_dialog_order(labels);
-    let (heading, body) = vw_host::dialog_heading(&text);
-    let spec = ConfirmSpec {
-        title: vw_host::DIALOG_TITLE.to_owned(),
-        heading,
-        body,
-        buttons: ordered.clone(),
-    };
+    let spec = super::dialog_spec(&text, ordered.clone());
     let owner = WindowOwner {
         app: app.clone(),
         id: Arc::new(AtomicU64::new(0)),

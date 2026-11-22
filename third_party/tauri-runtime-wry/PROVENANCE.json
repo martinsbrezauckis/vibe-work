@@ -6,6 +6,7 @@
   "license": "Apache-2.0 OR MIT",
   "note": "Copy of the published crate (without .cargo-ok). Modified: src/lib.rs (VIBE WORK PATCH: Windows profile names from tauri-apps/tauri PR #16054; Linux child webviews start hidden until the preview engine places or parks them, preventing GtkBox allocation and blank painting during construction). Our own file: PROVENANCE.json. Native proxy sign-in: retain local listener credentials through Tauri, supply them only to the configured proxy with WebKitGTK authentication, WebView2 BasicAuthenticationRequested and Network.framework proxy credentials. Remove when upstream exposes equivalent credential handling.",
   "modified": [
+    "Cargo.lock",
     "src/lib.rs"
   ],
   "upstreamFiles": {
@@ -35,7 +36,7 @@
   },
   "files": {
     ".cargo_vcs_info.json": "4a92503bcafd28958d33f54a09047f99d94622f81a3387d386339ecc98ee18ed",
-    "Cargo.lock": "b171094706a0117fc5874309ccbc749902e2fe4d6de4fb031f178a95110a6525",
+    "Cargo.lock": "169fd1f77f56c5944bf668c6afac1239080f33c077ef7e45832376e6d74abaf1",
     "Cargo.toml": "6a735daedfe2acc408fb6ece2affc1caaec024ba6d72385fdd5ffeabc04c30f4",
     "Cargo.toml.orig": "b99320a84ed89c2537c0209b49dc2ea8b7cd4760f52df6ca6e4cdeb6274914c0",
     "LICENSE-APACHE-2.0": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",

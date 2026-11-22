@@ -19,7 +19,9 @@
         },
         "enabled": true,
         "locked": false,
-        "active": false
+        "active": false,
+        "path": null,
+        "linked": false
       },
       {
         "name": "draft",
@@ -31,7 +33,9 @@
         "registry": null,
         "enabled": false,
         "locked": false,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       },
       {
         "name": "review",
@@ -47,7 +51,9 @@
         },
         "enabled": true,
         "locked": false,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       },
       {
         "name": "plugin:notes",
@@ -59,8 +65,11 @@
         "registry": null,
         "enabled": true,
         "locked": true,
-        "active": true
+        "active": true,
+        "path": null,
+        "linked": false
       }
-    ]
+    ],
+    "issues": []
   }
 }

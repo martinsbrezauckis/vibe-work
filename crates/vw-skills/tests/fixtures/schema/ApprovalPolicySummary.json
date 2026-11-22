@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "displayName": {
+      "title": "Displayname",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "safety": {
+      "$ref": "#/$defs/AgentSafety"
+    }
+  },
+  "required": [
+    "name",
+    "displayName",
+    "description",
+    "safety"
+  ],
+  "title": "ApprovalPolicySummary",
+  "type": "object"
+}

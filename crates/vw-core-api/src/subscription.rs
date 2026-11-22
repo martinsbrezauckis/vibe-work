@@ -149,7 +149,7 @@ impl CoreSubscription {
                 *access_mode = crate::restore::display_mode(
                     &shared,
                     session_id,
-                    &serde_json::json!({"agent": runtime["activeAgent"]}),
+                    &serde_json::json!({"agent": runtime["activeAgent"], "approvalPolicy": runtime["activeApprovalPolicy"]}),
                 );
             }
             _ => {}

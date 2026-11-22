@@ -87,7 +87,13 @@ fn admit_after_cleanup(
 }
 
 async fn stop_during_open(alias: bool, failed: bool) {
-    let core = crate::offline_core::start_with("stop-open-admission", |config, root| {
+    let fixture = match (alias, failed) {
+        (false, false) => "stop-open-admission",
+        (true, false) => "stop-open-alias-admission",
+        (false, true) => "stop-open-failed-admission",
+        (true, true) => "stop-open-alias-failed-admission",
+    };
+    let core = crate::offline_core::start_with(fixture, |config, root| {
         config.chrome_control.package = Some(root.join("package"));
     })
     .await;

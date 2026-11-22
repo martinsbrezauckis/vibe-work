@@ -27,7 +27,7 @@ export function AllowedLevels(): ReactElement | null {
   const access = accessValue({
     running: vibe.running,
     via: vibe.via,
-    mode: vibe.view === null ? undefined : vibe.view.defaultAgent.value,
+    mode: vibe.view === null ? undefined : vibe.view.defaultApprovalPolicy.value,
     error: vibe.error,
   });
   return (

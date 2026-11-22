@@ -97,6 +97,7 @@ impl LoginWriter for ChromeLoginWriter {
         {
             return Err(crate::ask::tool_calls::REVOKED_BROWSER_GRANT.to_owned());
         }
+        super::batch::admit()?;
         permit.dispatched();
         // Only a confirmed helper answer can be a fill receipt; a lost answer leaves the effect unconfirmed.
         let answer = shared
@@ -112,11 +113,15 @@ impl LoginWriter for ChromeLoginWriter {
             }
             owner::Answer::Own(result) => matches!(
                 result["structuredContent"]["error"]["code"].as_str(),
-                Some("OWNER_REQUIRED" | "OWNER_CLOSED" | "BUSY")
+                Some("OWNER_REQUIRED" | "OWNER_CLOSED" | "BUSY" | "CONSENT_REVOKED")
             ),
         };
         if settled {
             permit.settled();
+        }
+        if matches!(&answer, owner::Answer::Own(result) if result["structuredContent"]["error"]["code"] == "CONSENT_REVOKED")
+        {
+            return Err(crate::ask::tool_calls::REVOKED_BROWSER_GRANT.into());
         }
         let owner::Answer::Helper(result) = answer else {
             return Err(write_failure(action).to_owned());

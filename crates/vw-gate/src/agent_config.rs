@@ -9,7 +9,7 @@
 //! are accepted, each with its own check; every other key is refused.
 //! Invariants:
 //! - `headless` defaults to `false` (scheduled loops never fire when headless).
-//! - `autoApprove: true` and `agent: "auto-approve"` need a native confirmation.
+//! - `autoApprove: true` and `approvalPolicy: "auto-approve"` need a native confirmation.
 //! - `trustWorkspace: true` only for a `cwd` inside a folder the user picked natively, and with an
 //!   existing `worktree` only when the worktree is inside one too (Vibe trusts the worktree).
 //! - Every `workspaceRoots` entry inside a folder the user picked natively: Vibe loads a listed
@@ -21,7 +21,7 @@ use serde_json::{Map, Value, json};
 use crate::canonical::is_clean_text;
 use crate::error::{DenyReason, GateError};
 use crate::picked::PickedFolders;
-use crate::profile::{escalates, is_profile};
+use crate::profile::{escalates, is_agent, is_policy};
 use crate::shape::invalid;
 
 /// Result of filtering one `agentConfig`.
@@ -68,8 +68,9 @@ pub(crate) fn filter(
             "workspaceRoots" => is_text_list(value, 32, 4096),
             "enabledTools" => value.is_null() || is_text_list(value, 256, 128),
             "disabledTools" => is_text_list(value, 256, 128),
-            "agent" => match value.as_str() {
-                Some(name) if is_profile(name) => {
+            "agent" => value.as_str().is_some_and(is_agent),
+            "approvalPolicy" => match value.as_str() {
+                Some(name) if is_policy(name) => {
                     if escalates(name) {
                         confirm = Some(escalation_text());
                     }

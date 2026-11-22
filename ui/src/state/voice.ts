@@ -17,6 +17,7 @@ import { createNarration } from "./narration";
 import type { Shell } from "./shellStore";
 import type { Toasts } from "./toastStore";
 import { createVoiceChat } from "./voiceChat";
+import { VOICE_ANSWER_ENDED } from "./voiceQuestion";
 import { createAccessibility, type Accessibility } from "./accessibility";
 import { createPromptAudio } from "./promptAudio";
 import { createVoiceSettings } from "./voiceSettings";
@@ -119,7 +120,16 @@ export function createVoice(deps: {
     owns: (id) => id !== null && voiceChat.owns(id),
   });
   deps.shell.store.subscribe(() => {
-    voiceChat.prompt.reconcile();
+    // Permission answers belong to the visible card. Leaving its chat closes capture and hands it back;
+    // the toast remains visible in the newly selected chat while voice chat speaks the same sentence.
+    if (
+      voiceChat.store.get().phase === "listening" &&
+      voiceChat.prompt.store.get() !== null &&
+      deps.shell.store.get().selected !== voiceChat.store.get().owner
+    ) {
+      voiceChat.prompt.ended();
+      deps.toasts.feedback(VOICE_ANSWER_ENDED);
+    } else voiceChat.prompt.reconcile();
   });
   const stopForClose = () => {
     voiceChat.turnOff();

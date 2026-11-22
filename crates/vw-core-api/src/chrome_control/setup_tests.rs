@@ -397,3 +397,6 @@ mod macos_data;
 #[cfg(feature = "your-edge")]
 #[path = "setup_selection_tests.rs"]
 mod selection_tests;
+
+#[path = "setup_reconnect_tests.rs"]
+mod reconnect_tests;

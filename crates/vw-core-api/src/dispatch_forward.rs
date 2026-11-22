@@ -52,13 +52,13 @@ impl Core {
             return Ok(None);
         };
         let asked = params
-            .pointer("/agentConfig/agent")
+            .pointer("/agentConfig/approvalPolicy")
             .and_then(Value::as_str)
             .map(str::to_owned);
         if confirmed && asked.is_none() {
             return Err(CoreError::new(
                 ErrorCode::InvalidParams,
-                "a confirmed resume must name its agent; request confirmation with the chat's access mode",
+                "a confirmed resume must name its approval policy; request confirmation with the chat's access mode",
             )
             .with_method(method));
         }
@@ -126,8 +126,6 @@ impl Core {
         if let Some(id) = opens.filter(|id| self.shared.stuck.is_stuck(id)) {
             return Err(crate::stuck::refusal(id, method));
         }
-        // The `vw-plan` profile names this session's folder before Vibe opens the session.
-        crate::plan_profile::before_open(&self.shared, method, &params);
         let mut token = token.map(ConfirmationToken::from_wire);
         // A client's resume names the resolved profile and is followed by the profile restore
         // (`restore.rs`, fail closed): to the profile it named, else the session's. The session counts
@@ -150,7 +148,7 @@ impl Core {
         self.shared.channels.canonical_params(method, &mut params);
         // Attach first: reopening takes this same restore lock. Then read only the verified runtime.
         let _runtime_restore = self.runtime_restore_lock(method, &params).await;
-        Box::pin(crate::model_choices::before(&self.shared, method, &params)).await;
+        Box::pin(crate::model_choices::before(&self.shared, method, &params)).await?;
         let _skills_guard = self.lock_skills_work(method).await;
         // The session's review baseline exists before Vibe starts working in its folder.
         if crate::changes::starts_work(method) {
@@ -264,7 +262,7 @@ impl Core {
             Origin::Ui => {
                 let trusted = self.shared.config.trusted_ui_shell
                     && TRUSTED_SURFACE_METHODS.contains(&method)
-                    && (method != "session/agent/update" || trusted_access_switch);
+                    && (method != "session/approvalPolicy/update" || trusted_access_switch);
                 if trusted {
                     self.trusted_token(method, params)
                 } else {

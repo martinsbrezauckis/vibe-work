@@ -4,11 +4,21 @@
     "activeAgent": {
       "$ref": "#/$defs/AgentSummary"
     },
+    "activeApprovalPolicy": {
+      "$ref": "#/$defs/ApprovalPolicySummary"
+    },
     "agents": {
       "items": {
         "$ref": "#/$defs/AgentSummary"
       },
       "title": "Agents",
+      "type": "array"
+    },
+    "approvalPolicies": {
+      "items": {
+        "$ref": "#/$defs/ApprovalPolicySummary"
+      },
+      "title": "Approvalpolicies",
       "type": "array"
     },
     "bypassToolPermissions": {
@@ -62,6 +72,8 @@
     "config",
     "activeAgent",
     "agents",
+    "activeApprovalPolicy",
+    "approvalPolicies",
     "skills",
     "tools",
     "stats",

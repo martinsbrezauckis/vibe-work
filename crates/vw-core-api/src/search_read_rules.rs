@@ -14,31 +14,39 @@ pub(crate) struct ReadRules {
 }
 impl ReadRules {
     pub(crate) fn load(home: &Path, roots: &[PathBuf], deadline: Instant) -> Result<Self, String> {
-        Self::load_layers(home, roots, None, deadline)
+        Self::load_layers(home, roots, None, None, deadline)
     }
-    /// The same path policy, restricted to the chat's active profile at each folder layer.
+    /// The same path policy, restricted to the chat's active agent and approval policy.
     pub(crate) fn load_for_mode(
         home: &Path,
         roots: &[PathBuf],
         mode: &str,
+        agent: Option<&str>,
         deadline: Instant,
     ) -> Result<Self, String> {
-        if mode.is_empty() || mode.contains(['/', '\\']) || matches!(mode, "." | "..") {
+        if !valid_profile(mode) || agent.is_some_and(|agent| !valid_profile(agent)) {
             return Err("Cannot check file read rules.".into());
         }
-        Self::load_layers(home, roots, Some(mode), deadline)
+        Self::load_layers(
+            home,
+            roots,
+            Some(mode),
+            agent.filter(|agent| *agent != mode),
+            deadline,
+        )
     }
     fn load_layers(
         home: &Path,
         roots: &[PathBuf],
         mode: Option<&str>,
+        agent: Option<&str>,
         deadline: Instant,
     ) -> Result<Self, String> {
         let mut rules = Self::default();
-        rules.layer(home, mode, deadline)?;
+        rules.layer(home, mode, agent, deadline)?;
         for root in roots {
             for ancestor in root.ancestors().take(64) {
-                rules.layer(&ancestor.join(".vibe"), mode, deadline)?;
+                rules.layer(&ancestor.join(".vibe"), mode, agent, deadline)?;
                 if Some(ancestor) == home.parent() {
                     break;
                 }
@@ -61,13 +69,23 @@ impl ReadRules {
         }
         Ok(rules)
     }
-    fn layer(&mut self, dir: &Path, mode: Option<&str>, deadline: Instant) -> Result<(), String> {
+    fn layer(
+        &mut self,
+        dir: &Path,
+        mode: Option<&str>,
+        agent: Option<&str>,
+        deadline: Instant,
+    ) -> Result<(), String> {
         if Instant::now() >= deadline {
             return Err("Cannot check file read rules.".into());
         }
         self.config(&dir.join("config.toml"))?;
         if let Some(mode) = mode {
-            self.config(&dir.join("agents").join(format!("{mode}.toml")))
+            self.config(&dir.join("agents").join(format!("{mode}.toml")))?;
+            if let Some(agent) = agent {
+                self.config(&dir.join("agents").join(format!("{agent}.toml")))?;
+            }
+            Ok(())
         } else {
             self.profiles(&dir.join("agents"), deadline)
         }
@@ -170,6 +188,10 @@ impl ReadRules {
             .replace('\\', "/");
         !self.never && !self.patterns.iter().any(|g| g.is_match(&path))
     }
+}
+
+fn valid_profile(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && !matches!(name, "." | "..")
 }
 pub(crate) fn read(path: &Path) -> Result<Option<String>, String> {
     let parent = path.parent().ok_or("Cannot check file read rules.")?;

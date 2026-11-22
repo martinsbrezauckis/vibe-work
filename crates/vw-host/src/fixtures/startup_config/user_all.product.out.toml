@@ -11,13 +11,13 @@ include_commit_signature = false
 active_model = "devstral"
 tool_paths = []
 experimental_enable_tab_status = false
-default_agent = "accept-edits"
+default_agent = "default"
+default_approval_policy = "accept-edits"
 experimental_enable_registry_skills = true
 experimental_enable_model_catalog = true
 experimental_enable_mistral_mcp_connector = false
 experimental_local_runtime_session_api = false
 experimental_enable_document_library_connector = false
-experimental_enable_local_projects = false
 enable_pr_monitoring = false
 
 [[models]]

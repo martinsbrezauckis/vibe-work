@@ -46,7 +46,11 @@ fn probes(app: &AppHandle) -> &'static [(&'static str, String)] {
         let Ok(exe) = std::env::current_exe() else {
             return Vec::new();
         };
-        let problems = vw_host::install_check::start_problems(&exe, default_folder(app).as_deref());
+        let problems = vw_host::install_check::start_problems_with_pin(
+            &exe,
+            default_folder(app).as_deref(),
+            option_env!("VW_CHROME_HELPER_SHA256"),
+        );
         for (program, problem) in &problems {
             tracing::warn!(program, %problem, "a shipped program cannot start");
         }

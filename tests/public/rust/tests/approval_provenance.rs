@@ -20,7 +20,9 @@ async fn session(rig: &ScriptRig) -> String {
         .execute(
             Origin::Ui,
             Command::StartSession {
-                agent_config: Some(json!({"agent":"ask", "cwd":folder, "trustWorkspace":true})),
+                agent_config: Some(
+                    json!({"approvalPolicy":"ask", "cwd":folder, "trustWorkspace":true}),
+                ),
             },
         )
         .await

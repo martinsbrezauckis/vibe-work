@@ -229,16 +229,41 @@ async fn probe_inner(
     let mut lines = BufReader::new(stdout).lines();
     let mut answered = false;
     let mut version = None;
+    let mut request_id = 1;
     if wrote.is_ok() {
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(frame) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
-            if frame.get("id") == Some(&serde_json::json!(1)) {
+            if frame.get("id") == Some(&serde_json::json!(request_id)) {
+                // Older servers reject capabilities added after their release. Retry once, on that explicit
+                // protocol error only, to learn the version; the caller still requires the exact pinned version.
+                if request_id == 1
+                    && matches!(frame.pointer("/error/code"), Some(code) if code == "invalid_params" || code == -32602)
+                {
+                    request_id = 2;
+                    let minimal = serde_json::json!({
+                        "jsonrpc": "2.0", "id": request_id, "method": "initialize",
+                        "params": {
+                            "clientInfo": {"name": "vibe-work", "version": env!("CARGO_PKG_VERSION")},
+                            "capabilities": {"callbackKinds": ["approval", "user_input"]}
+                        }
+                    });
+                    if stdin
+                        .write_all(format!("{minimal}\n").as_bytes())
+                        .await
+                        .is_err()
+                        || stdin.flush().await.is_err()
+                    {
+                        break;
+                    }
+                    continue;
+                }
                 answered = true;
                 version = frame
                     .pointer("/result/serverInfo/version")
                     .and_then(|v| v.as_str())
+                    .filter(|v| !v.trim().is_empty())
                     .map(str::to_owned);
                 break;
             }

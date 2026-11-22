@@ -11,8 +11,14 @@ pub(crate) fn mode(shared: &Shared, session: &str) -> Option<String> {
     shared.access.remembered(session).or_else(|| {
         shared.store.runtime(session).and_then(|runtime| {
             runtime
-                .pointer("/activeAgent/name")
+                .pointer("/activeApprovalPolicy/name")
                 .and_then(Value::as_str)
+                .or_else(|| {
+                    runtime
+                        .pointer("/activeAgent/name")
+                        .and_then(Value::as_str)
+                        .and_then(|name| Tier::from_mode(name).map(|_| name))
+                })
                 .map(str::to_owned)
         })
     })
@@ -314,6 +320,26 @@ pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn current_policy_runtime_is_used_without_a_remembered_mode() {
+        let core = crate::offline_core::start("chrome-current-policy-runtime").await;
+        let shared = &core.shared;
+        let _ = shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        let _ = shared.store.apply(vw_session::Notification::new(
+            "runtime/updated",
+            json!({"sessionId":"s","runtime":{"activeAgent":{"name":"default"},
+                "activeApprovalPolicy":{"name":"ask"}}}),
+        ));
+        assert_eq!(mode(shared, "s").as_deref(), Some("ask"));
+        core.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn chrome_status_does_not_invent_an_unknown_store_state() {
         let fixture = crate::feature_test_core::Fixture::new().await;
         let mut reply = json!({"structuredContent":{"profiles":[]}});
@@ -342,9 +368,11 @@ mod tests {
             ("auto-approve", true),
             ("ask", false),
         ] {
-            shared
-                .access
-                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+            shared.access.observe_request(
+                "session/approvalPolicy/update",
+                "s",
+                &json!({"approvalPolicy":mode}),
+            );
             let typed = authorize(
                 shared,
                 "s",
@@ -361,10 +389,13 @@ mod tests {
             }
             assert_eq!(shared.asks.list(), [] as [vw_ask::Ask; 0]);
         }
-        for mode in ["vw-plan", "explore", "unknown"] {
-            shared
-                .access
-                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        {
+            let mode = "future-policy";
+            shared.access.observe_request(
+                "session/approvalPolicy/update",
+                "s",
+                &json!({"approvalPolicy":mode}),
+            );
             assert!(!available(shared, "s"));
             // The tool list does not follow the chat (`gateway` tests); the call is refused.
             assert!(authorize(shared, "s", "chrome_status", &json!({})).is_err());
@@ -397,9 +428,11 @@ mod tests {
             ("accept-edits", true, false),
             ("auto-approve", true, true),
         ] {
-            shared
-                .access
-                .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+            shared.access.observe_request(
+                "session/approvalPolicy/update",
+                "s",
+                &json!({"approvalPolicy":mode}),
+            );
             let status = super::super::gateway::call(shared, "s", "chrome_status", json!({}))
                 .await
                 .unwrap();
@@ -483,9 +516,9 @@ mod unsupported_tests {
             )
             .unwrap();
         shared.access.observe_request(
-            "session/agent/update",
+            "session/approvalPolicy/update",
             "s",
-            &json!({"agentName":"auto-approve"}),
+            &json!({"approvalPolicy":"auto-approve"}),
         );
         for (action, reason, instruction) in [
             ("client.selection", "user", "Ask Vibe Work"),

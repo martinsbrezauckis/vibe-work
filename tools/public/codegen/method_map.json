@@ -1,10 +1,6 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.3. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.4. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
   "requests": {
-    "initialize": {
-      "params": "InitializeParams",
-      "result": "InitializeResponse"
-    },
     "account/read": {
       "params": "AccountReadParams",
       "result": "AccountReadResponse"
@@ -29,6 +25,10 @@
       "params": "ArtifactsMarkViewedParams",
       "result": "EmptyResponse"
     },
+    "artifacts/subscribe": {
+      "params": null,
+      "result": "EmptyResponse"
+    },
     "artifacts/sync": {
       "params": "ArtifactsSyncParams",
       "result": "EmptyResponse"
@@ -37,9 +37,17 @@
       "params": "CallbackResultParams",
       "result": "CallbackResultResponse"
     },
+    "config/effective/read": {
+      "params": "ConfigEffectiveReadParams",
+      "result": "ConfigEffectiveReadResponse"
+    },
     "config/fields/read": {
       "params": "ConfigFieldsReadParams",
       "result": "ConfigFieldsReadResponse"
+    },
+    "config/model/write": {
+      "params": "ModelConfigWriteParams",
+      "result": "ConfigWriteResponse"
     },
     "config/proxy/read": {
       "params": "ConfigProxyReadParams",
@@ -49,17 +57,9 @@
       "params": "ConfigProxyWriteParams",
       "result": "EmptyResponse"
     },
-    "config/model/write": {
-      "params": "ModelConfigWriteParams",
-      "result": "ConfigWriteResponse"
-    },
     "config/read": {
       "params": "ConfigReadParams",
       "result": "ConfigReadResponse"
-    },
-    "config/effective/read": {
-      "params": "ConfigEffectiveReadParams",
-      "result": "ConfigEffectiveReadResponse"
     },
     "config/reload": {
       "params": "ConfigReloadParams",
@@ -69,25 +69,29 @@
       "params": "ConfigSchemaReadParams",
       "result": "ConfigSchemaReadResponse"
     },
+    "config/subscribe": {
+      "params": "ConfigSubscribeParams",
+      "result": "EmptyResponse"
+    },
+    "config/telemetry/read": {
+      "params": "TelemetrySettingReadParams",
+      "result": "TelemetrySettingReadResponse"
+    },
+    "config/telemetry/update": {
+      "params": "TelemetrySettingUpdateParams",
+      "result": "TelemetrySettingUpdateResponse"
+    },
     "config/write": {
       "params": "ConfigWriteParams",
       "result": "ConfigWriteResponse"
     },
-    "connectors/auth/read": {
-      "params": "ConnectorAuthReadParams",
-      "result": "ConnectorAuthReadResponse"
-    },
-    "connectors/read": {
-      "params": "ConnectorsReadParams",
-      "result": "ConnectorsReadResponse"
-    },
-    "connectors/refresh": {
-      "params": "ConnectorRefreshParams",
-      "result": "ConnectorRefreshResponse"
-    },
     "connector_catalog/auth/request": {
       "params": "ConnectorCatalogAuthRequestParams",
       "result": "ConnectorCatalogAuthRequestResponse"
+    },
+    "connector_catalog/connect": {
+      "params": "ConnectorCatalogConnectParams",
+      "result": "ConnectorCatalogMutationResponse"
     },
     "connector_catalog/read": {
       "params": "ConnectorCatalogReadParams",
@@ -101,9 +105,17 @@
       "params": "ConnectorCatalogToggleParams",
       "result": "ConnectorCatalogMutationResponse"
     },
-    "connector_catalog/connect": {
-      "params": "ConnectorCatalogConnectParams",
-      "result": "ConnectorCatalogMutationResponse"
+    "connectors/auth/read": {
+      "params": "ConnectorAuthReadParams",
+      "result": "ConnectorAuthReadResponse"
+    },
+    "connectors/read": {
+      "params": "ConnectorsReadParams",
+      "result": "ConnectorsReadResponse"
+    },
+    "connectors/refresh": {
+      "params": "ConnectorRefreshParams",
+      "result": "ConnectorRefreshResponse"
     },
     "diagnostics/logs/read": {
       "params": "DiagnosticsLogsReadParams",
@@ -121,13 +133,37 @@
       "params": "FeedbackShouldShowParams",
       "result": "FeedbackShouldShowResponse"
     },
-    "session/history/get": {
-      "params": "SessionHistoryGetParams",
-      "result": "SessionHistoryGetResponse"
+    "goal/clear": {
+      "params": "GoalClearParams",
+      "result": "GoalClearResponse"
+    },
+    "goal/get": {
+      "params": "GoalGetParams",
+      "result": "GoalGetResponse"
+    },
+    "goal/set": {
+      "params": "GoalSetParams",
+      "result": "GoalSetResponse"
     },
     "identity/read": {
       "params": "IdentityReadParams",
       "result": "IdentityReadResponse"
+    },
+    "imports/discover": {
+      "params": "ImportDiscoveryParams",
+      "result": "ImportDiscoveryResponse"
+    },
+    "imports/read": {
+      "params": "ImportJobReadParams",
+      "result": "ImportJobReadResponse"
+    },
+    "imports/start": {
+      "params": "ImportJobStartParams",
+      "result": "ImportJobStartResponse"
+    },
+    "initialize": {
+      "params": "InitializeParams",
+      "result": "InitializeResponse"
     },
     "loops/clear": {
       "params": "LoopsClearParams",
@@ -201,6 +237,10 @@
       "params": "NarrationSummarizeParams",
       "result": "NarrationSummarizeResponse"
     },
+    "platformCredentials/headers": {
+      "params": "PlatformCredentialHeadersParams",
+      "result": "PlatformCredentialHeadersResponse"
+    },
     "plugin/info": {
       "params": "PluginInfoParams",
       "result": "PluginInfoResponse"
@@ -209,17 +249,21 @@
       "params": "PluginReloadParams",
       "result": "PluginReloadResponse"
     },
-    "plugins/read": {
-      "params": "PluginCatalogReadParams",
-      "result": "PluginCatalogReadResponse"
-    },
     "plugin_catalog/read": {
       "params": "PluginCatalogReadParams",
       "result": "PluginCatalogReadResponse"
     },
-    "providerAuth/read": {
-      "params": "ProviderAuthReadParams",
-      "result": "ProviderAuthReadResponse"
+    "plugins/local/list": {
+      "params": "PluginsLocalListParams",
+      "result": "PluginsLocalListResponse"
+    },
+    "plugins/local/setEnabled": {
+      "params": "PluginsLocalSetEnabledParams",
+      "result": "PluginsLocalSetEnabledResponse"
+    },
+    "plugins/read": {
+      "params": "PluginCatalogReadParams",
+      "result": "PluginCatalogReadResponse"
     },
     "projectLinks/inspectRoot": {
       "params": "ProjectLinksInspectRootParams",
@@ -240,6 +284,38 @@
     "projectLinks/unlink": {
       "params": "ProjectLinksUnlinkParams",
       "result": "ProjectLinksUnlinkResponse"
+    },
+    "projects/create": {
+      "params": "ProjectsCreateParams",
+      "result": "ProjectMutationResponse"
+    },
+    "projects/link": {
+      "params": "ProjectsLinkParams",
+      "result": "ProjectMutationResponse"
+    },
+    "projects/list": {
+      "params": "ProjectsListParams",
+      "result": "ProjectsListResponse"
+    },
+    "projects/remove": {
+      "params": "ProjectsRemoveParams",
+      "result": "EmptyResponse"
+    },
+    "projects/rename": {
+      "params": "ProjectsRenameParams",
+      "result": "ProjectMutationResponse"
+    },
+    "projects/retireCloud": {
+      "params": "ProjectsRetireCloudParams",
+      "result": "EmptyResponse"
+    },
+    "projects/setCloud": {
+      "params": "ProjectsSetCloudParams",
+      "result": "ProjectMutationResponse"
+    },
+    "providerAuth/read": {
+      "params": "ProviderAuthReadParams",
+      "result": "ProviderAuthReadResponse"
     },
     "review/approve": {
       "params": "ReviewMutationParams",
@@ -273,6 +349,14 @@
       "params": "AgentSwitchParams",
       "result": "RuntimeMutationResponse"
     },
+    "session/approvalPolicy/update": {
+      "params": "ApprovalPolicySwitchParams",
+      "result": "RuntimeMutationResponse"
+    },
+    "session/archive": {
+      "params": "SessionArchiveParams",
+      "result": "SessionArchiveResponse"
+    },
     "session/backgroundProcess/output": {
       "params": "BackgroundProcessOutputParams",
       "result": "BackgroundProcessOutputResponse"
@@ -285,13 +369,17 @@
       "params": "SessionCompactParams",
       "result": "SessionCompactResponse"
     },
-    "session/continue": {
-      "params": "SessionContinueParams",
-      "result": "SessionContinueResponse"
-    },
     "session/context/inject": {
       "params": "ContextInjectParams",
       "result": "ContextInjectResponse"
+    },
+    "session/context/read": {
+      "params": "SessionContextReadParams",
+      "result": "SessionContextReadResponse"
+    },
+    "session/continue": {
+      "params": "SessionContinueParams",
+      "result": "SessionContinueResponse"
     },
     "session/delete": {
       "params": "SessionDeleteParams",
@@ -305,9 +393,17 @@
       "params": "SessionHistoryClearParams",
       "result": "SessionHistoryClearResponse"
     },
+    "session/history/get": {
+      "params": "SessionHistoryGetParams",
+      "result": "SessionHistoryGetResponse"
+    },
     "session/history/list": {
       "params": "SessionHistoryListParams",
       "result": "SessionHistoryListResponse"
+    },
+    "session/lease/subscribe": {
+      "params": null,
+      "result": "SessionLeaseSubscribeResponse"
     },
     "session/list": {
       "params": "SessionListParams",
@@ -321,13 +417,13 @@
       "params": "SessionMarkAsSeenParams",
       "result": "EmptyResponse"
     },
+    "session/move": {
+      "params": "SessionMoveParams",
+      "result": "SessionMoveResponse"
+    },
     "session/pin": {
       "params": "SessionPinParams",
       "result": "SessionPinResponse"
-    },
-    "session/archive": {
-      "params": "SessionArchiveParams",
-      "result": "SessionArchiveResponse"
     },
     "session/read": {
       "params": "SessionReadParams",
@@ -393,9 +489,69 @@
       "params": "SessionTitleUpdateParams",
       "result": "SessionTitleUpdateResponse"
     },
+    "session/turn/enqueue": {
+      "params": "TurnEnqueueParams",
+      "result": "TurnEnqueueResponse"
+    },
+    "session/turn/queue/edit/abandon": {
+      "params": "TurnQueueEditAbandonParams",
+      "result": "TurnQueueEditAbandonResponse"
+    },
+    "session/turn/queue/edit/cancel": {
+      "params": "TurnQueueEditCancelParams",
+      "result": "TurnQueueEditCancelResponse"
+    },
+    "session/turn/queue/edit/save": {
+      "params": "TurnQueueEditSaveParams",
+      "result": "TurnQueueEditSaveResponse"
+    },
+    "session/turn/queue/edit/start": {
+      "params": "TurnQueueEditStartParams",
+      "result": "TurnQueueEditStartResponse"
+    },
+    "session/turn/queue/read": {
+      "params": "TurnQueueReadParams",
+      "result": "TurnQueueReadResponse"
+    },
+    "session/turn/queue/remove": {
+      "params": "TurnQueueRemoveParams",
+      "result": "TurnQueueRemoveResponse"
+    },
+    "session/turn/queue/replace": {
+      "params": "TurnQueueReplaceParams",
+      "result": "TurnQueueReplaceResponse"
+    },
+    "session/turn/queue/resume": {
+      "params": "TurnQueueResumeParams",
+      "result": "TurnQueueResumeResponse"
+    },
+    "session/turn/queue/steer": {
+      "params": "TurnQueueSteerParams",
+      "result": "TurnQueueSteerResponse"
+    },
     "session/turns/list": {
       "params": "SessionTurnsListParams",
       "result": "SessionTurnsListResponse"
+    },
+    "setup/oidc-cancel": {
+      "params": "OidcAttemptParams",
+      "result": "ProtocolModel"
+    },
+    "setup/oidc-clear": {
+      "params": "ProtocolModel",
+      "result": "ProtocolModel"
+    },
+    "setup/oidc-poll": {
+      "params": "OidcAttemptParams",
+      "result": "OidcPollResponse"
+    },
+    "setup/oidc-probe": {
+      "params": "ProtocolModel",
+      "result": "OidcProbeResponse"
+    },
+    "setup/oidc-start": {
+      "params": "ProtocolModel",
+      "result": "OidcStartResponse"
     },
     "setup/status": {
       "params": "SetupStatusParams",
@@ -425,6 +581,10 @@
       "params": "SkillsConvertLocalParams",
       "result": "SkillsConvertResponse"
     },
+    "skills/deleteLocal": {
+      "params": "SkillsDeleteLocalParams",
+      "result": "RuntimeMutationResponse"
+    },
     "skills/detail": {
       "params": "SkillsDetailParams",
       "result": "SkillsDetailResponse"
@@ -440,6 +600,26 @@
     "skills/list": {
       "params": "SkillsListParams",
       "result": "SkillsListResponse"
+    },
+    "skills/local/delete": {
+      "params": "SkillsLocalDeleteParams",
+      "result": "EmptyResponse"
+    },
+    "skills/local/list": {
+      "params": "SkillsLocalListParams",
+      "result": "SkillsLocalListResponse"
+    },
+    "skills/local/read": {
+      "params": "SkillsLocalReadParams",
+      "result": "SkillsLocalReadResponse"
+    },
+    "skills/local/setEnabled": {
+      "params": "SkillsLocalSetEnabledParams",
+      "result": "SkillsLocalSetEnabledResponse"
+    },
+    "skills/local/write": {
+      "params": "SkillsLocalWriteParams",
+      "result": "SkillsLocalWriteResponse"
     },
     "skills/remove": {
       "params": "SkillsRemoveParams",
@@ -469,37 +649,25 @@
       "params": "SkillsVersionsParams",
       "result": "SkillsVersionsResponse"
     },
+    "storage/leftovers/clean": {
+      "params": "StorageLeftoversCleanParams",
+      "result": "StorageLeftoversCleanResponse"
+    },
+    "storage/sessions/delete": {
+      "params": "StorageSessionsDeleteParams",
+      "result": "StorageSessionsDeleteResponse"
+    },
+    "storage/usage/read": {
+      "params": "StorageUsageReadParams",
+      "result": "StorageUsageReadResponse"
+    },
+    "storage/usage/refresh": {
+      "params": "StorageUsageRefreshParams",
+      "result": "StorageUsageRefreshResponse"
+    },
     "telemetry/record": {
       "params": "TelemetryRecordParams",
       "result": "EmptyResponse"
-    },
-    "session/turn/enqueue": {
-      "params": "TurnEnqueueParams",
-      "result": "TurnEnqueueResponse"
-    },
-    "session/turn/queue/read": {
-      "params": "TurnQueueReadParams",
-      "result": "TurnQueueReadResponse"
-    },
-    "session/turn/queue/remove": {
-      "params": "TurnQueueRemoveParams",
-      "result": "TurnQueueRemoveResponse"
-    },
-    "session/turn/queue/replace": {
-      "params": "TurnQueueReplaceParams",
-      "result": "TurnQueueReplaceResponse"
-    },
-    "session/turn/queue/steer": {
-      "params": "TurnQueueSteerParams",
-      "result": "TurnQueueSteerResponse"
-    },
-    "session/turn/queue/resume": {
-      "params": "TurnQueueResumeParams",
-      "result": "TurnQueueResumeResponse"
-    },
-    "session/lease/subscribe": {
-      "params": null,
-      "result": "SessionLeaseSubscribeResponse"
     },
     "turn/interrupt": {
       "params": "TurnInterruptParams",
@@ -513,9 +681,25 @@
       "params": "TurnSteerParams",
       "result": "TurnSteerResponse"
     },
+    "vibebot/deliver": {
+      "params": "VibeBotDeliverParams",
+      "result": "VibeBotEmpty"
+    },
+    "vibebot/follow": {
+      "params": "VibeBotFollowParams",
+      "result": "VibeBotFollowResponse"
+    },
+    "vibebot/localTools": {
+      "params": "VibeBotLocalToolsParams",
+      "result": "VibeBotLocalToolsResponse"
+    },
     "workspace/git/checkouts": {
       "params": "WorkspaceGitCheckoutsParams",
       "result": "WorkspaceGitCheckoutsResponse"
+    },
+    "workspace/git/worktrees/auto/update": {
+      "params": "WorkspaceWorktreeAutoUpdateParams",
+      "result": "WorkspaceWorktreeAutoUpdateResponse"
     },
     "workspace/git/worktrees/limit/update": {
       "params": "WorkspaceWorktreeLimitUpdateParams",
@@ -541,170 +725,6 @@
       "params": "WorkspaceTrustDecisionParams",
       "result": "WorkspaceTrustStatusResponse"
     },
-    "workspace/trust/untrustedConfig": {
-      "params": "WorkspaceUntrustedConfigParams",
-      "result": "WorkspaceUntrustedConfigResponse"
-    },
-    "workspace/trust/status": {
-      "params": "WorkspaceTrustStatusParams",
-      "result": "WorkspaceTrustStatusResponse"
-    },
-    "imports/discover": {
-      "params": "ImportDiscoveryParams",
-      "result": "ImportDiscoveryResponse"
-    },
-    "imports/start": {
-      "params": "ImportJobStartParams",
-      "result": "ImportJobStartResponse"
-    },
-    "imports/read": {
-      "params": "ImportJobReadParams",
-      "result": "ImportJobReadResponse"
-    },
-    "session/turn/queue/edit/start": {
-      "params": "TurnQueueEditStartParams",
-      "result": "TurnQueueEditStartResponse"
-    },
-    "session/turn/queue/edit/save": {
-      "params": "TurnQueueEditSaveParams",
-      "result": "TurnQueueEditSaveResponse"
-    },
-    "session/turn/queue/edit/cancel": {
-      "params": "TurnQueueEditCancelParams",
-      "result": "TurnQueueEditCancelResponse"
-    },
-    "session/turn/queue/edit/abandon": {
-      "params": "TurnQueueEditAbandonParams",
-      "result": "TurnQueueEditAbandonResponse"
-    },
-    "projects/create": {
-      "params": "ProjectsCreateParams",
-      "result": "ProjectMutationResponse"
-    },
-    "projects/list": {
-      "params": "ProjectsListParams",
-      "result": "ProjectsListResponse"
-    },
-    "projects/remove": {
-      "params": "ProjectsRemoveParams",
-      "result": "EmptyResponse"
-    },
-    "projects/rename": {
-      "params": "ProjectsRenameParams",
-      "result": "ProjectMutationResponse"
-    },
-    "setup/oidc-cancel": {
-      "params": "OidcAttemptParams",
-      "result": "ProtocolModel"
-    },
-    "setup/oidc-clear": {
-      "params": "ProtocolModel",
-      "result": "ProtocolModel"
-    },
-    "setup/oidc-poll": {
-      "params": "OidcAttemptParams",
-      "result": "OidcPollResponse"
-    },
-    "setup/oidc-probe": {
-      "params": "ProtocolModel",
-      "result": "OidcProbeResponse"
-    },
-    "setup/oidc-start": {
-      "params": "ProtocolModel",
-      "result": "OidcStartResponse"
-    },
-    "skills/local/delete": {
-      "params": "SkillsLocalDeleteParams",
-      "result": "EmptyResponse"
-    },
-    "skills/local/list": {
-      "params": "SkillsLocalListParams",
-      "result": "SkillsLocalListResponse"
-    },
-    "skills/local/read": {
-      "params": "SkillsLocalReadParams",
-      "result": "SkillsLocalReadResponse"
-    },
-    "skills/local/setEnabled": {
-      "params": "SkillsLocalSetEnabledParams",
-      "result": "SkillsLocalSetEnabledResponse"
-    },
-    "skills/local/write": {
-      "params": "SkillsLocalWriteParams",
-      "result": "SkillsLocalWriteResponse"
-    },
-    "platformCredentials/headers": {
-      "params": "PlatformCredentialHeadersParams",
-      "result": "PlatformCredentialHeadersResponse"
-    },
-    "artifacts/subscribe": {
-      "params": null,
-      "result": "EmptyResponse"
-    },
-    "session/context/read": {
-      "params": "SessionContextReadParams",
-      "result": "SessionContextReadResponse"
-    },
-    "session/move": {
-      "params": "SessionMoveParams",
-      "result": "SessionMoveResponse"
-    },
-    "plugins/local/list": {
-      "params": "PluginsLocalListParams",
-      "result": "PluginsLocalListResponse"
-    },
-    "plugins/local/setEnabled": {
-      "params": "PluginsLocalSetEnabledParams",
-      "result": "PluginsLocalSetEnabledResponse"
-    },
-    "config/subscribe": {
-      "params": "ConfigSubscribeParams",
-      "result": "EmptyResponse"
-    },
-    "config/telemetry/read": {
-      "params": "TelemetrySettingReadParams",
-      "result": "TelemetrySettingReadResponse"
-    },
-    "config/telemetry/update": {
-      "params": "TelemetrySettingUpdateParams",
-      "result": "TelemetrySettingUpdateResponse"
-    },
-    "goal/clear": {
-      "params": "GoalClearParams",
-      "result": "GoalClearResponse"
-    },
-    "goal/get": {
-      "params": "GoalGetParams",
-      "result": "GoalGetResponse"
-    },
-    "goal/set": {
-      "params": "GoalSetParams",
-      "result": "GoalSetResponse"
-    },
-    "projects/link": {
-      "params": "ProjectsLinkParams",
-      "result": "ProjectMutationResponse"
-    },
-    "projects/retireCloud": {
-      "params": "ProjectsRetireCloudParams",
-      "result": "EmptyResponse"
-    },
-    "projects/setCloud": {
-      "params": "ProjectsSetCloudParams",
-      "result": "ProjectMutationResponse"
-    },
-    "storage/usage/read": {
-      "params": "StorageUsageReadParams",
-      "result": "StorageUsageReadResponse"
-    },
-    "storage/usage/refresh": {
-      "params": "StorageUsageRefreshParams",
-      "result": "StorageUsageRefreshResponse"
-    },
-    "workspace/git/worktrees/auto/update": {
-      "params": "WorkspaceWorktreeAutoUpdateParams",
-      "result": "WorkspaceWorktreeAutoUpdateResponse"
-    },
     "workspace/trust/folders/add": {
       "params": "WorkspaceTrustFoldersAddParams",
       "result": "WorkspaceTrustFoldersResponse"
@@ -720,6 +740,14 @@
     "workspace/trust/folders/update": {
       "params": "WorkspaceTrustFoldersUpdateParams",
       "result": "WorkspaceTrustFoldersResponse"
+    },
+    "workspace/trust/status": {
+      "params": "WorkspaceTrustStatusParams",
+      "result": "WorkspaceTrustStatusResponse"
+    },
+    "workspace/trust/untrustedConfig": {
+      "params": "WorkspaceUntrustedConfigParams",
+      "result": "WorkspaceUntrustedConfigResponse"
     }
   },
   "notifications": {

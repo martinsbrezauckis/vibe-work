@@ -18,12 +18,12 @@ use crate::core::{Core, Shared};
 use crate::event::{AlertKind, CoreEvent};
 
 impl Core {
-    /// For a session's switch (`session/agent/update`) or a write of the default profile for new sessions:
+    /// For a session's switch (`session/approvalPolicy/update`) or a write of the default profile for new sessions:
     /// whether it was Full access before (the session's mode, or the default as this core last wrote it).
     /// `None` for every other call. Sessions that start under a Full access default raise no alert: a
     /// start is neither.
     pub(crate) fn full_before(&self, method: &str, params: &Value) -> Option<bool> {
-        if method == "session/agent/update" {
+        if method == "session/approvalPolicy/update" {
             Some(in_full_access(&self.shared, params))
         } else {
             crate::access::default_written(method, params)
@@ -170,7 +170,10 @@ fn profile_is_full(profile: Option<&str>, runtime: Option<&Value>) -> bool {
     profile == Some("auto-approve")
         || runtime.is_some_and(|runtime| {
             (profile.is_none()
-                || runtime.pointer("/activeAgent/name").and_then(Value::as_str) == profile)
+                || runtime
+                    .pointer("/activeApprovalPolicy/name")
+                    .and_then(Value::as_str)
+                    == profile)
                 && bypasses(runtime)
         })
 }
@@ -178,12 +181,21 @@ fn profile_is_full(profile: Option<&str>, runtime: Option<&Value>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::profile_is_full;
+
+    #[test]
+    fn a_bypassing_policy_is_checked_separately_from_the_agent() {
+        let runtime = json!({"activeAgent": {"name": "default"},
+            "activeApprovalPolicy": {"name": "ask"}, "bypassToolPermissions": true});
+        assert!(profile_is_full(Some("ask"), Some(&runtime)));
+        assert!(!profile_is_full(Some("accept-edits"), Some(&runtime)));
+    }
+
     use serde_json::json;
 
     #[test]
     fn an_accepted_lower_mode_overrides_the_previous_full_runtime() {
         let previous = json!({
-            "activeAgent": {"name": "auto-approve"},
+            "activeApprovalPolicy": {"name": "auto-approve"},
             "bypassToolPermissions": true
         });
         // The switch reply records Ask before its runtime notification reaches the store.
@@ -194,7 +206,7 @@ mod tests {
     #[test]
     fn a_current_bypassing_profile_still_counts_as_full() {
         let current = json!({
-            "activeAgent": {"name": "ask"},
+            "activeApprovalPolicy": {"name": "ask"},
             "bypassToolPermissions": true
         });
         assert!(profile_is_full(Some("ask"), Some(&current)));
@@ -203,7 +215,7 @@ mod tests {
         assert!(!profile_is_full(Some("ask"), None));
         assert!(!profile_is_full(
             Some("ask"),
-            Some(&json!({"activeAgent": {"name": "ask"}, "bypassToolPermissions": false}))
+            Some(&json!({"activeApprovalPolicy": {"name": "ask"}, "bypassToolPermissions": false}))
         ));
     }
 }

@@ -24,7 +24,7 @@ a Vibe tag locks the fixed version itself. Because `mistral-vibe`'s own metadata
 `--no-deps`: this file is the complete install set (the check above proves it names every package the wheel
 requires), so nothing is resolved and nothing outside it can be installed. Every package keeps `--require-hashes`.
 
-Usage: python3 -I generate_pin.py --vibe 3.1.3 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
+Usage: python3 -I generate_pin.py --vibe 3.1.4 --commit <sha> --uv 0.12.24 --python 3.14.8 --out <crate>/pin [--work <scratch>]
 For a dependency-removal-only bump, --reuse-pin <previous pin dir> uses only PyPI: the previous
 requirements hash is checked, every retained dependency (including its marker) must match both published
 releases exactly, and the already-reviewed uv assets are reused. Added or changed dependencies require

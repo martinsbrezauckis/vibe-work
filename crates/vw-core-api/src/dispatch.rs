@@ -266,7 +266,7 @@ impl Core {
     ) -> Result<CommandResult, CoreError> {
         match command {
             Command::GithubReads { request } => self.github_reads(request).await,
-            Command::AskGrants { request } => self.ask_grants(request),
+            Command::AskGrants { request } => self.ask_grants(request).await,
             Command::ChromeControl { request } => self.chrome_control(origin, request).await,
             Command::VibeRules { request } => self.vibe_rules(origin, request).await,
             Command::Feedback { request } => Ok(CommandResult::Feedback {

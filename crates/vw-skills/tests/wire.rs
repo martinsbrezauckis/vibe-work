@@ -8,14 +8,24 @@ use std::path::Path;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use vw_skills::{
-    McpSourceSummary, ModelConfigView, RegistryRefView, RuntimeMutationResponse, SkillScope,
-    SkillSource, SkillSummary, SkillsCatalogParams, SkillsCatalogResponse,
+    ConfigIssue, McpSourceSummary, ModelConfigView, RegistryRefView, RuntimeMutationResponse,
+    SkillScope, SkillSource, SkillSummary, SkillsCatalogParams, SkillsCatalogResponse,
     SkillsConvertLocalParams, SkillsConvertResponse, SkillsDetailParams, SkillsDetailResponse,
     SkillsImportParams, SkillsInstalledParams, SkillsInstalledResponse, SkillsListParams,
     SkillsListResponse, SkillsRemoveParams, SkillsSetAliasParams, SkillsSetEnabledParams,
     SkillsSetLatestParams, SkillsSetVersionParams, SkillsUpdatesParams, SkillsUpdatesResponse,
     SkillsVersionsParams, SkillsVersionsResponse, ThinkingLevel,
 };
+
+#[test]
+fn config_issue_omits_missing_code_but_preserves_present_code() {
+    let absent = json!({"file":"/workspace/skill", "message":"missing description"});
+    let parsed: ConfigIssue = serde_json::from_value(absent.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), absent);
+    let present = json!({"file":"/workspace/skill", "message":"invalid", "code":"invalid_skill"});
+    let parsed: ConfigIssue = serde_json::from_value(present.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), present);
+}
 
 fn schema(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))

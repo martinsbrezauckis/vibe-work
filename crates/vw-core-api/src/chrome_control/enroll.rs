@@ -296,7 +296,7 @@ pub(super) async fn connect_edge(
     }
     super::refresh_helper_held(chrome).await;
     if let Some(state) = chrome.dir() {
-        super::setup::repair_registrations(&chrome.config, state, Some("Microsoft Edge"))?;
+        super::setup::reconnect_registrations(&chrome.config, state, "Microsoft Edge")?;
     }
     chrome.set_browser_enabled(super::agent_browser::Browser::Edge, true)?;
     super::switches::deliver(shared)

@@ -70,7 +70,10 @@ pub(crate) async fn observe(
     // from an accepted switch.
     if let Some(id) = params.get("sessionId").and_then(Value::as_str) {
         let previous_mode = crate::chrome_control::chat_mode(shared, id);
-        if method == "session/agent/update" {
+        if matches!(
+            method,
+            "session/approvalPolicy/update" | "session/agent/update"
+        ) {
             shared.access.observe_request(method, id, params);
         }
         // Only an attached, verified runtime can replace the record.
@@ -82,14 +85,14 @@ pub(crate) async fn observe(
         }
         crate::chrome_control::mode_changed(shared, id, previous_mode.as_deref());
     }
-    shared.model_choices.observe(method, params, result)?;
+    // `model_choices::pick` already saved a confirmed model write with its resolved backend.
     if method == "turn/start" {
         // The chat runs the turn Vibe answered with before Vibe's own events for it arrive. Subscribers (the window,
         // the Debug API) see it now; the pump's turn bookkeeping waits for Vibe's events, as before.
         if let (Some(id), Some(turn)) = (params["sessionId"].as_str(), result.get("turn")) {
             let _ = shared.store.note_accepted_turn(id, turn);
         }
-        crate::model_choices::turn_started(shared, params).await;
+        Box::pin(crate::model_choices::turn_started(shared, params)).await;
     }
     match effect(method) {
         Effect::None => Ok(None),

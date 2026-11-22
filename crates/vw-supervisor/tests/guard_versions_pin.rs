@@ -14,7 +14,12 @@ const VERSIONS: &str = include_str!("../src/vibe_guard_versions.py");
 const PIN: &str = include_str!("../../../tools/public/codegen/vibe.pin");
 
 /// Every file that patches Vibe and therefore must run only on a guarded release, with the guards it installs.
-const GUARDS: [(&str, &str, usize); 8] = [
+const GUARDS: [(&str, &str, usize); 9] = [
+    (
+        "vibe_tls_guard.py",
+        include_str!("../src/vibe_tls_guard.py"),
+        1,
+    ),
     (
         "vibe_child_stop.py",
         include_str!("../src/vibe_child_stop.py"),

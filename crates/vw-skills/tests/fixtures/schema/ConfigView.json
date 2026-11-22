@@ -26,6 +26,11 @@
       "title": "Awaitingexperimentmodel",
       "type": "boolean"
     },
+    "collapseTurnDetails": {
+      "default": false,
+      "title": "Collapseturndetails",
+      "type": "boolean"
+    },
     "crashReportsEnabled": {
       "default": false,
       "title": "Crashreportsenabled",
@@ -37,13 +42,23 @@
       "type": "boolean"
     },
     "defaultAgent": {
-      "default": "accept-edits",
+      "default": "default",
       "title": "Defaultagent",
+      "type": "string"
+    },
+    "defaultApprovalPolicy": {
+      "default": "accept-edits",
+      "title": "Defaultapprovalpolicy",
       "type": "string"
     },
     "defaultModelAlias": {
       "title": "Defaultmodelalias",
       "type": "string"
+    },
+    "disableSelectionAnimation": {
+      "default": false,
+      "title": "Disableselectionanimation",
+      "type": "boolean"
     },
     "disableWelcomeBannerAnimation": {
       "title": "Disablewelcomebanneranimation",
@@ -80,11 +95,6 @@
     },
     "enableUpdateChecks": {
       "title": "Enableupdatechecks",
-      "type": "boolean"
-    },
-    "experimentalEnableLocalProjects": {
-      "default": true,
-      "title": "Experimentalenablelocalprojects",
       "type": "boolean"
     },
     "experimentalEnableRegistrySkills": {

@@ -98,9 +98,9 @@ async fn a_chat_mode_change_ends_the_wait_at_once() {
     let core = crate::offline_core::start("stop-wait-mode").await;
     let shared = &core.shared;
     shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"auto-approve"}),
+        &json!({"approvalPolicy":"auto-approve"}),
     );
     let wait = super::until_ended(shared, || {
         shared.access.remembered("s").as_deref() != Some("auto-approve")
@@ -109,11 +109,15 @@ async fn a_chat_mode_change_ends_the_wait_at_once() {
     pending(wait.as_mut());
     let at = Instant::now();
     let before = shared.access.remembered("s");
-    shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"plan"}));
+    shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     crate::chrome_control::mode_changed(shared, "s", before.as_deref());
-    wait.await;
+    tokio::time::timeout(Duration::from_secs(1), wait)
+        .await
+        .expect("the mode change must end the wait");
     assert_eq!(at.elapsed(), Duration::ZERO, "the wait ran a timer");
 }
 

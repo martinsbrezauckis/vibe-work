@@ -1,6 +1,6 @@
 //! Persistence regressions for chat choices. Uses real private files, without a Vibe process.
 //! Called by cargo test; checks migration, atomic acceptance and the reader/writer size contract.
-use super::Choices;
+use super::{Choices, actual, provenance};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -9,6 +9,94 @@ fn scratch() -> tempfile::TempDir {
         std::env::var_os("VW_TEST_ROOT").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
     std::fs::create_dir_all(&root).unwrap();
     tempfile::tempdir_in(root).unwrap()
+}
+
+#[test]
+fn the_resolved_provider_route_changes_identity_without_a_wire_model_change() {
+    // activeModel is the shape captured from the pinned 3.1.4 server: provider is absent.
+    let runtime = json!({"runtime":{"config":{"activeModel":{
+        "alias":"same","name":"same-name","thinking":"route-level","supportsImages":false,
+        "displayName":"same","source":"local","thinkingLevels":["off","route-level"]
+    }}}});
+    let choice = actual(&runtime).unwrap();
+    assert_eq!(choice.provider, "");
+    let fields = |provider: &str, base: &str| {
+        json!({"fields":[
+        {"name":"models","kind":"complex","description":"","path":"/models",
+         "value":{"same":{"alias":"same","name":"same-name","provider":provider}}},
+        {"name":"providers","kind":"complex","description":"","path":"/providers",
+         "value":[{"name":provider,"api_base":base,"api_style":"openai",
+                   "backend":"generic"}]}
+    ],"targets":[]})
+    };
+    let first = provenance(
+        &fields("llamacpp", "http://127.0.0.1:19462/v1"),
+        &choice,
+        None,
+    )
+    .unwrap();
+    let changed_provider = provenance(
+        &fields("mistral", "http://127.0.0.1:19462/v1"),
+        &choice,
+        None,
+    )
+    .unwrap();
+    let changed_endpoint = provenance(
+        &fields("llamacpp", "http://127.0.0.1:19463/v1"),
+        &choice,
+        None,
+    )
+    .unwrap();
+    assert_eq!(first.0, "llamacpp");
+    assert_ne!(first.1, changed_provider.1);
+    assert_ne!(first.1, changed_endpoint.1);
+    assert!(
+        provenance(
+            &fields("llamacpp", "http://127.0.0.1:19462/v1"),
+            &super::Choice {
+                name: "different-name".into(),
+                ..choice.clone()
+            },
+            None
+        )
+        .is_none()
+    );
+    assert!(provenance(&json!({"fields":[]}), &choice, None).is_none());
+}
+
+#[test]
+fn app_proxy_port_is_stable_but_a_custom_mistral_route_is_distinct() {
+    let choice = actual(&json!({"runtime":{"config":{"activeModel":{
+        "alias":"route-choice","name":"route-choice","thinking":"route-level"
+    }}}}))
+    .unwrap();
+    let fields = |base: &str, backend: &str| {
+        json!({"fields":[
+            {"name":"models","value":{"route-choice":{"alias":"route-choice","name":"route-choice","provider":"mistral"}}},
+            {"name":"providers","value":[{"name":"mistral","api_base":base,
+                "api_style":"openai","backend":backend,"api_key_env_var":"MISTRAL_API_KEY"}]}
+        ]})
+    };
+    let first_route = "http://127.0.0.1:19462/v1";
+    let second_route = "http://127.0.0.1:19463/v1";
+    let first = provenance(&fields(first_route, "mistral"), &choice, Some(first_route)).unwrap();
+    let second = provenance(
+        &fields(second_route, "mistral"),
+        &choice,
+        Some(second_route),
+    )
+    .unwrap();
+    let custom = provenance(
+        &fields(second_route, "generic"),
+        &choice,
+        Some(second_route),
+    )
+    .unwrap();
+    let different_route =
+        provenance(&fields(second_route, "mistral"), &choice, Some(first_route)).unwrap();
+    assert_eq!(first, second);
+    assert_ne!(first, custom);
+    assert_ne!(first, different_route);
 }
 
 fn pick(choices: &Choices, id: &str, alias: &str, label: &str) -> Result<(), crate::CoreError> {

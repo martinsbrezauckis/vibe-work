@@ -160,9 +160,9 @@ async fn failed_reads_and_denied_modes_never_create_exports() {
             .is_none()
     );
     core.shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"vw-plan"}),
+        &json!({"approvalPolicy":"future-policy"}),
     );
     assert!(
         gateway::call(&core.shared, "s", "chrome_execute", args)
@@ -262,9 +262,11 @@ async fn ask_browser_exports_run_for_fresh_and_buffered_reads_without_general_fi
             output_tests::mcp(captured())
         }
     });
-    core.shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    core.shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     let first = gateway::call(&core.shared, "s", "chrome_execute", request(json!({})))
         .await
         .unwrap();
@@ -300,9 +302,9 @@ async fn ask_browser_exports_run_for_fresh_and_buffered_reads_without_general_fi
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
     assert_eq!(core.shared.asks.list(), [] as [vw_ask::Ask; 0]);
     core.shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"accept-edits"}),
+        &json!({"approvalPolicy":"accept-edits"}),
     );
     let mut args = request(json!({}));
     args["saveTo"] = json!("file");

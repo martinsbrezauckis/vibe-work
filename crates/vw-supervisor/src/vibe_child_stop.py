@@ -64,7 +64,8 @@ def install_config_switch_guard(adapter):
 
     backend = adapter.UnifiedHarnessBackendAdapter
     backend.switch_agent = guard_current(backend.switch_agent)
-    backend._restore_profile = guard_current(backend._restore_profile)
+    backend.switch_approval_policy = guard_current(backend.switch_approval_policy)
+    backend._restore_selection = guard_current(backend._restore_selection)
     # Agent install/uninstall switches after this await, so guard the completion.
     # Its other callers also enter with no configuration lock held.
     backend._await_deferred_setup = guard_current(backend._await_deferred_setup, after=True)
@@ -148,7 +149,7 @@ def install_config_switch_guard(adapter):
 
     @wraps(original_pin)
     async def apply_restored_pin(self, pin, context, value):
-        if pin == adapter.SessionPin.AGENT_NAME:
+        if pin in (adapter.SessionPin.AGENT_NAME, adapter.SessionPin.APPROVAL_POLICY):
             await quiescent(context)
         return await original_pin(self, pin, context, value)
 
@@ -292,6 +293,7 @@ def install():
     # with that message rather than running with some or all guards missing.
     require_guarded_vibe("launcher")  # noqa: F821 - launch.rs prepends vibe_guard_versions.py
     install_privacy_guard()  # noqa: F821 - launch.rs prepends vibe_privacy_guard.py
+    install_system_trust_guard()  # noqa: F821 - launch.rs prepends vibe_tls_guard.py
     from vibe.app_server import _unified_harness_backend_adapter as adapter
     from mistralai_vibe_local_harness.vibe._subagents._models import IdleChild, RunningChild, TurnFailedChild
     from mistralai_vibe_local_harness.vibe._subagents._controller import success_output

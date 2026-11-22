@@ -448,3 +448,7 @@ async fn stop_and_disconnect_clear_the_attempt() {
 pub(super) fn addon(rig: &Rig) -> AddonView {
     rig.core.chrome_view().setup.addon.unwrap()
 }
+
+#[cfg(not(target_os = "macos"))]
+#[path = "enroll_registration_tests.rs"]
+mod registration_tests;

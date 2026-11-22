@@ -318,7 +318,8 @@ impl AgentTools {
     }
 
     /// Whether this launch of a chat's tool server advertises the Chrome tools, decided now from the package,
-    /// Chrome Control and the mode the request names (`agentConfig.agent`), else the mode the core knows for the
+    /// Chrome Control and the policy the request names (`agentConfig.approvalPolicy`), else a legacy policy named
+    /// by `agentConfig.agent`, else the mode the core knows for the
     /// session it opens or continues. Vibe keeps a server's tool list under a hash of its launch line, so the
     /// decision is in the launch line and the list itself never depends on the chat (`gateway::list`).
     fn chrome_launch(&self, params: &Value) -> ChromeLaunch {
@@ -331,8 +332,14 @@ impl AgentTools {
             };
         };
         let mode = params
-            .pointer("/agentConfig/agent")
+            .pointer("/agentConfig/approvalPolicy")
             .and_then(Value::as_str)
+            .or_else(|| {
+                params
+                    .pointer("/agentConfig/agent")
+                    .and_then(Value::as_str)
+                    .filter(|name| vw_ask::chrome::Tier::from_mode(name).is_some())
+            })
             .map(str::to_owned)
             .or_else(|| {
                 params
@@ -545,6 +552,50 @@ fn write_endpoint_file(path: &Path, endpoint: &SocketAddr, credential: &str) -> 
 #[cfg(test)]
 mod server_args_tests {
     use super::{ChromeLaunch, chrome_launch, server_args};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn current_policy_selects_the_chrome_catalog_when_agent_is_default() {
+        let core =
+            crate::offline_core::start_with("chrome-catalog-current-policy", |config, dir| {
+                config.chrome_control.package = Some(dir.join("package"));
+                config.agent_tools = Some(crate::AgentToolsConfig::new(
+                    dir.join("unused-agent-tools"),
+                    dir.join("agent-tools"),
+                    None,
+                ));
+            })
+            .await;
+        core.shared.chrome_control.set_enabled(true).unwrap();
+        let tools = core.shared.agent_tools.as_ref().unwrap();
+        assert_eq!(
+            tools.chrome_launch(&json!({"agentConfig":{"agent":"default",
+            "approvalPolicy":"ask"}})),
+            ChromeLaunch::Catalog
+        );
+        let new_chat = tools.chrome_launch(&json!({"agentConfig":{"agent":"default"}}));
+        let _ = core
+            .shared
+            .store
+            .load(
+                json!({"session":{"id":"s"},"history":[],"turns":[]}),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        core.shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":"ask"}),
+        );
+        let remembered =
+            tools.chrome_launch(&json!({"sessionId":"s","agentConfig":{"agent":"default"}}));
+        assert_eq!(
+            (new_chat, remembered),
+            (ChromeLaunch::Catalog, ChromeLaunch::Catalog),
+            "default agent with omitted policy must use the default or remembered mode"
+        );
+        core.shutdown().await;
+    }
 
     /// Vibe keeps a stdio server's tool list for a day under a fingerprint of its entry without the environment
     /// values, so an update must change the arguments or the agent keeps the previous build's tools.

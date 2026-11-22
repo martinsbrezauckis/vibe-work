@@ -1,5 +1,5 @@
 //! Dispatch of the privileged (P1) methods to their typed handlers, plus the small shape-only
-//! handlers (toggles, skills, setup choices, worktrees, trust, profile switch).
+//! handlers (toggles, skills, setup choices, worktrees, trust, agent and policy switches).
 //!
 //! Depends on: `config_rules`, shape, profile, picked, error, class. Called by: gate.
 //! Invariants:
@@ -16,7 +16,7 @@ use crate::class::P1;
 use crate::config_rules::{config_write, model_write};
 use crate::error::{DenyReason, GateError};
 use crate::picked::{PickedFolders, repo_root};
-use crate::profile::{PROFILES, escalates};
+use crate::profile::{AGENTS, POLICIES, escalates};
 use crate::shape::{Field, Kind, check, opt, req};
 
 /// What the handlers may consult.
@@ -30,9 +30,10 @@ pub(crate) struct Ctx<'a> {
 const ID: Kind = Kind::Text(128);
 const NAME: Kind = Kind::Name(128);
 
-const AGENT_UPDATE: &[Field] = &[
+const AGENT_UPDATE: &[Field] = &[req("sessionId", ID), req("agentName", Kind::OneOf(&AGENTS))];
+const APPROVAL_POLICY_UPDATE: &[Field] = &[
     req("sessionId", ID),
-    req("agentName", Kind::OneOf(&PROFILES)),
+    req("approvalPolicy", Kind::OneOf(&POLICIES)),
 ];
 const MCP_TOGGLE: &[Field] = &[
     opt("sessionId", ID),
@@ -96,10 +97,11 @@ pub(crate) fn check_p1(
     match kind {
         P1::ConfigWrite => config_write(method, params, ctx.aliases),
         P1::ModelWrite => model_write(method, params, ctx.aliases).map(|()| None),
-        P1::AgentUpdate => {
-            let object = check(method, params, AGENT_UPDATE)?;
+        P1::AgentUpdate => shape_only(method, params, AGENT_UPDATE),
+        P1::ApprovalPolicyUpdate => {
+            let object = check(method, params, APPROVAL_POLICY_UPDATE)?;
             let escalating = object
-                .get("agentName")
+                .get("approvalPolicy")
                 .and_then(Value::as_str)
                 .is_some_and(escalates);
             Ok(escalating.then(|| {

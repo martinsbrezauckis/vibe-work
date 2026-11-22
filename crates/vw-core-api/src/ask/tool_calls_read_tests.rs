@@ -66,17 +66,12 @@ async fn reads_run_without_a_card_in_accept_edits_and_full_access_only() {
     let fixture = crate::feature_test_core::Fixture::new().await;
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
-    for mode in [
-        "ask",
-        "accept-edits",
-        "smart-approve",
-        "auto-approve",
-        "vw-plan",
-        "explore",
-    ] {
-        shared
-            .access
-            .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+    for mode in ["ask", "accept-edits", "smart-approve", "auto-approve"] {
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":mode}),
+        );
         let free = matches!(mode, "accept-edits" | "auto-approve");
         for tool in READS {
             assert_eq!(
@@ -123,9 +118,11 @@ async fn builtin_ask_runs_choices_and_navigation_and_asks_for_typing_and_sending
     let fixture = crate::feature_test_core::Fixture::new().await;
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
-    shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     let mut differences = Vec::new();
     for action in [
         "navigate",
@@ -181,9 +178,11 @@ async fn builtin_choices_run_without_cards_in_each_browser_mode() {
     let shared = &fixture.core.shared;
     let mut differences = Vec::new();
     for mode in ["ask", "accept-edits", "auto-approve"] {
-        shared
-            .access
-            .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":mode}),
+        );
         for args in [
             json!({"action":"select","ref":"choice","value":"existing"}),
             json!({"action":"check","ref":"choice","checked":true}),
@@ -208,9 +207,11 @@ async fn headless_activation_asks_once_in_ask_and_keeps_other_modes() {
         ("accept-edits", false),
         ("auto-approve", false),
     ] {
-        shared
-            .access
-            .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":mode}),
+        );
         assert_eq!(
             asks(shared, names::USE_HEADLESS_BROWSER, json!({})).await,
             expected,
@@ -227,9 +228,11 @@ async fn headless_yes_covers_activation_in_this_chat_and_no_keeps_it_off() {
         let fixture = crate::feature_test_core::Fixture::new().await;
         fixture.load("s", &fixture.root.join("work"), &[], true);
         let shared = &fixture.core.shared;
-        shared
-            .access
-            .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":"ask"}),
+        );
         let caller = shared.clone();
         let task = tokio::spawn(async move {
             permission(
@@ -289,9 +292,9 @@ async fn a_stricter_rule_the_person_set_keeps_the_card() {
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
     shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"accept-edits"}),
+        &json!({"approvalPolicy":"accept-edits"}),
     );
     let config = shared.instructions.own_home.join("config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
@@ -332,9 +335,11 @@ async fn builtin_browser_ask_runs_navigation_and_choices_but_asks_before_typing(
     let fixture = crate::feature_test_core::Fixture::new().await;
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
-    shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     for action in [
         "navigate",
         "click",
@@ -359,9 +364,11 @@ async fn builtin_dialog_confirmation_keeps_chromes_explicit_send_approval() {
     let fixture = crate::feature_test_core::Fixture::new().await;
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
-    shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"ask"}));
+    shared.access.observe_request(
+        "session/approvalPolicy/update",
+        "s",
+        &json!({"approvalPolicy":"ask"}),
+    );
     for action in ["page.dialog.accept", "page.dialog.prompt", "upload", "type"] {
         assert!(
             asks(shared, names::BROWSER_ACT, json!({"action":action})).await,
@@ -404,9 +411,11 @@ async fn builtin_secret_reads_refuse_below_full_without_a_card() {
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
     for mode in ["ask", "accept-edits", "auto-approve"] {
-        shared
-            .access
-            .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy":mode}),
+        );
         for action in ["cookies.read", "storage.read", "clipboard.read"] {
             let args = json!({"action":action});
             let outcome = tokio::time::timeout(
@@ -441,9 +450,9 @@ async fn builtin_actions_match_chrome_in_accept_edits() {
     fixture.load("s", &fixture.root.join("work"), &[], true);
     let shared = &fixture.core.shared;
     shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "s",
-        &json!({"agentName":"accept-edits"}),
+        &json!({"approvalPolicy":"accept-edits"}),
     );
     for action in [
         "scroll",

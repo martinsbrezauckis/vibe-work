@@ -205,14 +205,24 @@ pub(super) async fn serve_connection(
             call = requests.recv() => {
                 let Some(call) = call else { ended = "requests closed"; break };
                 if !call.admitted() { continue; }
+                if call.revoked() {
+                    let _ = call.reply.send(own(crate::ask::tool_calls::REVOKED_BROWSER_GRANT, "CONSENT_REVOKED"));
+                    continue;
+                }
                 if pending.len() >= 32 && call.name != "chrome_session" {
                     let _ = call.reply.send(own("Not run: browser control is busy. Retry this browser action after a moment.", "BUSY"));
                     continue;
                 }
-                let begun = if call.rpc {
-                    pipe.begin_tolerant(&call.name, call.args).await
-                } else {
-                    pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args})).await
+                let begun = call.dispatch(async {
+                    if call.rpc {
+                        pipe.begin_tolerant(&call.name, call.args.clone()).await
+                    } else {
+                        pipe.begin("tools/call", json!({"name":call.name,"arguments":call.args.clone()})).await
+                    }
+                }).await;
+                let Some(begun) = begun else {
+                    let _ = call.reply.send(own(crate::ask::tool_calls::REVOKED_BROWSER_GRANT, "CONSENT_REVOKED"));
+                    continue;
                 };
                 if let Ok(id) = begun {
                     pending.insert(id, (Some(call.reply), tokio::time::Instant::now()));

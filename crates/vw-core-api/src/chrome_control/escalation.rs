@@ -49,7 +49,12 @@ pub(super) async fn send(
             json!(call_capabilities(shared, session, tool, &args, tier, sends));
     }
     let checked = args.clone();
+    super::batch::admit()?;
     let mut answer = shared.chrome_control.owner.call(tool, args).await;
+    if matches!(&answer, owner::Answer::Own(value) if value["structuredContent"]["error"]["code"] == "CONSENT_REVOKED")
+    {
+        return Err(crate::ask::tool_calls::REVOKED_BROWSER_GRANT.into());
+    }
     if let owner::Answer::Helper(result) = &mut answer {
         shared
             .chrome_control

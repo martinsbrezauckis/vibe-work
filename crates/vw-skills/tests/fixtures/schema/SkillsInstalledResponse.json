@@ -1,6 +1,13 @@
 {
   "additionalProperties": false,
   "properties": {
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ConfigIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
     "skills": {
       "items": {
         "$ref": "#/$defs/SkillSummary"

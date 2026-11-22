@@ -43,6 +43,7 @@ pub(super) fn supported_action(profile: &Value, action: &str) -> bool {
 
 fn primitive_failure(error: owner::RpcFailure, action: &str) -> String {
     match error {
+        owner::RpcFailure::Revoked => crate::ask::tool_calls::REVOKED_BROWSER_GRANT.into(),
         owner::RpcFailure::Unavailable => "The page operation could not be acknowledged; its outcome is unknown. Check browser state before trying again.".into(),
         owner::RpcFailure::Rejected { code, helper_code, message } => {
             // These are fixed helper admissions, not page-derived strings. A future helper's
@@ -237,6 +238,7 @@ pub(super) async fn dispatch(
     }) {
         capabilities.push("page.read");
     }
+    super::batch::admit()?;
     let mut result = shared.chrome_control.owner.rpc_result("owner.primitive", json!({"sessionId":request["sessionId"],"tabId":tab,"steps":steps,"approvedCapabilities":capabilities})).await.map_err(|error| primitive_failure(error, request["action"].as_str().unwrap_or_default()))?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     while matches!(result["status"].as_str(), Some("queued" | "running")) {

@@ -137,8 +137,8 @@ pub fn required_length(head: &[u8]) -> Option<u64> {
 pub const CHROME_HELPER: [&str; 3] = ["chrome-control", "bin", "chrome-control.exe"];
 
 /// The first shipped program of an installed copy that is present but cannot start (file name, why), checked in the
-/// order [`HELPERS`], then [`CHROME_HELPER`]; `None` when each starts or `exe` is not an installed copy. A missing
-/// program is [`damaged_helper`]'s to report.
+/// order [`HELPERS`]; `None` when each starts or `exe` is not an installed copy. The Chrome helper needs a release
+/// fingerprint and is checked only by [`start_problems_with_pin`]. A missing program is [`damaged_helper`]'s to report.
 #[must_use]
 pub fn helper_start_problem(
     exe: &Path,
@@ -148,9 +148,21 @@ pub fn helper_start_problem(
 }
 
 /// Every shipped program of an installed copy that is present but cannot start (file name, why), in the order of
-/// [`helper_start_problem`]; empty when each starts or `exe` is not an installed copy. Each program is started once.
+/// [`helper_start_problem`]; empty when each starts or `exe` is not an installed copy. Chrome is skipped without a
+/// fingerprint. Each included program is started once.
 #[must_use]
 pub fn start_problems(exe: &Path, default_folder: Option<&Path>) -> Vec<(&'static str, String)> {
+    start_problems_with_pin(exe, default_folder, None)
+}
+
+/// Startup probes with the release's browser-helper fingerprint. An absent or differing pin
+/// leaves that helper for the existing integrity notice; it must never be executed by the probe.
+#[must_use]
+pub fn start_problems_with_pin(
+    exe: &Path,
+    default_folder: Option<&Path>,
+    chrome_pin: Option<&str>,
+) -> Vec<(&'static str, String)> {
     let Some(folder) = exe.parent() else {
         return Vec::new();
     };
@@ -161,10 +173,33 @@ pub fn start_problems(exe: &Path, default_folder: Option<&Path>) -> Vec<(&'stati
     HELPERS
         .iter()
         .map(|name| (*name, folder.join(name)))
-        .chain(std::iter::once((CHROME_HELPER[2], folder.join(chrome))))
+        .chain(
+            std::iter::once((CHROME_HELPER[2], folder.join(chrome)))
+                .filter(|(_, path)| chrome_pin.is_some_and(|pin| fingerprint_matches(path, pin))),
+        )
         .filter(|(_, path)| path.is_file())
         .filter_map(|(name, path)| start_problem(&path).map(|problem| (name, problem)))
         .collect()
+}
+
+fn fingerprint_matches(path: &Path, expected: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(size) => digest.update(&buffer[..size]),
+            Err(_) => return false,
+        }
+    }
+    format!("{:x}", digest.finalize()).eq_ignore_ascii_case(expected)
 }
 
 /// How long a start probe waits for the program to exit. A program still running then is reported as starting (a

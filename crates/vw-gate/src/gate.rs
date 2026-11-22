@@ -49,7 +49,7 @@ mod open_callbacks;
 /// dialog. Which origins may use this list is the core's decision (`own_token`).
 pub const TRUSTED_SURFACE_METHODS: &[&str] = &[
     "session/shellCommand",
-    "session/agent/update",
+    "session/approvalPolicy/update",
     "connector_catalog/auth/request",
     "mcp_catalog/login",
     "connector_catalog/connect",

@@ -27,8 +27,10 @@ pub enum P1 {
     ConfigWrite,
     /// `config/model/write`: a configured model alias and/or a reasoning level.
     ModelWrite,
-    /// `session/agent/update`: one of Vibe's five profiles.
+    /// `session/agent/update`: an agent the app offers.
     AgentUpdate,
+    /// `session/approvalPolicy/update`: one of Vibe's approval policies.
+    ApprovalPolicyUpdate,
     /// `mcp/toggle`, `mcp_catalog/toggle`: enable or disable a server, connector or tool.
     McpToggle,
     /// `connector_catalog/toggle`.

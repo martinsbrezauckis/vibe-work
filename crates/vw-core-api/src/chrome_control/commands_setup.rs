@@ -153,7 +153,7 @@ impl Core {
     }
 
     /// The result line says once that Connect replaced a stale browser connection (helper registration).
-    fn with_setup_notice(&self, result: CommandResult) -> CommandResult {
+    pub(super) fn with_setup_notice(&self, result: CommandResult) -> CommandResult {
         let notice = self.shared.chrome_control.config.setup_notice.take();
         match (result, notice) {
             (

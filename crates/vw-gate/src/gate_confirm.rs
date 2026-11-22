@@ -138,7 +138,8 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         session_id: &str,
     ) -> Result<(Value, ConfirmationToken), GateError> {
         let method = "session/resume";
-        let params = json!({"sessionId":session_id,"agentConfig":{"agent":"auto-approve"}});
+        let params =
+            json!({"sessionId":session_id,"agentConfig":{"approvalPolicy":"auto-approve"}});
         self.plan(method, &params)?;
         let token = self.state().vault.mint(method, &params, self.clock.now())?;
         Ok((params, token))
@@ -199,5 +200,58 @@ impl<T: Transport, C: Confirmer> Gate<T, C> {
         }
         let now = self.clock.now();
         self.state().vault.mint(method, params, now)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+    use vw_rpc::RpcError;
+
+    use crate::{Confirmation, ConfirmationRequest, Confirmer, Gate, GateConfig, Transport};
+
+    struct NeverTransport;
+
+    impl Transport for NeverTransport {
+        fn request(
+            &self,
+            _method: &str,
+            _params: Value,
+        ) -> impl std::future::Future<Output = Result<Value, RpcError>> + Send {
+            std::future::poll_fn(|_| panic!("restored access test never sends a request"))
+        }
+    }
+
+    struct NeverConfirm;
+
+    impl Confirmer for NeverConfirm {
+        fn confirm(
+            &self,
+            _request: &ConfirmationRequest,
+        ) -> impl std::future::Future<Output = Confirmation> + Send {
+            std::future::poll_fn(|_| panic!("restored access test never opens a dialog"))
+        }
+    }
+
+    #[test]
+    fn restored_full_access_uses_vibe314_policy_field_and_exact_token() {
+        let gate = Gate::new(NeverTransport, NeverConfirm, GateConfig::default());
+        let (params, token) = gate
+            .confirm_restored_full_access("saved-chat")
+            .expect("app-owned authority record makes a gated resume");
+        assert_eq!(
+            params,
+            json!({"sessionId":"saved-chat","agentConfig":{"approvalPolicy":"auto-approve"}})
+        );
+        assert!(gate.check("session/resume", &params, Some(&token)).is_ok());
+        for changed in [
+            json!({"sessionId":"another-chat","agentConfig":{"approvalPolicy":"auto-approve"}}),
+            json!({"sessionId":"saved-chat","agentConfig":{"agent":"default","approvalPolicy":"auto-approve"}}),
+        ] {
+            assert!(
+                gate.check("session/resume", &changed, Some(&token))
+                    .is_err()
+            );
+        }
     }
 }

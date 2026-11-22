@@ -209,7 +209,7 @@ pub enum Command {
     /// marked preview (the default moves with it), and a default Vibe no longer offers is named so the window asks.
     /// Answers `{gone, switchedTo}` (aliases or `null`).
     CheckDefaultModel {},
-    /// `session/agent/update`: switch the access mode (one of Vibe's profiles). The core supplies
+    /// `session/approvalPolicy/update`: switch the access mode (one of Vibe's approval policies). The core supplies
     /// the token for the trusted window's typed switch; other Full access callers need consent.
     SetAccessMode {
         /// Session id.

@@ -22,13 +22,8 @@
     },
     "plan": {
       "name": "Plan first",
-      "description": "Retired in Vibe 3. Saved chats reopen in Ask; use Plan on a page to plan.",
+      "description": "Retired in Vibe 3. Saved chats reopen in Ask; ask the agent to write a plan in any access mode.",
       "tooltip": "Plan first was retired in Vibe 3"
-    },
-    "vw-plan": {
-      "name": "Plan on a page",
-      "description": "Plans first and writes the plan as a page in the project's handbook (docs/handbook/plans/). Other file writes are refused; shell commands still run.",
-      "tooltip": "Use Plan on a page access mode"
     },
     "explore": {
       "name": "Explore",
@@ -120,6 +115,8 @@
     }
   },
   "texts": {
+    "informationNoticeTitle": "Vibe Work information",
+    "notReported": "Not reported",
     "developerPermissionsName": "Developer permissions",
     "developerPermissionsDescription": "Lets the agent ask Vibe Work to push and use other developer permissions.",
     "developerPermissionsConfirm": "Turn on Developer permissions?\nThis lets the agent push branches and change other Git branches under this chat's access mode. Ask and Accept edits require your approval for each push.",

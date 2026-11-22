@@ -151,7 +151,7 @@ pub(crate) struct Shared {
     pub(crate) pages: Option<Arc<crate::pages::PagesHub>>,
     /// The File tab (`files`): file handles and the files viewer.
     pub(crate) files: crate::files::FilesState,
-    /// The `vw-plan` access mode's profile file (`plan_profile`).
+    /// Project folders known to the Projects overview (`plan_profile`).
     pub(crate) plan_profile: crate::plan_profile::PlanProfile,
     /// The user's project groups (`projects`, `projects_filing`).
     pub(crate) projects: crate::projects_filing::ProjectsState,

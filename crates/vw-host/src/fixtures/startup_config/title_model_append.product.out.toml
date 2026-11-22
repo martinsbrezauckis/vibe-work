@@ -8,15 +8,15 @@ enable_system_trust_store = true
 include_commit_signature = false
 
 active_model = "large-4"
-default_agent = "accept-edits"
+default_agent = "default"
 experimental_enable_registry_skills = true
 experimental_enable_mistral_mcp_connector = false
 experimental_local_runtime_session_api = false
 experimental_enable_document_library_connector = false
 experimental_enable_model_catalog = true
-experimental_enable_local_projects = false
 experimental_enable_tab_status = false
 enable_pr_monitoring = false
+default_approval_policy = "accept-edits"
 
 
 # Vibe Work: each chat's own model writes its session title.

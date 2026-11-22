@@ -357,13 +357,12 @@ mod tests {
             ("smart-approve", true, true),
             ("auto-approve", true, true),
             ("ask", true, true),
-            ("vw-plan", false, false),
-            ("explore", false, false),
+            ("future-policy", false, false),
         ] {
             core.shared.access.observe_request(
-                "session/agent/update",
+                "session/approvalPolicy/update",
                 "s",
-                &json!({"agentName":mode}),
+                &json!({"approvalPolicy":mode}),
             );
             assert_eq!(
                 close_allowed(&core.shared, "s", false).is_ok(),

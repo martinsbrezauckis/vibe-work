@@ -136,6 +136,7 @@ mod tests {
             let view = vw_skills::SkillsView::merge(
                 &vw_skills::SkillsInstalledResponse {
                     skills: skills.clone(),
+                    issues: vec![],
                 },
                 &serde_json::from_value(json!({"skills":[]})).unwrap(),
                 &vw_skills::SkillsUpdatesResponse { updates: vec![] },

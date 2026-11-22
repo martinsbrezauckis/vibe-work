@@ -250,15 +250,36 @@ async fn dispatch_with_grant<F: Future<Output = Result<Value, String>>>(
     grant_id: Option<&str>,
     work: F,
 ) -> Result<Value, String> {
-    if grant_id.is_some_and(|id| !grants.contains(id)) {
-        return Ok(revoked_receipt());
-    }
-    match work.await {
+    let admission = match grant_id {
+        Some(id) => match grants.admission(id) {
+            Some(admission) => Some(admission),
+            None => return Ok(revoked_receipt()),
+        },
+        None => None,
+    };
+    let result = ADMISSION.scope(admission, work).await;
+    match result {
         Err(reason) if reason == crate::ask::tool_calls::REVOKED_BROWSER_GRANT => {
             Ok(revoked_receipt())
         }
         other => other,
     }
+}
+
+tokio::task_local! {
+    static ADMISSION: Option<crate::ask::grants::Admission>;
+}
+
+pub(super) fn admission() -> Option<crate::ask::grants::Admission> {
+    ADMISSION.try_with(Clone::clone).ok().flatten()
+}
+
+/// Check again after gateway waits and immediately before asking the owner to dispatch.
+pub(super) fn admit() -> Result<(), String> {
+    if admission().is_some_and(|token| !token.allows()) {
+        return Err(crate::ask::tool_calls::REVOKED_BROWSER_GRANT.into());
+    }
+    Ok(())
 }
 
 fn revoked_receipt() -> Value {
@@ -274,6 +295,73 @@ fn revoked_receipt() -> Value {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn a_waiting_batch_step_rechecks_revoke_at_final_dispatch() {
+        let grants = std::sync::Arc::new(crate::ask::grants::Grants::default());
+        let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+            "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","steps":[
+                {"action":"auth.fill","args":{"ref":"u2","login":"Demo"}}]}},"requiredPermissions":[]}});
+        grants.note_callback("card", "chat", "chat", crate::ask::grants::scope_of(&card));
+        let grant = grants
+            .keep(grants.claim("card").unwrap(), vw_ask::AnsweredBy::Person, 1)
+            .unwrap();
+        let (reached, waiting) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        let dispatched = std::sync::Arc::new(AtomicBool::new(false));
+        let sent = dispatched.clone();
+        let held = grants.clone();
+        let id = grant.id.clone();
+        let step = tokio::spawn(async move {
+            dispatch_with_grant(&held, Some(&id), async move {
+                reached.send(()).unwrap();
+                resumed.await.unwrap();
+                admit()?;
+                sent.store(true, Ordering::SeqCst);
+                Ok(json!({"vwMcpResult":{"structuredContent":{"status":"completed"}}}))
+            })
+            .await
+        });
+        waiting.await.unwrap();
+        assert!(grants.remove(&grant.id));
+        resume.send(()).unwrap();
+        let answer = step.await.unwrap().unwrap();
+        assert!(
+            !dispatched.load(Ordering::SeqCst),
+            "a revoked waiting step dispatched"
+        );
+        assert_eq!(
+            answer["vwMcpResult"]["structuredContent"]["status"],
+            "not_run"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoking_one_chats_batch_grant_keeps_a_second_chats_dispatch() {
+        let grants = crate::ask::grants::Grants::default();
+        let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+            "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","steps":[
+                {"action":"auth.fill","args":{"ref":"u2","login":"Demo"}}]}},"requiredPermissions":[]}});
+        let mut ids = Vec::new();
+        for chat in ["first", "second"] {
+            grants.note_callback(chat, chat, chat, crate::ask::grants::scope_of(&card));
+            ids.push(
+                grants
+                    .keep(grants.claim(chat).unwrap(), vw_ask::AnsweredBy::Person, 1)
+                    .unwrap()
+                    .id,
+            );
+        }
+        assert!(grants.remove(&ids[0]));
+        let answer = dispatch_with_grant(&grants, Some(&ids[1]), async {
+            admit()?;
+            Ok(json!({"status":"completed"}))
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer["status"], "completed");
+    }
+
     /// PREDICT: a batch keeps its prepared login executions after the chat grant is revoked,
     /// so the second saved-login field is sent despite Revoke.
     #[tokio::test]

@@ -2,7 +2,16 @@
 //! All files stay under the offline core's isolated package/home; tests may then change individual facts.
 use crate::core::Shared;
 use serde_json::{Value, json};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+fn install_fake_helper(path: &Path) {
+    // Several fixtures call answering after Core startup. Rewriting the same bytes can race
+    // Windows holding the helper image open during its start probe.
+    if !path.is_file() {
+        std::fs::write(path, b"test helper").unwrap();
+    }
+}
 
 pub(crate) fn answering(
     shared: &Shared,
@@ -12,7 +21,7 @@ pub(crate) fn answering(
     if let Some(package) = &chrome.config.package {
         let bin = package.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join(super::setup::helper_name()), b"test helper").unwrap();
+        install_fake_helper(&bin.join(super::setup::helper_name()));
         let dir = chrome.dir().unwrap();
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(
@@ -23,6 +32,24 @@ pub(crate) fn answering(
     }
     *chrome.owner.pairing.lock().unwrap() = (crate::chrome_control::PairingState::Paired, None);
     chrome.owner.answering(answer)
+}
+
+#[cfg(windows)]
+#[test]
+fn an_existing_fake_helper_is_not_rewritten_while_windows_has_it_open() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join(super::setup::helper_name());
+    install_fake_helper(&helper);
+    // FILE_SHARE_READ excludes writes, as when CreateProcess holds the helper image.
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&helper)
+        .unwrap();
+    install_fake_helper(&helper);
+    drop(held);
 }
 
 /// Waits until an approved Safari pairing has run to its end (the approval task sets `safari_approved` last), bounded

@@ -1,6 +1,16 @@
 //! Wire-contract checks for host tools and additive runtime fields; uses only generated types.
 use serde_json::{Value, json};
 
+#[test]
+fn agent_summary_no_longer_requires_policy_safety() -> serde_json::Result<()> {
+    let raw = json!({"name":"default", "displayName":"Fixture agent", "description":"", "agentType":"agent"});
+    let decoded: vw_protocol::AgentSummary = serde_json::from_value(raw)?;
+    let serialized = serde_json::to_value(decoded)?;
+    assert!(serialized.get("safety").is_none());
+    assert_eq!(serialized["name"], "default");
+    Ok(())
+}
+
 fn round_trip<T: serde::de::DeserializeOwned + serde::Serialize>(
     raw: Value,
 ) -> serde_json::Result<()> {

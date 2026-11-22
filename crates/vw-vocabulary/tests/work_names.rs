@@ -23,3 +23,14 @@ fn identical_copy_keeps_both_lookup_keys() {
         assert_eq!(vw_vocabulary::text(id), Some("Applies to new chats."));
     }
 }
+
+#[test]
+fn removed_plan_access_is_not_offered_by_the_vocabulary() {
+    assert!(vw_vocabulary::term("accessModes", "vw-plan").is_none());
+    assert!(
+        !vw_vocabulary::term("accessModes", "plan")
+            .unwrap()
+            .description
+            .contains("Plan on a page")
+    );
+}

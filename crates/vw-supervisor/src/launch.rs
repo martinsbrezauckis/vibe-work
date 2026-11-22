@@ -152,6 +152,8 @@ pub(crate) async fn open_channel(
 pub const CHILD_STOP_ADAPTER: &str = concat!(
     include_str!("vibe_guard_versions.py"),
     "\n",
+    include_str!("vibe_tls_guard.py"),
+    "\n",
     include_str!("vibe_privacy_guard.py"),
     "\n",
     include_str!("vibe_process_identity.py"),

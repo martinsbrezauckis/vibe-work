@@ -73,7 +73,6 @@ impl Core {
         let method = "session/resume";
         let stopping = self.shared.interrupted_send.pending(session_id).is_some();
         let (params, token) = restore.resume_request(stopping)?;
-        crate::plan_profile::before_open(&self.shared, method, &params);
         let entry_project = crate::entry_projects::before_open(&self.shared, method, &params).await;
         let mut model_hold = crate::resume_models::begin(&self.shared, session_id, bound)?;
         let mut reply = match self

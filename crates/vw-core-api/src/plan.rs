@@ -174,8 +174,8 @@ fn plan_turns_and_calls(command: Command) -> Planned {
             agent_name,
             confirmation_token,
         } => Planned::Forward {
-            method: "session/agent/update".to_owned(),
-            params: json!({"sessionId": session_id, "agentName": agent_name}),
+            method: "session/approvalPolicy/update".to_owned(),
+            params: json!({"sessionId": session_id, "approvalPolicy": agent_name}),
             token: confirmation_token,
             trusted_access_switch: true,
         },
@@ -185,5 +185,35 @@ fn plan_turns_and_calls(command: Command) -> Planned {
             confirmation_token,
         } => forward(&method, params, confirmation_token),
         local => Planned::Local(local),
+    }
+}
+
+#[cfg(test)]
+mod vibe314_contract_tests {
+    use super::{Planned, plan};
+    use crate::command::Command;
+    use serde_json::json;
+
+    #[test]
+    fn access_switch_uses_approval_policy_method() {
+        for policy in ["ask", "accept-edits", "auto-approve"] {
+            let planned = plan(Command::SetAccessMode {
+                session_id: "s".to_owned(),
+                agent_name: policy.to_owned(),
+                confirmation_token: None,
+            });
+            let Planned::Forward {
+                method,
+                params,
+                trusted_access_switch,
+                ..
+            } = planned
+            else {
+                panic!("access switch must be forwarded");
+            };
+            assert_eq!(method, "session/approvalPolicy/update");
+            assert_eq!(params, json!({"sessionId":"s", "approvalPolicy":policy}));
+            assert!(trusted_access_switch);
+        }
     }
 }

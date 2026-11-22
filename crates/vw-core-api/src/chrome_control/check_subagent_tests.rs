@@ -35,9 +35,9 @@ async fn a_child_names_the_builtin_and_main_chat_routes_even_with_a_mode() {
     }
     // A remembered mode does not override the subagent restriction.
     shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "child",
-        &json!({"agentName":"auto-approve"}),
+        &json!({"approvalPolicy":"auto-approve"}),
     );
     assert!(
         authorize(
@@ -72,10 +72,13 @@ async fn a_main_chat_without_a_mode_is_not_mislabeled_as_a_subagent() {
         .unwrap_err(),
         "Not run: this chat's access mode is unavailable. Ask the user to choose an available chat mode, then try again."
     );
-    for mode in ["vw-plan", "explore"] {
-        shared
-            .access
-            .observe_request("session/agent/update", "main", &json!({"agentName":mode}));
+    {
+        let mode = "future-policy";
+        shared.access.observe_request(
+            "session/approvalPolicy/update",
+            "main",
+            &json!({"approvalPolicy":mode}),
+        );
         let reason = authorize(
             shared,
             "main",
@@ -124,9 +127,9 @@ async fn a_child_hook_cannot_borrow_the_main_chats_browser_authority() {
         )
         .unwrap();
     shared.access.observe_request(
-        "session/agent/update",
+        "session/approvalPolicy/update",
         "child",
-        &json!({"agentName":"auto-approve"}),
+        &json!({"approvalPolicy":"auto-approve"}),
     );
     for profile in ["chrome:p", "edge:p"] {
         shared

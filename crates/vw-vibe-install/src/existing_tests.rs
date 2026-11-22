@@ -9,6 +9,75 @@ use super::*;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn an_older_initialize_names_the_version_but_never_becomes_supported() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("vw-probe-old-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("vibe-app-server");
+    for code in ["\"invalid_params\"", "-32602"] {
+        std::fs::write(&program, r#"#!/bin/sh
+read first
+case "$first" in *agentWorktrees*) ;; *) exit 2;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"error":{"code":INVALID_PARAMS,"message":"Invalid request parameters"}}'
+read second
+case "$second" in *agentWorktrees*|*sessionPeerRestore*|*entrypoint*|*title*) exit 3;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"serverInfo":{"version":"2.26.1"}}}'
+"#.replace("INVALID_PARAMS", code)).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let found = find(
+            &Discovery {
+                explicit: None,
+                path_var: Some(dir.as_os_str().to_owned()),
+                home: None,
+            },
+            &dir.join("probes"),
+            &[],
+            "3.1.4",
+            &dir.join("own"),
+        )
+        .await;
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].version.as_deref(), Some("2.26.1"));
+        assert!(!found[0].supported);
+        assert_eq!(
+            found[0].warning.as_deref(),
+            Some("This install is Vibe 2.26.1; Vibe Work needs Vibe 3.1.4.")
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_initialize_retry_is_bounded_and_missing_versions_stay_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("vw-probe-invalid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("vibe-app-server");
+    for response in [
+        r#"{"result":{}}"#,
+        r#"{"result":{"serverInfo":{"version":""}}}"#,
+        r#"{"error":{"code":-32602}}"#,
+    ] {
+        let frame: serde_json::Value = serde_json::from_str(response).unwrap();
+        let frame = serde_json::json!({"jsonrpc":"2.0", "id":2, "result":frame.get("result"), "error":frame.get("error")});
+        std::fs::write(&program, format!("#!/bin/sh\nread first\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{{\"code\":-32602}}}}'\nread second\nprintf '%s\\n' '{frame}'\nread third\nexit 0\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let result = probe_checked(
+            Duration::from_secs(3),
+            &program,
+            &[],
+            &dir.join("home"),
+            &[],
+        )
+        .await;
+        assert_eq!(result, Err(ProbeFailure::NoVersion), "{response}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn a_late_answer_within_the_limit_is_a_version_not_a_silence() {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("vw-probe-late-{}", std::process::id()));

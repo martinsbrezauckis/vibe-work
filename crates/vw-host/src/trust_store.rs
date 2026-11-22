@@ -1,10 +1,9 @@
-//! Vibe trusts the operating system's certificate store by default: Vibe Work's own `VIBE_HOME/config.toml` gets
+//! Vibe Work keeps Vibe on the operating system's certificate store: its own `VIBE_HOME/config.toml` gets
 //! `enable_system_trust_store = true` unless it already sets that key.
 //!
-//! Why: while the key is false (Vibe's default, `vibe_schema.py:1010`), Vibe's HTTPS clients (MCP servers over HTTP,
-//! MCP sign-in, the skills registry, connectors) trust only the certificate bundle of the `certifi` package Vibe
-//! pins (`utils/http.py:51-59`; the runtime's `_ssl.py:21-35` adds it on top of the platform roots). A user cannot
-//! update one package of Vibe's exact pins, and Vibe checks no revocation, so a bundle that still carries a revoked
+//! Why: Vibe 3.1.4's default enables the system store, but its HTTP and bundled-harness builders add the pinned
+//! `certifi` package's roots to it. Vibe Work's launcher guard keeps the system-store choice on the OS roots alone.
+//! A user cannot update one package of Vibe's exact pins, and Vibe checks no revocation, so a bundle that still carries a revoked
 //! root keeps trusting it until the next Vibe release (certifi 2026.7.22 in Vibe 3.0.2 carried one, advisory
 //! GHSA-6q48-6c7w-9gw2; the 2026.10.19 bundle in 3.0.3 dropped it). The operating systems' stores drop such roots
 //! with their own updates. With the key true every one of those clients verifies through the OS

@@ -306,21 +306,22 @@ pub(crate) fn merged_with_prefix(previous: &Value, mut next: Value) -> Value {
 
 /// Runtime values omitted from session events by the unified server.
 ///
-/// `agent`: a unified read carries the profile the chat runs on (Vibe 3.0.1+), while Vibe's turn-start
-/// `session/updated` replaces it with null and nothing sets it again; Vibe's own client takes it from the
-/// runtime's `activeAgent` (`client_state.py apply_runtime`). Legacy sessions keep their own reads' value.
+/// `agent` and `approvalPolicy`: a unified read carries the agent identity and access policy the chat runs on,
+/// while Vibe's turn-start `session/updated` can replace them with null. Vibe's own client restores both from
+/// runtime (`client_state.py apply_runtime`). Legacy sessions keep their own reads' values.
 fn runtime_patch(session: &Value, runtime: &Value) -> Vec<Value> {
     let mut patch = Vec::new();
     for (key, path) in [
         ("model", "/config/activeModel/alias"),
         ("reasoningEffort", "/config/activeModel/thinking"),
         ("agent", "/activeAgent"),
+        ("approvalPolicy", "/activeApprovalPolicy"),
     ] {
         if key != "model" && session["harness"] != "unified" {
             continue;
         }
         let wanted = |v: &&Value| {
-            if key == "agent" {
+            if key == "agent" || key == "approvalPolicy" {
                 v.is_object()
             } else {
                 v.is_string()
@@ -383,5 +384,25 @@ fn retain_observations(previous: &Value, next: &mut Value) {
         {
             history.insert(prior + 1, entry.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod vibe_314_policy_tests {
+    use super::runtime_patch;
+    use serde_json::json;
+
+    #[test]
+    fn unified_runtime_restores_the_session_policy_after_a_null_update() {
+        let session = json!({"harness":"unified", "agent":null, "approvalPolicy":null});
+        let runtime = json!({"activeAgent":{"name":"default"},
+            "activeApprovalPolicy":{"name":"ask"}});
+        let patch = runtime_patch(&session, &runtime);
+        assert!(
+            patch
+                .iter()
+                .any(|op| op["path"] == "/approvalPolicy" && op["value"]["name"] == "ask"),
+            "{patch:?}"
+        );
     }
 }

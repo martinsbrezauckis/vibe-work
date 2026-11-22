@@ -229,6 +229,12 @@ static TABLE: &[Row] = &[
     deny!("skills/local/read", NoEvidence),
     deny!("skills/local/setEnabled", NoUserInterface),
     deny!("skills/local/write", NoUserInterface),
+    deny!("skills/deleteLocal", NoUserInterface),
+    deny!("storage/leftovers/clean", NoUserInterface),
+    deny!("storage/sessions/delete", NoUserInterface),
+    deny!("vibebot/deliver", InternalOnly),
+    deny!("vibebot/follow", InternalOnly),
+    deny!("vibebot/localTools", InternalOnly),
     deny!("setup/oidc-cancel", Credential),
     deny!("setup/oidc-clear", Credential),
     deny!("platformCredentials/headers", Credential),
@@ -336,6 +342,7 @@ static TABLE: &[Row] = &[
     deny!("review/turnDiff", NotOnUnified),
     fwd!("runtime/read", RuntimeRead),
     p1!("session/agent/update", AgentUpdate),
+    p1!("session/approvalPolicy/update", ApprovalPolicyUpdate),
     fwd!(
         "session/backgroundProcess/output",
         SessionBackgroundProcessOutput

@@ -87,7 +87,9 @@ fn protected(field: &str) -> bool {
             | "active_model"
             | "default_model"
             | "default_agent"
+            | "default_approval_policy"
             | "agent_name"
+            | "approval_policy"
             | "model_alias"
             | "provider"
             | "api_base"
@@ -111,5 +113,27 @@ fn wipe(value: Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod vibe_314_tests {
+    use super::same;
+    use serde_json::json;
+
+    #[test]
+    fn scanner_cannot_change_the_default_approval_policy() {
+        let source = json!({"default_approval_policy":"ask", "approval_policy":"ask"});
+        let changed_default =
+            json!({"default_approval_policy":"auto-approve", "approval_policy":"ask"});
+        assert!(!same(&source, &changed_default, ""), "default config");
+    }
+
+    #[test]
+    fn scanner_cannot_change_the_session_approval_policy() {
+        let source = json!({"default_approval_policy":"ask", "approval_policy":"ask"});
+        let changed_session =
+            json!({"default_approval_policy":"ask", "approval_policy":"auto-approve"});
+        assert!(!same(&source, &changed_session, ""), "session pin");
     }
 }

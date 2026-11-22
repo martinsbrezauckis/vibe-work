@@ -114,6 +114,19 @@ struct State {
 }
 
 impl Records {
+    pub(super) fn has_saved_builtin_medium(&self) -> bool {
+        self.state
+            .lock_or_recover()
+            .document
+            .chats
+            .values()
+            .any(|value| {
+                Record::read(value)
+                    .expected()
+                    .is_some_and(|choice| super::bootstrap::is_builtin_medium(&choice))
+            })
+    }
+
     pub fn load(dir: Option<&Path>) -> Self {
         Self::load_with(dir, save)
     }

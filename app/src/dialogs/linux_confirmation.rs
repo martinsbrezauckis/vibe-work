@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tauri::{AppHandle, Runtime};
 use tokio::sync::oneshot;
-use vw_platform::confirm_window::{ConfirmSpec, linux as window};
+use vw_platform::confirm_window::linux as window;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -60,13 +60,7 @@ pub(super) async fn show_dialog<R: Runtime>(
             let parent =
                 crate::main_window(&app_for_window).and_then(|window| window.gtk_window().ok());
             // The question is the bold first line (Orca reads it right after the window title), the rest below it.
-            let (heading, rest) = vw_host::dialog_heading(&text);
-            let spec = ConfirmSpec {
-                title: vw_host::DIALOG_TITLE.to_owned(),
-                heading,
-                body: rest,
-                buttons: labels,
-            };
+            let spec = super::dialog_spec(&text, labels);
             window::show(
                 id,
                 parent.as_ref(),

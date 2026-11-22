@@ -1,7 +1,7 @@
 /**
  * The composer's session controls: the runtime snapshot behind the pickers, the model and
  * thinking pickers (`config/model/write`, pinned per session), the access menu
- * (`session/agent/update`; native picks are consent, other Full access switches ask), the skills of the `/`
+ * (`session/approvalPolicy/update`; native picks are consent, other Full access switches ask), the skills of the `/`
  * menu (`skills/list`), and the GUI `/` commands.
  * Depends on: coreStore, composerStore, composerSend, composerRewind, shellStore, sessionActions,
  * toastStore, the composer model. Called by: createComposer.
@@ -205,8 +205,8 @@ export function createSessionControls(deps: {
         if (modeOf(agentName)?.confirm === true && !deps.trustedAccessPick) {
           const answer = await core.run({
             type: "requestConfirmation",
-            method: "session/agent/update",
-            params: { sessionId, agentName },
+            method: "session/approvalPolicy/update",
+            params: { sessionId, approvalPolicy: agentName },
           });
           if (answer.type === "confirmation") token = answer.token;
         }
@@ -343,7 +343,7 @@ export function createSessionControls(deps: {
               obj(obj(runtime?.["config"] ?? null)?.["activeModel"] ?? null)?.["displayName"] ??
                 null,
             );
-            const agent = str(obj(runtime?.["activeAgent"] ?? null)?.["name"] ?? null);
+            const agent = currentModeId(runtime ?? undefined, undefined);
             const window = runtime?.["contextWindow"];
             const tokens = obj(core.store.get().sessions[sessionId]?.session["tokenUsage"] ?? null);
             const total = tokens?.["totalTokens"];

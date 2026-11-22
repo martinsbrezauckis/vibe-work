@@ -22,7 +22,7 @@ Remove on **Your Chrome** disconnects only Chrome; Remove on **Your Edge** disco
 | Accept edits | Also type, fill, submit forms, answer page dialogs, upload, save PDFs, drag/drop, read/add/rename bookmarks and read history. Typing into password and sensitive fields is refused. |
 | Full access | Also cookie values, site-storage values, clipboard text, captured network response bodies and unredacted diagnostic headers, vault sign-in, site-data changes, page scripts, WebMCP tools, bookmark removal and history deletion. Vault consent remains separate. |
 | Smart approve | Accept edits. |
-| Plan on a page / Explore | Chrome tools are absent. |
+| Explore | Chrome tools are absent. |
 
 Cookie values, local/session storage values, clipboard text, captured network response bodies and unredacted request/response headers require Full access in every browser, including the built-in browser. Ask and Accept edits refuse these reads with a reason and instructions for switching modes. Captured response bodies can contain credentials that were never displayed on the page. Rendered page content, cookie names and storage keys remain ordinary reads. Access modes are cumulative: Accept edits retains Ask's approval cards for actions it does not run directly, including HTTP sign-in with a saved vault login.
 

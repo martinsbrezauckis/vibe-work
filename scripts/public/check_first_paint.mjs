@@ -19,8 +19,10 @@ import { REPO_ROOT } from "./lib_files.mjs";
 // selection, paused-tools replies) passed the old budget by 656 bytes. The command palette must stay in the first paint: keys typed
 // right after Ctrl+K land in its field.
 // 2_010_000 -> 2_015_000 on purpose for the 0.1.15 last fixes: voice chat silent-microphone notice and wait, page-crash notice,
-// knowledge-base edits. 0.1.16 moves voice-chat code out of the eager chunk.
-const BUDGET = 2_015_000;
+// knowledge-base edits.
+// 2_015_000 -> 2_017_000 on purpose for the 0.1.16 fixes: one-word voice answers matched to question cards and the
+// chat-switch capture notice (68 bytes over). Moving voice-chat code out of the eager chunk follows in 0.1.17.
+const BUDGET = 2_017_000;
 // A class name only CodeMirror's view package carries; survives minification.
 const EDITOR_MARK = "cm-scroller";
 

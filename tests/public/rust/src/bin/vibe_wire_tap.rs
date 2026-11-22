@@ -4,9 +4,8 @@
 //! what the core sent to the given files, in the formats the old fake server wrote (so a test that proves "this call
 //! never reached Vibe" reads the same file whatever the backend):
 //! - `--methods`: one request method per line (`initialize` left out);
-//! - `--channels`: `<channel> <method> <sessionId|-> <agent|->` per request (channel 0 = not multiplexed);
-//! - `--agent-config`: `{"method", "agentConfig", "planProfile"}` per request with an `agentConfig` (`planProfile`:
-//!   `VIBE_HOME/agents/vw-plan.toml` at that moment);
+//! - `--channels`: `<channel> <method> <sessionId|-> <approvalPolicy|->` per request (channel 0 = not multiplexed);
+//! - `--agent-config`: `{"method", "agentConfig"}` per request with an `agentConfig`;
 //! - `--params`: `{"method", "params"}` per request, exactly as it arrived;
 //! - `--responses`: raw server output bytes, for correlating real assigned IDs after a local failure;
 //! - `--context`: `{"sessionId", "context": [texts], "user": [texts]}` per `session/turn/enqueue` with context entries.
@@ -153,19 +152,41 @@ fn record(logs: &Logs, line: &str) {
         .as_str()
         .or_else(|| params["sourceSessionId"].as_str())
         .unwrap_or("-");
-    let agent = params
-        .pointer("/agentConfig/agent")
-        .or_else(|| params.get("agentName"))
+    let policy = params
+        .pointer("/agentConfig/approvalPolicy")
         .and_then(Value::as_str)
+        .or_else(|| params.get("approvalPolicy").and_then(Value::as_str))
+        .or_else(|| {
+            params
+                .pointer("/agentConfig/agent")
+                .and_then(Value::as_str)
+                .filter(|name| {
+                    matches!(
+                        *name,
+                        "ask" | "accept-edits" | "smart-approve" | "auto-approve"
+                    )
+                })
+        })
+        .or_else(|| {
+            params
+                .get("agentName")
+                .and_then(Value::as_str)
+                .filter(|name| {
+                    matches!(
+                        *name,
+                        "ask" | "accept-edits" | "smart-approve" | "auto-approve"
+                    )
+                })
+        })
         .unwrap_or("-");
-    append(&logs.channels, &format!("{channel} {method} {sid} {agent}"));
+    append(
+        &logs.channels,
+        &format!("{channel} {method} {sid} {policy}"),
+    );
     if let Some(config) = params.get("agentConfig") {
-        let plan = std::env::var_os("VIBE_HOME")
-            .map(|home| PathBuf::from(home).join("agents/vw-plan.toml"))
-            .and_then(|file| std::fs::read_to_string(file).ok());
         append(
             &logs.agent_config,
-            &json!({"method": method, "agentConfig": config, "planProfile": plan}).to_string(),
+            &json!({"method": method, "agentConfig": config}).to_string(),
         );
     }
     append(

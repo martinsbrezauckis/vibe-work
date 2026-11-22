@@ -33,7 +33,7 @@ async fn the_expiry_route_is_not_in_a_normal_build() {
     .await;
     let (api, client) = debug_api(&rig.core, &rig.dir).await;
     let started = client
-        .command(json!({"type":"startSession","agentConfig":{"agent":"ask"}}))
+        .command(json!({"type":"startSession","agentConfig":{"approvalPolicy":"ask"}}))
         .await;
     let sid = started["snapshot"]["sessionId"]
         .as_str()

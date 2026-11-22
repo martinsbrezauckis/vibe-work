@@ -10,6 +10,8 @@
 ; Program files: install and uninstall also delete the install-folder files earlier versions shipped and this one
 ; does not (VIBE_DELETE_RETIRED_FILES), so an update leaves no stale file and an uninstall no install folder.
 
+!include "${__FILEDIR__}/installer-process.nsh"
+
 Var DeleteCredentialsIncomplete
 Var DeleteSessionsVaultIncomplete
 

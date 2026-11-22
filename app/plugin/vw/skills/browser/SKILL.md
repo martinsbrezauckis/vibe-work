@@ -7,7 +7,7 @@ description: Vibe Work's built-in browser (browser_*) for pages, forms, screensh
 
 ## Tabs
 
-**App preview** is pinned for `preview_open`. Tools use web tabs: omitted `tab` means current; `"new"` or an id selects another. Results: `tab.id`, `tab.site`; title/URL are under `untrustedPageContent.tab`. User tabs need handoff for page actions. Ask, Accept edits and Full access close this chat's own tabs and tabs the user handed over. Plan on a page and Explore cannot close tabs.
+**App preview** is pinned for `preview_open`. Tools use web tabs: omitted `tab` means current; `"new"` or an id selects another. Results: `tab.id`, `tab.site`; title/URL are under `untrustedPageContent.tab`. User tabs need handoff for page actions. Ask, Accept edits and Full access close this chat's own tabs and tabs the user handed over. Explore cannot close tabs.
 
 ```ts
 await tools.mcp_vw.browser_act({ action: "navigate", url: "https://example.com/", tab: "new" });

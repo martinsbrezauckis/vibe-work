@@ -41,7 +41,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
   const running = useCoreState((s) => s.server.phase === "running");
   const selected = useShellState((s) => s.selected);
   // The account is read through the open chat; without one the core reads it through its own short-lived helper
-  // chat. A chat that exists but is not open would only give Vibe's detached answer ("Not reported").
+  // chat. A chat that exists but is not open would only give Vibe's detached answer (the shared missing-value label).
   const via = useCoreState((s) =>
     selected !== null && s.sessions[selected] !== undefined ? selected : null,
   );
@@ -98,7 +98,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           <div className="check">
             <dt>Tokens used</dt>
             {usage.totalTokens === null ? (
-              <dd>Not reported yet</dd>
+              <dd>{TEXT.notReported}</dd>
             ) : (
               <dd className="mono">
                 {`${formatTokens(usage.totalTokens)} (${formatTokens(usage.inputTokens)} in, ${formatTokens(usage.outputTokens)} out)`}
@@ -107,7 +107,7 @@ export function AccountSettings({ part }: { part: "account" | "usage" }) {
           </div>
           <div className="check">
             <dt>Context</dt>
-            <dd>{readout === null ? "Not reported yet" : readout.explain}</dd>
+            <dd>{readout === null ? TEXT.notReported : readout.explain}</dd>
           </div>
         </dl>
       )}
@@ -160,13 +160,13 @@ function AccountFacts({
         <dl className="set-facts" data-testid="account-facts">
           <div className="check">
             <dt>Plan</dt>
-            <dd>{planInWords(account) ?? "Not reported"}</dd>
+            <dd>{planInWords(account) ?? TEXT.notReported}</dd>
           </div>
           <div className="check">
             <dt>Account</dt>
             <dd>
               {account.problem === null
-                ? (STATUS_TEXT[account.status] ?? "Not reported")
+                ? (STATUS_TEXT[account.status] ?? TEXT.notReported)
                 : `Could not be read: ${account.problem}`}
             </dd>
           </div>

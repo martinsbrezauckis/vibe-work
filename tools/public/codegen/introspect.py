@@ -54,7 +54,8 @@ ALIAS_MODULES = (
     "vibe.app_server._connection_protocol",
 )
 LOOKUP_MODULES = ("vibe.app_server.protocol", "vibe.app_server.models", "vibe.app_server._setup_oidc",
-                  "vibe.app_server._platform_credential_headers") + ALIAS_MODULES[2:]
+                  "vibe.app_server._platform_credential_headers",
+                  "vibe.app_server._vibe_bot", "vibe.app_server._vibe_bot_tools") + ALIAS_MODULES[2:]
 
 # Models outside the method map that clients still see on the wire (JSON-RPC envelopes and errors).
 ENVELOPE_ROOTS = (

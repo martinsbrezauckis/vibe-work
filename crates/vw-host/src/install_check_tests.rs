@@ -8,7 +8,7 @@
 use super::start_problem_within;
 use super::{
     HELPERS, damaged_helper, helper_start_problem, installed_copy, loader_failure, required_length,
-    start_problem, start_problems,
+    start_problem, start_problems_with_pin,
 };
 use std::path::Path;
 
@@ -275,6 +275,7 @@ fn not_starting(path: &Path) {
 
 #[test]
 fn the_first_shipped_program_that_cannot_start_is_named() {
+    use sha2::{Digest, Sha256};
     let folder = tempfile::tempdir().unwrap();
     install(folder.path(), true);
     let exe = folder.path().join("vibe-work.exe");
@@ -288,12 +289,22 @@ fn the_first_shipped_program_that_cannot_start_is_named() {
     );
     let chrome = folder.path().join("chrome-control/bin/chrome-control.exe");
     not_starting(&chrome);
-    let (name, problem) = settled(|| helper_start_problem(&exe, None)).unwrap();
+    let pin = format!("{:x}", Sha256::digest(std::fs::read(&chrome).unwrap()));
+    assert!(
+        helper_start_problem(&exe, None).is_none(),
+        "an unpinned Chrome helper is not started"
+    );
+    let (name, problem) = settled(|| {
+        start_problems_with_pin(&exe, None, Some(&pin))
+            .into_iter()
+            .next()
+    })
+    .unwrap();
     assert_eq!(name, "chrome-control.exe");
     assert!(problem.starts_with("it could not be started"), "{problem}");
     not_starting(&folder.path().join(HELPERS[1]));
     assert_eq!(helper_start_problem(&exe, None).unwrap().0, HELPERS[1]);
-    let all: Vec<_> = start_problems(&exe, None)
+    let all: Vec<_> = start_problems_with_pin(&exe, None, Some(&pin))
         .into_iter()
         .map(|(name, _)| name)
         .collect();
@@ -307,5 +318,31 @@ fn the_first_shipped_program_that_cannot_start_is_named() {
         helper_start_problem(&exe, None),
         None,
         "not an installed copy"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_changed_chrome_helper_is_not_started_by_the_install_probe() {
+    use sha2::{Digest, Sha256};
+    let folder = tempfile::tempdir().unwrap();
+    install(folder.path(), true);
+    let exe = folder.path().join("vibe-work.exe");
+    for name in HELPERS {
+        starting(&folder.path().join(name));
+    }
+    let chrome = folder.path().join("chrome-control/bin/chrome-control.exe");
+    starting(&chrome);
+    let expected = format!("{:x}", Sha256::digest(std::fs::read(&chrome).unwrap()));
+    let marker = folder.path().join("replaced-helper-ran");
+    std::fs::write(
+        &chrome,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    let _ = start_problems_with_pin(&exe, None, Some(&expected));
+    assert!(
+        !marker.exists(),
+        "the replaced helper ran before its fingerprint was checked"
     );
 }

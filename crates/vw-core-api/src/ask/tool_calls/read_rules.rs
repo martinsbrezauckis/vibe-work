@@ -3,8 +3,8 @@
 //! file read it stands for, set to ask or never, or turned off) keeps the card.
 //!
 //! Invariants:
-//! - The same persisted layers Vibe merges for the chat are read: Vibe's own config, the active mode's own profile
-//!   file, each folder's `.vibe` config and profile up to the Vibe home's parent, cached administrator rules and the
+//! - The same persisted layers Vibe merges for the chat are read: Vibe's own config, the active agent and approval
+//!   policy files, each folder's `.vibe` config and profiles up to the Vibe home's parent, cached administrator rules and the
 //!   `VIBE_TOOLS` override. Any layer that names a stricter rule wins (conservative union).
 //! - A layer that cannot be read or parsed, or a check that runs out of time, counts as a stricter rule: the card
 //!   stays. Nothing read here is shown or returned; only the yes/no answer leaves this module.
@@ -48,20 +48,31 @@ fn stricter_table(table: &toml::Table, tools: &[String]) -> bool {
     })
 }
 
-/// The files of one folder level: its config and the active mode's own profile.
-fn layer_files(dir: &Path, mode: &str) -> [PathBuf; 2] {
-    [
+/// The files of one folder level: its config and the selected agent and approval policy.
+fn layer_files(dir: &Path, mode: &str, agent: Option<&str>) -> Vec<PathBuf> {
+    let mut files = vec![
         dir.join("config.toml"),
         dir.join("agents").join(format!("{mode}.toml")),
-    ]
+    ];
+    if let Some(agent) = agent.filter(|agent| *agent != mode) {
+        files.push(dir.join("agents").join(format!("{agent}.toml")));
+    }
+    files
 }
 
 /// Whether the person configured a stricter rule than the default for `tool` in `mode` (module docs). Blocking.
-pub(super) fn stricter(home: &Path, roots: &[PathBuf], mode: &str, tool: &str) -> bool {
+pub(super) fn stricter(
+    home: &Path,
+    roots: &[PathBuf],
+    mode: &str,
+    agent: Option<&str>,
+    tool: &str,
+) -> bool {
     check(
         home,
         roots,
         mode,
+        agent,
         tool,
         Instant::now() + Duration::from_secs(2),
     )
@@ -72,14 +83,18 @@ fn check(
     home: &Path,
     roots: &[PathBuf],
     mode: &str,
+    agent: Option<&str>,
     tool: &str,
     deadline: Instant,
 ) -> Result<bool, ()> {
+    if !valid_profile(mode) || agent.is_some_and(|agent| !valid_profile(agent)) {
+        return Err(());
+    }
     let tools = governing(tool);
-    let mut files: Vec<PathBuf> = layer_files(home, mode).into();
+    let mut files = layer_files(home, mode, agent);
     for root in roots {
         for ancestor in root.ancestors().take(64) {
-            files.extend(layer_files(&ancestor.join(".vibe"), mode));
+            files.extend(layer_files(&ancestor.join(".vibe"), mode, agent));
             if Some(ancestor) == home.parent() {
                 break;
             }
@@ -119,9 +134,69 @@ fn check(
     Ok(false)
 }
 
+fn valid_profile(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && !matches!(name, "." | "..")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::feature_test_core::Fixture;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn active_agent_rule_keeps_the_accept_edits_tool_card() {
+        let f = Fixture::new().await;
+        let project = f.root.join("project");
+        f.load("chat", &project, &[], false);
+        let agents = project.join(".vibe/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join("explore.toml"),
+            "[tools.read_file]\npermission = 'ask'",
+        )
+        .unwrap();
+        let default = json!({"activeAgent":{"name":"default"},
+            "activeApprovalPolicy":{"name":"accept-edits"}});
+        let _ = f.core.shared.store.apply(vw_session::Notification::new(
+            "runtime/updated",
+            json!({"sessionId":"chat","runtime":default}),
+        ));
+        f.core.shared.access.observe_runtime("chat", &default);
+        assert!(!super::super::stricter_rule(&f.core.shared, "chat", names::PANEL_READ).await);
+        let explore = json!({"activeAgent":{"name":"explore"},
+            "activeApprovalPolicy":{"name":"accept-edits"}});
+        let _ = f.core.shared.store.apply(vw_session::Notification::new(
+            "runtime/updated",
+            json!({"sessionId":"chat","runtime":explore}),
+        ));
+        f.core.shared.access.observe_runtime("chat", &explore);
+        assert!(super::super::stricter_rule(&f.core.shared, "chat", names::PANEL_READ).await);
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    async fn active_ask_policy_rule_keeps_the_browser_read_card() {
+        let f = Fixture::new().await;
+        let project = f.root.join("project");
+        f.load("chat", &project, &[], false);
+        let agents = project.join(".vibe/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join("ask.toml"),
+            "[tools.vw_browser_read]\npermission = 'ask'",
+        )
+        .unwrap();
+        let runtime = json!({"activeAgent":{"name":"default"},
+            "activeApprovalPolicy":{"name":"ask"}});
+        let _ = f.core.shared.store.apply(vw_session::Notification::new(
+            "runtime/updated",
+            json!({"sessionId":"chat","runtime":runtime}),
+        ));
+        f.core.shared.access.observe_runtime("chat", &runtime);
+        assert!(super::super::stricter_rule(&f.core.shared, "chat", names::BROWSER_READ).await);
+        f.finish().await;
+    }
 
     #[test]
     fn ask_never_and_off_are_stricter_and_unreadable_config_keeps_the_card() {
@@ -142,7 +217,13 @@ mod tests {
         let home = root.join("vibe-home");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.toml"), "broken = [").unwrap();
-        assert!(stricter(&home, &[], "accept-edits", names::PREVIEW_LIST));
+        assert!(stricter(
+            &home,
+            &[],
+            "accept-edits",
+            None,
+            names::PREVIEW_LIST
+        ));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -224,8 +224,8 @@ pub fn for_request(route: &str, body: &Value, facts: Option<&dyn GrantFacts>) ->
 fn access(body: &Value) -> Grant {
     let pins = vec![
         ("/type", json!("requestConfirmation")),
-        ("/method", json!("session/agent/update")),
-        ("/params/agentName", json!("auto-approve")),
+        ("/method", json!("session/approvalPolicy/update")),
+        ("/params/approvalPolicy", json!("auto-approve")),
     ];
     let pins = match text(body, "sessionId").filter(|id| *id != "new-chat") {
         Some(id) => {

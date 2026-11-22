@@ -15,6 +15,11 @@
       "title": "Enabled",
       "type": "boolean"
     },
+    "linked": {
+      "default": false,
+      "title": "Linked",
+      "type": "boolean"
+    },
     "locked": {
       "default": false,
       "title": "Locked",
@@ -23,6 +28,18 @@
     "name": {
       "title": "Name",
       "type": "string"
+    },
+    "path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Path"
     },
     "prompt": {
       "title": "Prompt",

@@ -290,11 +290,8 @@ async fn safari_uses_its_own_switch_and_browser_identity() {
         agent_browser::selected(shared, "s", "chrome_session", &args).id(),
         "safari"
     );
+    // Plan mode was removed in 0.1.16; every approval policy has a browser tier.
     assert!(check::authorize(shared, "s", "chrome_session", &args).is_ok());
-    shared
-        .access
-        .observe_request("session/agent/update", "s", &json!({"agentName":"plan"}));
-    assert!(check::authorize(shared, "s", "chrome_session", &args).is_err());
     assert!(!shared.chrome_control.enabled());
     core.shutdown().await;
 }

@@ -1,15 +1,14 @@
 /**
- * Access modes (Vibe's agent profiles) as the composer's access menu shows them:
+ * Access modes (Vibe's approval policies) as the composer's access menu shows them:
  * labels and the colour level of the composer's top rule (`.composer.lvl-*`), which profiles are
  * offered, and which one the session runs in.
  * Depends on: protocol/core types. Called by: the access menu, the composer view, composerSession.
  * Invariants:
- * - Smart approve is offered only when Vibe lists `smart-approve` among the session's agents (a Mistral
+ * - Smart approve is offered only when Vibe lists `smart-approve` among the session's policies (a Mistral
  *   dark launch); Vibe Work never forces it.
  * - Full access (`auto-approve`) needs consent: a trusted native menu pick decides; other paths need
  *   native confirmation. The gate always requires a token for the switch.
- * - "Plan on a page" is the app-owned `vw-plan` profile: the plan is
- *   written as a Project Pages plan page; other file writes are refused; shell commands still run.
+ * - A chat saved with the retired `vw-plan` agent opens in Ask.
  */
 import type { JsonValue } from "../../../protocol/core";
 import { term, TEXT, wording } from "../../../vocabulary";
@@ -29,7 +28,7 @@ export interface AccessMode {
   confirm: boolean;
 }
 
-/** Vibe's profiles in menu order with the wording that matches the access rules. */
+/** Vibe's policies in menu order with the wording that matches the access rules. */
 export const ACCESS_MODES: readonly AccessMode[] = [
   {
     id: "auto-approve",
@@ -63,72 +62,82 @@ export const ACCESS_MODES: readonly AccessMode[] = [
     level: "neutral",
     confirm: false,
   },
-  {
-    id: "vw-plan",
-    label: term("accessModes", "vw-plan").name,
-    description: term("accessModes", "vw-plan").description,
-    tooltip: term("accessModes", "vw-plan").tooltip,
-    level: "safe",
-    confirm: false,
-  },
 ];
 
-/** Names of the agents a `RuntimeSnapshot` lists (`runtime.agents[].name`), or `null` without one. */
-function runtimeAgents(runtime: JsonValue | undefined): string[] | null {
-  const agents = obj(runtime)?.["agents"];
-  if (!Array.isArray(agents)) return null;
-  return agents.flatMap((a) => {
+/** Names in a runtime list, or `null` without that list. */
+function runtimeNames(runtime: JsonValue | undefined, key: string): string[] | null {
+  const entries = obj(runtime)?.[key];
+  if (!Array.isArray(entries)) return null;
+  return entries.flatMap((a) => {
     const name = obj(a)?.["name"];
     return typeof name === "string" ? [name] : [];
   });
 }
 
 /**
- * The modes to offer: every mode except smart approve, which needs Vibe to list it, and "Plan on a page", which is
- * hidden when Vibe's list is known and lacks it (its profile file was not there when the session opened).
+ * Vibe's policy list bounds the offered modes.
  */
 export function offeredModes(runtime: JsonValue | undefined): AccessMode[] {
-  const listed = runtimeAgents(runtime);
+  const policies = runtimeNames(runtime, "approvalPolicies") ?? runtimeNames(runtime, "agents");
   return ACCESS_MODES.filter((mode) => {
-    if (mode.id === "smart-approve") return listed?.includes(mode.id) === true;
-    if (mode.id === "vw-plan") return listed === null || listed.includes(mode.id);
-    return true;
+    if (mode.id === "smart-approve") return policies?.includes(mode.id) === true;
+    return policies === null || policies.includes(mode.id);
   });
 }
 
 /**
  * The core's resolved mode is available before attachment and stays visible during verification.
- * Older clients fall back to the runtime, then Vibe's recorded agent (an object with a name).
+ * Older clients fall back to the legacy agent-as-policy, then the session's saved policy.
  */
 export function currentModeId(
   runtime: JsonValue | undefined,
   session: Obj | undefined,
   remembered?: string,
 ): string | null {
-  if (remembered !== undefined && remembered !== "") return remembered;
-  const active = obj(obj(runtime)?.["activeAgent"] ?? null)?.["name"];
-  if (typeof active === "string" && active !== "") return active;
+  if (remembered === "vw-plan") {
+    const restored = obj(obj(runtime)?.["activeApprovalPolicy"] ?? null)?.["name"];
+    return typeof restored === "string" && restored !== "" ? restored : "ask";
+  }
+  if (remembered !== undefined && remembered !== "" && remembered !== "default") return remembered;
+  const activeAgent = obj(obj(runtime)?.["activeAgent"] ?? null)?.["name"];
+  const activePolicy = obj(obj(runtime)?.["activeApprovalPolicy"] ?? null)?.["name"];
+  if (typeof activePolicy === "string" && activePolicy !== "") return activePolicy;
+  if (activeAgent === "vw-plan") return "ask";
+  const active = activeAgent;
+  if (typeof active === "string" && ACCESS_MODES.some((mode) => mode.id === active)) return active;
+  const savedPolicy = session?.["approvalPolicy"];
+  const savedName =
+    typeof savedPolicy === "string" ? savedPolicy : obj(savedPolicy ?? null)?.["name"];
+  if (typeof savedName === "string" && savedName !== "") return savedName;
   const agent = session?.["agent"];
   const name = typeof agent === "string" ? agent : obj(agent ?? null)?.["name"];
-  return typeof name === "string" && name !== "" ? name : null;
+  if (name === "vw-plan") return "ask";
+  return typeof name === "string" && ACCESS_MODES.some((mode) => mode.id === name) ? name : null;
 }
 
 /**
- * The mode a new session starts in (for the new-chat composer): the configuration's `defaultAgent` from a
+ * The mode a new session starts in (for the new-chat composer): the configuration's `defaultApprovalPolicy` from a
  * `config/read` result (lobby call, no session), when it is one of the modes this menu knows; else `null` (the chip
- * then says "Access", as before). Custom profile names come from the same configuration.
+ * then says "Access", as before). A saved `vw-plan` default maps to Ask.
  */
 export function configuredModeId(config: JsonValue | undefined): string | null {
   const o = obj(config ?? null);
   const view = obj(o?.["config"] ?? null) ?? o;
-  const agent = view?.["defaultAgent"];
+  const configured = view?.["defaultApprovalPolicy"] ?? view?.["default_approval_policy"];
+  if (configured === undefined && view?.["defaultAgent"] === "vw-plan") return "ask";
+  const agent = configured ?? view?.["defaultAgent"];
   const name = typeof agent === "string" ? agent : obj(agent ?? null)?.["name"];
-  return typeof name === "string" && name !== "" ? name : null;
+  return typeof name === "string" &&
+    name !== "" &&
+    (configured !== undefined || ACCESS_MODES.some((mode) => mode.id === name))
+    ? name
+    : null;
 }
 
 /** The mode with `id`, or a generic entry for a profile we do not know (a custom TOML profile). */
 export function modeOf(id: string | null): AccessMode | null {
   if (id === null) return null;
+  if (id === "vw-plan") return ACCESS_MODES.find((mode) => mode.id === "ask") ?? null;
   return (
     ACCESS_MODES.find((mode) => mode.id === id) ?? {
       id,

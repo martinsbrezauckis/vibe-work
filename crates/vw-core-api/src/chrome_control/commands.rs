@@ -182,6 +182,7 @@ impl Core {
         }
         let chrome = &self.shared.chrome_control;
         let _held = chrome.lifecycle.lock().await;
+        let _ = chrome.config.setup_notice.take();
         if chrome
             .owner
             .credential_missing
@@ -206,7 +207,7 @@ impl Core {
         }
         // Chrome may start the helper as soon as it sees the extension: give it this version's copy first.
         super::refresh_helper_held(chrome).await;
-        setup::repair_registrations(&chrome.config, state, Some("Google Chrome"))
+        setup::reconnect_registrations(&chrome.config, state, "Google Chrome")
             .map_err(|reason| invalid(&reason))?;
         chrome
             .set_enabled(true)
@@ -249,7 +250,7 @@ impl Core {
         }
         launched.map_err(|reason| invalid(&reason))?;
         super::owner::publish(&self.shared);
-        Ok(self.chrome_result(None))
+        Ok(self.with_setup_notice(self.chrome_result(None)))
     }
 
     /// `chromeControl`.
@@ -361,10 +362,11 @@ impl Core {
                     return Ok(asked);
                 }
                 let _held = chrome.lifecycle.lock().await;
+                let _ = chrome.config.setup_notice.take();
                 super::enroll::connect_edge(&self.shared, origin)
                     .await
                     .map_err(|reason| invalid(&reason))?;
-                Ok(self.chrome_result(None))
+                Ok(self.with_setup_notice(self.chrome_result(None)))
             }
             ChromeControlRequest::OfferFirefoxSetup {} => {
                 Ok(self.chrome_result(Some(self.firefox_setup_offer()?)))

@@ -95,6 +95,9 @@ fn accepts_edits(tool: &str, args: &Value) -> bool {
 
 /// Whether the person set a stricter rule for `tool` in Vibe (`read_rules`); only the default card goes.
 async fn stricter_rule(shared: &Arc<Shared>, owner: &str, tool: &str) -> bool {
+    let Some(policy) = shared.access.remembered(owner) else {
+        return true;
+    };
     let home = shared.instructions.own_home.clone();
     // The chat's folders as its tools see them; read without the folder guard's own refusal record (the tool's
     // run still checks them).
@@ -103,10 +106,29 @@ async fn stricter_rule(shared: &Arc<Shared>, owner: &str, tool: &str) -> bool {
         .find(|c| c.session_id == owner)
         .map(|c| c.folders)
         .unwrap_or_default();
+    let agent = shared
+        .store
+        .runtime(owner)
+        .and_then(|runtime| {
+            runtime
+                .pointer("/activeAgent/name")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            shared.store.view(owner).and_then(|view| {
+                view.state
+                    .pointer("/session/agent/name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+        });
     let tool = tool.to_owned();
-    tokio::task::spawn_blocking(move || read_rules::stricter(&home, &roots, "accept-edits", &tool))
-        .await
-        .unwrap_or(true)
+    tokio::task::spawn_blocking(move || {
+        read_rules::stricter(&home, &roots, &policy, agent.as_deref(), &tool)
+    })
+    .await
+    .unwrap_or(true)
 }
 
 pub(crate) async fn permission(

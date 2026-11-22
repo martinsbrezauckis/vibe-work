@@ -98,6 +98,25 @@ fn hold_modal<R: Runtime>(app: &AppHandle<R>, title: &str) -> Option<vw_core_api
     Some(host.core()?.browser_dialog(title))
 }
 
+/// The native title, heading and body, shared by every OS dialog.
+fn dialog_spec(text: &str, labels: Vec<String>) -> vw_platform::confirm_window::ConfirmSpec {
+    let title = if labels.as_slice() == ["OK"] {
+        vw_vocabulary::texts::INFORMATION_NOTICE_TITLE
+    } else {
+        vw_host::DIALOG_TITLE
+    };
+    let (mut heading, body) = vw_host::dialog_heading(text);
+    if heading == vw_host::DIALOG_TITLE {
+        title.clone_into(&mut heading);
+    }
+    vw_platform::confirm_window::ConfirmSpec {
+        title: title.to_owned(),
+        heading,
+        body,
+        buttons: labels,
+    }
+}
+
 /// Shows one confirmation dialog with `text` and the buttons `labels` (last = declining = default, see
 /// `vw_host::dialog_buttons`) and returns the pressed label; `None` when it was closed, declined without a button
 /// (Escape), failed, or there are not 1 to 3 labels. Dropping the future closes the window.
@@ -109,7 +128,7 @@ async fn show_dialog<R: Runtime>(
     modal: bool,
     ask: Option<&str>,
 ) -> Option<String> {
-    let _dialog = modal.then(|| hold_modal(app, &vw_host::dialog_heading(&text).0));
+    let _dialog = modal.then(|| hold_modal(app, &dialog_spec(&text, labels.to_vec()).heading));
     let ask = ask.filter(|_| !modal);
     #[cfg(target_os = "linux")]
     return linux_confirmation::show_dialog(app, text, labels, modal, ask).await;

@@ -153,6 +153,8 @@ mod tools;
 pub use tools::*;
 mod turn;
 pub use turn::*;
+mod vibebot;
+pub use vibebot::*;
 mod warning;
 pub use warning::*;
 mod workspace_1;

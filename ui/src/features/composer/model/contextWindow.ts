@@ -4,6 +4,7 @@
  * Other models show only a valid configured count. This changes display, never Vibe's config.
  * The 2.26.1 projection omits provider; exact names identify published model capacity, not endpoint caps.
  */
+import { TEXT } from "../../../vocabulary";
 import { type Obj } from "../../transcript/model/entries";
 
 // Mistral model cards. Keep their units: "1M" does not specify an exact integer.
@@ -32,7 +33,7 @@ export function contextWindowLabel(model: Obj): string {
   if (model["source"] === "catalog") {
     return typeof count === "number" && Number.isSafeInteger(count) && count > 0
       ? `Context: ${count.toLocaleString("en-US")} tokens`
-      : "Context: not reported";
+      : `Context: ${TEXT.notReported}`;
   }
   const name = model["name"];
   const provider = model["provider"];
@@ -47,5 +48,5 @@ export function contextWindowLabel(model: Obj): string {
   if (published !== undefined) return `Context: ${published} tokens`;
   return typeof count === "number" && Number.isSafeInteger(count) && count > 0
     ? `Context: ${count.toLocaleString("en-US")} tokens`
-    : "Context: not reported";
+    : `Context: ${TEXT.notReported}`;
 }

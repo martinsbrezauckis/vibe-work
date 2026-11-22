@@ -12,6 +12,7 @@
  *   fill is "of N tokens until compaction", never "of the model's window".
  * - The email address is not read into the view (the screen has no use for it).
  */
+import { TEXT } from "../vocabulary";
 import type { JsonValue, RateLimitsView } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
@@ -187,9 +188,9 @@ export function contextReadout(
   };
 }
 
-/** A count with thousands separators ("12,345"); "Not reported yet" for `null`. */
+/** A count with thousands separators ("12,345"); the shared missing-value label for `null`. */
 export function formatTokens(value: number | null): string {
-  return value === null ? "Not reported yet" : value.toLocaleString("en-US");
+  return value === null ? TEXT.notReported : value.toLocaleString("en-US");
 }
 
 /** How long a rate-limit snapshot counts as current: the numbers are per minute. */

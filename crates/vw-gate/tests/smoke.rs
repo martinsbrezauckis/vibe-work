@@ -43,3 +43,33 @@ fn native_plugin_switches_and_retired_project_methods_are_refused() {
     }
     assert_eq!(classify_server_request("tools/call"), InboundKind::Denied);
 }
+
+#[test]
+fn vibe314_approval_policy_has_a_gated_switch_and_full_access_confirmation() {
+    use serde_json::json;
+    use vw_gate::{Class, P1, TRUSTED_SURFACE_METHODS, classify, full_access_escalation};
+
+    assert!(TRUSTED_SURFACE_METHODS.contains(&"session/approvalPolicy/update"));
+    assert!(!TRUSTED_SURFACE_METHODS.contains(&"session/agent/update"));
+
+    assert_eq!(
+        classify("session/approvalPolicy/update"),
+        Some(Class::Privileged(P1::ApprovalPolicyUpdate))
+    );
+    assert!(full_access_escalation(
+        "session/approvalPolicy/update",
+        &json!({"sessionId":"s", "approvalPolicy":"auto-approve"})
+    ));
+    assert!(full_access_escalation(
+        "session/start",
+        &json!({"agentConfig":{"approvalPolicy":"auto-approve"}})
+    ));
+    assert!(full_access_escalation(
+        "config/write",
+        &json!({"ops":[{"op":"set","path":"/default_approval_policy","value":"auto-approve"}]})
+    ));
+    assert!(!full_access_escalation(
+        "session/agent/update",
+        &json!({"sessionId":"s", "agentName":"default"})
+    ));
+}

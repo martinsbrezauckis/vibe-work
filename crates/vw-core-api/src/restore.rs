@@ -2,11 +2,11 @@
 //!
 //! Why: the core keeps each session's access mode and applies it itself on every reopen (`access.rs`).
 //! Every resume names the resolved profile and the session is then switched
-//! (`session/agent/update`) to the profile it should run in before new work is sent. An interrupted
+//! (`session/approvalPolicy/update`) to the profile it should run in before new work is sent. An interrupted
 //! send first stops the recovered turn, in that same visible mode, before the verified switch.
 //!
 //! Which profile, in order: the one this core last saw for the session (`access.rs`), else Vibe's own
-//! record of it (`PublicSession.agent`, from the store or a `session/read` before the resume; it may
+//! record of it (`PublicSession.approvalPolicy`, from the store or a `session/read` before the resume; it may
 //! be empty), else `ask`. There is no "nothing to restore" path.
 //!
 //! Depends on: `core` (`Core`, `Shared`), `access`, `sessions`, `channels`.
@@ -77,18 +77,18 @@ impl Restoring {
             return Ok((params, Some(token)));
         }
         Ok((
-            json!({"sessionId":self.session_id,"agentConfig":{"agent":self.profile()}}),
+            json!({"sessionId":self.session_id,"agentConfig":{"approvalPolicy":self.profile()}}),
             None,
         ))
     }
 
     /// The selected profile, or Ask when the gate requires a new confirmation for it.
     pub(crate) fn profile(&self) -> &str {
-        let params = json!({"sessionId": self.session_id, "agentName": self.wanted});
+        let params = json!({"sessionId": self.session_id, "approvalPolicy": self.wanted});
         if self
             .shared
             .gate
-            .check("session/agent/update", &params, None)
+            .check("session/approvalPolicy/update", &params, None)
             .is_ok()
         {
             &self.wanted
@@ -105,7 +105,8 @@ pub(crate) fn display_mode(shared: &Shared, id: &str, session: &Value) -> Option
     let ours = remembered.is_some();
     let wanted = remembered.or_else(|| {
         session
-            .pointer("/agent/name")
+            .pointer("/approvalPolicy/name")
+            .or_else(|| session.pointer("/agent/name"))
             .and_then(Value::as_str)
             .map(str::to_owned)
     })?;
@@ -113,8 +114,8 @@ pub(crate) fn display_mode(shared: &Shared, id: &str, session: &Value) -> Option
         || shared
             .gate
             .check(
-                "session/agent/update",
-                &json!({"sessionId": id, "agentName": wanted}),
+                "session/approvalPolicy/update",
+                &json!({"sessionId": id, "approvalPolicy": wanted}),
                 None,
             )
             .is_ok();
@@ -158,7 +159,8 @@ impl Core {
                     .as_ref()
                     .and_then(|session| {
                         session
-                            .pointer("/agent/name")
+                            .pointer("/approvalPolicy/name")
+                            .or_else(|| session.pointer("/agent/name"))
                             .and_then(Value::as_str)
                             .map(str::to_owned)
                     })
@@ -213,8 +215,8 @@ impl Core {
         }
         let id = restore.session_id.clone();
         let wanted = restore.wanted.clone();
-        let method = "session/agent/update";
-        let switch = |agent: &str| json!({"sessionId": id, "agentName": agent});
+        let method = "session/approvalPolicy/update";
+        let switch = |agent: &str| json!({"sessionId": id, "approvalPolicy": agent});
         let mut token = None;
         let mut lowered = self
             .shared
@@ -256,7 +258,7 @@ impl Core {
         };
         let active = reply
             .result
-            .pointer("/runtime/activeAgent/name")
+            .pointer("/runtime/activeApprovalPolicy/name")
             .and_then(Value::as_str);
         if !reports_agent(&reply.result, agent) {
             warn!(
@@ -268,12 +270,12 @@ impl Core {
             return Err(self.fail_closed(restore, agent).await);
         }
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
-        let runtime = crate::model_choices::restore(
+        let runtime = Box::pin(crate::model_choices::restore(
             &self.shared,
             &id,
             reply.result["runtime"].clone(),
             restore.model.clone(),
-        )
+        ))
         .await;
         // Publish the verified runtime even when Vibe only returns it in the switch's reply.
         let applied = self.shared.store.apply(vw_session::Notification::new(
@@ -297,7 +299,7 @@ impl Core {
                 message: format!(
                     "“{}” was reopened in Ask. Choose the access again in the chat if you want to change it.{}",
                     self.shared.names.title_of(&self.shared.store, &id).unwrap_or_else(|| vw_vocabulary::text("untitledSession").unwrap_or_default().to_owned()),
-                    if wanted == "plan" { format!("\nPlan first is gone in Vibe 3; {} is Vibe Work’s planning mode.", vw_vocabulary::label("accessModes", "vw-plan")) } else { String::new() }
+                    if matches!(wanted.as_str(), "plan" | "vw-plan") { "\nThe Plan access mode has been retired. You can still ask the agent to write a plan.".to_owned() } else { String::new() }
                 ),
             });
         }
@@ -334,13 +336,14 @@ impl Core {
             kind: AlertKind::AccessModeUnverified,
             message: message.clone(),
         });
-        CoreError::new(ErrorCode::AccessModeUnverified, message).with_method("session/agent/update")
+        CoreError::new(ErrorCode::AccessModeUnverified, message)
+            .with_method("session/approvalPolicy/update")
     }
 }
 
 fn reports_agent(result: &Value, wanted: &str) -> bool {
     result
-        .pointer("/runtime/activeAgent/name")
+        .pointer("/runtime/activeApprovalPolicy/name")
         .and_then(Value::as_str)
         == Some(wanted)
 }
@@ -350,16 +353,30 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn policy_verification_is_independent_of_the_selected_agent() {
+        assert!(super::reports_agent(
+            &json!({"runtime": {"activeAgent": {"name": "default"},
+                "activeApprovalPolicy": {"name": "ask"}}}),
+            "ask"
+        ));
+        assert!(!super::reports_agent(
+            &json!({"runtime": {"activeAgent": {"name": "ask"},
+                "activeApprovalPolicy": {"name": "auto-approve"}}}),
+            "ask"
+        ));
+    }
+
+    #[test]
     fn profile_verification_rejects_wrong_missing_and_malformed_names() {
         for value in [
-            json!({"runtime":{"activeAgent":{"name":"auto-approve"}}}),
+            json!({"runtime":{"activeApprovalPolicy":{"name":"auto-approve"}}}),
             json!({}),
-            json!({"runtime":{"activeAgent":{"name":42}}}),
+            json!({"runtime":{"activeApprovalPolicy":{"name":42}}}),
         ] {
             assert!(!super::reports_agent(&value, "ask"), "{value}");
         }
         assert!(super::reports_agent(
-            &json!({"runtime":{"activeAgent":{"name":"ask"}}}),
+            &json!({"runtime":{"activeApprovalPolicy":{"name":"ask"}}}),
             "ask"
         ));
     }

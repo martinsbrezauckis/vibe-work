@@ -1,9 +1,9 @@
-//! The access mode (Vibe agent profile) each session runs with, kept by the core so that a reopened
+//! The access mode (Vibe approval policy) each session runs with, kept by the core so that a reopened
 //! session runs in the mode the user chose.
 //!
 //! Design: Vibe Work keeps each session's access mode in the core and applies it itself on every
 //! reopen. Every resume the core sends names the session's selected profile, and the core then
-//! switches the session to the profile it should run in (`session/agent/update`, `restore.rs`) and
+//! switches the session to the policy it should run in (`session/approvalPolicy/update`, `restore.rs`) and
 //! checks Vibe's answer before any command of that session is sent. A reopened session therefore
 //! runs with the access mode the user chose; app commands wait for the verified restore. The core
 //! opens a channel before a person's command when a restart or idle close detached the chat,
@@ -12,12 +12,13 @@
 //! Depends on: `serde_json`, tokio (restore ordering), vw-platform (user-only file). Called by: `pump` (`runtime/updated`), `sessions` (results and start
 //! params), `dispatch` (the profile a client's resume names).
 //! Invariants:
-//! - The remembered profile is the last one Vibe reported for the session (`runtime.activeAgent.name`
-//!   in `runtime/updated` or any result carrying a runtime), else the `agentConfig.agent` it was
-//!   started or resumed with, else the profile of an accepted `session/agent/update`.
+//! - The remembered policy is the last one Vibe reported (`runtime.activeApprovalPolicy.name`
+//!   in a runtime update/result), else `agentConfig.approvalPolicy` at start, else an accepted
+//!   `session/approvalPolicy/update`. Legacy agent-as-policy names are read for old records.
 //! - The remembered profiles are kept in memory and, when the app configures `sessions_dir`, in
 //!   `<sessions_dir>/access.json` (user-only, written whole on every change), so a session reopened after
 //!   the app restarted gets the mode the user chose for it. The app's data folder protects this setting.
+//!   A saved 0.1.15 `vw-plan` mode resolves to Ask because its agent was retired.
 //! - Full access (`auto-approve`) the user confirmed for a session is put back on reopen without a new
 //!   dialog (`restore.rs`, trusted token for that exact switch). A custom profile name is never selected
 //!   by the core: it selects [`FALLBACK_PROFILE`] (`ask`, the stricter mode) instead and the user is told.
@@ -39,7 +40,7 @@ pub(crate) const FALLBACK_PROFILE: &str = "ask";
 /// The record's file name inside `sessions_dir`.
 const FILE: &str = "access.json";
 
-/// Sets the profile of a resume, keeping the other configuration keys.
+/// Sets the policy of a resume, keeping the actual agent identity and other configuration keys.
 pub(crate) fn set_resume_profile(params: &mut Value, profile: &str) {
     let Some(object) = params.as_object_mut() else {
         return;
@@ -51,8 +52,26 @@ pub(crate) fn set_resume_profile(params: &mut Value, profile: &str) {
         *config = Value::Object(serde_json::Map::new());
     }
     if let Some(config) = config.as_object_mut() {
-        config.insert("agent".to_owned(), Value::String(profile.to_owned()));
+        let policy = if profile == "vw-plan" { "ask" } else { profile };
+        config.insert(
+            "approvalPolicy".to_owned(),
+            Value::String(policy.to_owned()),
+        );
+        if config
+            .get("agent")
+            .and_then(Value::as_str)
+            .is_some_and(|name| is_policy_name(name) || name == "vw-plan")
+        {
+            config.insert("agent".to_owned(), Value::String("default".to_owned()));
+        }
     }
+}
+
+fn is_policy_name(name: &str) -> bool {
+    matches!(
+        name,
+        "ask" | "accept-edits" | "smart-approve" | "auto-approve"
+    )
 }
 
 /// Remembered profiles by session id (in memory, mirrored to disk when a folder is configured).
@@ -66,7 +85,7 @@ pub(crate) struct Access {
     default_full: AtomicBool,
 }
 
-/// The profile a `config/write` sets as the default for new sessions (`/default_agent`), if it touches the
+/// The policy a `config/write` sets as the default for new sessions (`/default_approval_policy`), if it touches the
 /// default at all: the written name, or an empty name when it removes the setting.
 pub(crate) fn default_written(method: &str, params: &Value) -> Option<String> {
     if method != "config/write" {
@@ -76,7 +95,7 @@ pub(crate) fn default_written(method: &str, params: &Value) -> Option<String> {
     let op = ops
         .iter()
         .rev()
-        .find(|op| op.get("path").and_then(Value::as_str) == Some("/default_agent"))?;
+        .find(|op| op.get("path").and_then(Value::as_str) == Some("/default_approval_policy"))?;
     let set = op.get("op").and_then(Value::as_str) == Some("set");
     Some(
         op.get("value")
@@ -110,11 +129,16 @@ impl Access {
     /// else `ask`), never to a mode nobody chose.
     pub(crate) fn load(sessions_dir: Option<PathBuf>) -> Self {
         let file = sessions_dir.map(|dir| dir.join(FILE));
-        let agents = file
+        let mut agents = file
             .as_ref()
             .and_then(|f| std::fs::read(f).ok())
             .and_then(|bytes| serde_json::from_slice::<HashMap<String, String>>(&bytes).ok())
             .unwrap_or_default();
+        for name in agents.values_mut() {
+            if name == "vw-plan" {
+                "ask".clone_into(name);
+            }
+        }
         Self {
             agents: Mutex::new(agents),
             restores: Mutex::new(HashMap::new()),
@@ -153,23 +177,49 @@ impl Access {
 
     /// Records the profile in a runtime snapshot (`runtime/updated` params' `runtime`, or a result's).
     pub(crate) fn observe_runtime(&self, session_id: &str, runtime: &Value) {
-        if let Some(name) = runtime.pointer("/activeAgent/name").and_then(Value::as_str) {
+        let reported = runtime
+            .pointer("/activeApprovalPolicy/name")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                runtime
+                    .pointer("/activeAgent/name")
+                    .and_then(Value::as_str)
+                    .map(|name| if name == "vw-plan" { "ask" } else { name })
+                    .filter(|name| is_policy_name(name))
+            });
+        if let Some(name) = reported {
             self.set(session_id, name);
         }
     }
 
-    /// Records the profile a call asked for: `agentConfig.agent` of a start, continue or fork,
-    /// `agentName` of an accepted `session/agent/update`. Not a resume's: it always names
+    /// Records the policy a call asked for: `agentConfig.approvalPolicy` of a start, continue or fork,
+    /// `approvalPolicy` of an accepted `session/approvalPolicy/update`. Not a resume's: it always names
     /// the resolved profile, which the restore verifies. A runtime Vibe reports later overrides it.
     pub(crate) fn observe_request(&self, method: &str, session_id: &str, params: &Value) {
         let asked = match method {
             "session/start" | "session/continue" | "session/fork" => {
-                params.pointer("/agentConfig/agent")
+                if params.pointer("/agentConfig/agent").and_then(Value::as_str) == Some("vw-plan") {
+                    Some("ask")
+                } else {
+                    params
+                        .pointer("/agentConfig/approvalPolicy")
+                        .and_then(Value::as_str)
+                        .or_else(|| {
+                            params
+                                .pointer("/agentConfig/agent")
+                                .and_then(Value::as_str)
+                                .filter(|name| is_policy_name(name))
+                        })
+                }
             }
-            "session/agent/update" => params.get("agentName"),
+            "session/approvalPolicy/update" => params.get("approvalPolicy").and_then(Value::as_str),
+            "session/agent/update" => params
+                .get("agentName")
+                .and_then(Value::as_str)
+                .filter(|name| is_policy_name(name)),
             _ => None,
         };
-        if let Some(name) = asked.and_then(Value::as_str) {
+        if let Some(name) = asked {
             self.set(session_id, name);
         }
     }
@@ -213,17 +263,89 @@ impl Access {
 
 #[cfg(test)]
 mod tests {
-    use super::{Access, default_written};
+    use super::{Access, default_written, set_resume_profile};
     use serde_json::json;
 
     #[test]
+    fn approval_policy_is_remembered_independently_of_agent_identity() {
+        let access = Access::default();
+        access.observe_request(
+            "session/start",
+            "s",
+            &json!({"agentConfig": {"agent": "default", "approvalPolicy": "accept-edits"}}),
+        );
+        assert_eq!(access.remembered("s").as_deref(), Some("accept-edits"));
+        access.observe_runtime(
+            "s",
+            &json!({"activeAgent": {"name": "lean"}, "activeApprovalPolicy": {"name": "ask"}}),
+        );
+        assert_eq!(access.remembered("s").as_deref(), Some("ask"));
+        access.observe_request(
+            "session/approvalPolicy/update",
+            "s",
+            &json!({"approvalPolicy": "auto-approve"}),
+        );
+        assert_eq!(access.remembered("s").as_deref(), Some("auto-approve"));
+        let mut resume = json!({"agentConfig": {"agent": "lean"}});
+        set_resume_profile(&mut resume, "ask");
+        assert_eq!(resume.pointer("/agentConfig/agent"), Some(&json!("lean")));
+        assert_eq!(
+            resume.pointer("/agentConfig/approvalPolicy"),
+            Some(&json!("ask"))
+        );
+    }
+
+    #[test]
+    fn default_policy_write_does_not_confuse_agent_default() {
+        let params = json!({"ops": [{"op": "set", "path": "/default_agent", "value": "lean"}, {"op": "set", "path": "/default_approval_policy", "value": "auto-approve"}]});
+        assert_eq!(
+            default_written("config/write", &params).as_deref(),
+            Some("auto-approve")
+        );
+    }
+
+    #[test]
+    fn a_saved_legacy_plan_mode_reopens_in_ask() {
+        let test_root = std::env::var_os("VW_TEST_ROOT")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let dir = test_root.join(format!("vw-access-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("access.json"), br#"{"chat":"vw-plan"}"#).unwrap();
+        let access = Access::load(Some(dir.clone()));
+        assert_eq!(access.remembered("chat").as_deref(), Some("ask"));
+        let mut resume = json!({"agentConfig": {"agent": "vw-plan"}});
+        set_resume_profile(&mut resume, "vw-plan");
+        assert_eq!(
+            resume.pointer("/agentConfig/agent"),
+            Some(&json!("default"))
+        );
+        assert_eq!(
+            resume.pointer("/agentConfig/approvalPolicy"),
+            Some(&json!("ask"))
+        );
+        access.observe_runtime(
+            "chat",
+            &json!({"activeAgent": {"name": "vw-plan"}, "activeApprovalPolicy": {"name": "ask"}}),
+        );
+        assert_eq!(access.remembered("chat").as_deref(), Some("ask"));
+        access.observe_runtime("chat", &json!({"activeAgent": {"name": "vw-plan"}, "activeApprovalPolicy": {"name": "auto-approve"}}));
+        assert_eq!(
+            access.remembered("chat").as_deref(),
+            Some("auto-approve"),
+            "the reported policy remains authoritative"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_default_write_names_its_profile() {
-        let set = |value: &str| json!({"sessionId": "s", "ops": [{"op": "set", "path": "/default_agent", "value": value}]});
+        let set = |value: &str| json!({"sessionId": "s", "ops": [{"op": "set", "path": "/default_approval_policy", "value": value}]});
         assert_eq!(
             default_written("config/write", &set("auto-approve")).as_deref(),
             Some("auto-approve")
         );
-        let removed = json!({"sessionId": "s", "ops": [{"op": "unset", "path": "/default_agent"}]});
+        let removed =
+            json!({"sessionId": "s", "ops": [{"op": "unset", "path": "/default_approval_policy"}]});
         assert_eq!(
             default_written("config/write", &removed).as_deref(),
             Some("")
@@ -240,9 +362,9 @@ mod tests {
         access.observe_request(
             "session/start",
             "s",
-            &json!({"agentConfig": {"agent": "plan"}}),
+            &json!({"agentConfig": {"agent": "default", "approvalPolicy": "accept-edits"}}),
         );
-        assert_eq!(access.remembered("s").as_deref(), Some("plan"));
+        assert_eq!(access.remembered("s").as_deref(), Some("accept-edits"));
         access.observe_runtime("s", &json!({"activeAgent": {"name": "ask"}}));
         assert_eq!(access.remembered("s").as_deref(), Some("ask"));
         access.observe_request(

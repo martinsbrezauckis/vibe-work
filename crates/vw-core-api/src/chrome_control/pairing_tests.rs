@@ -23,13 +23,13 @@ async fn a_pairing_click_is_not_a_live_browser_connection() {
 
 #[tokio::test]
 async fn pairing_is_added_before_the_folder_and_later_profiles_emit_an_event() {
-    profile_discovery(false).await;
+    Box::pin(profile_discovery(false)).await;
 }
 
 #[cfg(feature = "your-edge")]
 #[tokio::test]
 async fn edge_profile_discovery_emits_an_event_without_a_pairing_change() {
-    profile_discovery(true).await;
+    Box::pin(profile_discovery(true)).await;
 }
 
 async fn profile_discovery(edge: bool) {

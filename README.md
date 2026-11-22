@@ -14,8 +14,8 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.15 follows Mistral's own model list, answers the agent's questions by voice, records the agent's work as
-video in every browser, and adds Developer permissions so the agent can ask Vibe Work to push your branch.
+Version 0.1.16 moves the agent engine to Vibe 3.1.4 and fixes voice answers, Windows updates, browser connections
+and revoking a site's access while a step waits.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -154,7 +154,7 @@ is too old.
 
 Updates are signed and installed when you click Install and restart. How to check a download's checksum and
 signature: [docs/public/RELEASE_VERIFICATION.md](docs/public/RELEASE_VERIFICATION.md). Vibe Work installs the Vibe versions it has been
-tested with (3.1.3 for this release); newer tested versions arrive through a signed list, without a new app release.
+tested with (3.1.4 for this release); newer tested versions arrive through a signed list, without a new app release.
 
 ## Send files or text to a chat
 
@@ -200,8 +200,10 @@ folder; keys stay in the encrypted vault.
 
 ## Security model
 
-The agent runs commands with your user's permissions. Vibe's access modes and the app's Plan on a page profile decide
-what it may do without asking; Push, pull requests and vault changes stay your actions. Changes to Vibe's settings,
+The agent runs commands with your user's permissions. Vibe's approval policies decide
+what it may do without asking. With Developer permissions on, the agent can ask Vibe Work to push the chat's branch:
+Full access pushes without asking, the other modes show a confirmation first. Pull requests and vault changes stay your
+actions. Changes to Vibe's settings,
 skills and agent profiles can be proposed as file changes for your approval. The bell groups refusals and permission
 decisions with links to the chat. Reports: `SECURITY.md`.
 
@@ -218,15 +220,15 @@ Requirements: Rust 1.99.0 (pinned by `rust-toolchain.toml`), Node 22 or later, p
 A development build starts Vibe from a `data/` folder in the repository (git-ignored):
 
 ```sh
-# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.1.3/venv.
-uv venv --python 3.14.8 data/vibe-3.1.3/venv
-uv pip install --python data/vibe-3.1.3/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
+# The pinned Vibe (version in tools/public/codegen/vibe.pin), hash-locked like the app installs it, in data/vibe-3.1.4/venv.
+uv venv --python 3.14.8 data/vibe-3.1.4/venv
+uv pip install --python data/vibe-3.1.4/venv --require-hashes --only-binary :all: --no-deps -r crates/vw-vibe-install/pin/vibe.requirements.txt
 # The included minimal Vibe config is copied into each run folder; your own ~/.vibe stays untouched.
 mkdir -p data/vibe-home-template
 cp tools/public/dev/vibe-config.template.toml data/vibe-home-template/config.toml
 
 pnpm install --frozen-lockfile
-VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.3/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
+VW_DEV_SERVER_BIN="$PWD/data/vibe-3.1.4/venv/bin/vibe-app-server" VW_DEV_KEYS=1 pnpm tauri dev
 ```
 
 `VW_DEV_SERVER_BIN`, `VW_DEV_HOME_TEMPLATE` and `VW_DEV_RUN_DIR` (absolute paths) override the Vibe program, the

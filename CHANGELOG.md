@@ -2,6 +2,17 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.16 (2026-11-22)
+
+Built for Vibe 3.1.4 on Python 3.14.8.
+
+- **Vibe 3.1.4**: the agent engine moves to Mistral Vibe 3.1.4.
+- **Access modes**: "Plan on a page" is no longer offered. Plans stay available in the Project tab and as a writing skill, and a chat saved in that mode opens in Ask.
+- **Model choice**: a chat keeps the model you picked after a restart, and tells you when that model is no longer available.
+- **Voice**: one-word answers to a question card are understood more reliably.
+- **Windows updates** no longer stop part-way.
+- **Connect Chrome and Edge** on Windows also repairs a browser connection left by an earlier install.
+
 ## 0.1.15 (2026-11-21)
 
 Built for Vibe 3.1.3 on Python 3.14.8.

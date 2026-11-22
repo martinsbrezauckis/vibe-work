@@ -110,10 +110,12 @@ def render(name, schema, classes, definitions):
     defaults = []
     for alias, prop in schema["properties"].items():
         field = next(key for key, info in cls.model_fields.items() if (info.alias or key) == alias)
+        model_field = cls.model_fields[field]
         lines += [f"    /// Vibe field `{alias}`.", f"    #[serde(rename = {json.dumps(alias)})]"]
+        if rust_type(prop).startswith("Option<") and model_field.exclude_if is not None and model_field.exclude_if(None):
+            lines += ['    #[serde(skip_serializing_if = "Option::is_none")]']
         if alias not in schema.get("required", []):
-            info = cls.model_fields[field]
-            default = TypeAdapter(info.annotation).dump_python(info.get_default(call_default_factory=True), mode="json")
+            default = TypeAdapter(model_field.annotation).dump_python(model_field.get_default(call_default_factory=True), mode="json")
             if default in (None, False, "", 0) or default == [] or default == {}:
                 lines += ["    #[serde(default)]"]
             else:

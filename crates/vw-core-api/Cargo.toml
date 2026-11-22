@@ -97,7 +97,7 @@ vw-preview = { workspace = true }
 vw-netguard = { workspace = true }
 # The agent browser: observe, act, receipts, prompt guard, Stop and the action log.
 vw-browser = { workspace = true }
-# Project Pages: hub, page server, comments, viewer, the vw-plan profile.
+# Project Pages: hub, page server, comments, viewer.
 vw-pages = { workspace = true }
 # The user's project groups: store, filing rules, reconcile.
 vw-projects = { path = "../vw-projects" }

@@ -30,6 +30,7 @@ interface Script {
   /** What the open chat's own `config/fields/read` reports for Subagents. */
   subagentsRead: boolean;
   backgroundRead: boolean;
+  defaultApprovalPolicyRead: string | null;
   setAnswer: SetAnswer;
 }
 
@@ -44,7 +45,12 @@ const refusal: CoreError = {
 function fieldsResult(script: Script) {
   return {
     fields: [
-      { name: "default_agent", value: "ask", layerValues: [] },
+      { name: "default_agent", value: "default", layerValues: [] },
+      {
+        name: "default_approval_policy",
+        value: script.defaultApprovalPolicyRead,
+        layerValues: [],
+      },
       {
         name: "enable_background_processes",
         value: script.backgroundRead,
@@ -70,6 +76,7 @@ async function rig(over: Partial<Script> = {}) {
   const script: Script = {
     subagentsRead: true,
     backgroundRead: false,
+    defaultApprovalPolicyRead: "ask",
     setAnswer: { enabled: false, leftoverSessionId: null },
     ...over,
   };
@@ -121,6 +128,52 @@ const row = (id: string): HTMLElement => {
 };
 
 describe("Settings: the Subagents switch", () => {
+  it("shows the effective Accept edits default when the policy field is empty", async () => {
+    await rig({ defaultApprovalPolicyRead: null });
+    const mode = await screen.findByRole("combobox", { name: "Access mode" });
+    expect(mode).toHaveTextContent("Accept edits");
+    await userEvent.setup().click(mode);
+    expect(
+      screen.queryByRole("option", { name: "Vibe's default" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("writes the approval default independently of the agent", async () => {
+    const r = await rig();
+    const mode = await screen.findByRole("combobox", { name: "Access mode" });
+    await userEvent.setup().click(mode);
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("option", { name: "Accept edits" }));
+    await waitFor(() => {
+      expect(
+        r.client.commands.some(
+          (c) =>
+            isCall(c, "config/write") &&
+            JSON.stringify(c).includes('"/default_approval_policy"'),
+        ),
+      ).toBe(true);
+    });
+    expect(
+      r.client.commands.filter((c) => isCall(c, "config/write")),
+    ).toContainEqual({
+      type: "call",
+      method: "config/write",
+      params: {
+        sessionId: CHAT,
+        ops: [
+          {
+            op: "set",
+            path: "/default_approval_policy",
+            value: "accept-edits",
+          },
+        ],
+        reason: "default access mode",
+        reloadRuntime: true,
+      },
+    });
+  });
+
   it("asks the core and never writes through the open chat", async () => {
     const r = await rig();
     const sw = await subagentsSwitch();

@@ -1,4 +1,5 @@
 /** Derives session spending and counters from Vibe stats; Settings renders these without a local price list. */
+import { TEXT } from "../vocabulary";
 import type { JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
@@ -55,7 +56,7 @@ export function sessionUsageOf(
 /** Dollar amounts preserve small nonzero costs; null means Vibe has not reported pricing. */
 export function costText(cost: number | null): string {
   return cost === null
-    ? "Not reported yet"
+    ? TEXT.notReported
     : cost.toLocaleString("en-US", {
         style: "currency",
         currency: "USD",

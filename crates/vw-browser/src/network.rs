@@ -165,10 +165,9 @@ fn headers(row: &Value, raw: bool) -> Value {
     out
 }
 
-/// A policy refusal comes from Vibe Work's network guard, not the page's native request log.
-/// Keep it beside the untrusted rows. Correlate a native 403 or error only when it is the sole
-/// eligible row for that target in the complete current-document log and both refusal reads agree.
-/// A native row must also have started after the refusal's millisecond. Otherwise leave it unpaired.
+/// Host policy refusals are separate from native request rows. A refusal can label a row
+/// only when the guard supplies that row's native request identity. URL, host, time,
+/// status, and error text are insufficient: a server may answer 403 to the same host.
 fn network_receipt(
     action: &str,
     data: &Value,
@@ -177,48 +176,28 @@ fn network_receipt(
     pairable_count: usize,
 ) -> Value {
     let mut data = data.clone();
-    let mut refusals = host_refusals.to_vec();
+    let refusals = host_refusals.to_vec();
     if let (Some(rows), Some(native)) = (
         data["requests"].as_array_mut(),
         snapshot["requests"].as_array(),
     ) && snapshot["dropped"].as_u64().unwrap_or(0) == 0
-        && pairable_count == host_refusals.len()
+        && pairable_count == refusals.len()
     {
-        let mut marked = vec![false; native.len()];
-        for (index, refusal) in refusals.iter_mut().enumerate() {
-            let Some(target) = refusal["target"].as_str() else {
+        for (index, refusal) in refusals.iter().enumerate() {
+            let Some(id) = refusal["requestId"].as_str().filter(|id| !id.is_empty()) else {
                 continue;
             };
-            let Some(refused_at) = refusal["atMs"].as_u64() else {
-                continue;
-            };
-            let mut candidates = native.iter().enumerate().filter(|(at, row)| {
-                !marked[*at]
-                    && (row["status"] == 403 || row["error"].is_string())
-                    && row["startedAtMs"]
-                        .as_u64()
-                        .is_some_and(|start| start > refused_at)
-                    && row_target(row).is_some_and(|t| t.eq_ignore_ascii_case(target))
-            });
-            let Some((at, candidate)) = candidates.next() else {
-                continue;
-            };
-            if candidates.next().is_some() {
+            if native.iter().filter(|row| row["requestId"] == id).count() != 1 {
                 continue;
             }
-            let Some(id) = candidate["requestId"].as_str().filter(|id| !id.is_empty()) else {
+            let Some(row) = rows.iter_mut().find(|row| row["requestId"] == id) else {
                 continue;
             };
-            let Some(row) = rows
-                .iter_mut()
-                .find(|row| row["requestId"].as_str() == Some(id))
-            else {
+            if row.get("refusedBy").is_some() {
                 continue;
-            };
-            marked[at] = true;
+            }
             row["refusedBy"] = json!("Vibe Work");
             row["refusal"] = json!(index);
-            refusal["requestId"] = json!(id);
         }
     }
     let mut receipt = json!({"ok":true,"action":action,"Outcome":"Native request records read.","untrustedPageContent":data});
@@ -226,16 +205,6 @@ fn network_receipt(
         receipt["networkRequestRefusals"] = json!(refusals);
     }
     receipt
-}
-
-/// `host:port` of a native row's URL, in the refusal's `target` form (IPv6 in brackets).
-fn row_target(row: &Value) -> Option<String> {
-    let url = url::Url::parse(row["url"].as_str()?).ok()?;
-    Some(format!(
-        "{}:{}",
-        url.host_str()?,
-        url.port_or_known_default()?
-    ))
 }
 
 fn pairable_refusal_count(
@@ -411,8 +380,81 @@ mod host_refusal_tests {
         );
     }
 
-    /// PREDICT (fails before the change): the native row of a request Vibe Work refused showed only status 403, so an
-    /// agent read it as the server's answer. The row now names Vibe Work and its refusal row; the refusal names the row.
+    #[test]
+    fn server_403_after_unlogged_held_request_keeps_its_server_identity() {
+        // The held request is present, but the browser did not assign it a 403 or error.
+        // A later server answer on the same host must not inherit its refusal.
+        let snapshot = json!({"requests": [
+            {"requestId":"held","url":"http://10.55.5.17:18115/held","method":"GET","status":null,"finished":false,"startedAtMs":43},
+            {"requestId":"server-403","url":"http://10.55.5.17:18115/server","method":"GET","status":403,"finished":true,"startedAtMs":44}
+        ],"dropped":0});
+        let refusal = json!({"atMs":42,"target":"10.55.5.17:18115","reason":"blocked by the user"});
+        let receipt = super::network_receipt("network.list", &snapshot, &snapshot, &[refusal], 1);
+        let rows = &receipt["untrustedPageContent"]["requests"];
+        assert!(rows[0].get("refusedBy").is_none(), "{receipt}");
+        assert!(rows[1].get("refusedBy").is_none(), "{receipt}");
+        assert!(
+            receipt["networkRequestRefusals"][0]
+                .get("requestId")
+                .is_none(),
+            "{receipt}"
+        );
+        assert_eq!(rows[1]["status"], 403);
+    }
+
+    #[test]
+    fn absent_empty_or_ambiguous_identity_never_labels_a_native_row() {
+        let cases = [
+            (
+                "missing refusal ID",
+                json!({"atMs":42,"target":"10.55.5.17:18115"}),
+                json!({"requests":[{"requestId":"real","url":"http://10.55.5.17:18115/real","status":403}]}),
+            ),
+            (
+                "empty refusal ID",
+                json!({"atMs":42,"requestId":"","target":"10.55.5.17:18115"}),
+                json!({"requests":[{"requestId":"real","url":"http://10.55.5.17:18115/real","status":403}]}),
+            ),
+            (
+                "ID absent from native log",
+                json!({"atMs":42,"requestId":"held","target":"10.55.5.17:18115"}),
+                json!({"requests":[{"requestId":"real","url":"http://10.55.5.17:18115/real","status":403}]}),
+            ),
+            (
+                "duplicate native IDs",
+                json!({"atMs":42,"requestId":"held","target":"10.55.5.17:18115"}),
+                json!({"requests":[
+                    {"requestId":"held","url":"http://10.55.5.17:18115/held","status":403},
+                    {"requestId":"held","url":"http://10.55.5.17:18115/real","status":403}
+                ]}),
+            ),
+        ];
+        for (name, refusal, snapshot) in cases {
+            let receipt =
+                super::network_receipt("network.list", &snapshot, &snapshot, &[refusal], 1);
+            let Some(rows) = receipt["untrustedPageContent"]["requests"].as_array() else {
+                panic!("{name}: missing request rows: {receipt}");
+            };
+            for row in rows {
+                assert!(row.get("refusedBy").is_none(), "{name}: {receipt}");
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_identity_pairs_even_if_native_start_precedes_refusal() {
+        let snapshot = json!({"requests":[
+            {"requestId":"held","url":"http://10.55.5.17:18115/held","status":null,"startedAtMs":40},
+            {"requestId":"real","url":"http://10.55.5.17:18115/real","status":403,"startedAtMs":80}
+        ]});
+        let refusal = json!({"atMs":42,"requestId":"held","target":"10.55.5.17:18115"});
+        let receipt = super::network_receipt("network.list", &snapshot, &snapshot, &[refusal], 1);
+        let rows = &receipt["untrustedPageContent"]["requests"];
+        assert_eq!(rows[0]["refusedBy"], "Vibe Work", "{receipt}");
+        assert!(rows[1].get("refusedBy").is_none(), "{receipt}");
+    }
+
+    /// A refusal with an explicit native request identity may label that exact row.
     #[test]
     fn the_native_403_of_a_refused_request_says_vibe_work_refused_it() {
         let snapshot = json!({"requests":[
@@ -426,6 +468,7 @@ mod host_refusal_tests {
             &snapshot,
             &[json!({
                 "atMs": 42,
+                "requestId": "req-5",
                 "origin": null,
                 "target": "10.55.5.17:18115",
                 "targetClass": "local-network",
@@ -536,7 +579,9 @@ mod host_refusal_tests {
             "network.list",
             &snapshot,
             &snapshot,
-            &[json!({"atMs":42,"target":"10.55.5.17:18115","reason":"question not answered"})],
+            &[
+                json!({"atMs":42,"requestId":"native-error","target":"10.55.5.17:18115","reason":"question not answered"}),
+            ],
             1,
         );
         assert_eq!(

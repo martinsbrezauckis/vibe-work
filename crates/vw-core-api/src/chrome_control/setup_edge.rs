@@ -31,7 +31,7 @@ pub(super) fn register_browser(
     super::selection::migrate(config, state)?;
     let mut receipt = read_receipt(config, state).ok_or("Browser setup is missing")?;
     if receipt.browsers.iter().any(|name| name == browser) {
-        return super::registration::repair(config, state, Some(browser));
+        return super::registration::repair_for_connect(config, state, browser);
     }
     if !config.is_macos() {
         super::registration::repair(config, state, None)?;

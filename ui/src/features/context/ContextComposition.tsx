@@ -1,6 +1,7 @@
 /** The context meter's optional breakdown. Renders reported counts only; all reads live in the store.
  * Depends on shared controls and the generated protocol model; mounted by StatusBar on a person’s click.
  */
+import { TEXT } from "../../vocabulary";
 import { type RefObject, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Button, IconButton } from "../../components/Controls";
@@ -110,7 +111,7 @@ export function ContextComposition({
               <dd>
                 {breakdown.contextWindow > 0
                   ? `${formatTokens(breakdown.contextWindow)} tokens`
-                  : "Not reported"}
+                  : TEXT.notReported}
               </dd>
             </div>
             <div>
@@ -118,7 +119,7 @@ export function ContextComposition({
               <dd>
                 {breakdown.compactionThreshold > 0
                   ? `${formatTokens(breakdown.compactionThreshold)} tokens`
-                  : "Not reported"}
+                  : TEXT.notReported}
               </dd>
             </div>
           </dl>

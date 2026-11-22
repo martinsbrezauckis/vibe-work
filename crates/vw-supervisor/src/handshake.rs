@@ -15,7 +15,7 @@ use vw_protocol::{
 };
 use vw_rpc::{Connection, RequestOptions, RpcError};
 
-/// Default client identity: name `vibe-work`, this crate's version, entrypoint `desktop`, and
+/// Default client identity: name `vibe-work`, this crate's version, entrypoint `programmatic`, and
 /// the callback kinds used by the client (`approval`, `user_input`).
 #[must_use]
 pub fn default_initialize_params() -> InitializeParams {
@@ -24,7 +24,10 @@ pub fn default_initialize_params() -> InitializeParams {
             name: "vibe-work".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             title: Maybe::Value("Vibe Work".to_owned()),
-            entrypoint: Some(AgentEntrypoint::Desktop),
+            // Vibe 3.1.4 reserves `desktop` for a connection-provided OAuth
+            // sign-in and refuses its API-key environment fallback. Vibe Work
+            // owns an API key and injects it into the private child instead.
+            entrypoint: Some(AgentEntrypoint::Programmatic),
             terminal_emulator: None,
         },
         capabilities: Some(ClientCapabilities {
@@ -41,6 +44,9 @@ pub fn default_initialize_params() -> InitializeParams {
             // "ask before editing this checkout" rule out of the prompt; the person still picks folder or copy
             // at chat start.
             agent_worktrees: Some(true),
+            // Vibe Work has no agent-managed project capability. A chat's
+            // project remains owned by the desktop app.
+            agent_projects: None,
             child_session_events: None,
             agent_plugins: None,
             client_tool_definitions: None,
@@ -49,6 +55,7 @@ pub fn default_initialize_params() -> InitializeParams {
             // `platformCredentials/resolve` and keeps its own sign-in.
             platform_credentials: Maybe::Absent,
         }),
+        account: Maybe::Absent,
     }
 }
 
@@ -83,8 +90,27 @@ mod tests {
     #[test]
     fn host_execution_capabilities_remain_unadvertised() {
         let raw = serde_json::to_value(super::default_initialize_params()).unwrap();
-        for key in ["clientTools", "clientToolDefinitions", "agentPlugins"] {
+        for key in [
+            "clientTools",
+            "clientToolDefinitions",
+            "agentPlugins",
+            "agentProjects",
+        ] {
             assert!(raw["capabilities"].get(key).is_none(), "{key}");
         }
+        assert!(
+            raw.get("account").is_none(),
+            "account comes from Vibe's own login"
+        );
+    }
+
+    #[test]
+    fn app_managed_api_key_uses_programmatic_credential_selection() {
+        let raw = serde_json::to_value(super::default_initialize_params()).unwrap();
+        assert_eq!(raw["clientInfo"]["entrypoint"], "programmatic");
+        assert_eq!(raw["clientInfo"]["name"], "vibe-work");
+        assert_eq!(raw["clientInfo"]["title"], "Vibe Work");
+        assert!(raw["capabilities"].get("platformCredentials").is_none());
+        assert!(raw.get("account").is_none());
     }
 }

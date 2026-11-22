@@ -19,6 +19,23 @@ pub(super) async fn answer(
     let home = shared.instructions.own_home.clone();
     let roots = crate::agent_tools::session::folders(shared, session);
     let mode = shared.access.remembered(session);
+    let agent = shared
+        .store
+        .runtime(session)
+        .and_then(|runtime| {
+            runtime
+                .pointer("/activeAgent/name")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            shared.store.view(session).and_then(|view| {
+                view.state
+                    .pointer("/session/agent/name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+        });
     tokio::task::spawn_blocking(move || {
         let policy = roots.and_then(|roots| {
             let mode = mode.as_deref().ok_or(UNCHECKED)?;
@@ -27,6 +44,7 @@ pub(super) async fn answer(
                 &home,
                 &roots,
                 mode,
+                agent.as_deref(),
                 Instant::now() + Duration::from_secs(2),
             )?;
             Ok((rules, root))

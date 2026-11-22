@@ -348,8 +348,8 @@ async fn escalations_need_a_token_and_safe_shapes_do_not() {
     let rig = rig();
     let needs: Vec<(&str, Value)> = vec![
         (
-            "session/agent/update",
-            json!({"sessionId": "s1", "agentName": "auto-approve"}),
+            "session/approvalPolicy/update",
+            json!({"sessionId": "s1", "approvalPolicy": "auto-approve"}),
         ),
         (
             "session/start",
@@ -357,7 +357,7 @@ async fn escalations_need_a_token_and_safe_shapes_do_not() {
         ),
         (
             "session/start",
-            json!({"agentConfig": {"cwd": "/work/r", "agent": "auto-approve"}}),
+            json!({"agentConfig": {"cwd": "/work/r", "approvalPolicy": "auto-approve"}}),
         ),
         (
             "workspace/git/worktrees/remove",
@@ -412,28 +412,28 @@ async fn escalations_need_a_token_and_safe_shapes_do_not() {
     }
     assert!(rig.transport.frames().is_empty());
     // With a token the escalated call goes through, unchanged apart from the documented defaults.
-    let params = json!({"sessionId": "s1", "agentName": "auto-approve"});
+    let params = json!({"sessionId": "s1", "approvalPolicy": "auto-approve"});
     let t = rig
         .gate
-        .request_confirmation("session/agent/update", &params)
+        .request_confirmation("session/approvalPolicy/update", &params)
         .await
         .unwrap();
     rig.gate
-        .call("session/agent/update", params.clone(), Some(&t))
+        .call("session/approvalPolicy/update", params.clone(), Some(&t))
         .await
         .unwrap();
     assert_eq!(
         rig.transport.frames(),
         vec![Frame {
-            method: "session/agent/update".into(),
+            method: "session/approvalPolicy/update".into(),
             params
         }]
     );
 
     let safe: Vec<(&str, Value)> = vec![
         (
-            "session/agent/update",
-            json!({"sessionId": "s1", "agentName": "ask"}),
+            "session/approvalPolicy/update",
+            json!({"sessionId": "s1", "approvalPolicy": "ask"}),
         ),
         (
             "workspace/git/worktrees/remove",

@@ -348,6 +348,17 @@ pub(super) fn repair_registrations(
     }
 }
 
+/// Repairs a browser for an explicit Connect, including replacement of a checked stale registration.
+pub(super) fn reconnect_registrations(
+    config: &ChromeControlConfig,
+    state: &Path,
+    browser: &str,
+) -> Result<(), String> {
+    let _held = registration_lock();
+    let result = registration::repair_for_connect(config, state, browser);
+    problem::finish(config, state, browser, result)
+}
+
 pub(super) fn helper_name() -> &'static str {
     if cfg!(windows) {
         "chrome-control.exe"

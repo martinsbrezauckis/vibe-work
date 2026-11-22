@@ -1,6 +1,6 @@
 [package]
 name = "vw-pages"
-description = "Project handbook (Handbook Format 1.2): page heads, plan steps, the validator, the live hub, the Projects overview, the loopback page server, comments, the vw-plan profile, the page viewer on the preview engine"
+description = "Project handbook (Handbook Format 1.2): page heads, plan steps, the validator, the live hub, the Projects overview, the loopback page server, comments, the page viewer on the preview engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

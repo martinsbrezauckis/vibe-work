@@ -16,6 +16,8 @@ fn choice(alias: &str, effort: &str) -> Choice {
         effort: effort.into(),
         name: format!("served-{alias}"),
         display_name: format!("Display {alias}"),
+        provider: String::new(),
+        provider_key: String::new(),
     }
 }
 

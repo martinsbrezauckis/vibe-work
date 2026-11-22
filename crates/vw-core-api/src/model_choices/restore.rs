@@ -3,7 +3,7 @@
 //! Called by reopen and model selection; failures leave the chat open and sendable.
 use super::{Choice, actual, apply};
 use crate::core::Shared;
-use crate::error::CoreError;
+use crate::error::{CoreError, ErrorCode};
 use serde_json::{Value, json};
 
 /// The chat's model is in Vibe's model list, and so is its thinking level when Vibe lists the model's levels
@@ -22,10 +22,64 @@ pub(super) fn offered(runtime: &Value, choice: &Choice) -> bool {
                             .any(|level| level.as_str() == Some(&choice.effort))
                     });
                 level_offered
-                    && actual(&json!({"runtime":{"config":{"activeModel":model}}}))
-                        .is_some_and(|current| choice.same_model(&current))
+                    && model["alias"] == choice.alias
+                    && (choice.name.is_empty() || model["name"] == choice.name)
             })
         })
+}
+
+/// A catalog row can be absent from the first runtime after resume while Vibe's resolved fields
+/// already contain it. Only a saved, backend-bound identity may use that row for replay.
+pub(super) async fn replayable(
+    shared: &Shared,
+    id: &str,
+    runtime: &Value,
+    choice: &Choice,
+) -> bool {
+    if offered(runtime, choice) {
+        return true;
+    }
+    if choice.name.is_empty() || choice.provider.is_empty() || choice.provider_key.is_empty() {
+        return false;
+    }
+    let mut probe = choice.clone();
+    probe.provider.clear();
+    probe.provider_key.clear();
+    let resolved = super::identified(shared, id, probe).await;
+    if resolved.provider_key.is_empty() || !choice.matches(&resolved) {
+        return false;
+    }
+    // The gate learns permitted aliases only from runtime/read. A resolved fields row alone
+    // cannot authorize config/model/write; after catalog hydration the runtime must offer it.
+    read(shared, id)
+        .await
+        .is_ok_and(|refreshed| offered(&refreshed, choice))
+}
+
+/// The same alias now resolves to a different backend. This is positive evidence for the
+/// existing unavailable-choice notice, unlike a failed write or an incomplete runtime.
+pub(super) async fn backend_changed(shared: &Shared, id: &str, choice: &Choice) -> bool {
+    if choice.provider_key.is_empty() {
+        return false;
+    }
+    let mut probe = choice.clone();
+    probe.provider.clear();
+    probe.provider_key.clear();
+    let resolved = super::identified(shared, id, probe).await;
+    !resolved.provider_key.is_empty() && resolved.provider_key != choice.provider_key
+}
+
+pub(super) fn mark_cold_replay(
+    shared: &Shared,
+    id: &str,
+    runtime: &Value,
+    pending: Option<&Choice>,
+) {
+    if let Some(choice) =
+        pending.filter(|choice| !choice.provider_key.is_empty() && !offered(runtime, choice))
+    {
+        shared.model_choices.mark_cold_replay(id, choice.clone());
+    }
 }
 
 /// Vibe resolves catalog aliases before reporting a missing or excluded default.
@@ -52,6 +106,8 @@ pub(super) fn unavailable_default(config: &Value) -> Option<Choice> {
         alias: alias.into(),
         effort: String::new(),
         name: String::new(),
+        provider: String::new(),
+        provider_key: String::new(),
         display_name: String::new(),
     })
 }
@@ -90,8 +146,62 @@ pub(super) async fn read(shared: &Shared, id: &str) -> Result<Value, CoreError> 
         .map_err(|error| CoreError::from_gate("runtime/read", &error))
 }
 
+/// A cold resumed runtime can expose catalog rows while its configured rows are still loading.
+/// Wait only for a backend-bound saved pick missing from that list; an absent row after readiness
+/// follows the ordinary unavailable-model notice path.
+pub(super) async fn after_ready(
+    shared: &Shared,
+    id: &str,
+    last: Value,
+    choice: &Choice,
+) -> Result<(Value, bool), CoreError> {
+    if choice.name.is_empty()
+        || choice.provider.is_empty()
+        || choice.provider_key.is_empty()
+        || offered(&last, choice)
+    {
+        return Ok((last, false));
+    }
+    let method = "runtime/read";
+    let reply = shared
+        .gate
+        .call(method, json!({"sessionId":id}), None)
+        .await
+        .map_err(|error| CoreError::from_gate(method, &error))?;
+    if reply.result["ready"] != false {
+        return Ok((reply.result["runtime"].clone(), true));
+    }
+    let method = "session/ready/wait";
+    let ready = shared
+        .gate
+        .call(method, json!({"sessionId":id}), None)
+        .await
+        .map_err(|error| CoreError::from_gate(method, &error))?;
+    if ready.result["ready"] != true {
+        return Err(CoreError::new(
+            ErrorCode::Timeout,
+            "The saved model for this chat is still loading. Try Send again.",
+        ));
+    }
+    read(shared, id).await.map(|runtime| (runtime, true))
+}
+
 pub(super) async fn fallback(shared: &Shared, id: &str, choice: &Choice, last: Value) -> Value {
-    let why = if offered(&last, choice) {
+    let old_identity_ambiguous = choice.provider.is_empty()
+        && !choice.name.is_empty()
+        && last
+            .pointer("/config/models")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row["alias"] == choice.alias
+                        && row["name"] == choice.name
+                        && row["source"] == "project"
+                })
+            });
+    let why = if old_identity_ambiguous {
+        "could not be identified from its older saved choice"
+    } else if offered(&last, choice) {
         "could not be restored"
     } else {
         "is unavailable right now"
@@ -125,7 +235,9 @@ pub(super) async fn fallback(shared: &Shared, id: &str, choice: &Choice, last: V
     };
     let message = notice(&choice, default.as_ref(), &runtime, why, problem);
     // Remember what runs until Vibe records the next turn, so the older pin does not repeat the alert.
-    if let Some(current) = actual(&json!({"runtime":runtime}))
+    if let Some(current) = super::identified_actual(shared, id, &json!({"runtime":runtime}))
+        .await
+        .filter(|choice| !choice.provider_key.is_empty())
         && let Err(error) = shared
             .model_choices
             .records
@@ -142,6 +254,9 @@ pub(super) async fn fallback(shared: &Shared, id: &str, choice: &Choice, last: V
 }
 
 fn same_label(left: &Choice, right: &Choice) -> bool {
+    if left.provider != right.provider {
+        return false;
+    }
     left.alias == right.alias
         || (!left.display_name.is_empty() && left.display_name == right.display_name)
 }
@@ -208,21 +323,56 @@ pub(crate) async fn restore(
     last: Value,
     recorded: Option<Choice>,
 ) -> Value {
+    // Vibe's pin holds only the alias. Preserve the pre-migration identity: migration can
+    // rewrite the saved seed's alias before this pin is interpreted.
+    let prior = shared.model_choices.records.get(id);
+    mark_cold_replay(shared, id, &last, prior.pending.as_ref());
+    let (last, cold_missing) = if let Some(choice) = prior.expected() {
+        match after_ready(shared, id, last.clone(), &choice).await {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                // A failed readiness check is not evidence that the person's model vanished.
+                // Keep the saved choice for the next Send, which checks again before sending.
+                tracing::warn!(%error, "saved chat model is still loading");
+                return last;
+            }
+        }
+    } else {
+        (last, false)
+    };
     super::retired::migrate(&shared.model_choices.records, id, &last);
     let record = shared.model_choices.records.get(id);
+    let current = super::identified_actual(shared, id, &json!({"runtime":last})).await;
     let replacement = record.fallback;
     let is_replacement = replacement.is_some();
     if let Some(choice) = replacement.or(record.pending) {
         if is_replacement
-            && actual(&json!({"runtime":last})).is_some_and(|current| choice.matches(&current))
+            && current
+                .as_ref()
+                .is_some_and(|current| choice.matches(current))
         {
             return last;
         }
-        if offered(&last, &choice)
-            && let Ok(runtime) = apply(shared, id, &choice).await
-        {
-            return runtime;
+        if replayable(shared, id, &last, &choice).await {
+            match apply(shared, id, &choice).await {
+                Ok(runtime) => {
+                    shared.model_choices.clear_cold_replay(id);
+                    return runtime;
+                }
+                Err(error)
+                    if (cold_missing || shared.model_choices.cold_replay_matches(id, &choice))
+                        && !choice.provider_key.is_empty()
+                        && !backend_changed(shared, id, &choice).await =>
+                {
+                    // A rejected write does not prove the bound model is gone. Keep the pick
+                    // until a later Send can replay it or report the failure to the person.
+                    tracing::warn!(%error, "saved chat model could not be applied yet");
+                    return last;
+                }
+                Err(_) => {}
+            }
         }
+        shared.model_choices.clear_cold_replay(id);
         return fallback(shared, id, &choice, last).await;
     }
     // Vibe's own pin of the retired Large 4 alias names the catalog Large 4: put it back silently (this also ends
@@ -231,12 +381,14 @@ pub(crate) async fn restore(
     // own `large-4` model is never taken for the retired app seed.
     let recorded = recorded.map(|mut pin| {
         if pin.name.is_empty()
-            && let Some(saved) = record
+            && let Some(saved) = prior
                 .remembered
                 .as_ref()
                 .filter(|saved| saved.alias == pin.alias)
         {
             pin.name.clone_from(&saved.name);
+            pin.provider.clone_from(&saved.provider);
+            pin.provider_key.clone_from(&saved.provider_key);
         }
         pin
     });
@@ -253,15 +405,24 @@ pub(crate) async fn restore(
                 saved
             })
     });
-    if resolved && let Some(choice) = recorded.as_ref().filter(|choice| offered(&last, choice)) {
+    if resolved
+        && let Some(choice) = recorded.as_ref()
+        && replayable(shared, id, &last, choice).await
+    {
         return match apply(shared, id, choice).await {
             Ok(runtime) => runtime,
             Err(_) => fallback(shared, id, choice, last).await,
         };
     }
-    if let Some(choice) =
-        recorded.filter(|choice| differs(&last, choice) && !unset_off(&last, choice))
-    {
+    if let Some(choice) = recorded.filter(|choice| {
+        differs(&last, choice, current.as_ref()) && !unset_off(&last, choice, current.as_ref())
+    }) {
+        if !offered(&last, &choice)
+            && replayable(shared, id, &last, &choice).await
+            && let Ok(runtime) = apply(shared, id, &choice).await
+        {
+            return runtime;
+        }
         return fallback(shared, id, &choice, last).await;
     }
     last
@@ -270,15 +431,21 @@ pub(crate) async fn restore(
 /// A recorded Off that the chat's own model does not offer is no choice to restore: a chat whose level was left unset
 /// records no level (read as Off, `model_choices::recorded`), and Vibe then runs the model's own default, as it does
 /// for an Off it pinned for an unset level in older sessions. Large 4 offers no Off, so its chats reopen as they ran.
-fn unset_off(runtime: &Value, choice: &Choice) -> bool {
+fn unset_off(runtime: &Value, choice: &Choice, current: Option<&Choice>) -> bool {
     choice.effort == "off"
         && !offered(runtime, choice)
-        && actual(&json!({"runtime":runtime})).is_some_and(|current| choice.same_model(&current))
+        && current
+            .cloned()
+            .or_else(|| actual(&json!({"runtime":runtime})))
+            .is_some_and(|current| choice.same_model(&current))
 }
 
-pub(super) fn differs(runtime: &Value, choice: &Choice) -> bool {
+pub(super) fn differs(runtime: &Value, choice: &Choice, current: Option<&Choice>) -> bool {
     !offered(runtime, choice)
-        || actual(&json!({"runtime":runtime})).is_some_and(|current| !choice.same_model(&current))
+        || current
+            .cloned()
+            .or_else(|| actual(&json!({"runtime":runtime})))
+            .is_some_and(|current| !choice.same_model(&current))
 }
 
 #[cfg(test)]
@@ -291,7 +458,33 @@ mod tests {
             name: alias.into(),
             display_name: label.into(),
             effort: effort.into(),
+            provider: String::new(),
+            provider_key: String::new(),
         }
+    }
+
+    #[test]
+    fn proven_choice_requires_current_backend_but_legacy_choice_waits_for_confirmation() {
+        let runtime = json!({"config":{"activeModel":{"alias":"same","name":"same-name",
+            "thinking":"route-level","displayName":"Same"},"models":[{"alias":"same",
+            "name":"same-name","thinking":"route-level","displayName":"Same"}]}});
+        let mut saved = model("same", "Same", "route-level");
+        saved.name = "same-name".into();
+        let legacy = saved.clone();
+        saved.provider = "llamacpp".into();
+        saved.provider_key = "old-route".into();
+        let mut changed = saved.clone();
+        changed.provider = "mistral".into();
+        changed.provider_key = "new-route".into();
+        assert!(differs(&runtime, &saved, Some(&changed)));
+        assert!(
+            differs(&runtime, &saved, None),
+            "missing identity must not accept a proven choice"
+        );
+        assert!(
+            !differs(&runtime, &legacy, Some(&changed)),
+            "legacy records cannot infer a backend change from the 3.1.4 view"
+        );
     }
 
     #[test]
@@ -389,7 +582,7 @@ mod tests {
         ]}});
         assert!(offered(&runtime, &model("large-4", "Large 4", "high")));
         assert!(!offered(&runtime, &model("large-4", "Large 4", "medium")));
-        assert!(differs(&runtime, &model("large-4", "Large 4", "low")));
+        assert!(differs(&runtime, &model("large-4", "Large 4", "low"), None));
         // A model whose levels Vibe does not list keeps any level, as before.
         assert!(offered(&runtime, &model("old", "Old", "medium")));
     }
@@ -406,17 +599,22 @@ mod tests {
             }})
         };
         let unset = model("large-4", "", "off");
-        assert!(differs(&runtime("large-4"), &unset));
+        assert!(differs(&runtime("large-4"), &unset, None));
         assert!(
-            unset_off(&runtime("large-4"), &unset),
+            unset_off(&runtime("large-4"), &unset, None),
             "the chat runs as it ran"
         );
         // Another model running, an offered Off, or another level: the usual restore rules.
-        assert!(!unset_off(&runtime("flash"), &unset));
-        assert!(!unset_off(&runtime("flash"), &model("flash", "", "off")));
+        assert!(!unset_off(&runtime("flash"), &unset, None));
+        assert!(!unset_off(
+            &runtime("flash"),
+            &model("flash", "", "off"),
+            None
+        ));
         assert!(!unset_off(
             &runtime("large-4"),
-            &model("large-4", "", "max")
+            &model("large-4", "", "max"),
+            None
         ));
     }
 }

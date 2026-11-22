@@ -39,7 +39,7 @@ impl Core {
         {
             return Ok(reply);
         }
-        if method == "config/model/write" && token.is_none() {
+        if method == "config/model/write" {
             return Box::pin(crate::model_choices::pick(&self.shared, params, selected)).await;
         }
         let call = crate::worktrees_deleted::call(&self.shared, method, params, token, stop);

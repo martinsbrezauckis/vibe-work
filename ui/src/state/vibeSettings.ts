@@ -46,7 +46,7 @@ interface ModelTuning {
 
 /** What Settings shows. */
 export interface VibeSettings {
-  defaultAgent: Field<string>;
+  defaultApprovalPolicy: Field<string>;
   activeModel: string | null;
   models: readonly ModelTuning[];
   backgroundProcesses: Field<boolean>;
@@ -118,7 +118,7 @@ export function parseVibeSettings(result: JsonValue): VibeSettings | null {
     : undefined;
   const active = own ?? activeField?.["value"];
   return {
-    defaultAgent: field(byName, "default_agent", isString),
+    defaultApprovalPolicy: field(byName, "default_approval_policy", isString),
     activeModel: typeof active === "string" ? active : null,
     models: modelList.flatMap((m) => {
       const t = m === undefined ? null : modelOf(m);

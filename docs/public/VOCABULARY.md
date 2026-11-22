@@ -14,8 +14,7 @@ Models use Vibe's reported display name, falling back to the configured alias. D
 | `smart-approve` | Smart approve | A model checks each tool call: the calls it judges low-risk run, the others ask. | Use Smart approve access mode |
 | `accept-edits` | Accept edits | File edits run. Commands and anything outside the folder ask. | Use Accept edits access mode |
 | `ask` | Ask | Asks before tool use. | Use Ask access mode |
-| `plan` | Plan first | Retired in Vibe 3. Saved chats reopen in Ask; use Plan on a page to plan. | Plan first was retired in Vibe 3 |
-| `vw-plan` | Plan on a page | Plans first and writes the plan as a page in the project's handbook (docs/handbook/plans/). Other file writes are refused; shell commands still run. | Use Plan on a page access mode |
+| `plan` | Plan first | Retired in Vibe 3. Saved chats reopen in Ask; ask the agent to write a plan in any access mode. | Plan first was retired in Vibe 3 |
 | `explore` | Explore | Explore the project with Vibe's configured profile. | Use Explore access mode |
 
 ## Thinking level

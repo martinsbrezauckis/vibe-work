@@ -24,6 +24,34 @@ use crate::pump;
 use crate::transport::SupervisedTransport;
 use crate::view::DebugApiFlag;
 
+/// Identify only our explicit loopback Mistral proxy override, whose port changes on restart.
+fn mistral_proxy_route(env: &[(String, std::ffi::OsString)]) -> Option<String> {
+    let raw = env
+        .iter()
+        .rev()
+        .find(|(name, _)| name == "VIBE_PROVIDERS")?
+        .1
+        .to_str()?;
+    let providers: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let mut matches = providers
+        .as_array()?
+        .iter()
+        .filter(|row| row["name"] == "mistral");
+    let row = matches.next()?;
+    if matches.next().is_some()
+        || row["backend"] != "mistral"
+        || row["api_key_env_var"] != "MISTRAL_API_KEY"
+    {
+        return None;
+    }
+    let route = row["api_base"].as_str()?;
+    let port = route
+        .strip_prefix("http://127.0.0.1:")?
+        .strip_suffix("/v1")?;
+    port.parse::<u16>().ok().filter(|port| *port > 0)?;
+    Some(route.into())
+}
+
 /// The supervisor: started with its server, or waiting with no server (nothing spawned) when Vibe is
 /// not installed yet; the install's `on_ready` hook launches it later ([`connect_vibe_install`]).
 async fn start_supervisor(
@@ -31,6 +59,10 @@ async fn start_supervisor(
     secrets: Arc<dyn SecretProvider>,
     config: &CoreConfig,
 ) -> Result<Arc<Supervisor>, SupervisorError> {
+    crate::model_choices::prepare_builtin_models(
+        &supervisor.vibe_home,
+        config.sessions_dir.as_deref(),
+    );
     crate::mcp_keys::prepare_config(&supervisor.vibe_home, config.keys.as_ref()); // Use this run's port.
     if !config.start_vibe {
         // Local startup recovery and plugin admission still belong to the core even when a test needs no server.
@@ -165,7 +197,7 @@ fn spawn_key_forwarder(shared: &Arc<Shared>) {
 
 /// Wires the core's owned services and starts their background work (stopped on shutdown or core drop).
 /// Registers Vibe config credentials before a session can echo them, then starts agent tools, preview events,
-/// browser popups, pages, files, plan profiles, Changes refresh, process monitoring and session-holder polling.
+/// browser popups, pages, files, Changes refresh, process monitoring and session-holder polling.
 fn spawn_owned_tasks(shared: &Arc<Shared>) {
     crate::mcp_keys::at_start(shared);
     crate::agent_tools::start_server(shared);
@@ -173,7 +205,6 @@ fn spawn_owned_tasks(shared: &Arc<Shared>) {
     crate::browser_popups::install(shared);
     crate::pages::start_events(shared);
     crate::files::start_events(shared);
-    crate::plan_profile::start(shared);
     shared.changes.spawn(shared);
     *shared.procmon_tick.lock_or_recover() = Some(crate::processes::spawn_tick(shared));
     crate::session_holder::start_poll(shared);
@@ -196,6 +227,7 @@ fn own_callbacks(supervisor: &mut SupervisorConfig) -> Arc<OnceLock<Weak<Shared>
 /// Services prepared in startup order, then moved into the shared state without spawning its tasks.
 struct Startup {
     model_requests: Option<Arc<dyn vw_supervisor::ModelRequests>>,
+    mistral_proxy_route: Option<String>,
     vibe_processes: crate::vibe_processes::VibeProcesses,
     deletes: Arc<crate::session_delete::Deletes>,
     app_context: crate::app_context::Context,
@@ -308,7 +340,8 @@ fn build_shared(state: Startup) -> Shared {
         names: state.names,
         channels: state.channels,
         access: Access::load(config.sessions_dir.clone()),
-        model_choices: crate::model_choices::Choices::load(config.sessions_dir.as_deref()),
+        model_choices: crate::model_choices::Choices::load(config.sessions_dir.as_deref())
+            .with_mistral_proxy_route(state.mistral_proxy_route),
         plugin_refresh: crate::plugin_refresh::Refresh::default(),
         interrupted_send: crate::interrupted_send::State::default(),
         stops: crate::stops::Stops::default(),
@@ -395,6 +428,9 @@ impl Core {
         config: CoreConfig,
     ) -> Result<Self, CoreStartError> {
         let mut config = crate::secrets::configure_clipboard(config)?;
+        if let Err(error) = crate::plan_profile::retire_legacy_agent(&supervisor.vibe_home) {
+            tracing::warn!(%error, "could not remove the retired app-owned plan agent file");
+        }
         crate::agent_tools::secret_env::inherit_path(&supervisor, &mut config)?;
         let github_reads = crate::github_reads::Reader::new(&config, &supervisor.vibe_home);
         crate::github_reads::prepare(&github_reads, &mut supervisor, &mut config);
@@ -420,6 +456,7 @@ impl Core {
         let slot = own_callbacks(&mut supervisor);
         let app_context = crate::app_context::Context::new(&supervisor, &config);
         let model_requests = secrets.model_requests();
+        let mistral_proxy_route = mistral_proxy_route(&supervisor.extra_env);
         let supervisor = start_supervisor(supervisor, secrets, &config).await?;
         let first = supervisor.current().map(|conn| conn.subscribe());
         let (feeds, feeds_rx) = mpsc::unbounded_channel();
@@ -450,9 +487,10 @@ impl Core {
         let terminals = crate::terminals::manager(&config, &procmon, &events);
         let (loads, loads_rx) = mpsc::channel(256);
         let (preview, pages, files) = crate::core_viewers::open(&config);
-        let plan_profile = crate::plan_profile::PlanProfile::new(instructions.own_home.clone());
+        let plan_profile = crate::plan_profile::PlanProfile::new();
         let shared = Arc::new(build_shared(Startup {
             model_requests,
+            mistral_proxy_route,
             vibe_processes,
             deletes,
             app_context,

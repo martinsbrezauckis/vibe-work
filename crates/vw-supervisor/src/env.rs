@@ -29,22 +29,25 @@ pub const API_KEY_VAR: &str = "MISTRAL_API_KEY";
 pub const MCP_TOKEN_VAR: &str = "VW_MCP_TOKEN";
 
 /// Unsupported experiments pinned off in both the app config and the server environment.
-pub const EXPERIMENT_CONFIG_KEYS: [&str; 5] = [
+pub const EXPERIMENT_CONFIG_KEYS: [&str; 4] = [
     "experimental_enable_mistral_mcp_connector",
     "experimental_local_runtime_session_api",
     "experimental_enable_document_library_connector",
-    "experimental_enable_local_projects",
     "experimental_enable_tab_status",
 ];
 
 /// Stable features not offered by the app, pinned off in config and environment.
 pub const STABLE_CONFIG_KEYS: [&str; 1] = ["enable_pr_monitoring"];
 
-/// Vibe settings a runtime layer (`GrowthBook`) can switch on that Vibe never reads from the person's files, pinned off in
-/// the server environment only (Vibe's environment layer beats `GrowthBook` and both TOML layers). The managed-shell
-/// rollout gives `bash_stdin`/`bash_sessions` Vibe `ALWAYS` with input the per-command guards cannot see.
-pub const RUNTIME_PINNED_OFF: [&str; 3] = [
+/// Runtime switches pinned off in the server environment. Vibe's environment
+/// layer beats `GrowthBook` and both TOML layers. The managed-shell rollout
+/// gives `bash_stdin`/`bash_sessions` Vibe `ALWAYS` with input the per-command
+/// guards cannot see. CLI OIDC is an environment-only credential selector.
+pub const RUNTIME_PINNED_OFF: [&str; 4] = [
     "VIBE_MANAGED_SHELL_TOOLS_ENABLED",
+    // The app-managed API key is the only intended provider credential in
+    // this child; never borrow a CLI OIDC login through a host override.
+    "VIBE_CLI_OIDC_ENABLED",
     // Older installed runtimes remain guarded while an app update replaces them.
     "VIBE_EXPERIMENTAL_ENABLE_PR_MONITORING",
     "VIBE_EXPERIMENTAL_ENABLE_PR_DISCOVERY",
@@ -531,6 +534,21 @@ mod tests {
             build_env(&plan(Vec::new(), &extra)),
             Err(EnvError::Hijack("GIT_REDIRECT_STDIN".to_owned())),
             "only the builder sets it"
+        );
+    }
+
+    #[test]
+    fn cli_oidc_stays_off_with_an_app_managed_api_key() {
+        let parent = vec![(
+            OsString::from("VIBE_CLI_OIDC_ENABLED"),
+            OsString::from("true"),
+        )];
+        let env = build_env(&plan(parent, &[])).unwrap();
+        assert_eq!(value(&env, "VIBE_CLI_OIDC_ENABLED"), Some("false".into()));
+        let extra = [("VIBE_CLI_OIDC_ENABLED".to_owned(), "true".into())];
+        assert_eq!(
+            build_env(&plan(Vec::new(), &extra)),
+            Err(EnvError::Experiment("VIBE_CLI_OIDC_ENABLED".to_owned()))
         );
     }
 }

@@ -4,8 +4,8 @@
  * Depends on: AppContext, state/createStore, state/sessionTools. Called by: shell/Content (the session header).
  * Invariants: renders nothing for a normal session. A narrow header (a side panel open, or a chat area under
  * 1040 px) shows only "Temporary"; the whole explanation is the chip's tooltip, reachable without a mouse: the chip
- * is in the Tab order, the explanation is its accessible name (it starts with the visible word, and every screen
- * reader reads a focused element's name; NVDA does not read a focused note's description), the tooltip shows while
+ * is in the Tab order, the explanation is its accessible name and the visible words stay exposed (NVDA/WebView2
+ * reads those words for a focused note), the tooltip shows while
  * the chip is hovered or focused, and Esc hides it while focus stays. The tooltip stays inside the session header
  * (`tooltipPlace`): a side panel beside it is a native view painted above the page, which would cut it off.
  */
@@ -73,7 +73,7 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
         presentation="temporary"
         data-testid="temporary-chip"
         tabIndex={0}
-        // A note: a focusable span with a role; its name is the whole explanation, read on focus everywhere.
+        // A focusable note: its visible words remain available to screen readers alongside the full name.
         role="note"
         aria-label={EXPLANATION}
         onFocus={() => {
@@ -89,9 +89,7 @@ export function TemporaryChip({ sessionId }: { sessionId: string }): ReactElemen
           }
         }}
       >
-        {/* Hidden from assistive tech: NVDA on WebView2 read this visible text instead of the note's name, so the
-            name is the only thing left to read (once, on every engine). */}
-        <span aria-hidden="true">
+        <span>
           Temporary<span className="temporary-more"> · deleted when you quit</span>
         </span>
       </Badge>

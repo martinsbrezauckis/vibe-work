@@ -68,7 +68,7 @@ and has the same limitation. Password mode does not isolate an unlocked process'
 
 ## Known limits
 
-- The agent runs commands with your user's permissions. Vibe's access modes and Vibe Work's Plan on a page profile
+- The agent runs commands with your user's permissions. Vibe's approval policies
   decide what may run without asking; see [Access modes](docs/public/VOCABULARY.md#access-modes) for the current names
   and behavior. Vibe Work adds no operating-system sandbox in this version. The ordinary agent command environment
   strips inherited Git and forge sign-in channels; the command guard refuses push, GitHub writes and Git/gh

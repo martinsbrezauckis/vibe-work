@@ -12,6 +12,24 @@ pub(super) fn repair(
     state: &Path,
     browser: Option<&str>,
 ) -> Result<(), String> {
+    repair_inner(config, state, browser, false)
+}
+
+/// Explicit Connect may reclaim a stale registration; passive status and refresh only repair owned entries.
+pub(super) fn repair_for_connect(
+    config: &ChromeControlConfig,
+    state: &Path,
+    browser: &str,
+) -> Result<(), String> {
+    repair_inner(config, state, Some(browser), true)
+}
+
+fn repair_inner(
+    config: &ChromeControlConfig,
+    state: &Path,
+    browser: Option<&str>,
+    connect: bool,
+) -> Result<(), String> {
     super::selection::migrate(config, state)?;
     let Some(receipt) = read_receipt(config, state) else {
         return Ok(());
@@ -33,20 +51,46 @@ pub(super) fn repair(
         }
         let expected = manifest_for(&helper, config, target.name);
         let result = (|| {
-            let path = target.hosts.map_or_else(
+            let path = target.hosts.as_ref().map_or_else(
                 || manifest_path(state, target.name),
                 |hosts| hosts.join(format!("{HOST_NAME}.json")),
             );
             if !receipt.files.contains(&path) {
                 return Err("Browser helper registration is not owned by this setup".into());
             }
-            ensure_manifest(config, &path, &expected)?;
-            if let Some(root) = target.registry {
-                let key = format!(r"{root}\{HOST_NAME}");
-                if !receipt.registry_keys.contains(&key) {
-                    return Err("Browser helper registration is not owned by this setup".into());
-                }
-                extension_registry::host(&key, &super::windows_native_path(&path), true, &Native)?;
+            let key = target.registry.map(|root| format!(r"{root}\{HOST_NAME}"));
+            if key
+                .as_ref()
+                .is_some_and(|key| !receipt.registry_keys.contains(key))
+            {
+                return Err("Browser helper registration is not owned by this setup".into());
+            }
+            let replaced = if connect {
+                super::prior::check(config, &target, state)?
+            } else {
+                None
+            };
+            ensure_manifest_over(
+                config,
+                &path,
+                &expected,
+                replaced
+                    .as_ref()
+                    .and_then(|prior| prior.manifest_bytes.as_deref()),
+            )?;
+            if let Some(key) = key {
+                extension_registry::host_replacing(
+                    &key,
+                    &super::windows_native_path(&path),
+                    true,
+                    replaced
+                        .as_ref()
+                        .and_then(|prior| prior.registry_value.as_deref()),
+                    &Native,
+                )?;
+            }
+            if let Some(replaced) = replaced {
+                config.setup_notice.set(replaced.notice);
             }
             Ok(())
         })();

@@ -133,6 +133,12 @@ impl PreviewService {
             // A view the agent controls reads its chat's input block from its first event; the person's own never.
             crate::service_person_block::scope_view(&state, session_id, &label);
             let entry = state.entry(session_id);
+            // A restored view has no document yet, even if its previous mount finished loading.
+            // Native setup returns before the first page-load event. A cancelled canary can also report
+            // Finished under the target URI, so only that document's Started may arm its completion.
+            entry.pending_open = Some(url.clone());
+            entry.pending_started = false;
+            entry.set_loading(true);
             // An explicit LAN host selects its storage class; otherwise the URL selects it.
             let class = if entry.lan_host.is_some() {
                 crate::policy::PageClass::Lan

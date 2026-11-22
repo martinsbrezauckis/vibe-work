@@ -30,7 +30,10 @@
 //! Depends on: `vw_ask` (grant types). Called by: `ask::cards` (offers, the user's answer), `pump` (matching,
 //! session end, hand-off), `session_end`, `ask::commands` (list, remove).
 use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{
+    Arc, Mutex, MutexGuard,
+    atomic::{AtomicBool, Ordering},
+};
 use vw_platform::sync::LockRecover;
 
 use serde_json::{Value, json};
@@ -349,6 +352,35 @@ struct Kept {
     grant: SessionGrant,
     /// The session whose end ends the grant: the card's session, or its parent for a subagent's card.
     owner: String,
+    admission: Admission,
+}
+
+/// Shared with an already admitted browser step. The owner holds `dispatch` from its final
+/// check until the pipe write completes. Revoke closes admission first, then waits for that write.
+#[derive(Clone)]
+pub(crate) struct Admission(Arc<AdmissionState>);
+
+struct AdmissionState {
+    allowed: AtomicBool,
+    dispatch: tokio::sync::Mutex<()>,
+}
+
+impl Admission {
+    pub(crate) fn allows(&self) -> bool {
+        self.0.allowed.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn dispatch_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.0.dispatch.lock().await
+    }
+
+    async fn wait_for_dispatch(&self) {
+        drop(self.dispatch_guard().await);
+    }
+
+    fn revoke(&self) {
+        self.0.allowed.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Default)]
@@ -434,6 +466,10 @@ impl Grants {
         state.kept.push(Kept {
             grant: grant.clone(),
             owner: pending.owner,
+            admission: Admission(Arc::new(AdmissionState {
+                allowed: AtomicBool::new(true),
+                dispatch: tokio::sync::Mutex::new(()),
+            })),
         });
         Some(grant)
     }
@@ -468,7 +504,14 @@ impl Grants {
     pub(crate) fn end_tools(&self, gone: impl Fn(&str) -> bool) -> bool {
         let mut state = self.lock();
         let before = state.kept.len();
-        state.kept.retain(|k| !gone(&k.grant.tool));
+        state.kept.retain(|k| {
+            if gone(&k.grant.tool) {
+                k.admission.revoke();
+                false
+            } else {
+                true
+            }
+        });
         state.kept.len() != before
     }
 
@@ -480,6 +523,14 @@ impl Grants {
     /// Whether the same grant still exists after a prepared call has waited to run.
     pub(crate) fn contains(&self, id: &str) -> bool {
         self.lock().kept.iter().any(|kept| kept.grant.id == id)
+    }
+
+    pub(crate) fn admission(&self, id: &str) -> Option<Admission> {
+        self.lock()
+            .kept
+            .iter()
+            .find(|kept| kept.grant.id == id)
+            .map(|kept| kept.admission.clone())
     }
 
     /// What "Allow for this session" would keep on each open card that offers it (the cards' covers lines).
@@ -511,8 +562,32 @@ impl Grants {
     }
 
     /// Removes one grant; false when no grant has that id.
+    #[cfg(test)]
     pub(crate) fn remove(&self, id: &str) -> bool {
         self.remove_many(std::slice::from_ref(&id.to_owned())) == 1
+    }
+
+    pub(crate) async fn remove_wait(&self, id: &str) -> bool {
+        self.remove_many_wait(std::slice::from_ref(&id.to_owned()))
+            .await
+            == 1
+    }
+
+    pub(crate) async fn remove_many_wait(&self, ids: &[String]) -> usize {
+        // Capture the exact tokens before removal drops them. A send already past its final
+        // check keeps its guard until the bounded pipe write finishes; a later send sees false.
+        let admissions = self
+            .lock()
+            .kept
+            .iter()
+            .filter(|k| ids.contains(&k.grant.id))
+            .map(|k| k.admission.clone())
+            .collect::<Vec<_>>();
+        let removed = self.remove_many(ids);
+        for admission in admissions {
+            admission.wait_for_dispatch().await;
+        }
+        removed
     }
 
     /// Removes every grant named in `ids` in one step ("Revoke all"); returns how many were removed. Ids that
@@ -520,7 +595,14 @@ impl Grants {
     pub(crate) fn remove_many(&self, ids: &[String]) -> usize {
         let mut state = self.lock();
         let before = state.kept.len();
-        state.kept.retain(|k| !ids.contains(&k.grant.id));
+        state.kept.retain(|k| {
+            if ids.contains(&k.grant.id) {
+                k.admission.revoke();
+                false
+            } else {
+                true
+            }
+        });
         before - state.kept.len()
     }
 
@@ -532,9 +614,14 @@ impl Grants {
             .pending
             .retain(|_, p| p.session != session && p.owner != session);
         let before = state.kept.len();
-        state
-            .kept
-            .retain(|k| k.grant.session != session && k.owner != session);
+        state.kept.retain(|k| {
+            if k.grant.session == session || k.owner == session {
+                k.admission.revoke();
+                false
+            } else {
+                true
+            }
+        });
         state.kept.len() != before
     }
 }

@@ -5,7 +5,7 @@ market_discovery.rs) and the Windows agent shell PATH reader (vw-core-api secret
 stops with a clear message instead of running without a guard. A Vibe update adds its version here only after every
 guard was checked against it; a test compares the list with the pinned version.
 """
-GUARDED_VIBE_VERSIONS = frozenset({"3.1.3"})
+GUARDED_VIBE_VERSIONS = frozenset({"3.1.4"})
 # The first words of the refusal; the supervisor shows this line as the reason Vibe did not start, and the setup
 # screen recognises it as "this Vibe version is not supported yet" (vw-vibe-install `UNSUPPORTED_VIBE`).
 GUARD_REFUSAL = "Vibe Work does not support Vibe "

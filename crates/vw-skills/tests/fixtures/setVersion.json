@@ -32,16 +32,19 @@
         "imagesSupported": false,
         "awaitingExperimentModel": false,
         "defaultModelAlias": "example",
-        "defaultAgent": "accept-edits",
+        "defaultAgent": "default",
+        "defaultApprovalPolicy": "accept-edits",
         "theme": "example",
         "logLevel": null,
         "disableWelcomeBannerAnimation": false,
+        "disableSelectionAnimation": false,
         "cursorBlink": true,
         "vimKeybindings": false,
         "showDangerousDirectoryWarning": true,
         "autocopyToClipboard": false,
         "enableMouseCapture": true,
         "enableStickyPrompt": true,
+        "collapseTurnDetails": false,
         "enableFileAutocomplete": true,
         "fileWatcherForAutocomplete": false,
         "askConfirmationOnExit": false,
@@ -57,7 +60,6 @@
         "experimentalEnableTabStatus": false,
         "crashReportsEnabled": false,
         "experimentalEnableRegistrySkills": false,
-        "experimentalEnableLocalProjects": true,
         "enablePrMonitoring": true,
         "experimentalEnableStorageUsage": false,
         "models": [],
@@ -95,10 +97,16 @@
         "name": "example",
         "displayName": "example",
         "description": "example",
-        "safety": "safe",
         "agentType": "agent"
       },
       "agents": [],
+      "activeApprovalPolicy": {
+        "name": "example",
+        "displayName": "example",
+        "description": "example",
+        "safety": "safe"
+      },
+      "approvalPolicies": [],
       "skills": [
         {
           "name": "review",
@@ -114,7 +122,9 @@
           },
           "enabled": true,
           "locked": false,
-          "active": true
+          "active": true,
+          "path": null,
+          "linked": false
         },
         {
           "name": "vibe",
@@ -126,7 +136,9 @@
           "registry": null,
           "enabled": true,
           "locked": true,
-          "active": true
+          "active": true,
+          "path": null,
+          "linked": false
         },
         {
           "name": "plugin:notes",
@@ -138,7 +150,9 @@
           "registry": null,
           "enabled": true,
           "locked": true,
-          "active": true
+          "active": true,
+          "path": null,
+          "linked": false
         }
       ],
       "tools": [],

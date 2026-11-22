@@ -170,7 +170,8 @@ impl Rig {
     /// `auto-approve` goes through the native confirmation (the fake confirmer approves), as in the app.
     pub async fn start_session(&self, folder: &Path, agent: &str) -> String {
         self.core.register_picked_folder(folder).unwrap();
-        let params = json!({"agentConfig": {"cwd": folder.to_str().unwrap(), "agent": agent}});
+        let params =
+            json!({"agentConfig": {"cwd": folder.to_str().unwrap(), "approvalPolicy": agent}});
         let token = if agent == "auto-approve" {
             let ask: Command = serde_json::from_value(json!({
                 "type": "requestConfirmation", "method": "session/start", "params": params

@@ -178,7 +178,7 @@ fn decorate(
 ) {
     if let Some(text) = texts.take(&request.method, &request.params) {
         text.apply(&mut request.summary);
-    } else if request.method == "session/agent/update"
+    } else if request.method == "session/approvalPolicy/update"
         && vw_gate::full_access_escalation(&request.method, &request.params)
     {
         let title = request
@@ -322,8 +322,8 @@ mod tests {
                 ),
             ),
             (
-                "session/agent/update",
-                json!({"sessionId": "s1", "agentName": "auto-approve"}),
+                "session/approvalPolicy/update",
+                json!({"sessionId": "s1", "approvalPolicy": "auto-approve"}),
                 format!(
                     "Let the agent in \"{title}\" run every tool without asking ({full_access})?"
                 ),
@@ -371,12 +371,12 @@ mod tests {
             crate::vault_scope::DIALOG_METHODS.len()
         );
 
-        let full_access = json!({"sessionId": "s1", "agentName": "auto-approve"});
+        let full_access = json!({"sessionId": "s1", "approvalPolicy": "auto-approve"});
         let default_profile = json!({"sessionId": "s1", "ops": [
-            {"op": "set", "path": "/default_agent", "value": "auto-approve"}]});
+            {"op": "set", "path": "/default_approval_policy", "value": "auto-approve"}]});
         let before = dialog.shown().len();
         for (method, params) in [
-            ("session/agent/update", full_access.clone()),
+            ("session/approvalPolicy/update", full_access.clone()),
             ("config/write", default_profile),
             ("config/proxy/write", json!({})),
             (crate::browser_consent::METHOD, json!({})),
@@ -393,14 +393,14 @@ mod tests {
         let window = confirmer
             .confirm(&request(
                 Requester::Window,
-                "session/agent/update",
+                "session/approvalPolicy/update",
                 full_access,
             ))
             .await;
         assert_eq!(window, Confirmation::Declined);
         assert_eq!(
             dialog.shown().last().map(String::as_str),
-            Some("session/agent/update")
+            Some("session/approvalPolicy/update")
         );
     }
 }

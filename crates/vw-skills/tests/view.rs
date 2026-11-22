@@ -140,7 +140,10 @@ fn merges_update_disabled_project_shadow_and_reported_sources() {
 fn empty_and_unavailable_catalog_are_distinct() {
     let mut catalog: SkillsCatalogResponse =
         serde_json::from_value(serde_json::json!({"skills": []})).unwrap();
-    let installed = SkillsInstalledResponse { skills: vec![] };
+    let installed = SkillsInstalledResponse {
+        skills: vec![],
+        issues: vec![],
+    };
     let active = SkillsListResponse { skills: vec![] };
     let updates = SkillsUpdatesResponse { updates: vec![] };
     let unavailable = SkillsView::merge(&installed, &catalog, &updates, &active, &[]);

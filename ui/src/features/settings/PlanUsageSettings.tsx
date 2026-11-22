@@ -1,6 +1,7 @@
 /** Monthly allowance in Usage and plan. Uses the plan usage store, existing facts, progress and Button.
  * Mounted only by the optional UI switch; never retains another key's or session's figures.
  */
+import { TEXT } from "../../vocabulary";
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Controls";
 import { clockText } from "../../state/account";
@@ -50,7 +51,7 @@ export function PlanUsageSettings() {
           )}
           {value?.kind === "notReported" && (
             <p className="key-line" role="status">
-              Not reported
+              {TEXT.notReported}
             </p>
           )}
           {value?.kind === "error" && (
@@ -71,7 +72,7 @@ export function PlanUsageSettings() {
                 </div>
                 <div className="check">
                   <dt>Pay as you go</dt>
-                  <dd>{value.payg === null ? "Not reported" : value.payg ? "On" : "Off"}</dd>
+                  <dd>{value.payg === null ? TEXT.notReported : value.payg ? "On" : "Off"}</dd>
                 </div>
                 {value.resetAt !== null && (
                   <div className="check">

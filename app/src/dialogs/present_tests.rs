@@ -55,3 +55,38 @@ fn no_os_window_reveals_the_main_window_by_itself() {
         );
     }
 }
+
+#[test]
+fn an_ok_notice_has_an_information_title_even_without_a_short_heading() {
+    for text in [
+        "Vibe Work was not installed completely.",
+        "",
+        &"x".repeat(301),
+    ] {
+        let spec = super::dialog_spec(text, vec!["OK".to_owned()]);
+        assert_eq!(spec.title, "Vibe Work information");
+        assert!(!spec.heading.contains("confirmation"));
+        assert_eq!(spec.buttons, ["OK"]);
+    }
+    for labels in [
+        vec![],
+        vec!["Continue".into(), "Cancel".into()],
+        vec!["OK".into(), "Cancel".into()],
+    ] {
+        let spec = super::dialog_spec("", labels);
+        assert_eq!(spec.title, vw_host::DIALOG_TITLE);
+        assert_eq!(spec.heading, vw_host::DIALOG_TITLE);
+    }
+}
+
+#[test]
+fn every_os_uses_the_shared_dialog_copy() {
+    for source in [
+        include_str!("linux_confirmation.rs"),
+        include_str!("macos_confirmation.rs"),
+        include_str!("windows_confirmation.rs"),
+    ] {
+        assert!(source.contains("super::dialog_spec("));
+        assert!(!source.contains("title: vw_host::DIALOG_TITLE"));
+    }
+}

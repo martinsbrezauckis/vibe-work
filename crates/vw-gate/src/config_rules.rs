@@ -10,7 +10,7 @@
 //! - One bad op refuses the whole call; nothing is partly applied.
 //! - `config/model/write` accepts a model alias Vibe reported in `runtime/read`, a non-blank
 //!   provider level, or both, with `sessionOnly: true`; chat picks never write the user default.
-//! - Making `auto-approve` the default profile is an escalation (needs a native confirmation).
+//! - Making `auto-approve` the default approval policy is an escalation (needs a native confirmation).
 //! - The two privacy switches (`/enable_telemetry`, `/experiments/enable`) accept only OFF.
 //!   Enabling one or removing its key is refused because the guarded runtime disables data sharing.
 
@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use serde_json::{Map, Value};
 
 use crate::error::{DenyReason, GateError};
-use crate::profile::{escalates, is_profile};
+use crate::profile::{escalates, is_agent, is_policy};
 use crate::shape::{Field, Kind, check, invalid, opt, req};
 
 /// What value a config path takes.
@@ -28,6 +28,7 @@ enum KeyType {
     Bool,
     Theme,
     DefaultAgent,
+    DefaultApprovalPolicy,
     ActiveModel,
     /// A managed data-sharing switch: only off is allowed.
     Privacy,
@@ -53,6 +54,7 @@ const CONFIG_KEYS: &[(&str, KeyType)] = &[
     ("/enable_update_checks", KeyType::Bool),
     ("/enable_notifications", KeyType::Bool),
     ("/default_agent", KeyType::DefaultAgent),
+    ("/default_approval_policy", KeyType::DefaultApprovalPolicy),
     ("/active_model", KeyType::ActiveModel),
     // Vibe 2.26.1: what the agent may use, and when a silent answer counts as stalled.
     ("/enable_background_processes", KeyType::Bool),
@@ -149,6 +151,9 @@ fn check_op(
             if matches!(value_kind, KeyType::Privacy) {
                 return Err(policy(method, "data sharing is disabled by Vibe Work"));
             }
+            if matches!(value_kind, KeyType::DefaultApprovalPolicy) {
+                return Err(policy(method, "set the default approval policy explicitly"));
+            }
             Ok(None)
         }
         Some("set") => {
@@ -183,8 +188,13 @@ fn check_value(
             });
             ok.then_some(None).ok_or_else(bad)
         }
-        KeyType::DefaultAgent => match value.as_str() {
-            Some(name) if is_profile(name) => Ok(escalates(name).then(|| {
+        KeyType::DefaultAgent => value
+            .as_str()
+            .filter(|name| is_agent(name))
+            .map(|_| None)
+            .ok_or_else(bad),
+        KeyType::DefaultApprovalPolicy => match value.as_str() {
+            Some(name) if is_policy(name) => Ok(escalates(name).then(|| {
                 format!(
                     "Make {} the default access mode: new chats would run every tool without asking",
                     vw_vocabulary::label("accessModes", "auto-approve")

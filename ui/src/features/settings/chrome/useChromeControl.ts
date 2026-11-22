@@ -193,7 +193,11 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
         });
         // A profile that waits after "Not now" is asked again on its next reconnect; the hint says when.
         if (asked.type === "chromeControl" && asked.hint)
-          setStatus({ kind: "hint", text: asked.hint, alert: false });
+          setStatus({
+            ...(asked.hint.startsWith("Connected.") ? {} : { kind: "hint" as const }),
+            text: asked.hint,
+            alert: false,
+          });
       }
     } catch (thrown) {
       setStatus({ text: toCallError(thrown).error.message, alert: true });

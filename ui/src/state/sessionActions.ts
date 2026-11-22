@@ -18,6 +18,7 @@
  */
 import type { Command, JsonValue, ProcessesResult } from "../protocol/core";
 import { CoreCallError, toCallError } from "../protocol/client/types";
+import { currentModeId } from "../features/composer/model/access";
 import type { CoreController } from "./coreStore";
 import { reportMissingChat } from "./sessionOpenError";
 import { createStore } from "./createStore";
@@ -315,11 +316,12 @@ export function createSessionActions(deps: {
         typeof runtime === "object" && runtime !== null && !Array.isArray(runtime)
           ? runtime["activeAgent"]
           : null;
-      const profile =
+      const agent =
         typeof active === "object" && active !== null && !Array.isArray(active)
           ? active["name"]
           : null;
-      if (typeof cwd !== "string" || typeof profile !== "string") {
+      const policy = currentModeId(runtime, stateSession, entry?.accessMode);
+      if (typeof cwd !== "string" || typeof agent !== "string" || policy === null) {
         fail(
           new Error(
             "The chat's folder and access mode could not be read. Reopen it and try again.",
@@ -333,7 +335,8 @@ export function createSessionActions(deps: {
             type: "startSession",
             agentConfig: {
               cwd,
-              agent: profile,
+              agent: agent === "vw-plan" ? "default" : agent,
+              approvalPolicy: policy,
               ...(workspaceRoots.length === 0 ? {} : { workspaceRoots }),
             },
           },

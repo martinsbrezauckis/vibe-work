@@ -42,9 +42,40 @@ struct Call {
     rpc: bool,
     /// Sent by [`Owner::control`], which never waits for the answer: it is delivered although nobody holds its reply.
     detached: bool,
+    admission: Option<crate::ask::grants::Admission>,
 }
 
 impl Call {
+    async fn dispatch<T>(&self, send: impl std::future::Future<Output = T>) -> Option<T> {
+        // The grant is checked while its dispatch gate is held. Revoke closes the grant and
+        // waits for this guard before reporting completion to the person.
+        let _guard = match &self.admission {
+            Some(token)
+                if !matches!(
+                    self.name.as_str(),
+                    "chrome_status" | "owner.primitiveResult"
+                ) =>
+            {
+                Some(token.dispatch_guard().await)
+            }
+            _ => None,
+        };
+        if self.revoked() {
+            None
+        } else {
+            Some(send.await)
+        }
+    }
+
+    fn revoked(&self) -> bool {
+        // Status and receipt reads finish an effect already sent; blocking them would turn an
+        // in-flight outcome into an incorrect "not_run" receipt after revoke.
+        !matches!(
+            self.name.as_str(),
+            "chrome_status" | "owner.primitiveResult"
+        ) && self.admission.as_ref().is_some_and(|token| !token.allows())
+    }
+
     /// Whether the owner still sends this call to the helper. A call whose caller stopped waiting (its reply is
     /// closed) is dropped, except fire-and-forget control calls (frame, idle, stop, delete, cancel), which carry
     /// the app's intent and must arrive.
@@ -56,6 +87,155 @@ impl Call {
                     self.args["action"].as_str(),
                     Some("stop" | "delete" | "cancel")
                 ))
+    }
+}
+
+#[cfg(test)]
+mod revoke_dispatch_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn revoke_waits_for_owner_pipe_send_commitment() {
+        let grants = Arc::new(crate::ask::grants::Grants::default());
+        let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+            "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","steps":[
+                {"action":"auth.fill","args":{"ref":"u2","login":"Demo"}}]}},"requiredPermissions":[]}});
+        grants.note_callback("card", "chat", "chat", crate::ask::grants::scope_of(&card));
+        let grant = grants
+            .keep(grants.claim("card").unwrap(), vw_ask::AnsweredBy::Person, 1)
+            .unwrap();
+        let admission = grants.admission(&grant.id).unwrap();
+        let (reply, _answer) = oneshot::channel();
+        let call = Call {
+            name: "chrome_execute".into(),
+            args: json!({}),
+            reply,
+            rpc: false,
+            detached: false,
+            admission: Some(admission),
+        };
+        let (checked, reached) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let revoke_returned = Arc::new(AtomicBool::new(false));
+        let late_send = Arc::new(AtomicBool::new(false));
+        let returned = revoke_returned.clone();
+        let late = late_send.clone();
+        let owner = tokio::spawn(async move {
+            call.dispatch(async move {
+                checked.send(()).unwrap();
+                resumed.await.unwrap();
+                late.store(returned.load(Ordering::SeqCst), Ordering::SeqCst);
+            })
+            .await
+        });
+        reached.await.unwrap(); // Owner passed its final grant check, before the pipe write.
+        let id = grant.id.clone();
+        let revoke_grants = grants.clone();
+        let returned = revoke_returned.clone();
+        let mut revoke = tokio::spawn(async move {
+            assert!(revoke_grants.remove_wait(&id).await);
+            returned.store(true, Ordering::SeqCst);
+        });
+        let early = tokio::time::timeout(Duration::from_millis(100), &mut revoke).await;
+        resume.send(()).unwrap();
+        owner.await.unwrap();
+        let returned_before_send = early.is_ok();
+        if let Ok(result) = early {
+            result.unwrap();
+        } else {
+            revoke.await.unwrap();
+        }
+        assert!(
+            !returned_before_send,
+            "Revoke returned while the owner had not committed the pipe send"
+        );
+        assert!(
+            !late_send.load(Ordering::SeqCst),
+            "a helper send followed completed Revoke"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_chats_revoke_does_not_take_another_chats_dispatch_gate() {
+        let grants = Arc::new(crate::ask::grants::Grants::default());
+        let card = json!({"vwToolAsk":true,"detail":{"kind":"approval","vwBrowserTier":2,
+            "effect":{"toolName":"mcp_vw.chrome_execute","input":{"sessionId":"t","steps":[
+                {"action":"auth.fill","args":{"ref":"u2","login":"Demo"}}]}},"requiredPermissions":[]}});
+        let mut ids = Vec::new();
+        for chat in ["first", "second"] {
+            grants.note_callback(chat, chat, chat, crate::ask::grants::scope_of(&card));
+            ids.push(
+                grants
+                    .keep(grants.claim(chat).unwrap(), vw_ask::AnsweredBy::Person, 1)
+                    .unwrap()
+                    .id,
+            );
+        }
+        let first = grants.admission(&ids[0]).unwrap();
+        let second = grants.admission(&ids[1]).unwrap();
+        let (reply, _answer) = oneshot::channel();
+        let first_call = Call {
+            name: "chrome_execute".into(),
+            args: json!({}),
+            reply,
+            rpc: false,
+            detached: false,
+            admission: Some(first.clone()),
+        };
+        let (at_send, reached) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let owner = tokio::spawn(async move {
+            first_call
+                .dispatch(async {
+                    at_send.send(()).unwrap();
+                    released.await.unwrap();
+                })
+                .await
+        });
+        reached.await.unwrap();
+        let first_id = ids[0].clone();
+        let revoking = grants.clone();
+        let revoke = tokio::spawn(async move { revoking.remove_wait(&first_id).await });
+        tokio::time::timeout(Duration::from_millis(100), async {
+            while first.allows() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the first chat's grant was revoked");
+        let (reply, _answer) = oneshot::channel();
+        let second_call = Call {
+            name: "chrome_execute".into(),
+            args: json!({}),
+            reply,
+            rpc: false,
+            detached: false,
+            admission: Some(second),
+        };
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                second_call.dispatch(async { 7 })
+            )
+            .await
+            .unwrap(),
+            Some(7),
+            "another chat waited on the revoked chat's send"
+        );
+        release.send(()).unwrap();
+        owner.await.unwrap();
+        assert!(revoke.await.unwrap());
+        let (reply, _answer) = oneshot::channel();
+        let revoked_call = Call {
+            name: "chrome_execute".into(),
+            args: json!({}),
+            reply,
+            rpc: false,
+            detached: false,
+            admission: Some(first),
+        };
+        assert_eq!(revoked_call.dispatch(async { 9 }).await, None);
     }
 }
 
@@ -72,6 +252,7 @@ pub(super) enum Answer {
 /// helper messages; arbitrary error text may contain page data and must not reach a chat verbatim.
 pub(super) enum RpcFailure {
     Unavailable,
+    Revoked,
     Rejected {
         code: i64,
         helper_code: Option<String>,
@@ -169,6 +350,7 @@ impl Owner {
                 reply,
                 rpc: false,
                 detached: true,
+                admission: None,
             };
             if let Err(tokio::sync::mpsc::error::TrySendError::Full(call)) = send.try_send(call) {
                 tokio::spawn(async move {
@@ -212,6 +394,13 @@ impl Owner {
                 }
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
+                }
+                if call.revoked() {
+                    let _ = call.reply.send(own(
+                        crate::ask::tool_calls::REVOKED_BROWSER_GRANT,
+                        "CONSENT_REVOKED",
+                    ));
+                    continue;
                 }
                 let value = answer(&call.name, &call.args);
                 log.lock()
@@ -326,6 +515,11 @@ impl Owner {
                     Ok(value)
                 }
             }
+            Some(Answer::Own(value))
+                if value["structuredContent"]["error"]["code"] == "CONSENT_REVOKED" =>
+            {
+                Err(RpcFailure::Revoked)
+            }
             _ => Err(RpcFailure::Unavailable),
         }
     }
@@ -386,6 +580,7 @@ impl Owner {
                 reply,
                 rpc,
                 detached: false,
+                admission: super::batch::admission(),
             })
             .await
             .ok()?;

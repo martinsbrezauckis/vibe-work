@@ -56,7 +56,7 @@ async fn core(root: &std::path::Path) -> crate::Core {
 }
 
 async fn knowledge(core: &crate::Core, request: KnowledgeRequest) -> Result<KnowledgeView, String> {
-    match core.local(Origin::Ui, Command::Knowledge { request }).await {
+    match Box::pin(core.local(Origin::Ui, Command::Knowledge { request })).await {
         Ok(crate::CommandResult::Knowledge { view }) => Ok(view),
         Ok(_) => panic!("another result kind"),
         Err(error) => Err(error.message),

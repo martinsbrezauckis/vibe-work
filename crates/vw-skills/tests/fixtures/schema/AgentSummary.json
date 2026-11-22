@@ -15,16 +15,12 @@
     "name": {
       "title": "Name",
       "type": "string"
-    },
-    "safety": {
-      "$ref": "#/$defs/AgentSafety"
     }
   },
   "required": [
     "name",
     "displayName",
     "description",
-    "safety",
     "agentType"
   ],
   "title": "AgentSummary",

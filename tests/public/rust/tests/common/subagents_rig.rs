@@ -117,7 +117,9 @@ pub async fn users_chat_in(r: &Rig, folder: &str) -> String {
     r.rig.core.register_picked_folder(&folder).unwrap();
     let started = r
         .run(Command::StartSession {
-            agent_config: Some(json!({"cwd": folder, "agent":"ask", "trustWorkspace":true})),
+            agent_config: Some(
+                json!({"cwd": folder, "approvalPolicy":"ask", "trustWorkspace":true}),
+            ),
         })
         .await
         .unwrap();

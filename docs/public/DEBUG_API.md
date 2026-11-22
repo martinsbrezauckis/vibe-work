@@ -1222,7 +1222,7 @@ Settings `chrome` actions require a build carrying the Chrome Control package. W
 ### Chrome Control agent path
 
 The current chat mode controls every Chrome call and each batch step: Ask, Accept edits, Full access;
-Smart approve maps to Accept edits. Plan on a page and Explore have no Chrome tools. Above-tier actions return
+Smart approve maps to Accept edits. Explore has no Chrome tools. Above-tier actions return
 plain refusals naming the required mode, with no persistent action grants. In Ask, history and bookmark reads and
 tab closes show a card first, and opening a closed Chrome or Edge asks first. Vault dialogs remain
 native and cannot be answered through the Debug API. The complete behavior is in [Chrome Control](BROWSER_CONTROL.md).

@@ -12,7 +12,7 @@ use toml::{Table, Value};
 use toml_edit::{DocumentMut, value};
 
 /// The keys pinned off (top level of Vibe's config).
-pub const KEYS: [&str; 5] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
+pub const KEYS: [&str; 4] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
 
 /// Stable features disabled until the app offers them through its own controls.
 pub const STABLE_KEYS: [&str; 1] = vw_supervisor::STABLE_CONFIG_KEYS;
@@ -69,6 +69,48 @@ fn enable(doc: &mut DocumentMut, expected: &mut Table, key: &str) {
     expected.insert(key.into(), Value::Boolean(true));
 }
 
+fn migrate_approval_policy(doc: &mut DocumentMut, expected: &mut Table) {
+    // Vibe 3.1.4 separates the chosen agent from its approval policy. An older
+    // config used default_agent for both; retain that person's access choice.
+    let legacy_policy = expected
+        .get("default_agent")
+        .and_then(Value::as_str)
+        .and_then(|name| match name {
+            "ask" | "accept-edits" | "smart-approve" | "auto-approve" => Some(name),
+            // Vibe 3.1.4 removes the built-in plan agent and maps it to Ask.
+            "plan" | "vw-plan" => Some("ask"),
+            _ => None,
+        })
+        .map(str::to_owned);
+    if let Some(policy) = legacy_policy {
+        if !doc.contains_key("default_approval_policy") {
+            doc["default_approval_policy"] = value(policy.as_str());
+            expected.insert("default_approval_policy".into(), Value::String(policy));
+        }
+        // Retain the original key and value decorations, including personal comments.
+        let decor = doc
+            .get("default_agent")
+            .and_then(toml_edit::Item::as_value)
+            .map(|v| v.decor().clone());
+        doc["default_agent"] = value("default");
+        if let (Some(decor), Some(new)) = (decor, doc["default_agent"].as_value_mut()) {
+            *new.decor_mut() = decor;
+        }
+        expected.insert("default_agent".into(), Value::String("default".into()));
+    }
+    if !doc.contains_key("default_agent") {
+        doc["default_agent"] = value("default");
+        expected.insert("default_agent".into(), Value::String("default".into()));
+    }
+    if !doc.contains_key("default_approval_policy") {
+        doc["default_approval_policy"] = value("accept-edits");
+        expected.insert(
+            "default_approval_policy".into(),
+            Value::String("accept-edits".into()),
+        );
+    }
+}
+
 fn edited(
     existing: &str,
     migrate_registry: bool,
@@ -113,11 +155,10 @@ fn edited(
     if let Some(old) = expected.remove(OLD_COW) {
         expected.entry(COW).or_insert(old);
     }
-    // Preserve the previous stable default when a remote default-agent experiment is active.
-    if !doc.contains_key("default_agent") {
-        doc["default_agent"] = value("accept-edits");
-        expected.insert("default_agent".into(), Value::String("accept-edits".into()));
-    }
+    migrate_approval_policy(&mut doc, &mut expected);
+    // This key was removed in 3.1.4 and strict config validation rejects it.
+    doc.remove("experimental_enable_local_projects");
+    expected.remove("experimental_enable_local_projects");
     if !doc.contains_key(REGISTRY)
         || (migrate_registry && expected.get(REGISTRY).and_then(Value::as_bool) == Some(false))
     {
@@ -265,4 +306,109 @@ pub fn ensure(vibe_home: &Path) -> Result<ExperimentPins, String> {
     let stage = stage(&mut draft, vibe_home);
     let written = draft.commit();
     finish(stage, &written)
+}
+
+#[cfg(test)]
+mod vibe_314_policy_tests {
+    use super::with_pins_off;
+
+    #[test]
+    fn legacy_access_defaults_become_policies_without_losing_custom_agents() {
+        for policy in ["ask", "accept-edits", "smart-approve", "auto-approve"] {
+            let input = format!("default_agent = '{policy}'\n");
+            let (updated, outcome) = with_pins_off(&input);
+            assert!(outcome.skipped.is_none(), "{policy}: {outcome:?}");
+            let updated = updated.expect("the old default must migrate");
+            let parsed: toml::Table = updated.parse().expect("valid TOML");
+            assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+            assert_eq!(parsed["default_approval_policy"].as_str(), Some(policy));
+            assert!(!parsed.contains_key("experimental_enable_local_projects"));
+        }
+
+        let (updated, _) = with_pins_off("default_agent = 'my-agent'\n");
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(parsed["default_agent"].as_str(), Some("my-agent"));
+        assert_eq!(
+            parsed["default_approval_policy"].as_str(),
+            Some("accept-edits")
+        );
+
+        let (updated, _) =
+            with_pins_off("default_agent = 'ask'\ndefault_approval_policy = 'smart-approve'\n");
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+        assert_eq!(
+            parsed["default_approval_policy"].as_str(),
+            Some("smart-approve"),
+            "an explicit policy must win over a legacy agent-name alias"
+        );
+
+        let (updated, _) = with_pins_off("default_agent = 'plan'\n");
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+        assert_eq!(parsed["default_approval_policy"].as_str(), Some("ask"));
+    }
+
+    #[test]
+    fn migrating_a_legacy_access_default_preserves_personal_comments() {
+        for explicit in [
+            "",
+            "default_approval_policy = 'smart-approve' # policy choice\n",
+        ] {
+            let input =
+                format!("# personal access choice\ndefault_agent = 'ask' # chosen\n{explicit}");
+            let (updated, outcome) = with_pins_off(&input);
+            assert!(outcome.skipped.is_none());
+            let updated = updated.expect("the legacy access default migrates");
+            assert!(updated.contains("# personal access choice"), "{updated}");
+            assert!(updated.contains("# chosen"), "{updated}");
+            if !explicit.is_empty() {
+                assert!(updated.contains("# policy choice"), "{updated}");
+            }
+            let parsed: toml::Table = updated.parse().unwrap();
+            assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+            assert_eq!(
+                parsed["default_approval_policy"].as_str(),
+                Some(if explicit.is_empty() {
+                    "ask"
+                } else {
+                    "smart-approve"
+                })
+            );
+            assert!(with_pins_off(&updated).0.is_none());
+        }
+    }
+
+    #[test]
+    fn removed_vw_plan_agent_becomes_ask_policy() {
+        let (updated, outcome) = with_pins_off("default_agent = 'vw-plan'\n");
+        assert!(outcome.skipped.is_none());
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+        assert_eq!(parsed["default_approval_policy"].as_str(), Some("ask"));
+
+        let (updated, outcome) =
+            with_pins_off("default_agent = 'vw-plan'\ndefault_approval_policy = 'auto-approve'\n");
+        assert!(outcome.skipped.is_none());
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(parsed["default_agent"].as_str(), Some("default"));
+        assert_eq!(
+            parsed["default_approval_policy"].as_str(),
+            Some("auto-approve")
+        );
+    }
+
+    #[test]
+    fn retired_local_projects_key_is_removed_and_session_api_stays_off() {
+        let (updated, outcome) = with_pins_off(
+            "experimental_enable_local_projects = true\nexperimental_local_runtime_session_api = true\n",
+        );
+        assert!(outcome.skipped.is_none());
+        let parsed: toml::Table = updated.unwrap().parse().unwrap();
+        assert!(!parsed.contains_key("experimental_enable_local_projects"));
+        assert_eq!(
+            parsed["experimental_local_runtime_session_api"].as_bool(),
+            Some(false)
+        );
+    }
 }

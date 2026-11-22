@@ -228,6 +228,49 @@ pub(crate) struct Prepared {
     safe: io::Result<()>,
 }
 
+/// Vibe 3.1.4 maps a Windows permission error under `VIBE_HOME` to `forbidden`.
+/// Only a denial inside this confirmed chat's captured store may use the delete retry.
+fn denied_in_captured_store(
+    error: &vw_protocol::ProtocolError,
+    prepared: &Prepared,
+    id: &str,
+) -> bool {
+    if !cfg!(windows) || error.code.as_str() != "forbidden" {
+        return false;
+    }
+    let Some(data) = error.data.as_option() else {
+        return false;
+    };
+    if data.get("harnessCode").and_then(serde_json::Value::as_str)
+        != Some("vibe_home_access_denied")
+    {
+        return false;
+    }
+    let Some(path) = data.get("path").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    if !std::path::Path::new(path).is_absolute() {
+        return false;
+    }
+    let Ok(denied) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let save_dir = &prepared.targets.save_dir;
+    let unified = save_dir.join("unified").join(id);
+    let legacy = prepared
+        .targets
+        .legacy
+        .as_ref()
+        .map(|name| save_dir.join(name));
+    [Some(unified), legacy]
+        .into_iter()
+        .flatten()
+        .any(|candidate| {
+            std::fs::canonicalize(candidate)
+                .is_ok_and(|target| denied != target && denied.starts_with(target))
+        })
+}
+
 /// Capture storage before rmtree can remove a legacy folder's full-id metadata.
 pub(crate) async fn prepare(shared: &Arc<Shared>, id: &str) -> Option<Prepared> {
     if !files::uuid(id) || !authorized(shared, id) {
@@ -310,7 +353,8 @@ pub(crate) async fn finish(
     };
     let eligible = files::uuid(id)
         && matches!(&error, GateError::Transport(RpcError::Remote { error, .. })
-            if matches!(error.code.as_str(), "internal_error" | "not_found"));
+            if matches!(error.code.as_str(), "internal_error" | "not_found")
+                || prepared.as_ref().is_some_and(|prepared| denied_in_captured_store(error, prepared, id)));
     let Some(mut prepared) = prepared.filter(|_| eligible) else {
         return Err(error);
     };
@@ -392,6 +436,86 @@ pub(crate) async fn sweep(core: &Core) {
                     "chat deletion remains pending; retry at the next start"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod denial_tests {
+    use super::{Prepared, Targets, denied_in_captured_store};
+    use serde_json::json;
+    use std::fs;
+
+    const ID: &str = "11111111-2222-3333-4444-555555555555";
+    const OTHER: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+    fn forbidden(path: &std::path::Path, harness_code: &str) -> vw_protocol::ProtocolError {
+        serde_json::from_value(json!({
+            "code": "forbidden",
+            "message": "denied",
+            "data": {"harnessCode": harness_code, "path": path}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_denial_for_another_chat_or_home_file_cannot_grant_delete_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let save = dir.path().join("logs/session");
+        let victim = save.join("unified").join(ID);
+        let other = save.join("unified").join(OTHER);
+        fs::create_dir_all(&victim).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let current = victim.join("CURRENT");
+        let other_current = other.join("CURRENT");
+        let config = dir.path().join("config.toml");
+        for path in [&current, &other_current, &config] {
+            fs::write(path, "fixture").unwrap();
+        }
+        let prepared = Prepared {
+            targets: Targets {
+                save_dir: save,
+                prefix: "session".into(),
+                legacy: None,
+            },
+            safe: Ok(()),
+        };
+        assert_eq!(
+            denied_in_captured_store(
+                &forbidden(&current, "vibe_home_access_denied"),
+                &prepared,
+                ID
+            ),
+            cfg!(windows)
+        );
+        for path in [&other_current, &config] {
+            assert!(!denied_in_captured_store(
+                &forbidden(path, "vibe_home_access_denied"),
+                &prepared,
+                ID
+            ));
+        }
+        assert!(!denied_in_captured_store(
+            &forbidden(&current, "unrelated_denial"),
+            &prepared,
+            ID
+        ));
+        for path in [&victim, &victim.join("MISSING")] {
+            assert!(!denied_in_captured_store(
+                &forbidden(path, "vibe_home_access_denied"),
+                &prepared,
+                ID
+            ));
+        }
+        for data in [
+            json!(null),
+            json!({"harnessCode": "vibe_home_access_denied"}),
+        ] {
+            let error = serde_json::from_value(json!({
+                "code": "forbidden", "message": "denied", "data": data
+            }))
+            .unwrap();
+            assert!(!denied_in_captured_store(&error, &prepared, ID));
         }
     }
 }

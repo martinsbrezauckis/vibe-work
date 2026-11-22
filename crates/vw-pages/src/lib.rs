@@ -9,7 +9,7 @@
 //! second Tauri engine instance in the app; a recording fake in tests).
 //!
 //! Depends on: vw-preview, vw-platform, axum (page server), pulldown-cmark (Markdown pages), tokio, serde. Called by:
-//! vw-core-api (the `pages` command, the overview, the agent's `handbook_check`, the `vw-plan` profile, preview
+//! vw-core-api (the `pages` command, the overview, the agent's `handbook_check`, preview
 //! element picks), the app (engine setup), tests.
 //! Invariants:
 //! - Pages and `index.html` are the agent's. Only the explicit `handbook_check({repair: "stylesheet"})` tool writes
@@ -44,7 +44,6 @@ mod page_scan;
 mod paths;
 mod pick;
 mod picking;
-mod profile;
 mod projects;
 mod readiness;
 mod server;
@@ -94,9 +93,6 @@ pub use pick::{
     start_script, start_script_from, target_script, target_script_with_quote,
 };
 pub use picking::{run_pick, section_of};
-pub use profile::{
-    NAME as PLAN_PROFILE, PlanTarget, pattern as plan_pattern, toml as plan_profile_toml,
-};
 pub use server::{CHECK_PREFIX, ERROR_PRELUDE, MAX_FILE, PagesServer, Policy, csp};
 pub use service::{LABEL_PREFIX, PagesService};
 pub use settings::{PagesSettings, SettingsStore};
@@ -106,7 +102,8 @@ pub use viewer::{ViewerView, allowed as viewer_allows};
 
 /// One-line statement of what this crate is responsible for, exposed so tests and diagnostics
 /// can assert which crate they are looking at.
-pub const CRATE_ROLE: &str = "project handbook: format, validator, hub, overview, page server, comments, plan profile, viewer";
+pub const CRATE_ROLE: &str =
+    "project handbook: format, validator, hub, overview, page server, comments, viewer";
 
 /// Milliseconds since the Unix epoch for comment, answer and check times; 0 when the clock is before the epoch.
 pub(crate) use vw_platform::wall_clock::unix_ms as now_ms;

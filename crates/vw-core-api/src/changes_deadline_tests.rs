@@ -8,7 +8,11 @@
 //! PREDICT (two reasons, red before the change): both a late recording and a late start after it said "Preparing the
 //! review took too long". Now a hold before the baseline is written says the folder took too long to record, and a
 //! hold after it says watching the folder took too long to start.
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::time::Duration;
 use vw_platform::sync::LockRecover;
 
@@ -28,9 +32,10 @@ impl Confirmer for NoPrompt {
 }
 
 /// Holds the review until the test releases it: before its baseline is written (`.1`), or after (`!.1`).
-struct Hold(Mutex<mpsc::Receiver<()>>, bool);
+struct Hold(Mutex<mpsc::Receiver<()>>, bool, Arc<AtomicBool>);
 impl Hold {
     fn wait(&self) {
+        self.2.store(true, Ordering::SeqCst);
         let _ = self
             .0
             .lock_or_recover()
@@ -41,6 +46,9 @@ impl crate::ChangesTestHooks for Hold {
     fn before_take(&self, _: &str) {
         if self.1 {
             self.wait();
+        } else {
+            // Simulate a loaded Windows host taking longer to write the baseline.
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
     fn before_install(&self, _: &str) {
@@ -50,7 +58,7 @@ impl crate::ChangesTestHooks for Hold {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_late_review_says_which_part_took_too_long() {
     assert_eq!(
         Box::pin(late_reason("after", false)).await,
@@ -81,6 +89,7 @@ async fn late_reason(name: &str, before_take: bool) -> String {
     );
     std::fs::write(repo.join("file.txt"), "content\n").unwrap();
     let (release, held) = mpsc::channel();
+    let reached = Arc::new(AtomicBool::new(false));
     let core = Box::pin(crate::Core::start(
         vw_supervisor::SupervisorConfig::new(
             base.join("no-server"),
@@ -92,10 +101,12 @@ async fn late_reason(name: &str, before_take: bool) -> String {
         crate::CoreConfig {
             start_vibe: false,
             changes_dir: Some(base.join("data")),
-            // After the baseline the hold makes the deadline pass anyway; the longer limit lets the recording
-            // itself finish first on a loaded machine.
-            changes_baseline_limit: Duration::from_millis(if before_take { 50 } else { 3000 }),
-            changes_test_hooks: Some(Arc::new(Hold(Mutex::new(held), before_take))),
+            changes_baseline_limit: Duration::from_millis(50),
+            changes_test_hooks: Some(Arc::new(Hold(
+                Mutex::new(held),
+                before_take,
+                reached.clone(),
+            ))),
             ..crate::CoreConfig::default()
         },
     ))
@@ -109,8 +120,18 @@ async fn late_reason(name: &str, before_take: bool) -> String {
             vw_session::LoadKind::New,
         )
         .unwrap();
-    core.changes_before_work(&json!({"sessionId":"late-session"}))
-        .await;
+    let params = json!({"sessionId":"late-session"});
+    let mut work = Box::pin(core.changes_before_work(&params));
+    // Keep virtual time still until the blocking worker reaches the selected phase. Even the
+    // deliberately slow recording above cannot choose this test's outcome by wall-clock speed.
+    while !reached.load(Ordering::SeqCst) {
+        tokio::select! {
+            () = &mut work => panic!("review finished before reaching the hold"),
+            () = tokio::task::yield_now() => {}
+        }
+    }
+    tokio::time::advance(Duration::from_millis(51)).await;
+    work.await;
     let reason = {
         let tracker = core.shared.changes.tracker("late-session").unwrap();
         let guard = tracker.lock_or_recover();
