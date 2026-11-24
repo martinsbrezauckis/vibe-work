@@ -25,6 +25,19 @@ pub(in crate::chrome_control) fn migrate(
         if profile.is_empty() || id.is_empty() || confirmed_ended(row) {
             continue;
         }
+        if chrome
+            .bindings
+            .lock_or_recover()
+            .retired_profiles
+            .get(chat)
+            .is_some_and(|retired| {
+                retired
+                    .iter()
+                    .any(|old| super::super::profile_ids::same(old, profile))
+            })
+        {
+            continue;
+        }
         // A completed session remains in the helper's status history. Its durable identity also
         // remains here after its chat binding is cleared; it must never seed that old profile again.
         let known_retired = {
@@ -76,7 +89,9 @@ pub(in crate::chrome_control) fn migrate(
 pub(in crate::chrome_control) fn reconcile_completed_status(
     chrome: &ChromeControl,
     rows: &[Value],
+    started: tokio::time::Instant,
     window_closed: &mut Vec<(String, String)>,
+    stop_unconfirmed: &mut Vec<(String, String)>,
 ) -> bool {
     let live = chrome
         .work
@@ -90,28 +105,9 @@ pub(in crate::chrome_control) fn reconcile_completed_status(
     let mut next = saved.clone();
     let mut changed = false;
     next.uncertain_opens.retain(|chat, uncertain| {
-        if uncertain.owner != next.owner {
-            return true;
-        }
-        let Some(id) = uncertain.id.as_deref() else {
-            return true;
-        };
-        let Some(row) = rows.iter().find(|row| row["sessionId"] == id) else {
-            changed = true;
-            return false;
-        };
-        let exact = row["clientSessionId"] == chat.as_str()
-            && uncertain.profile.as_deref().is_none_or(|profile| {
-                row["profileId"]
-                    .as_str()
-                    .is_some_and(|id| super::super::profile_ids::same(id, profile))
-            });
-        if exact && confirmed_ended(row) {
-            changed = true;
-            false
-        } else {
-            true
-        }
+        let keep = keep_uncertain(uncertain, chat, next.owner.as_deref(), rows, started);
+        changed |= !keep;
+        keep
     });
     for (chat, leases) in &mut next.leases {
         let before = leases.len();
@@ -152,6 +148,7 @@ pub(in crate::chrome_control) fn reconcile_completed_status(
         .map(|(chat, identity)| (chat.clone(), identity.profile.clone()))
         .collect();
     let closed = closed_windows(&saved, &clear, rows);
+    let unconfirmed = unconfirmed_stops(&saved, &clear, rows);
     for (chat, _) in &clear {
         next.chats.remove(chat);
         next.leases.remove(chat);
@@ -173,6 +170,7 @@ pub(in crate::chrome_control) fn reconcile_completed_status(
             }
         }
         window_closed.extend(closed);
+        stop_unconfirmed.extend(unconfirmed);
         if let Err(reason) = saved.save(chrome.dir()) {
             tracing::warn!(%reason, "Browser release receipt could not be saved");
         }
@@ -181,11 +179,65 @@ pub(in crate::chrome_control) fn reconcile_completed_status(
     false
 }
 
+fn keep_uncertain(
+    uncertain: &super::UncertainOpen,
+    chat: &str,
+    owner: Option<&str>,
+    rows: &[Value],
+    started: tokio::time::Instant,
+) -> bool {
+    if uncertain.owner.as_deref() != owner
+        || uncertain
+            .observed_after
+            .is_some_and(|opened| started < opened)
+    {
+        return true;
+    }
+    let same_profile = |row: &Value| {
+        uncertain.profile.as_deref().is_none_or(|profile| {
+            row["profileId"]
+                .as_str()
+                .is_some_and(|id| super::super::profile_ids::same(id, profile))
+        })
+    };
+    let Some(id) = uncertain.id.as_deref() else {
+        // With no receipt ID, only a complete fresh inventory can prove absence. A row
+        // without chat attribution may still be this chat's session; keep it fenced.
+        return rows.iter().any(|row| {
+            (row["clientSessionId"] == chat || row["clientSessionId"].is_null())
+                && same_profile(row)
+                && !open_ended(row)
+        });
+    };
+    rows.iter()
+        .find(|row| row["sessionId"] == id)
+        .is_some_and(|row| {
+            !(row["clientSessionId"] == chat && same_profile(row) && open_ended(row))
+        })
+}
+
 /// Notices accompany only retirement of this chat's exact closed-window lease.
 pub(super) fn closed_windows(
     saved: &Bindings,
     cleared: &[(String, String)],
     rows: &[Value],
+) -> Vec<(String, String)> {
+    ended_with_reason(saved, cleared, rows, "WINDOW_CLOSED")
+}
+
+pub(super) fn unconfirmed_stops(
+    saved: &Bindings,
+    cleared: &[(String, String)],
+    rows: &[Value],
+) -> Vec<(String, String)> {
+    ended_with_reason(saved, cleared, rows, "STOP_UNCONFIRMED")
+}
+
+fn ended_with_reason(
+    saved: &Bindings,
+    cleared: &[(String, String)],
+    rows: &[Value],
+    reason: &str,
 ) -> Vec<(String, String)> {
     cleared
         .iter()
@@ -200,7 +252,7 @@ pub(super) fn closed_windows(
                                     .as_str()
                                     .is_some_and(|id| super::super::profile_ids::same(id, profile))
                                 && row["state"] == "disconnected"
-                                && row["suspensionReason"] == "WINDOW_CLOSED"
+                                && row["suspensionReason"] == reason
                         })
                 })
             })
@@ -209,14 +261,30 @@ pub(super) fn closed_windows(
         .collect()
 }
 
+/// A failed/uncertain open's own session has ended; this does not claim browser cleanup.
+/// Connecting with desired active remains uncertain, even with lastConfirmed null.
+pub(in crate::chrome_control) fn open_ended(row: &Value) -> bool {
+    matches!(row["state"].as_str(), Some("disconnected" | "stopped"))
+        || row["desiredState"] == "stopped"
+}
+
 pub(super) fn confirmed_ended(row: &Value) -> bool {
-    row["state"] == "stopped" && row["capture"] == "off"
+    // Never migrate a helper-fenced start into a durable live lease. Missing lastConfirmed
+    // in legacy rows is not proof: only the helper's explicit null confirms it never started.
+    (row.get("lastConfirmed").is_some_and(Value::is_null) && open_ended(row))
+        || row["state"] == "stopped" && row["capture"] == "off"
         || row["state"] == "disconnected" && super::super::person_stop::connection_ended(row)
+        // A timed-out Stop is terminal for this chat's selection, but it never confirms browser
+        // cleanup. Its unknown capture and explicit reason stay visible in the helper session.
+        || row["state"] == "disconnected" && row["desiredState"] == "stopped"
+            && row["suspensionReason"] == "STOP_UNCONFIRMED"
 }
 
 /// One owner observation updates the durable identity namespace and its readable profile inventory.
 pub(in crate::chrome_control) fn observe(chrome: &ChromeControl, data: &Value) {
     chrome.bindings.lock_or_recover().observe_owner(data);
+    // The browser incarnation of each profile: a restarted browser drops the agent windows remembered in it.
+    chrome.agent_windows.lock_or_recover().observe(data);
     super::super::profiles::observe(chrome, data);
 }
 

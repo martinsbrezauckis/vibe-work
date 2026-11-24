@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout},
 };
 
@@ -21,6 +21,10 @@ mod tests;
 #[cfg(test)]
 #[path = "pipe_identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(test)]
+#[path = "pipe_stderr_tests.rs"]
+mod stderr_tests;
 
 /// Refusal codes the helper prints on stderr before it ends; the first one found names why it stopped.
 const REFUSALS: [&str; 3] = [
@@ -45,11 +49,63 @@ impl From<()> for LaunchError {
     }
 }
 
-/// Reads the first 4 KiB of the helper's stderr and returns the first refusal code in it, logged as a warning.
-async fn read_refusal(stderr: tokio::process::ChildStderr) -> Option<&'static str> {
-    let mut bytes = Vec::new();
-    let _ = stderr.take(4096).read_to_end(&mut bytes).await;
-    let code = refusal_code(&bytes)?;
+/// Drains stderr for the helper's lifetime; returns a refusal from its first 4 KiB at EOF.
+async fn read_refusal(stderr: impl AsyncRead + Unpin) -> Option<&'static str> {
+    read_helper_stderr(stderr, |line| {
+        tracing::warn!(diagnostic = line, "Chrome Control helper diagnostic");
+    })
+    .await
+}
+
+async fn read_helper_stderr(
+    mut stderr: impl AsyncRead + Unpin,
+    mut diagnostic: impl FnMut(&str),
+) -> Option<&'static str> {
+    const PREFIXES: [&[u8]; 2] = [b"Firefox BiDi deadline: ", b"Firefox BiDi late reply: "];
+    let mut refusal = Vec::with_capacity(4096);
+    let mut chunk = [0; 1024];
+    let mut line = [0; 600];
+    let mut length = 0;
+    let mut invalid = false;
+    let mut forwarded = 0;
+    while let Ok(count) = stderr.read(&mut chunk).await {
+        if count == 0 {
+            break;
+        }
+        let keep = count.min(4096 - refusal.len());
+        refusal.extend_from_slice(&chunk[..keep]);
+        for &byte in &chunk[..count] {
+            if byte == b'\n' {
+                if !invalid
+                    && PREFIXES
+                        .iter()
+                        .any(|prefix| line[..length].starts_with(prefix))
+                {
+                    if forwarded < 200 {
+                        // Every retained byte is printable ASCII, so conversion cannot fail.
+                        if let Ok(text) = std::str::from_utf8(&line[..length]) {
+                            diagnostic(text);
+                        }
+                        forwarded += 1;
+                    } else if forwarded == 200 {
+                        diagnostic("further helper diagnostics suppressed");
+                        forwarded += 1;
+                    }
+                }
+                length = 0;
+                invalid = false;
+            } else if !invalid {
+                // Drop overlong or non-printable lines entirely, including their suffix, until newline.
+                if length == line.len() || !(b' '..=b'~').contains(&byte) {
+                    invalid = true;
+                } else {
+                    line[length] = byte;
+                    length += 1;
+                }
+            }
+        }
+    }
+    let code = refusal_code(&refusal)?;
     // A closing process's stderr can arrive after its connection was cleared.
     tracing::warn!(code, "Chrome Control helper reported an error");
     Some(code)

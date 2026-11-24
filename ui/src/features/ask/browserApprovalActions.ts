@@ -16,4 +16,5 @@ export const SESSION_ACTIONS: Readonly<Record<string, string>> = {
   stop: "Stop browser work{in}",
   cancel: "Cancel the current browser action{in}",
   delete: "End browser work{in}",
+  close_browser: "End this chat's browser work{in}",
 };

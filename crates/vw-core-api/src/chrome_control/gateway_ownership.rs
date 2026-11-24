@@ -76,14 +76,33 @@ fn refusal(
                 chat == session,
                 work.state_of(task, chat).unwrap_or_default().to_owned(),
                 work.lowered(task),
+                work.closed_by_agent(task, chat),
             )
         })
     };
     match shown {
-        Some((true, state, _)) if state == "disconnected" => Fixed::LostConnection.text(browser),
-        Some((true, _, true)) => Fixed::ModeLowered.text(browser),
-        Some((true, _, false)) => Fixed::Stopped.text(browser),
-        Some((false, _, _)) => Fixed::OtherChat.text(browser),
+        Some((true, _, _, true)) => format!(
+            "Not run: this chat's {} browser session ended by close_browser. Open a new browser session with chrome_session.",
+            browser.name()
+        ),
+        Some((true, state, _, false)) if state == "disconnected" => {
+            let profile = shared
+                .chrome_control
+                .work
+                .lock_or_recover()
+                .profile_of(task)
+                .map(str::to_owned)
+                .or_else(|| {
+                    super::super::profile_bindings::session_profile(&shared.chrome_control, task)
+                });
+            let hint = profile.map_or_else(String::new, |profile| format!(
+                " End this chat's hold with chrome_session close_browser (profileId {profile}), then open a new browser session."
+            ));
+            format!("{}{hint}", Fixed::LostConnection.text(browser))
+        }
+        Some((true, _, true, false)) => Fixed::ModeLowered.text(browser),
+        Some((true, _, false, false)) => Fixed::Stopped.text(browser),
+        Some((false, _, _, _)) => Fixed::OtherChat.text(browser),
         // After an app restart an opaque old ID has no browser binding. The browser that
         // happens to be connected or selected in this chat cannot name that missing session.
         None => {

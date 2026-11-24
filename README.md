@@ -14,8 +14,7 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.16 moves the agent engine to Vibe 3.1.4 and fixes voice answers, Windows updates, browser connections
-and revoking a site's access while a step waits.
+Version 0.1.17 is a patch release built for Vibe 3.1.4 on Python 3.14.8.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.
@@ -72,11 +71,11 @@ Questions and reports: `CONTRIBUTING.md`.
   or Your Edge (Connect Chrome or Connect Edge), or on macOS in Settings > Browser > Your Safari. The agent works in
   your own Chrome, Microsoft Edge or Safari: each chat in its own window, as far as the chat's access mode allows,
   with Stop, Pause and Resume in the extension frame (extension 0.1.15). A chat uses one of these browsers next to the
-  built-in one: it locks to it once the agent uses it, and closing its window ends that session. In Firefox the agent works in a
-  window Vibe Work opens with its own
-  empty profile each time: Settings > Browser > Your Firefox > Open window (on Linux also Ubuntu's Snap Firefox).
+  built-in one: it locks to it once the agent uses it, and closing its window ends that session. In Firefox the agent works in its own
+  window: once Your Firefox is turned on under Settings > Browser, Vibe Work opens it with an empty profile when a chat
+  starts using Firefox (on Linux also Ubuntu's Snap Firefox).
   Local pages open like in a normal browser. To share from your own
-  Firefox (on Linux also Ubuntu's Snap Firefox), choose Connect next to Ask Vibe Work and add the Vibe Work add-on when Firefox asks; then right-click a
+  Firefox (on Linux also Ubuntu's Snap Firefox), choose Connect next to Ask Vibe Work, add the Vibe Work add-on when Firefox asks, and choose Pair Firefox in the same card; then right-click a
   page, link, image or selected text and choose Ask Vibe Work. The agent never reads your own Firefox tabs.
   Manual:
   [docs/public/BROWSER_CONTROL.md](docs/public/BROWSER_CONTROL.md).

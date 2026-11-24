@@ -86,7 +86,7 @@ impl NotReady {
 /// connecting state, so no reconnect wait is registered for a browser that never disconnected.
 pub(super) fn unconfirmed(browser: Browser) -> Value {
     let instruction = browser
-        .words("{yourBrowser} is connected, but {fullBrowser} did not confirm a new browser session. Ask the user to open {extension} from the {browser} toolbar and choose Check connection; if it still fails, ask the user to restart {browser}. Do not retry before that.")
+        .words("{yourBrowser} is connected, but {fullBrowser} did not confirm a new browser session. Ask the user to open {extension} from the {browser} toolbar, choose Settings, then Connection > Check connection; if it still fails, ask the user to restart {browser}. Do not retry before that.")
         .replace("{extension}", vw_vocabulary::label("workNames", "chromeExtension"));
     let mut answer =
         super::owner::own(&format!("Not run: {instruction}"), "SESSION_NOT_READY").into_value();

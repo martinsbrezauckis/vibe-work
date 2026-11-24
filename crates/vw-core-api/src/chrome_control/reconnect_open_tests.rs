@@ -175,7 +175,11 @@ async fn a_repeated_unconfirmed_open_while_connected_asks_the_person_and_never_r
         let text = second.to_string();
         assert!(!text.contains("reconnecting"), "{text}");
         assert!(
-            text.contains("did not confirm") && text.contains("Check connection"),
+            text.contains("did not confirm")
+                && text.contains("toolbar")
+                && text.contains("Settings")
+                && text.contains("Connection")
+                && text.contains("Check connection"),
             "{text}"
         );
         assert_ne!(body["addon"]["stateCode"], "connecting", "{second}");

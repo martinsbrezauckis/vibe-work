@@ -316,7 +316,7 @@ offerId: string, } | { "op": "openEdgeStore", } | { "op": "offerFirefoxSetup", }
 /**
  * The offer shown to the person.
  */
-offerId: string, } | { "op": "openFirefoxStore", } | { "op": "openFirefox", } | { "op": "closeFirefox", } | { "op": "openSafariSetup", } | { "op": "setSafariEnabled",
+offerId: string, } | { "op": "openFirefoxStore", } | { "op": "pairFirefox", } | { "op": "openFirefox", } | { "op": "closeFirefox", } | { "op": "openSafariSetup", } | { "op": "setSafariEnabled",
 /**
  * Whether the optional Safari connection is enabled.
  */

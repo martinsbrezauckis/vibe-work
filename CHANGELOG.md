@@ -2,6 +2,15 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.17 (2026-11-23)
+
+Built for Vibe 3.1.4 on Python 3.14.8.
+
+- **Firefox**: the agent opens its own Firefox window by itself, as in Chrome and Edge.
+- **Firefox add-on 0.1.8**: add the extension, then pair it in Vibe Work Settings. It connects when Firefox starts and updates itself from now on.
+- **Chrome and Edge**: Stop always ends the browser session, so the chat can use a browser again.
+- **macOS**: an app started straight from Downloads now tells you to move it to Applications before it can update.
+
 ## 0.1.16 (2026-11-22)
 
 Built for Vibe 3.1.4 on Python 3.14.8.

@@ -85,6 +85,11 @@ pub(super) fn refusal(shared: &Shared, browser: Browser, live: bool) -> Option<V
 fn refusal_for(shared: &Shared, browser: Browser, live: bool, view: &AddonView) -> Option<Value> {
     let blocks = match view.state {
         AddonState::Connected => false,
+        // A closed owned Firefox is ready for session-open, not a person-only setup step.
+        AddonState::ChromeClosed if browser == Browser::Firefox => false,
+        // The owned runtime checks Firefox's version on every launch. A saved outdated diagnosis
+        // must not block a new startup check after the user updates Firefox.
+        AddonState::UpdateNeeded if browser == Browser::Firefox => !live,
         AddonState::SwitchedOff | AddonState::UpdateNeeded => true,
         _ => !live,
     };
@@ -148,6 +153,22 @@ pub(super) fn after_call(
         )
     {
         return Some(refusal);
+    }
+    // Before its first session Firefox needs no running helper: the session open starts it. A status
+    // query is not a failed browser action and must not tell the user to restart a healthy app.
+    if tool == "chrome_status"
+        && browser == Browser::Firefox
+        && !shared.chrome_control.owner.is_running()
+        && answer.value()["structuredContent"]["error"]["code"] == "OWNER_REQUIRED"
+    {
+        let view = addon(shared, browser);
+        if view.state == AddonState::ChromeClosed {
+            return Some(json!({"vwMcpResult":{
+                "isError":false,
+                "content":[{"type":"text","text":view.instruction}],
+                "structuredContent":{"firefoxWindow":"Window closed","profiles":[],"instruction":view.instruction},
+            }}));
+        }
     }
     // If the connection changed during the call, report the card's current diagnosis too; never for an unknown
     // outcome (the connection ended mid-call): the action may have run, so it must not read as not run.

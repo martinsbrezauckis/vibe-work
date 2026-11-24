@@ -82,7 +82,7 @@ async fn settings_and_agent_facts_show_sharing_as_the_persons_action() {
         .owner
         .connected_profiles
         .observe(&json!({"profiles":[
-            {"profileId":"firefox:one","connected":true,"extensionVersion":"0.1.7"}
+            {"profileId":"firefox:one","connected":true,"extensionVersion":"0.1.8"}
         ]}));
     let view = commands::view(&core.shared);
     let sharing = view
@@ -99,6 +99,58 @@ async fn settings_and_agent_facts_show_sharing_as_the_persons_action() {
 }
 
 #[tokio::test]
+async fn signed_firefox_017_shows_plain_update_cue_and_connect_action() {
+    let registration = registry_native_tests::TestRoot::new("firefox-sharing-update-floor");
+    let (core, _) = core("firefox-sharing-update-floor", None, &registration).await;
+    core.shared
+        .chrome_control
+        .set_browser_enabled(agent_browser::Browser::Firefox, true)
+        .unwrap();
+    core.shared
+        .chrome_control
+        .owner
+        .connected_profiles
+        .observe(&json!({"profiles":[
+            {"profileId":"firefox:older","connected":true,"extensionVersion":"0.1.7"}
+        ]}));
+    let sharing = commands::view(&core.shared)
+        .firefox_sharing
+        .expect("the Ask Vibe Work row is shown");
+    assert_eq!(sharing.state, AddonState::UpdateNeeded);
+    assert_eq!(sharing.extension_version.as_deref(), Some("0.1.7"));
+    assert_eq!(
+        sharing.label,
+        format!(
+            "{} add-on is older than this Vibe Work needs. Choose {} to update it.",
+            vw_vocabulary::texts::FIREFOX_NAME,
+            vw_vocabulary::texts::CONNECTOR_CONNECT
+        )
+    );
+    assert_eq!(sharing.action, Some(addon::AddonAction::Connect));
+    assert!(
+        sharing
+            .instruction
+            .contains("older than this Vibe Work needs"),
+        "{}",
+        sharing.instruction
+    );
+    assert!(
+        sharing
+            .instruction
+            .contains(vw_vocabulary::texts::CONNECTOR_CONNECT),
+        "{}",
+        sharing.instruction
+    );
+    let fact = firefox_fact(&core)["sharing"].to_string();
+    assert!(fact.contains("update") || fact.contains("Update"), "{fact}");
+    assert!(
+        fact.contains(vw_vocabulary::texts::CONNECTOR_CONNECT),
+        "{fact}"
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn connect_opens_firefox_add_ons() {
     let registration = registry_native_tests::TestRoot::new("firefox-sharing-store");
     let (core, opened) = core("firefox-sharing-store", None, &registration).await;
@@ -107,6 +159,72 @@ async fn connect_opens_firefox_add_ons() {
         .unwrap();
     assert_eq!(*opened.lock().unwrap(), ["about:addons"]);
     core.shutdown().await;
+}
+
+#[tokio::test]
+async fn installed_firefox_without_a_live_host_names_the_toolbar_wake_in_settings_and_agent_facts()
+{
+    let root = std::env::var_os("VW_TEST_ROOT")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join(format!("firefox-sharing-wake-{}", std::process::id()));
+    let keys = owner_credential_tests::memory_keys(&root).await;
+    let registration = registry_native_tests::TestRoot::new("firefox-sharing-wake");
+    let (core, _) = core_on(
+        "firefox-sharing-wake",
+        Some(keys.clone()),
+        &registration,
+        Some(true),
+    )
+    .await;
+    core.shared
+        .chrome_control
+        .owner
+        .answering(|_, _| json!({"applied":true}));
+    let crate::CommandResult::ChromeControl {
+        offer: Some(offer), ..
+    } = core
+        .chrome_control(
+            crate::Origin::Ui,
+            ChromeControlRequest::OfferFirefoxSetup {},
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("Firefox setup offer")
+    };
+    core.chrome_control(
+        crate::Origin::Ui,
+        ChromeControlRequest::SetupFirefox {
+            offer_id: offer.offer_id,
+        },
+    )
+    .await
+    .unwrap();
+    let home = core.shared.chrome_control.config.user_home.clone().unwrap();
+    let profile = home.join("Library/Application Support/Firefox/Profiles/person.default");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(
+        profile.join("extensions.json"),
+        json!({"addons":[{"id":setup::FIREFOX_EXTENSION_ID,"version":"0.1.8","userDisabled":false,"appDisabled":false}]}).to_string(),
+    )
+    .unwrap();
+    let view = commands::view(&core.shared).firefox_sharing.unwrap();
+    assert_eq!(view.state, AddonState::NotConnected);
+    // The row keeps the short label of the other browsers; the agent's instruction carries the toolbar step.
+    assert_eq!(view.label, "Not connected");
+    assert!(
+        view.instruction
+            .contains("open it once from Firefox's toolbar"),
+        "{}",
+        view.instruction
+    );
+    assert!(
+        view.instruction.contains("Ask the user to open Firefox"),
+        "{}",
+        view.instruction
+    );
+    core.shutdown().await;
+    keys.shutdown().await;
 }
 
 #[tokio::test]
@@ -150,7 +268,15 @@ async fn setup_registers_firefox_and_opens_the_add_on_prompt() {
     else {
         panic!("Firefox setup result")
     };
-    assert!(view.firefox_sharing.is_some());
+    let sharing = view.firefox_sharing.expect("Firefox sharing is shown");
+    assert_eq!(sharing.label, "Not connected");
+    assert!(
+        sharing
+            .instruction
+            .contains("If the extension is missing, add it")
+    );
+    assert!(sharing.instruction.contains("pair Firefox in Settings"));
+    assert!(!sharing.instruction.contains("toolbar"));
     let chrome = &core.shared.chrome_control;
     assert!(setup::registered(
         &chrome.config,

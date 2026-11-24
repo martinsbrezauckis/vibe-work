@@ -1,10 +1,10 @@
 /** Owned Firefox window and optional sharing add-on states. Uses confirmed core facts in Browser Settings. */
-import { TEXT } from "../../../vocabulary";
+import { TEXT, term } from "../../../vocabulary";
 import { Button, SettingsRow } from "../../../components/Controls";
 import type { ChromeControlState } from "./useChromeControl";
 
 /**
- * Firefox card rows: the connection state with a Turn on, Open window or Close button, and the sharing add-on row
+ * Firefox card rows: connection truth (the existing Use my Firefox switch controls availability), and the sharing add-on row
  * when the core reports one. Renders nothing before the core view arrives.
  */
 export function FirefoxConnection({ chrome }: { chrome: ChromeControlState }) {
@@ -12,66 +12,74 @@ export function FirefoxConnection({ chrome }: { chrome: ChromeControlState }) {
   if (view === null) return null;
   const busy = chrome.busy !== null;
   const sharing = view.firefoxSharing;
+  const waiting = sharing?.state === "notPaired";
+  const changed = sharing?.state === "otherOwner";
+  const pair = waiting;
+  const connecting = sharing?.state === "connecting";
   return (
     <>
       <SettingsRow data-setting="firefox-control-status">
         <span>
           Connection
-          <span className="d" role="status">
-            {view.setup.pairing}
+          <span className="d" role="status" aria-live="polite">
+            {!view.enabled
+              ? "Off"
+              : view.setup.pairingState === "windowClosed" && view.setup.package
+                ? "Ready"
+                : view.setup.pairing}
           </span>
         </span>
-        <Button
-          data-testid="settings.firefox-window"
-          shape="outlined"
-          disabled={
-            busy ||
-            view.setup.pairingState === "blocked" ||
-            !view.setup.package ||
-            view.setup.pairingState === "notInstalled" ||
-            view.setup.pairingState === "connecting"
-          }
-          onClick={() => {
-            void chrome.run(
-              !view.enabled
-                ? { op: "setEnabled", enabled: true }
-                : { op: view.setup.pairingState === "windowOpen" ? "closeFirefox" : "openFirefox" },
-              "window",
-            );
-          }}
-        >
-          {view.setup.pairingState === "connecting"
-            ? "Starting…"
-            : !view.enabled
-              ? "Turn on"
-              : view.setup.pairingState === "windowOpen"
-                ? "Close"
-                : "Open window"}
-        </Button>
       </SettingsRow>
       <p className="key-line">Other programs on this computer can also control this Firefox.</p>
       <p className="key-line">
-        It starts empty each time you choose Open window: sign-ins there end when you close it.
+        When Vibe Work starts Firefox, it uses an empty profile. Sign-ins there end when that
+        Firefox closes.
       </p>
       {sharing ? (
         <SettingsRow data-setting="firefox-sharing">
           <span>
             Ask Vibe Work
-            <span className="d" role="status">
+            <span className="d" role="status" aria-live="polite">
               {sharing.label}
             </span>
           </span>
-          <Button
-            data-testid="settings.firefox-sharing"
-            shape="outlined"
-            disabled={busy || !view.setup.package}
-            onClick={() => {
-              void chrome.connect();
-            }}
-          >
-            {sharing.state === "connected" ? "Add-ons" : TEXT.connectorConnect}
-          </Button>
+          {!changed ? (
+            <Button
+              data-testid="settings.firefox-sharing"
+              shape="outlined"
+              disabled={busy || !view.setup.package || connecting}
+              onClick={() => {
+                if (pair) void chrome.run({ op: "pairFirefox" }, "pair");
+                else void chrome.connect();
+              }}
+            >
+              {sharing.state === "connected"
+                ? "Add-ons"
+                : connecting
+                  ? "Connecting…"
+                  : waiting
+                    ? "Pair Firefox"
+                    : TEXT.connectorConnect}
+            </Button>
+          ) : null}
         </SettingsRow>
+      ) : null}
+      {waiting || changed ? (
+        <>
+          <p className="key-line">
+            {changed
+              ? `Firefox is paired with another Vibe Work. To change it, open ${term("workNames", "chromeExtension").name} from the Firefox toolbar and choose Pair with Vibe Work.`
+              : "Firefox is ready. Pair it here to connect."}
+          </p>
+          {waiting && view.setup.fingerprint ? (
+            <p className="key-line">
+              Compare identity · <code>{view.setup.fingerprint}</code>
+            </p>
+          ) : null}
+        </>
+      ) : sharing &&
+        ["notSetUp", "extensionNotInstalled", "notConnected"].includes(sharing.state) ? (
+        <p className="key-line">Open Firefox. Add the extension if it is missing.</p>
       ) : null}
     </>
   );

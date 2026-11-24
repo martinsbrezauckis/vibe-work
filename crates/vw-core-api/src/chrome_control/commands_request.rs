@@ -123,6 +123,8 @@ pub enum ChromeControlRequest {
     },
     /// Open the approved Firefox add-on listing.
     OpenFirefoxStore {},
+    /// Pair the waiting Firefox sharing add-on after a click in Vibe Work Settings.
+    PairFirefox {},
     /// Open or reuse the app-owned Firefox window.
     OpenFirefox {},
     /// The person closes the app-owned Firefox window.

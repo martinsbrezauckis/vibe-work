@@ -18,6 +18,16 @@ pub(crate) fn catalog() -> Vec<Value> {
                 tool["description"].as_str().unwrap_or_default(),
                 crate::browser_data::DESCRIPTION
             ));
+        } else if tool["name"] == "chrome_session" {
+            let description = tool["description"].as_str().unwrap_or_default();
+            tool["description"] = json!(format!(
+                "{description} close_browser requires the exact profileId for this chat's external browser. It closes only the app-owned Firefox window; in Chrome, Edge or Safari it closes the tabs this chat opened in its own windows, then ends this chat's session, and leaves the person's browser process, windows and tabs alone. Use it when Stop cannot be confirmed or before switching browsers from a stuck session. Ask mode shows an approval card."
+            ));
+            if let Some(actions) =
+                tool["inputSchema"]["properties"]["action"]["enum"].as_array_mut()
+            {
+                actions.push(json!("close_browser"));
+            }
         }
     }
     tools
@@ -25,6 +35,24 @@ pub(crate) fn catalog() -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_catalog_advertises_close_browser_and_its_scope() {
+        let session = super::catalog()
+            .into_iter()
+            .find(|tool| tool["name"] == "chrome_session")
+            .unwrap();
+        assert!(
+            session["inputSchema"]["properties"]["action"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action == "close_browser")
+        );
+        let description = session["description"].as_str().unwrap();
+        assert!(description.contains("profileId"), "{description}");
+        assert!(description.contains("person's browser"), "{description}");
+    }
+
     #[test]
     fn browser_read_description_matches_inline_defaults() {
         let description = super::catalog()

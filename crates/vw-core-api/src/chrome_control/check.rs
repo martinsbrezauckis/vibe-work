@@ -132,7 +132,8 @@ fn authorize_mode(
             shared, session, tool, args,
         )));
     }
-    if !super::agent_browser::selected(shared, session, tool, args).enabled(shared) {
+    let closing = tool == "chrome_session" && args["action"] == "close_browser";
+    if !closing && !super::agent_browser::selected(shared, session, tool, args).enabled(shared) {
         let browser = super::agent_browser::selected(shared, session, tool, args);
         return Err(super::availability::reason(&browser.addon(shared), browser));
     }
@@ -147,7 +148,13 @@ fn authorize_mode(
         )
     })?;
     super::mapping::check_full(Some(&mode), tool, args)?;
-    let required = (if tier == Tier::Ask { super::mapping::ask_required(tool,args) } else { super::mapping::required(tool, args) }).ok_or_else(|| {
+    let required = (if closing {
+        Some(Tier::AcceptEdits)
+    } else if tier == Tier::Ask {
+        super::mapping::ask_required(tool, args)
+    } else {
+        super::mapping::required(tool, args)
+    }).ok_or_else(|| {
         let browser = super::agent_browser::selected(shared, session, tool, args);
         match super::mapping::action(tool, args).as_str() {
             "client.selection" => Fixed::SelectionFromUser.text(browser),
@@ -276,6 +283,29 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
         }
     }
 }
+/// A subagent never drives an external browser session, also not through a path that asks the person first
+/// (the Ask-mode `close_browser` card, DBK17G-01). One rule for `check` and every early Ask preparation.
+pub(crate) fn refuse_child_source(
+    shared: &Arc<Shared>,
+    source: &str,
+    parent: &str,
+    session: &str,
+    tool: &str,
+    input: &Value,
+) -> Result<(), String> {
+    let child = (!parent.is_empty() && parent != source)
+        || shared.store.view(source).is_some_and(|view| {
+            view.state["session"]["parentSessionId"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        });
+    if child {
+        let browser = super::agent_browser::selected(shared, session, tool, input);
+        return Err(subagent_reason(browser));
+    }
+    Ok(())
+}
+
 pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
     let source = args["sessionId"].as_str().unwrap_or_default();
     let session = args["sessionId"].as_str().unwrap_or_default();
@@ -294,17 +324,11 @@ pub(crate) fn check(shared: &Arc<Shared>, args: &Value) -> Value {
         let browser = super::agent_browser::selected(shared, session, tool, &args["toolInput"]);
         return json!({"decision":"deny","reason":Fixed::Unavailable.text(browser)});
     }
-    let child = args["parentSessionId"]
-        .as_str()
-        .is_some_and(|parent| !parent.is_empty() && parent != source)
-        || shared.store.view(source).is_some_and(|view| {
-            view.state["session"]["parentSessionId"]
-                .as_str()
-                .is_some_and(|id| !id.is_empty())
-        });
-    if child {
-        let browser = super::agent_browser::selected(shared, session, tool, &args["toolInput"]);
-        return json!({"decision":"deny","reason":subagent_reason(browser)});
+    let parent = args["parentSessionId"].as_str().unwrap_or_default();
+    if let Err(reason) =
+        refuse_child_source(shared, source, parent, session, tool, &args["toolInput"])
+    {
+        return json!({"decision":"deny","reason":reason});
     }
     // Execute performs the tier check itself so the refusal reaches the model as a tool receipt.
     if tool == "chrome_execute" {

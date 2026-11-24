@@ -126,7 +126,11 @@ pub fn start<R: Runtime>(
         return;
     };
     let bundle = tauri::utils::platform::bundle_type().map(|b| b.to_string());
-    let mode = InstallMode::for_bundle(bundle.as_deref());
+    let mode = InstallMode::for_running_app(
+        bundle.as_deref(),
+        std::env::consts::OS,
+        std::env::current_exe().ok().as_deref(),
+    );
     tracing::info!(?bundle, ?mode, "update install mode");
     let manager = UpdateManager::new(
         UpdateConfig {

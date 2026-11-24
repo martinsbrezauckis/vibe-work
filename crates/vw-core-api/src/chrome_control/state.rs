@@ -1,9 +1,9 @@
 //! The app's browser-control state: one value in the core's shared state (`Shared::chrome_control`), with the
 //! per-chat release, Stop and end paths that every browser route shares. The module's facade is `super` (mod.rs).
 use super::{
-    ChromeControlConfig, agent_browser, approval, browser_data, external_video, frames,
-    installation, local_documents, output_cache, owner, person_stop, probe, profile_bindings,
-    profiles, selection, store, work,
+    ChromeControlConfig, agent_browser, agent_windows, approval, browser_data, external_video,
+    frames, installation, local_documents, output_cache, owner, person_stop, probe,
+    profile_bindings, profiles, selection, store, work,
 };
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -68,6 +68,12 @@ pub(crate) struct ChromeControl {
     /// Last person Stop per browser and chat, bound to its turn and retained for racing replies.
     pub(super) stopped_by_person:
         Mutex<std::collections::HashMap<String, Vec<person_stop::Stopped>>>,
+    /// Per chat: (profile, browser incarnation, window) of each tab its agent created (memory only,
+    /// `agent_close::remember`). After a reconnect the extension hands the agent's windows to the person and the next
+    /// session opens a new one; `close_browser` names these windows too, and the helper still closes only this chat's
+    /// own tabs there. A window is nominated only in the browser incarnation it was opened in (DBK17S-01). Bounded in
+    /// chats and per chat; a deleted chat's entry goes with the chat (`end_chat`).
+    pub(super) agent_windows: Mutex<agent_windows::AgentWindows>,
 }
 impl ChromeControl {
     pub(crate) fn new(_vibe_home: &Path, config: ChromeControlConfig) -> Self {
@@ -76,6 +82,8 @@ impl ChromeControl {
         let bindings = profile_bindings::Bindings::load(dir.as_deref());
         let profiles = profiles::Profiles::load(dir.as_deref());
         let chat_profiles = bindings.chats();
+        let mut agent_windows = super::agent_windows::AgentWindows::default();
+        agent_windows.seed_dropped(bindings.unclosed_windows());
         let paired_once = dir.as_deref().is_some_and(store::paired_once);
         let edge_paired_once = dir
             .as_deref()
@@ -117,6 +125,7 @@ impl ChromeControl {
             chat_profiles: Mutex::new(chat_profiles),
             picked_profiles: Mutex::new(std::collections::HashMap::new()),
             stopped_by_person: Mutex::new(std::collections::HashMap::new()),
+            agent_windows: Mutex::new(agent_windows),
         }
     }
     pub(crate) fn dir(&self) -> Option<&Path> {
@@ -288,6 +297,10 @@ impl ChromeControl {
                 .remove(chat);
         }
         if deleted {
+            self.agent_windows
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove_chat(chat);
             profile_bindings::forget(self, chat);
             self.picked_profiles
                 .lock()

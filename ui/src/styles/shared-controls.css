@@ -209,6 +209,14 @@ select:disabled {
 .check > .set-actions {
   margin-block: 0;
 }
+/* A row with long words beside several actions (Updates status): the words keep a readable column and the actions
+   wrap under each other, instead of the actions squeezing the words to one per line in a narrow window. */
+.check.check-wrap-actions {
+  grid-template-columns: minmax(min(24ch, 100%), 1fr) auto;
+}
+.check.check-wrap-actions > .set-actions {
+  justify-content: flex-end;
+}
 .set-row > span,
 .set-row > p {
   flex: 1 1 24ch;

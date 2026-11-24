@@ -38,6 +38,20 @@ export type NoticeAction = "download" | "install" | "openReleasePage" | "retry" 
 
 const NOTES_MAX = 200;
 
+const MOVE_HEADLINE = "Move Vibe Work to Applications to update.";
+const MOVE_DETAIL =
+  "This copy is running from a temporary read-only place. Move Vibe Work into Applications, then open it from there to update.";
+
+/** The copy must be moved before either a new or an already downloaded update can be installed. */
+function needsMove(view: UpdateView): boolean {
+  return (
+    view.mode === "macosTranslocated" &&
+    (view.phase.type === "available" ||
+      view.phase.type === "ready" ||
+      (view.phase.type === "failed" && view.phase.stage !== "check"))
+  );
+}
+
 /**
  * The host the "Open release page" button goes to, shown beside it: the user sees where the
  * system browser will open before clicking. The host builds the link from the official repository only
@@ -107,6 +121,15 @@ export function offersUpdate(view: UpdateView | null): boolean {
 /** The notice for `view`; plain words. `null` for idle, checking, a failed check, and the install in progress. */
 export function noticeFor(view: UpdateView): NoticeModel | null {
   const phase = view.phase;
+  if (needsMove(view))
+    return {
+      tone: "info",
+      headline: MOVE_HEADLINE,
+      detail: MOVE_DETAIL,
+      progress: null,
+      actions: view.releasePage === null ? ["later"] : ["openReleasePage", "later"],
+      key: `move:${phase.type}:${"version" in phase ? (phase.version ?? "") : ""}`,
+    };
   const linkOnly = view.mode === "linkOnly";
   switch (phase.type) {
     case "available":
@@ -192,6 +215,7 @@ export function noticeFor(view: UpdateView): NoticeModel | null {
 
 /** One line for Settings: what is going on, including a failed check. */
 export function statusLine(view: UpdateView): string {
+  if (needsMove(view)) return `${MOVE_HEADLINE} ${MOVE_DETAIL}`;
   const phase = view.phase;
   switch (phase.type) {
     case "idle":

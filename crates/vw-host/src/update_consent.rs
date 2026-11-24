@@ -13,7 +13,7 @@
 use crate::update_flow::Consent;
 use crate::update_flow::{Phase, Stage, UpdateError, UpdateManager, UpdateRequester};
 use crate::update_store::Pending;
-use crate::update_view::Offer;
+use crate::update_view::{InstallMode, Offer};
 
 impl UpdateManager {
     /// Records the user's agreement to install the `ready` version: the main window's click or the Debug API's
@@ -22,6 +22,9 @@ impl UpdateManager {
     /// # Errors
     /// [`UpdateError::WrongState`] (nothing is `ready`), [`UpdateError::Busy`].
     pub fn consent(&self, requester: UpdateRequester) -> Result<(), UpdateError> {
+        if self.0.cfg.mode == InstallMode::MacosTranslocated {
+            return Err(UpdateError::MacosTranslocated);
+        }
         let version = self.ready_version()?;
         tracing::info!(?requester, %version, "update: install agreed");
         self.with(|s| match &s.phase {
@@ -49,6 +52,9 @@ impl UpdateManager {
     /// [`UpdateError::ConsentRequired`] without consent; [`UpdateError::WrongState`]; [`UpdateError::Busy`];
     /// [`UpdateError::Failed`] when the package is bad or the install fails (phase `failed`, offer kept).
     pub async fn install(&self) -> Result<(), UpdateError> {
+        if self.0.cfg.mode == InstallMode::MacosTranslocated {
+            return Err(UpdateError::MacosTranslocated);
+        }
         // The check and the take happen under one lock, together with the move to `installing`.
         let (offer, pending) = self.with(|s| {
             if s.busy {

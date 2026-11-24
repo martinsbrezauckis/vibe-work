@@ -89,6 +89,10 @@ function describe(
   const template = Object.hasOwn(table, action) ? table[action] : undefined;
   if (template === undefined)
     return `Unrecognized browser action in ${browser}; review the arguments`;
+  if (session && action === "close_browser")
+    return browser === TEXT.firefoxName
+      ? `Close only the agent's browser window in ${browser}`
+      : `Close the agent's own windows in ${browser} and end this chat's browser work; your tabs stay open`;
   const limit = args["limit"];
   const page = pageOf(action, input, args, session);
   if (action === "tabs.create" && page === "this page") return `Open a new tab in ${browser}`;

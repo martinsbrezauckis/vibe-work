@@ -5,7 +5,9 @@ use serde_json::Value;
 use vw_platform::sync::LockRecover;
 
 pub(super) fn profile(shared: &Shared, tool: &str, args: &Value) -> Option<String> {
-    if matches!(tool, "chrome_session" | "chrome_task") && args["action"] == "open" {
+    if matches!(tool, "chrome_session" | "chrome_task")
+        && matches!(args["action"].as_str(), Some("open" | "close_browser"))
+    {
         return args["profileId"].as_str().map(str::to_owned);
     }
     args["sessionId"]

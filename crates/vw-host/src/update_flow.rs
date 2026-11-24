@@ -64,6 +64,9 @@ pub enum UpdateError {
         "Vibe Work does not update this copy itself: download the new version from the release page"
     )]
     LinkOnly,
+    /// macOS runs this copy from a temporary read-only place.
+    #[error("Move Vibe Work into Applications, then open it from there to update.")]
+    MacosTranslocated,
     /// A step failed; the text says why in plain words.
     #[error("{0}")]
     Failed(String),
@@ -76,7 +79,7 @@ pub struct UpdateConfig {
     pub current: String,
     /// The channel's `pubkey` (base64 minisign public key, as in the Tauri config).
     pub pubkey: String,
-    /// In-app or link-only.
+    /// Whether this copy can update here, uses the release page, or must first be moved on macOS.
     pub mode: InstallMode,
     /// The app's data folder (`updates/`, `updates.json`, `settings.json` live here).
     pub data_dir: PathBuf,
@@ -147,11 +150,12 @@ impl UpdateManager {
             .and_then(|bytes| serde_json::from_slice::<UpdateStatus>(&bytes).ok())
             .unwrap_or_else(|| UpdateStatus::new(&cfg.current));
         status.current.clone_from(&cfg.current);
-        // Only a link-only install never downloads, so only an in-app install resumes a stored package.
-        let pending = if cfg.mode == InstallMode::InApp {
-            store.load(&cfg.pubkey, &cfg.current)
-        } else {
+        // A translocated copy still shows an already verified package, with the move instruction.
+        // Package-manager installs never resume a package.
+        let pending = if cfg.mode == InstallMode::LinkOnly {
             None
+        } else {
+            store.load(&cfg.pubkey, &cfg.current)
         };
         let (phase, offer) = match &pending {
             Some(p) => (
@@ -285,7 +289,8 @@ impl UpdateManager {
     pub(crate) fn notify_once(&self, notice: UpdateNotice) {
         let (first, status) = self.with(|s| {
             let (slot, version) = match &notice {
-                UpdateNotice::Available { version, .. } => {
+                UpdateNotice::Available { version, .. }
+                | UpdateNotice::MoveToApplications { version } => {
                     (&mut s.status.notified_available, version)
                 }
                 UpdateNotice::Ready { version } => (&mut s.status.notified_ready, version),
@@ -432,10 +437,16 @@ impl UpdateManager {
         });
         self.save_status("available", Some(&offer.version), None);
         let downloading = auto && mode == InstallMode::InApp;
-        self.notify_once(UpdateNotice::Available {
-            version: offer.version.clone(),
-            downloading,
-            link_only: mode == InstallMode::LinkOnly,
+        self.notify_once(if mode == InstallMode::MacosTranslocated {
+            UpdateNotice::MoveToApplications {
+                version: offer.version.clone(),
+            }
+        } else {
+            UpdateNotice::Available {
+                version: offer.version.clone(),
+                downloading,
+                link_only: mode == InstallMode::LinkOnly,
+            }
         });
         if downloading {
             self.download_inner(offer).await;

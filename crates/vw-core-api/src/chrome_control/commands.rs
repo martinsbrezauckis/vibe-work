@@ -373,6 +373,7 @@ impl Core {
             }
             ChromeControlRequest::SetupFirefox { offer_id } => self.firefox_setup(offer_id).await,
             ChromeControlRequest::OpenFirefoxStore {} => self.firefox_addons(),
+            ChromeControlRequest::PairFirefox {} => self.firefox_pair(origin).await,
             ChromeControlRequest::SetFirefoxEnabled { enabled } => {
                 self.browser_enabled(Browser::Firefox, enabled).await
             }
@@ -403,6 +404,7 @@ impl Core {
             ChromeControlRequest::OfferFirefoxSetup {}
                 | ChromeControlRequest::SetupFirefox { .. }
                 | ChromeControlRequest::OpenFirefoxStore {}
+                | ChromeControlRequest::PairFirefox {}
                 | ChromeControlRequest::OpenFirefox {}
                 | ChromeControlRequest::CloseFirefox {}
                 | ChromeControlRequest::SetFirefoxEnabled { .. }

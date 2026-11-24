@@ -45,11 +45,11 @@ pub(in crate::chrome_control) fn validate_session_args(
         return Err("Not run: Vibe Work supplies this chat's browser session title; omit title from the tool arguments.".into());
     }
     let field = match args["action"].as_str() {
-        Some("open") => "profileId",
+        Some("open" | "close_browser") => "profileId",
         Some("get" | "cancel" | "stop") => "sessionId",
         _ => {
             return Err(
-                "Not run: chrome_session requires action: open, get, cancel or stop.".into(),
+                "Not run: chrome_session requires action: open, get, cancel, stop or close_browser.".into(),
             );
         }
     };

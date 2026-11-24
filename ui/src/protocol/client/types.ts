@@ -106,8 +106,8 @@ export type UpdatePhase =
 /** What the update flow shows (mirrors `vw_host::update_flow::UpdateView`; a private Rust test pins the JSON). */
 export interface UpdateView {
   current: string;
-  /** `inApp`: download, ask, install here. `linkOnly`: a package-manager install; only a link is offered. */
-  mode: "inApp" | "linkOnly";
+  /** `inApp`: update here. `linkOnly`: use the release page. `macosTranslocated`: move this copy first. */
+  mode: "inApp" | "linkOnly" | "macosTranslocated";
   /** The "Download updates automatically" setting. */
   autoDownload: boolean;
   /** The offered version's release page: always the official repository's tag, built by the host (never a link from the update manifest). */

@@ -52,6 +52,7 @@ struct Session {
     stop: Stop,
     /// Ended because the chat's access mode was lowered (the agent's refusal and the chat notice say so).
     lowered: bool,
+    closed_by_agent: bool,
 }
 /// Stop intent is independent of the helper's last display state. A poll can predate acknowledgement.
 #[derive(Default, PartialEq, Eq)]
@@ -86,6 +87,53 @@ impl Work {
             }
         }
     }
+    /// An agent escape ends only this chat's matching sessions; late helper rows cannot revive them.
+    pub(super) fn close_chat_profile(&mut self, chat: &str, profile: &str) -> Vec<String> {
+        let mut ids = Vec::new();
+        for session in &mut self.0 {
+            if session.row.session_id == chat && super::profile_ids::same(&session.profile, profile)
+            {
+                ids.push(session.id.clone());
+                session.stop = Stop::Ended;
+                session.row.state = "disconnected".into();
+                session.closed_by_agent = true;
+                session.opened = Instant::now();
+            }
+        }
+        ids
+    }
+
+    pub(super) fn close_candidates(&self, chat: &str, profile: &str) -> Vec<String> {
+        self.0
+            .iter()
+            .filter(|session| {
+                session.row.session_id == chat
+                    && super::profile_ids::same(&session.profile, profile)
+                    && !matches!(session.row.state.as_str(), "stopped" | "disconnected")
+            })
+            .map(|session| session.id.clone())
+            .collect()
+    }
+
+    pub(super) fn has_profile(&self, chat: &str, profile: &str) -> bool {
+        self.0.iter().any(|session| {
+            session.row.session_id == chat && super::profile_ids::same(&session.profile, profile)
+        })
+    }
+
+    pub(super) fn other_live_firefox(&self, chat: &str) -> bool {
+        self.0.iter().any(|session| {
+            session.row.session_id != chat
+                && session.profile == "firefox:agent"
+                && !matches!(session.row.state.as_str(), "stopped" | "disconnected")
+        })
+    }
+
+    pub(super) fn closed_by_agent(&self, id: &str, chat: &str) -> bool {
+        self.0.iter().any(|session| {
+            session.id == id && session.row.session_id == chat && session.closed_by_agent
+        })
+    }
     pub(super) fn open(
         &mut self,
         helper: &str,
@@ -115,6 +163,7 @@ impl Work {
             turn: turn.map(str::to_owned),
             stop: Stop::None,
             lowered: false,
+            closed_by_agent: false,
         });
         while self.0.len() > 128 {
             self.0.pop_front();
@@ -316,6 +365,9 @@ impl Work {
     ) -> bool {
         let before = self.view();
         for session in &mut self.0 {
+            if session.closed_by_agent {
+                continue;
+            }
             if session.opened > started {
                 continue;
             }

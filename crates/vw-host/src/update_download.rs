@@ -24,8 +24,10 @@ impl UpdateManager {
     /// [`UpdateError::LinkOnly`], [`UpdateError::WrongState`], [`UpdateError::Busy`], or
     /// [`UpdateError::Failed`] with the download's failure (the phase is then `failed`).
     pub async fn download(&self, requester: UpdateRequester) -> Result<(), UpdateError> {
-        if self.0.cfg.mode == InstallMode::LinkOnly {
-            return Err(UpdateError::LinkOnly);
+        match self.0.cfg.mode {
+            InstallMode::LinkOnly => return Err(UpdateError::LinkOnly),
+            InstallMode::MacosTranslocated => return Err(UpdateError::MacosTranslocated),
+            InstallMode::InApp => {}
         }
         let offer = self.downloadable()?;
         tracing::info!(?requester, version = %offer.version, "update: download asked");

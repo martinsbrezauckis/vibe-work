@@ -39,7 +39,7 @@ profile from your pick. Its first successful external session locks that profile
 A chat uses one external browser profile at a time, alongside its built-in Browser. After that external session
 closes, is released or disconnects, the chat can open a new connection in any supported browser or profile. The tab
 picker offers the new choice after Vibe Work confirms the old connection has ended; an unfinished Stop keeps it
-unavailable. An unconfirmed opening also blocks another connection until the earlier session is confirmed ended. Browser permissions granted for the chat follow that chat to its next connection. Closing the sole agent window ends the external session; the chat says that the session ended because its window was closed.
+unavailable. If a delivered Stop remains unconfirmed for ten seconds, the session ends as disconnected and the chat says to close its agent window by hand. The tab and window are not claimed closed; a late browser acknowledgement may still complete cleanup. The chat can then open another browser. An unconfirmed opening also blocks another connection until the earlier session is confirmed ended. Browser permissions granted for the chat follow that chat to its next connection. Closing the sole agent window ends the external session; the chat says that the session ended because its window was closed.
 
 The vault prompt waits until you answer; saying No answers only that call and the turn goes on, and the agent receives:
 `Not run: the user declined this. Nothing was done, so report it as not done, never as done. Explain why it is needed for the user's delegated task.`
@@ -57,6 +57,8 @@ When the agent asks you a question, it releases this chat's browser so you can c
 ## Tools, files and context
 
 `chrome_status {action}` returns an action's schema. `chrome_session` opens, gets, cancels or stops a chat session. `chrome_execute` accepts one action or up to 16 sequential steps within 25 seconds, stopping at the first refusal, failure, unmet condition or unknown outcome. A wait that times out prevents later steps from running. Every page-derived string, including errors and tab metadata, is marked as untrusted page content.
+
+If an external browser session is stuck, `chrome_session {action:"close_browser",profileId}` takes the exact profile ID, ends this chat's session and frees the chat to open another browser. In Ask mode it asks for approval. For `firefox:agent` it closes only Vibe Work's separate Firefox window; for Chrome, Edge and Safari it first closes the tabs this chat opened in its own windows, including a window from before the connection to the browser was lost (tabs you opened, moved or changed stay open), then requests this chat's normal Stop; your browser process and windows stay open. If Stop cannot be confirmed, the agent is told that its tabs may remain open and to tell you.
 
 Reads support headings, lists, landmarks, tables, subtrees, depth, interactive elements and optional option lists. CSS-hidden text is excluded. Coordinates resolve nodes and frames before input. Screenshots support regions, scale, maximum dimensions and file output; large full pages are scaled. Console/network reads are filtered and paged from bounded per-tab buffers. Headers redact cookies, authorization and set-cookie by default. Known vault authorization headers stay redacted even at Full access.
 
@@ -89,6 +91,10 @@ Your Chrome and Your Edge require extension 0.1.7 or later.
 Media downloaded by Vibe Work outside a browser retains its separate address checks, including private-address refusals and the existing exceptions for the current page's own local resources.
 
 Remove in Your Chrome removes the helper setup and any extension-install registration it created. Chrome and its windows remain. Chrome may remove an externally installed extension when it next checks the registration; you can also remove the extension in Chrome.
+
+## Your Firefox
+
+Turn on **Use my Firefox** in Settings > Browser > Your Firefox. When a chat opens a Firefox browser session, Vibe Work automatically opens its separate, empty-profile Firefox window if needed; no manual launch step is required. The Connection row shows Off, Ready or Window open. Firefox must be installed and version 159 or later. Browser actions keep their normal access-mode checks. Stopping a session or ending its chat closes its owned tabs; windows with personal or other-chat tabs stay open. When no other chat or personal tab needs it, the owned process closes and its sign-ins end. Other programs on this computer can also control this Firefox.
 
 ## Your Safari
 
@@ -134,6 +140,6 @@ On Windows and Linux the built-in browser can send wheel input at an observed el
 
 `page.scroll_into_view {selector,tabId?}` brings one unique main-document element into view in Chrome, Edge or connected Firefox and returns actual bounds and scroll-container offsets. Hidden or ambiguous selectors do not scroll. Safari’s current adapter refuses this route; ordinary scrolling remains available.
 
-In your own Firefox, choose **Connect** next to Ask Vibe Work in Settings > Browser > Your Firefox and add the Vibe Work add-on when Firefox asks (Firefox 153 or later; on Linux also Ubuntu's Snap Firefox); approve the connection in Vibe Work. Then right-click a webpage, link, image or selected text and choose **Ask Vibe Work**. A page adds its URL, title and current selection; links and images add their addresses; selected text adds the text. The add-on only sends what you choose: the agent cannot open, list or read your Firefox tabs, and a shared page does not become the chat's tab. The agent's own actions stay in the Firefox window Vibe Work opens. On macOS, Connect opens the add-on in your running Firefox.
+In your own Firefox, choose **Connect** next to Ask Vibe Work in Settings > Browser > Your Firefox and add the Vibe Work add-on when Firefox asks (Firefox 153 or later; on Linux also Ubuntu's Snap Firefox); when the add-on has reached Vibe Work, choose **Pair Firefox** in the same card. Nothing has to be pressed inside the add-on. If this Firefox is already paired with another Vibe Work, change it in the add-on instead (open it from the Firefox toolbar and choose Pair with Vibe Work). Add-on 0.1.8 and later connect when Firefox starts and update themselves; with add-on 0.1.7, choose Connect once to get the current one. Then right-click a webpage, link, image or selected text and choose **Ask Vibe Work**. A page adds its URL, title and current selection; links and images add their addresses; selected text adds the text. The add-on only sends what you choose: the agent cannot open, list or read your Firefox tabs, and a shared page does not become the chat's tab. The agent's own actions stay in the Firefox window Vibe Work opens. On macOS, Connect opens the add-on in your running Firefox.
 
 In Safari, right-click a webpage, link or image and choose **Ask Vibe Work** to add it to the app. Sharing requires website access and Safari 18.4 or later, and checks the document where the menu opened. A page already open when the extension is updated may need a reload before sharing.

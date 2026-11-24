@@ -264,11 +264,14 @@ pub(in crate::chrome_control) fn update_work(
                 )
         });
     let mut window_closed = Vec::new();
+    let mut stop_unconfirmed = Vec::new();
     let released = complete
         && super::super::profile_bindings::reconcile_completed_status(
             &shared.chrome_control,
             rows,
+            started,
             &mut window_closed,
+            &mut stop_unconfirmed,
         );
     for (chat, profile) in window_closed {
         let browser = super::super::agent_browser::Browser::from_profile(&profile);
@@ -277,6 +280,17 @@ pub(in crate::chrome_control) fn update_work(
         let _ = shared.store.apply(vw_session::Notification::new(
             "warning",
             json!({"sessionId":chat,"warning":{"code":"browser_window_closed","message":message}}),
+        ));
+    }
+    for (chat, profile) in stop_unconfirmed {
+        let browser = super::super::agent_browser::Browser::from_profile(&profile);
+        let message = format!(
+            "{}: close its agent window by hand. Stop unconfirmed; try another browser.",
+            browser.name()
+        );
+        let _ = shared.store.apply(vw_session::Notification::new(
+            "warning",
+            json!({"sessionId":chat,"warning":{"code":"browser_stop_unconfirmed","message":message}}),
         ));
     }
     super::super::person_stop::received(&shared, &stopped);

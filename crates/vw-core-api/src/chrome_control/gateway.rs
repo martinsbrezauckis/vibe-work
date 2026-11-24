@@ -52,7 +52,7 @@ async fn call_entry(
     tool: &str,
     args: Value,
 ) -> Result<Value, String> {
-    super::firefox_sharing::refuse_agent_reach(tool, &args)?;
+    guard_agent_reach(tool, &args)?;
     let browser = agent_browser::selected(shared, session, tool, &args);
     // Stop points of one call (A2-02): `chrome_execute` here, before anything else answers; `chrome_session` in
     // `call_selected` after its arguments are checked; both again at every point where the call resumes after a
@@ -115,34 +115,17 @@ async fn call_entry(
                 super::profile_agent::status(shared, session, &mut answer["vwMcpResult"]);
                 super::output::guard_status(&mut answer["vwMcpResult"]);
             } else {
-                super::profile_agent::failed_connection(
-                    shared,
-                    session,
-                    tool,
-                    &output_request,
-                    &mut answer["vwMcpResult"],
-                );
-                super::profile_agent::chosen(
-                    shared,
-                    session,
-                    tool,
-                    &output_request,
-                    &mut answer["vwMcpResult"],
-                );
-                if super::output_cache::observation(&answer["vwMcpResult"]) {
-                    super::output_cache::bound(
-                        shared,
-                        session,
-                        &output_request,
-                        &mut answer["vwMcpResult"],
-                    );
+                let result = &mut answer["vwMcpResult"];
+                let request = &output_request;
+                super::profile_agent::failed_connection(shared, session, tool, request, result);
+                super::profile_agent::chosen(shared, session, tool, request, result);
+                super::agent_close::hint(shared, tool, request, result);
+                super::agent_close::remember(shared, session, tool, request, result);
+                if super::output_cache::observation(result) {
+                    super::output_cache::bound(shared, session, request, result);
                 }
-                super::output::guard(&mut answer["vwMcpResult"]);
-                crate::paused_tools_gate::note_resumed_helper(
-                    shared,
-                    session,
-                    &mut answer["vwMcpResult"],
-                );
+                super::output::guard(result);
+                crate::paused_tools_gate::note_resumed_helper(shared, session, result);
             }
             answer
         })
@@ -152,6 +135,13 @@ async fn call_entry(
                 super::frames::sync_chat(shared, session);
             }
         })
+}
+
+fn guard_agent_reach(tool: &str, args: &Value) -> Result<(), String> {
+    if tool != "chrome_session" || args["action"] != "close_browser" {
+        super::firefox_sharing::refuse_agent_reach(tool, args)?;
+    }
+    Ok(())
 }
 
 pub(super) async fn call_selected(
@@ -174,6 +164,9 @@ pub(super) async fn call_selected(
     // `chrome_execute` was checked on entry (`call_entry`, the only caller with that tool) with no wait since.
     if !matches!(tool, "chrome_status" | "chrome_execute") {
         halted(shared, session, browser, tool)?;
+    }
+    if tool == "chrome_session" && args["action"] == "close_browser" {
+        return super::agent_close::call(shared, session, &args, None).await;
     }
     // A frozen receipt cannot revive an ended session. It only reads the app's existing buffer.
     if tool == "chrome_execute" && super::output_cache::is_continuation(&args) {

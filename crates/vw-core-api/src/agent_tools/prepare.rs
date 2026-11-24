@@ -61,6 +61,14 @@ async fn prepare_inner(
             .map(Some);
     }
     if names::CHROME_TOOLS.contains(&tool) {
+        if tool == "chrome_session"
+            && args["action"] == "close_browser"
+            && crate::chrome_control::chat_mode(shared, owner).as_deref() == Some("ask")
+        {
+            return crate::chrome_control::prepare_close(shared, owner, source, call, args.clone())
+                .await
+                .map(Some);
+        }
         let decision = crate::chrome_control::check_request(
             shared,
             &json!({"sessionId":source,"parentSessionId":owner,"toolName":format!("mcp_vw.{tool}"),"toolInput":args}),

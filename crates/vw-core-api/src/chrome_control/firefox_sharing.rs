@@ -1,6 +1,8 @@
 //! Firefox add-on sharing status, separate from the owned automation window. Consumed by Settings and agent facts.
 use super::{AddonState, AddonView, agent_browser::Browser};
 use crate::core::Shared;
+use crate::{CommandResult, Core, CoreError, Origin};
+use serde_json::json;
 use vw_platform::sync::LockRecover;
 
 /// Firefox page sharing ("Ask Vibe Work" through the signed add-on). The helper relays the add-on and limits it to a
@@ -11,6 +13,23 @@ pub(super) const PAGE_SHARING_AVAILABLE: bool = true;
 
 /// What the agent is told about a connected sharing add-on: shares arrive from the person; it cannot reach the tabs.
 const CONNECTED: &str = "The user can share pages, links, images and selected text from their own Firefox with Ask Vibe Work in Firefox's right-click menu; shared items arrive in the chat. The agent cannot open, list or read the user's Firefox tabs. For browser actions use chrome_session with profileId firefox:agent (the owned Firefox window).";
+const TOOLBAR_WAKE: &str = "If the add-on is already installed, open it once from Firefox's toolbar (the Vibe Work icon) to connect.";
+
+/// The one step that changes an already paired Vibe Work: it stays a choice inside the Firefox extension, never a
+/// Settings action. The extension's name comes from the shared vocabulary. The toolbar is named because the add-on
+/// accepts Pair only from its toolbar panel; its page opened as a tab from Firefox Add-ons is refused.
+fn change_in_extension() -> String {
+    format!(
+        "open {} from the Firefox toolbar and choose Pair with Vibe Work to change it.",
+        vw_vocabulary::label("workNames", "chromeExtension")
+    )
+}
+
+/// `change_in_extension` as a sentence of its own.
+fn change_in_extension_sentence() -> String {
+    let step = change_in_extension();
+    format!("O{}", &step[1..])
+}
 
 /// The plain refusal for the add-on request while page sharing is hidden; names the owned window's control instead.
 pub(super) fn page_sharing_unavailable() -> String {
@@ -68,7 +87,7 @@ pub(super) fn observe(shared: &Shared, data: &serde_json::Value) -> bool {
                 .iter()
                 .any(|p| p["profileId"].as_str().is_some_and(addon_profile))
         })
-        && current.0 == PairingState::Waiting
+        && matches!(current.0, PairingState::Waiting | PairingState::OtherOwner)
     {
         return false;
     }
@@ -80,8 +99,22 @@ pub(super) fn observe(shared: &Shared, data: &serde_json::Value) -> bool {
         })
     });
     let state = PairingState::observe(code, connected, code == "OWNER_APPROVAL_REQUIRED");
-    let changed = current.0 != state;
+    let fingerprint = if state == PairingState::Waiting {
+        data["ownerFingerprint"]
+            .as_str()
+            .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(|value| value[..16].to_owned())
+            .or_else(|| {
+                (current.0 == PairingState::Waiting)
+                    .then(|| current.1.clone())
+                    .flatten()
+            })
+    } else {
+        None
+    };
+    let changed = *current != (state, fingerprint.clone());
     current.0 = state;
+    current.1 = fingerprint;
     changed
 }
 
@@ -107,13 +140,15 @@ pub(super) fn view(shared: &Shared) -> AddonView {
     let state = if !chrome.firefox_enabled() {
         AddonState::SwitchedOff
     } else if version.as_deref().is_some_and(|v| {
-        vw_vibe_install::support::compare_versions(v, "0.1.7") == Some(std::cmp::Ordering::Less)
+        vw_vibe_install::support::compare_versions(v, "0.1.8") == Some(std::cmp::Ordering::Less)
     }) {
         AddonState::UpdateNeeded
     } else if !live.is_empty() {
         AddonState::Connected
     } else if pairing == PairingState::Waiting {
         AddonState::NotPaired
+    } else if pairing == PairingState::Connecting {
+        AddonState::Connecting
     } else if pairing == PairingState::OtherOwner {
         AddonState::OtherOwner
     } else if !super::setup::registered(&chrome.config, chrome.dir(), "Mozilla Firefox") {
@@ -131,8 +166,32 @@ pub(super) fn view(shared: &Shared) -> AddonView {
         view.instruction = CONNECTED.into();
     }
     if state == AddonState::NotPaired {
-        view.instruction = "The Firefox add-on is waiting for approval. Ask the user to confirm the Firefox connection in Vibe Work.".into();
+        view.label = "Waiting for you to pair".into();
+        view.instruction = "The Firefox extension is ready. Ask the user to select Pair Firefox in the Firefox card in Vibe Work Settings > Browser.".into();
         view.action = None;
+    }
+    if state == AddonState::OtherOwner {
+        view.label = "Identity changed".into();
+        view.instruction = format!(
+            "Firefox is paired with another Vibe Work. Ask the user to {}",
+            change_in_extension()
+        );
+        view.action = None;
+    }
+    if matches!(
+        state,
+        AddonState::NotSetUp | AddonState::ExtensionNotInstalled | AddonState::NotConnected
+    ) {
+        view.label = "Not connected".into();
+        view.instruction = "Ask the user to open Firefox. If the extension is missing, add it from the Firefox card in Settings > Browser. When it reaches Vibe Work, pair Firefox in Settings.".into();
+        if state == AddonState::NotConnected
+            && probe.status == super::firefox_probe::Status::Installed
+        {
+            // The add-on is installed, yet it has not reached Vibe Work: opening its toolbar panel starts its
+            // background page (add-on 0.1.7 did not start with Firefox).
+            view.instruction.push(' ');
+            view.instruction.push_str(TOOLBAR_WAKE);
+        }
     }
     if state == AddonState::UpdateNeeded {
         self_distributed_update(&mut view);
@@ -140,12 +199,60 @@ pub(super) fn view(shared: &Shared) -> AddonView {
     view
 }
 
+impl Core {
+    /// Only a real Settings click may ask the owner pipe to offer its connection-bound ticket.
+    pub(super) async fn firefox_pair(&self, origin: Origin) -> Result<CommandResult, CoreError> {
+        if crate::command_origin::debug_api_acts(&self.shared, origin) {
+            return Err(super::commands::invalid(
+                "Pair Firefox in the Vibe Work Settings window.",
+            ));
+        }
+        let state = view(&self.shared).state;
+        if state == AddonState::OtherOwner {
+            return Err(super::commands::invalid(&change_in_extension_sentence()));
+        }
+        if state != AddonState::NotPaired {
+            return Err(super::commands::invalid(
+                "Firefox is not waiting to pair. Check its state on the Firefox card in Settings > Browser.",
+            ));
+        }
+        let offered = self
+            .shared
+            .chrome_control
+            .owner
+            .rpc("owner.firefoxPair", json!({}))
+            .await;
+        if !offered
+            .as_ref()
+            .is_some_and(|answer| answer["offered"] == true)
+        {
+            let changed = change_in_extension_sentence();
+            let reason = match offered.as_ref().and_then(|answer| answer["none"].as_str()) {
+                Some("ambiguous") => {
+                    "More than one Firefox is waiting. Close the other Firefox profile and try again."
+                }
+                Some("identity_changed") => changed.as_str(),
+                _ => "Firefox is no longer waiting. Open Firefox and try again.",
+            };
+            return Err(super::commands::invalid(reason));
+        }
+        Ok(CommandResult::ChromeControl {
+            view: super::commands::view(&self.shared),
+            offer: None,
+            hint: None,
+        })
+    }
+}
+
 /// The signed add-on is self-distributed (no listing, no automatic update): a newer one comes from Vibe Work's own
 /// copy through Connect, not from Firefox updating it by itself as the shared extension wording says.
 fn self_distributed_update(view: &mut AddonView) {
     let firefox = vw_vocabulary::text("firefoxName").unwrap_or_default();
+    view.label = format!(
+        "{firefox} add-on is older than this Vibe Work needs. Choose Connect to update it."
+    );
     view.instruction = format!(
-        "The Vibe Work add-on in Firefox is older than this Vibe Work needs, and Firefox does not update it by itself. Ask the user to click Connect next to Ask Vibe Work in Settings > Browser > {firefox} and add the newer add-on when Firefox asks."
+        "The add-on in {firefox} is older than this Vibe Work needs. Ask the user to choose Connect next to Ask Vibe Work in Settings > Browser > {firefox} to update it."
     );
     view.action = Some(super::addon::AddonAction::Connect);
 }
@@ -180,6 +287,19 @@ mod tests {
             &serde_json::json!({"profileId":"firefox:12345678-1234-1234-1234-123456789012", "error":{"code":"OWNER_APPROVAL_REQUIRED"}}),
         );
         assert_eq!(view(shared).state, AddonState::NotPaired);
+        assert_eq!(view(shared).label, "Waiting for you to pair");
+        assert!(
+            view(shared)
+                .instruction
+                .contains("Pair Firefox in the Firefox card in Vibe Work Settings")
+        );
+        super::super::edge_state::update(
+            shared,
+            &serde_json::json!({
+                "profileId":"firefox:12345678-1234-1234-1234-123456789012", "error":{"code":"OWNER_CONNECTING"}
+            }),
+        );
+        assert_eq!(view(shared).state, AddonState::Connecting);
         assert_ne!(
             shared
                 .chrome_control
@@ -190,6 +310,119 @@ mod tests {
                 .0,
             super::super::PairingState::WindowOpen
         );
+        fixture.finish().await;
+    }
+    #[tokio::test]
+    async fn waiting_firefox_identity_is_short_and_survives_an_empty_status_poll() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let shared = &fixture.core.shared;
+        let id = "firefox:12345678-1234-1234-1234-123456789012";
+        let fingerprint = "0123456789abcdef".repeat(4);
+        assert!(observe(
+            shared,
+            &serde_json::json!({
+                "profileId":id,"error":{"code":"OWNER_APPROVAL_REQUIRED"},"ownerFingerprint":fingerprint
+            })
+        ));
+        assert_eq!(view(shared).state, AddonState::NotPaired);
+        assert_eq!(
+            super::super::firefox_commands::setup_view(shared)
+                .unwrap()
+                .fingerprint
+                .as_deref(),
+            Some("0123456789abcdef")
+        );
+        assert!(!observe(shared, &serde_json::json!({"profiles":[]})));
+        assert_eq!(view(shared).state, AddonState::NotPaired);
+        fixture.finish().await;
+    }
+    #[tokio::test]
+    async fn changed_firefox_identity_stays_visible_until_the_connection_changes() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let shared = &fixture.core.shared;
+        assert!(observe(
+            shared,
+            &serde_json::json!({
+                "profileId":"firefox:12345678-1234-1234-1234-123456789012",
+                "error":{"code":"OWNER_IDENTITY_MISMATCH"}
+            })
+        ));
+        assert_eq!(view(shared).state, AddonState::OtherOwner);
+        assert_eq!(
+            view(shared).instruction,
+            format!(
+                "Firefox is paired with another Vibe Work. Ask the user to open {} from the Firefox toolbar and choose Pair with Vibe Work to change it.",
+                vw_vocabulary::label("workNames", "chromeExtension")
+            )
+        );
+        let error = fixture
+            .core
+            .firefox_pair(crate::Origin::Ui)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Pair with Vibe Work"), "{error}");
+        assert!(!observe(shared, &serde_json::json!({"profiles":[]})));
+        assert_eq!(view(shared).state, AddonState::OtherOwner);
+        fixture.finish().await;
+    }
+    #[tokio::test]
+    async fn a_debug_api_cannot_pair_firefox_even_through_the_window() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let direct = fixture
+            .core
+            .firefox_pair(crate::Origin::DebugApi)
+            .await
+            .unwrap_err();
+        assert!(direct.to_string().contains("Settings window"), "{direct}");
+        fixture.core.set_window_drive(|| true);
+        let driven = fixture
+            .core
+            .firefox_pair(crate::Origin::Ui)
+            .await
+            .unwrap_err();
+        assert!(driven.to_string().contains("Settings window"), "{driven}");
+        fixture.finish().await;
+    }
+    #[tokio::test]
+    async fn waiting_uses_only_the_fixtures_absent_old_or_current_addon() {
+        let fixture = crate::feature_test_core::Fixture::new().await;
+        let shared = &fixture.core.shared;
+        let config = &shared.chrome_control.config;
+        let home = config.user_home.as_ref().expect("isolated browser home");
+        let root = if config.is_macos() {
+            home.join("Library/Application Support/Firefox/Profiles")
+        } else if cfg!(windows) {
+            home.join("AppData/Roaming/Mozilla/Firefox/Profiles")
+        } else {
+            home.join(".mozilla/firefox")
+        };
+        let profile = root.join("test.default");
+        std::fs::create_dir_all(&profile).unwrap();
+        observe(
+            shared,
+            &json!({
+                "profileId":"firefox:test", "error":{"code":"OWNER_APPROVAL_REQUIRED"}
+            }),
+        );
+        for (version, expected) in [
+            (None, AddonState::NotPaired),
+            (Some("0.1.7"), AddonState::UpdateNeeded),
+            (Some("0.1.8"), AddonState::NotPaired),
+        ] {
+            let addons = version.map_or_else(Vec::new, |version| {
+                vec![json!({
+                    "id":super::super::setup::FIREFOX_EXTENSION_ID,
+                    "version":version, "userDisabled":false, "appDisabled":false
+                })]
+            });
+            std::fs::write(
+                profile.join("extensions.json"),
+                json!({"addons":addons}).to_string(),
+            )
+            .unwrap();
+            assert_eq!(view(shared).state, expected, "add-on {version:?}");
+            assert_eq!(view(shared).extension_version.as_deref(), version);
+        }
         fixture.finish().await;
     }
     #[tokio::test]

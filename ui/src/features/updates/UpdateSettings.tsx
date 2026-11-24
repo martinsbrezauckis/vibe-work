@@ -8,7 +8,8 @@
  * dialog is gone).
  * Invariants: the switch only saves the preference (the host stores it); installing is the same "Install and
  * restart" request as the notice's, so it is never offered before the download is verified. A package-manager
- * install (`linkOnly`) gets no download switch: nothing is downloaded there.
+ * install (`linkOnly`) gets no download switch. A translocated Mac copy explains the move and disables
+ * Download/Install; neither copy downloads updates here.
  */
 import { Button, Switch } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
@@ -53,7 +54,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
   return (
     <section data-testid="update-settings">
       <h3>Updates</h3>
-      <div className="check" data-setting="update-status">
+      <div className="check check-wrap-actions" data-setting="update-status">
         <span>
           Status
           <span className="d" data-testid="update-status">
@@ -68,11 +69,12 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
           )}
         </span>
         <span className="set-actions">
-          {phase.type === "available" && view.mode === "inApp" && (
+          {phase.type === "available" && view.mode !== "linkOnly" && (
             <Button
               data-testid="updates.update-settings-run"
               type="button"
               shape="outlined"
+              disabled={view.mode === "macosTranslocated"}
               onClick={run(updates.download)}
             >
               Download
@@ -84,24 +86,28 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
               type="button"
               shape="outlined"
               variant="primary"
+              disabled={view.mode === "macosTranslocated"}
               onClick={run(updates.install)}
             >
               Install and restart
             </Button>
           )}
-          {phase.type === "available" && view.mode === "linkOnly" && view.releasePage !== null && (
-            <>
-              <Button
-                data-testid="updates.update-settings-run-3"
-                type="button"
-                shape="outlined"
-                onClick={run(updates.openReleasePage)}
-              >
-                Open release page
-              </Button>
-              <ReleaseHost url={view.releasePage} />
-            </>
-          )}
+          {((phase.type === "available" && view.mode === "linkOnly") ||
+            (view.mode === "macosTranslocated" &&
+              (phase.type === "available" || phase.type === "ready" || phase.type === "failed"))) &&
+            view.releasePage !== null && (
+              <>
+                <Button
+                  data-testid="updates.update-settings-run-3"
+                  type="button"
+                  shape="outlined"
+                  onClick={run(updates.openReleasePage)}
+                >
+                  Open release page
+                </Button>
+                <ReleaseHost url={view.releasePage} />
+              </>
+            )}
           <Button
             data-testid="updates.update-settings-run-4"
             type="button"
@@ -111,9 +117,11 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
           >
             Check for updates
           </Button>
-          {phase.type === "failed" && phase.stage !== "check" && (
-            <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />
-          )}
+          {phase.type === "failed" &&
+            phase.stage !== "check" &&
+            view.mode !== "macosTranslocated" && (
+              <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />
+            )}
         </span>
       </div>
       <VibeRow />

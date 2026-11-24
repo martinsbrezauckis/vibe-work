@@ -136,11 +136,11 @@ async fn the_firefox_name_opens_the_owned_window() {
     }
 }
 
-/// Guard: without the owned window the name keeps the existing answer (open the window in Settings > Browser > Your
-/// Firefox) and nothing is opened; the name's mapping to firefox:agent does not change that.
+/// Firefox shorthand reaches automatic startup too. This fixture has no owner key service, so the
+/// same startup checks as the Settings command refuse before a window or browser session opens.
 #[cfg(feature = "your-firefox")]
 #[tokio::test]
-async fn the_firefox_name_without_the_window_says_how_to_open_it() {
+async fn the_firefox_name_without_a_window_reaches_checked_startup() {
     let core = chat_with_session().await;
     let shared = &core.shared;
     let seen = super::super::test_support::answering(shared, |tool, args| {
@@ -150,18 +150,19 @@ async fn the_firefox_name_without_the_window_says_how_to_open_it() {
             helper("held")(tool, args)
         }
     });
-    let answer = super::super::gateway::call(
+    let error = super::super::gateway::call(
         shared,
         "s",
         "chrome_session",
         json!({"action":"open","profileId":"firefox"}),
     )
     .await
-    .unwrap();
-    let text = answer["vwMcpResult"]["structuredContent"]["error"]["message"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(text.contains("Open window"), "{answer}");
+    .unwrap_err();
+    assert!(
+        error.contains(vw_vocabulary::texts::CHROME_NEEDS_KEYRING),
+        "{error}"
+    );
+    assert!(!error.contains("Open window"), "{error}");
     assert_eq!(opens(&seen), Vec::<Value>::new());
     core.shutdown().await;
 }

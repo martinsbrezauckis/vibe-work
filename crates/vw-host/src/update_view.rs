@@ -9,6 +9,7 @@
 //! Depends on: serde. Called by: [`crate::update_flow`], `app` (`updater.rs`), the private tests.
 
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -26,6 +27,8 @@ pub enum InstallMode {
     /// A package-manager install (deb, rpm) or an unbundled run: tell about the new version and link to the
     /// release page; the app never downloads or installs (the package manager owns the files).
     LinkOnly,
+    /// macOS runs this quarantined copy in a temporary read-only location. Move it before updating.
+    MacosTranslocated,
 }
 
 impl InstallMode {
@@ -38,6 +41,26 @@ impl InstallMode {
         match bundle {
             Some("appimage" | "msi" | "nsis" | "app") => Self::InApp,
             _ => Self::LinkOnly,
+        }
+    }
+
+    /// The running executable's parent directories identify macOS App Translocation. Match a whole
+    /// component (not a substring or the executable's name), including both `/var` and `/private/var`.
+    /// Downloads alone is not evidence: a copy there may run without translocation. Other systems keep
+    /// their bundle policy. No private macOS API or extra filesystem access is needed.
+    #[must_use]
+    pub fn for_running_app(bundle: Option<&str>, os: &str, executable: Option<&Path>) -> Self {
+        if bundle == Some("app")
+            && os == "macos"
+            && executable.and_then(Path::parent).is_some_and(|parent| {
+                parent
+                    .components()
+                    .any(|part| part.as_os_str() == "AppTranslocation")
+            })
+        {
+            Self::MacosTranslocated
+        } else {
+            Self::for_bundle(bundle)
         }
     }
 }
@@ -68,6 +91,10 @@ impl UpdateNotice {
     pub fn text(&self) -> (String, String) {
         let open = vw_vocabulary::texts::OPEN_VIBE_WORK;
         match self {
+            Self::MoveToApplications { .. } => (
+                "Move Vibe Work to Applications to update.".to_owned(),
+                "This copy is running from a temporary read-only place. Move Vibe Work into Applications, then open it from there to update.".to_owned(),
+            ),
             Self::Available {
                 version,
                 downloading: true,
@@ -103,7 +130,7 @@ impl From<crate::update_flow::UpdateError> for vw_core_api::CoreError {
         use crate::update_flow::UpdateError as E;
         let code = match &error {
             E::Failed(_) => vw_core_api::ErrorCode::Internal,
-            E::Busy | E::WrongState | E::ConsentRequired | E::LinkOnly => {
+            E::Busy | E::WrongState | E::ConsentRequired | E::LinkOnly | E::MacosTranslocated => {
                 vw_core_api::ErrorCode::Denied
             }
         };
@@ -199,7 +226,7 @@ pub enum Phase {
 pub struct UpdateView {
     /// The running version.
     pub current: String,
-    /// In-app or link-only.
+    /// Whether this copy can update here, uses the release page, or must first be moved on macOS.
     pub mode: InstallMode,
     /// The "Download updates automatically" setting.
     pub auto_download: bool,
@@ -250,6 +277,11 @@ pub trait UpdateBackend: Send + Sync {
 /// An OS notification the flow wants shown (the app crate maps it to text and the desktop notifier).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateNotice {
+    /// macOS runs this copy read-only; it must be moved before an update can be installed.
+    MoveToApplications {
+        /// The offered version, for once-per-version notification tracking.
+        version: String,
+    },
     /// A newer version exists. `downloading`: the app will fetch it now.
     Available {
         /// The version.

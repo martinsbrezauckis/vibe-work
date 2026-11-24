@@ -37,8 +37,91 @@ pub(super) async fn open(core: &crate::Core, profile: &str) -> Result<Value, Str
     .await
 }
 
+#[path = "failed_open_tests.rs"]
+mod failed_open_tests;
 #[path = "profile_binding_storage_tests.rs"]
 mod storage_tests;
+
+/// An authenticated terminal unconfirmed Stop ends this chat's browser selection while telling
+/// the person exactly how to release the still-open agent window. Another chat stays bound.
+#[tokio::test]
+async fn an_unconfirmed_stop_unlocks_the_chat_and_warns_once() {
+    let core = connected("profile-rebind-stop-unconfirmed").await;
+    test_support::chat(&core.shared, "other");
+    super::profile_bindings::remember(
+        &core.shared.chrome_control,
+        "other",
+        "chrome:personal",
+        None,
+    )
+    .unwrap();
+    open(&core, "chrome:work").await.unwrap();
+    let mut events = core.subscribe(None);
+    let wrong_profile = json!({"structuredContent":{"version":1,"clientId":"vibework-owner","profiles":[],"sessions":[{
+        "sessionId":"task","clientSessionId":"s","profileId":"edge:work","state":"disconnected",
+        "desiredState":"stopped","capture":"unknown","suspensionReason":"STOP_UNCONFIRMED"
+    }]}});
+    super::owner::update_work_for_test(&core.shared, &wrong_profile);
+    assert_eq!(
+        super::profile_bindings::selected(&core.shared.chrome_control, "s").as_deref(),
+        Some("chrome:work")
+    );
+    let unresolved = json!({"structuredContent":{"version":1,"clientId":"vibework-owner","profiles":[],"sessions":[{
+        "sessionId":"task","clientSessionId":"s","profileId":"chrome:work","state":"disconnected",
+        "desiredState":"stopped","capture":"unknown","suspensionReason":"UNCLASSIFIED_FAILURE"
+    }]}});
+    super::owner::update_work_for_test(&core.shared, &unresolved);
+    assert_eq!(
+        super::profile_bindings::selected(&core.shared.chrome_control, "s").as_deref(),
+        Some("chrome:work")
+    );
+    assert!(super::profile_bindings::check(&core.shared.chrome_control, "s", "edge:work").is_err());
+    let ended = json!({"structuredContent":{"version":1,"clientId":"vibework-owner","profiles":[],"sessions":[{
+        "sessionId":"task","clientSessionId":"s","profileId":"chrome:work","state":"disconnected",
+        "desiredState":"stopped","capture":"unknown","suspensionReason":"STOP_UNCONFIRMED"
+    }]}});
+    for _ in 0..2 {
+        super::owner::update_work_for_test(&core.shared, &ended);
+    }
+    assert_eq!(
+        super::profile_bindings::selected(&core.shared.chrome_control, "s"),
+        None
+    );
+    assert_eq!(
+        super::profile_bindings::selected(&core.shared.chrome_control, "other").as_deref(),
+        Some("chrome:personal")
+    );
+    assert!(super::profile_bindings::check(&core.shared.chrome_control, "s", "edge:work").is_ok());
+    let mut notices = Vec::new();
+    while let Ok(Some(event)) =
+        tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
+    {
+        let value = serde_json::to_value(event).unwrap();
+        if value["change"]["params"]["warning"]["code"] == "browser_stop_unconfirmed" {
+            notices.push(value);
+        }
+    }
+    assert_eq!(notices.len(), 1);
+    let message = notices[0]["change"]["params"]["warning"]["message"]
+        .as_str()
+        .unwrap();
+    let expected_prefix = format!(
+        "{}: close its agent window by hand.",
+        super::agent_browser::Browser::Chrome.name()
+    );
+    assert!(message.starts_with(expected_prefix.as_str()), "{message}");
+    assert!(
+        message.len() <= 90,
+        "Person warning does not fit a 900px chat: {message}"
+    );
+    assert!(
+        message.contains("close")
+            && message.contains("agent window")
+            && message.contains("another browser"),
+        "{message}"
+    );
+    core.shutdown().await;
+}
 
 /// PREDICT: a positive closed-window fence releases only its chat's binding and
 /// emits exactly one factual notice while the chat's turn continues.
@@ -132,6 +215,65 @@ async fn agent_cannot_replace_the_chats_profile_binding() {
         core.shared.chrome_control.chat_profiles.lock().unwrap()["s"],
         "chrome:work"
     );
+    core.shutdown().await;
+}
+
+/// A stop reply may be `stopping` before the helper confirms cleanup. The next browser open must
+/// describe that transient state rather than implying the agent forgot to stop the old session.
+#[tokio::test]
+async fn another_browser_open_immediately_after_stop_says_the_old_session_is_stopping() {
+    let core = connected("profile-binding-open-while-stopping").await;
+    open(&core, "chrome:work").await.unwrap();
+    test_support::answering(&core.shared, |tool, args| {
+        assert_eq!(tool, "chrome_session");
+        assert_eq!(args["action"], "stop");
+        json!({"structuredContent":{"sessionId":"task","state":"stopping"}})
+    });
+    gateway::call(
+        &core.shared,
+        "s",
+        "chrome_session",
+        json!({"action":"stop","sessionId":"task"}),
+    )
+    .await
+    .unwrap();
+    let refusal = open(&core, "edge:work").await.unwrap_err();
+    assert!(
+        refusal.contains("Chrome") && refusal.contains("still stopping"),
+        "{refusal}"
+    );
+    assert!(refusal.contains("try again in a few seconds"), "{refusal}");
+    assert!(
+        !refusal.contains("Close that browser session first"),
+        "{refusal}"
+    );
+    let alias =
+        super::profile_bindings::check_agent(&core.shared.chrome_control, "s", "edge").unwrap_err();
+    assert!(alias.contains("still stopping"), "{alias}");
+
+    test_support::chat(&core.shared, "other");
+    super::profile_bindings::remember(
+        &core.shared.chrome_control,
+        "other",
+        "edge:work",
+        Some("other-task"),
+    )
+    .unwrap();
+    core.shared.chrome_control.work.lock().unwrap().open(
+        "other-task",
+        "other",
+        "active",
+        "edge:work",
+        None,
+    );
+    let other =
+        super::profile_bindings::check_agent(&core.shared.chrome_control, "other", "chrome:work")
+            .unwrap_err();
+    assert!(
+        other.contains("Close that browser session first"),
+        "{other}"
+    );
+    assert!(!other.contains("still stopping"), "{other}");
     core.shutdown().await;
 }
 

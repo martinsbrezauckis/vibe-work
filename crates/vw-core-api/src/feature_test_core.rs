@@ -29,7 +29,7 @@ impl Fixture {
         std::fs::create_dir_all(&home).unwrap();
         let root = vw_platform::canonical_plain(&root).unwrap();
         let home = root.join("app-data/vibe");
-        let config = crate::CoreConfig {
+        let mut config = crate::CoreConfig {
             start_vibe: false,
             agent_tools: Some(crate::AgentToolsConfig::new(
                 root.join("no-tools-spawned"),
@@ -41,6 +41,8 @@ impl Fixture {
             },
             ..crate::CoreConfig::default()
         };
+        // Browser probes must never inherit the machine's installed add-ons.
+        config.chrome_control.user_home = Some(root.join("browser-home"));
         let core = Box::pin(crate::Core::start(
             vw_supervisor::SupervisorConfig::new(root.join("no-vibe-spawned"), home, root.clone()),
             Arc::new(vw_supervisor::NoSecret),

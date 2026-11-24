@@ -43,7 +43,14 @@ pub(super) fn setup_view(shared: &crate::core::Shared) -> Option<Box<setup::Chro
         };
         setup.store_url.clear();
         setup.store_review = false;
-        setup.fingerprint = None;
+        setup.fingerprint.clone_from(
+            &chrome
+                .owner
+                .firefox_share_pairing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .1,
+        );
         setup.states = None;
         Box::new(setup)
     })
@@ -88,102 +95,118 @@ use super::setup::{owner_read_text, owner_store_text};
 
 impl Core {
     pub(super) async fn firefox_window(&self, open: bool) -> Result<CommandResult, CoreError> {
-        if !cfg!(feature = "your-firefox") {
-            return Err(invalid(ABSENT));
-        }
-        let chrome = &self.shared.chrome_control;
-        let _held = chrome.lifecycle.lock().await;
-        if open && !chrome.firefox_enabled() {
-            return Err(invalid(&super::agent_browser::Browser::Firefox.words(
-                "{yourBrowser} is off. Turn it on in Settings > Browser > {yourBrowser}.",
-            )));
-        }
-        if open {
-            setup::packaged_helper(&chrome.config).map_err(|e| invalid(&e))?;
-            let state = chrome
-                .dir()
-                .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NO_APP_FOLDER))?;
-            let keys = self
-                .shared
-                .config
-                .keys
-                .as_ref()
-                .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NEEDS_KEYRING))?;
-            if keys
-                .chrome_owner()
+        window(&self.shared, open).await
+    }
+}
+
+fn pairing(chrome: &super::ChromeControl) -> PairingState {
+    chrome
+        .owner
+        .firefox_pairing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .0
+}
+
+/// The Settings command and the checked session-open path use the same owned-window startup.
+pub(super) async fn window(
+    shared: &std::sync::Arc<crate::core::Shared>,
+    open: bool,
+) -> Result<CommandResult, CoreError> {
+    if !cfg!(feature = "your-firefox") {
+        return Err(invalid(ABSENT));
+    }
+    let chrome = &shared.chrome_control;
+    let _held = chrome.lifecycle.lock().await;
+    if open && !chrome.firefox_enabled() {
+        return Err(invalid(&super::agent_browser::Browser::Firefox.words(
+            "{yourBrowser} is off. Turn it on in Settings > Browser > {yourBrowser}.",
+        )));
+    }
+    if open {
+        setup::packaged_helper(&chrome.config).map_err(|e| invalid(&e))?;
+        let state = chrome
+            .dir()
+            .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NO_APP_FOLDER))?;
+        let keys = shared
+            .config
+            .keys
+            .as_ref()
+            .ok_or_else(|| invalid(vw_vocabulary::texts::CHROME_NEEDS_KEYRING))?;
+        if keys
+            .chrome_owner()
+            .await
+            .map_err(|e| invalid(&owner_read_text(FIREFOX, &e)))?
+            .is_none()
+        {
+            keys.create_chrome_owner()
                 .await
-                .map_err(|e| invalid(&owner_read_text(FIREFOX, &e)))?
-                .is_none()
-            {
-                keys.create_chrome_owner()
-                    .await
-                    .map_err(|e| invalid(&owner_store_text(FIREFOX, &e)))?;
-            }
-            std::fs::create_dir_all(state)
-                .map_err(|_| invalid("The Firefox connection could not be saved."))?;
-            std::fs::write(state.join("firefox-window"), b"enabled\n")
-                .map_err(|_| invalid("The Firefox connection could not be saved."))?;
-            super::start_owner(&self.shared).await;
+                .map_err(|e| invalid(&owner_store_text(FIREFOX, &e)))?;
         }
-        if open {
-            *chrome
-                .owner
-                .firefox_pairing
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                (PairingState::Connecting, None);
-            self.shared.emit(crate::CoreEvent::ChromeControl {
-                view: view(&self.shared),
-            });
-        }
-        let answer = chrome
+        std::fs::create_dir_all(state)
+            .map_err(|_| invalid("The Firefox connection could not be saved."))?;
+        std::fs::write(state.join("firefox-window"), b"enabled\n")
+            .map_err(|_| invalid("The Firefox connection could not be saved."))?;
+        super::start_owner(shared).await;
+    }
+    // A failed close says nothing about whether the child is gone: it keeps this last observed state.
+    let before = pairing(chrome);
+    if open && before != PairingState::WindowOpen {
+        *chrome
             .owner
-            .call(
-                "chrome_status",
-                json!({"_firefoxWindow":if open {"open"} else {"close"}}),
-            )
-            .await;
-        let data = &answer.value()["structuredContent"];
-        let state = data["firefoxWindow"]
-            .as_str()
-            .and_then(PairingState::firefox_window);
-        if let Some(state) = state {
-            *chrome
-                .owner
-                .firefox_pairing
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
-        } else {
-            let state = match data["error"]["code"].as_str() {
+            .firefox_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (PairingState::Connecting, None);
+        shared.emit(crate::CoreEvent::ChromeControl { view: view(shared) });
+    }
+    let answer = chrome
+        .owner
+        .call(
+            "chrome_status",
+            json!({"_firefoxWindow":if open {"open"} else {"close"}}),
+        )
+        .await;
+    let data = &answer.value()["structuredContent"];
+    let state = data["firefoxWindow"]
+        .as_str()
+        .and_then(PairingState::firefox_window);
+    if let Some(state) = state {
+        *chrome
+            .owner
+            .firefox_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
+    } else {
+        let state = if open {
+            match data["error"]["code"].as_str() {
                 Some("BROWSER_NOT_INSTALLED") => PairingState::NotInstalled,
                 Some("BROWSER_OUTDATED") => PairingState::BrowserOutdated,
                 _ => PairingState::WindowClosed,
-            };
-            *chrome
-                .owner
-                .firefox_pairing
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
-            self.shared.emit(crate::CoreEvent::ChromeControl {
-                view: view(&self.shared),
-            });
-            let fallback = format!(
-                "{} Ask the user to open its window in Vibe Work Settings, then check chrome_status.",
-                vw_vocabulary::texts::FIREFOX_NOT_CONNECTED
-            );
-            return Err(invalid(
-                data["error"]["message"].as_str().unwrap_or(&fallback),
-            ));
-        }
-        let view = view(&self.shared);
-        self.shared
-            .emit(crate::CoreEvent::ChromeControl { view: view.clone() });
-        Ok(CommandResult::ChromeControl {
-            view,
-            offer: None,
-            hint: None,
-        })
+            }
+        } else {
+            before
+        };
+        *chrome
+            .owner
+            .firefox_pairing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (state, None);
+        shared.emit(crate::CoreEvent::ChromeControl { view: view(shared) });
+        let fallback = format!(
+            "{} Firefox could not start. Check chrome_status, then try a new browser session. Ask the user to restart Vibe Work if it remains unavailable.",
+            vw_vocabulary::texts::FIREFOX_NOT_CONNECTED
+        );
+        return Err(invalid(
+            data["error"]["message"].as_str().unwrap_or(&fallback),
+        ));
     }
+    let view = view(shared);
+    shared.emit(crate::CoreEvent::ChromeControl { view: view.clone() });
+    Ok(CommandResult::ChromeControl {
+        view,
+        offer: None,
+        hint: None,
+    })
 }
 
 /// Firefox's card and agent facts share one diagnosis and name the actual window controls.
@@ -194,9 +217,9 @@ pub(super) fn addon(shared: &crate::core::Shared) -> super::AddonView {
 }
 fn state_view(state: PairingState, enabled: bool, package: bool) -> super::AddonView {
     use super::AddonState as A;
-    let (state, label, instruction) = if (!package && state != PairingState::WindowOpen)
-        || !cfg!(feature = "your-firefox")
-    {
+    let (state, label, instruction) = if !enabled {
+        (A::SwitchedOff, "Off", super::browser_text::SWITCHED_OFF)
+    } else if (!package && state != PairingState::WindowOpen) || !cfg!(feature = "your-firefox") {
         (
             A::Unavailable,
             "Unavailable",
@@ -206,10 +229,8 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
         (
             A::ChromeMissing,
             "Not installed",
-            "Firefox is missing. Ask the user to install Firefox, then choose Open window in Settings > Browser > {yourBrowser}.",
+            "Firefox is missing. Ask the user to install Firefox, then open a new browser session with profileId firefox:agent.",
         )
-    } else if !enabled {
-        (A::SwitchedOff, "Off", super::browser_text::SWITCHED_OFF)
     } else {
         match state {
             PairingState::WindowOpen => (
@@ -225,7 +246,7 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             PairingState::BrowserOutdated => (
                 A::UpdateNeeded,
                 "Update Firefox",
-                "Firefox is older than the supported version. Ask the user to update Firefox to version 159 or later, then choose Open window under Settings > Browser > {yourBrowser}.",
+                "Firefox is older than the supported version. Ask the user to update Firefox to version 159 or later, then open a new browser session with profileId firefox:agent.",
             ),
             PairingState::Blocked => (
                 A::Unavailable,
@@ -234,8 +255,8 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
             ),
             _ => (
                 A::ChromeClosed,
-                "Window closed",
-                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {yourBrowser}, then open a new browser session for this chat; the old browser session has ended.",
+                "Ready",
+                "Use chrome_session with profileId firefox:agent to open this chat's owned Firefox window automatically. A previous closed window's browser session has ended; open a new session. Do not start Firefox with process or shell tools.",
             ),
         }
     };
@@ -250,81 +271,5 @@ fn state_view(state: PairingState, enabled: bool, package: bool) -> super::Addon
 }
 
 #[cfg(all(test, feature = "your-firefox"))]
-mod tests {
-    use super::*;
-    /// PREDICT: the closed-window instruction ended "the old session cannot resume after a restart" also when the
-    /// user had only closed the window; it now says the old session has ended, which holds for a close and a restart.
-    #[test]
-    fn a_closed_window_says_its_old_session_ended() {
-        let view = state_view(PairingState::WindowClosed, true, true);
-        let name = vw_vocabulary::texts::FIREFOX_NAME;
-        assert_eq!(
-            view.instruction,
-            format!(
-                "The owned Firefox window is closed. Ask the user to choose Open window under Settings > Browser > {name}, then open a new browser session for this chat; the old browser session has ended."
-            )
-        );
-    }
-    #[tokio::test]
-    async fn firefox_facts_use_its_window_controls_and_connection_state() {
-        let core = crate::offline_core::start_with("firefox-window-facts", |config, dir| {
-            config.chrome_control.package = Some(dir.join("package"));
-        })
-        .await;
-        super::super::test_support::answering(&core.shared, |_, _| json!({"structuredContent":{}}));
-        for (state, label, instruction) in [
-            (PairingState::WindowClosed, "Window closed", "Open window"),
-            (PairingState::WindowOpen, "Window open", "chrome_session"),
-            (PairingState::Connecting, "Starting", "Wait"),
-            (
-                PairingState::BrowserOutdated,
-                "Update Firefox",
-                "Open window",
-            ),
-            (
-                PairingState::NotInstalled,
-                "Not installed",
-                "Ask the user to install Firefox",
-            ),
-        ] {
-            *core
-                .shared
-                .chrome_control
-                .owner
-                .firefox_pairing
-                .lock()
-                .unwrap() = (state, None);
-            let facts = super::super::installation::addons(&core.shared);
-            let firefox = facts
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|v| v["id"] == "firefox")
-                .expect("Firefox facts are required when its module is enabled");
-            assert_eq!(firefox["label"], label);
-            assert!(
-                firefox["instruction"]
-                    .as_str()
-                    .unwrap()
-                    .contains(instruction),
-                "{firefox}"
-            );
-            assert!(
-                !firefox["instruction"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Connect Firefox")
-            );
-            if state == PairingState::NotInstalled {
-                assert_eq!(
-                    firefox["instruction"],
-                    format!(
-                        "Firefox is missing. Ask the user to install Firefox, then choose Open window in Settings > Browser > {}.",
-                        vw_vocabulary::texts::FIREFOX_NAME
-                    )
-                );
-            }
-        }
-        core.shutdown().await;
-    }
-}
+#[path = "firefox_commands_tests.rs"]
+mod tests;

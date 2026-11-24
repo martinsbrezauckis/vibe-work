@@ -1,0 +1,33 @@
+{
+  "browser": "Mozilla Firefox",
+  "capture": "unknown",
+  "clientId": "vibework-owner",
+  "clientName": "Vibe Work",
+  "clientSessionId": "e0aaaba1-4741-bb20-0313-5418df94853b",
+  "desiredState": "stopped",
+  "frame": null,
+  "groupTabs": true,
+  "lastConfirmed": null,
+  "leaseEpoch": 3,
+  "ownerFingerprint": "b496c9ed41def17fe4df897bd06ac6dee51d5f8e346e5d60bd8ed452567492e6",
+  "ownerPublicKey": "04204606ba81ddb55ae66c1e058d17e247c4fb6e945236856ba0ed8d7b12bf46f00d45ea848377913a5260da2dd8036d3f2f1bf1b63d81fe14ca200fa930a9bbf8",
+  "personPause": null,
+  "policyRevision": 1,
+  "popups": {
+    "closedCount": 0,
+    "complete": false,
+    "openCount": null,
+    "trackingTruncated": false
+  },
+  "profileId": "firefox:agent",
+  "purpose": "Vibe Work chat",
+  "scope": {
+    "tabIds": []
+  },
+  "sessionId": "session-29bdfe8c-b8ac-4dc4-9fb6-6b78bf3fe287",
+  "state": "disconnected",
+  "suspensionReason": "LEASE_EXPIRED",
+  "target": null,
+  "unresolved": [],
+  "windowId": null
+}
