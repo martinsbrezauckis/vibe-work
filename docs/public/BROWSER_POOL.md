@@ -28,14 +28,13 @@ visible snapshot. Selecting a suspended tab reloads its page. Snapshots are omit
 vault login fill, and pages that were never visible have no snapshot.
 The pool retains the visible page, the agent's current page during an unfinished turn
 (including one waiting for the user's answer), ongoing page operations and a pending user save.
-If every slot is protected,
-the browser tool immediately answers:
-
-> Not run: the browser is busy with another session; try again when it is free
-
-The requested address is retained, and the panel displays **Waiting for the browser**. There is
-no automatic queue execution: the agent retries explicitly when a slot becomes available.
-A denied session stays waiting when its turn ends; it has no engine to release.
+If every slot is protected, an accepted navigation records a waiting page. The panel displays
+**Waiting for the browser** and, while it still waits, the tool returns status `waiting` and
+`pending: true`. The page
+opens by itself when a slot becomes free; check it later with `list_tabs`, then `browser_read`,
+rather than opening it again. If the chat's access mode is lowered, its waiting page is withdrawn.
+The waiting queue holds up to four pages per chat and 16 across chats; further requests are refused.
+A page can finish waiting before the receipt is returned, in which case its status is `notWaiting`.
 
 The selected browser panel remains protected while a modal temporarily parks its native view.
 Closing the panel, switching pages or switching to another session removes that page's panel
