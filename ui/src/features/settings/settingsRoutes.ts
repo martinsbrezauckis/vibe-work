@@ -51,7 +51,7 @@ import {
   HOMEPAGE_URL,
   SOURCE_URL,
   MISTRAL_DATA_POLICY_URL,
-} from "./AboutSettings";
+} from "./aboutConstants";
 import { offeredCategories } from "./availability";
 import { SEARCH_INDEX, searchSettings, settingPath } from "./catalog";
 import { MISTRAL_LINKS } from "./mistralLinks";

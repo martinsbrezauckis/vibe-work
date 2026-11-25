@@ -36,7 +36,7 @@ pub(crate) fn pending_ports(
 
 pub(crate) fn reason(port: u16) -> String {
     format!(
-        "no listener detected on this port yet (port {port}); this session's process is running and \
+        "no listener detected on this port yet (port {port}); this chat's process is running and \
         reserves the port. Check processes_list and its output, confirm the server uses this port, \
         then retry preview_open when it shows listening; Reload an already open preview before preview_screenshot."
     )

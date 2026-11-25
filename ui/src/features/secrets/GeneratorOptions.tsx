@@ -5,6 +5,7 @@
  */
 import { Button } from "../../components/Controls";
 import { type ReactNode, useId, useState, useSyncExternalStore } from "react";
+import { ACT_OPTIONS } from "../settings/actionLabels";
 
 /** The options sent to the vault generator. */
 export interface GenerateOptions {
@@ -66,14 +67,14 @@ export function GeneratorOptions(props: {
         <Button
           data-testid="secrets.generator-options-set-disclosure-expanded"
           type="button"
-
+          shape="outlined"
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
           onClick={() => {
             setDisclosureExpanded(scope, !expanded);
           }}
         >
-          Options
+          {ACT_OPTIONS}
         </Button>
       </div>
       {expanded && (

@@ -184,12 +184,13 @@ function Page({ projects }: { projects: Projects }): ReactElement {
                   <button
                     data-testid="projects.projects-page-open-session"
                     type="button"
+                    title={n.title}
                     onClick={() => {
                       projects.openSession(n.sessionId);
                     }}
                   >
                     <span className="kind">Needs input</span>
-                    <span>
+                    <span className="pj-needs-description">
                       <span className="what">{n.title}</span>{" "}
                       <span className="where">in {n.where}</span>
                     </span>

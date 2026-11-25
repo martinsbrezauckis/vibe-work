@@ -8,6 +8,14 @@ import { literalInputProps } from "../../components/inputProps";
 import { type ReactNode, useId, useState } from "react";
 import { TEXT } from "../../vocabulary";
 import { Badge, Button, LinkButton, RowDisclosure } from "../../components/Controls";
+import {
+  ACT_CANCEL,
+  ACT_REPLACE,
+  ACT_REPLACE_AND_TEST,
+  ACT_SET_UP_KEY,
+  ACT_TEST,
+  ACT_UNLOCK_IN_ACCOUNT,
+} from "../settings/actionLabels";
 
 import { when } from "../../state/secrets";
 import { useKeyUi } from "../setup/useKeys";
@@ -124,7 +132,7 @@ export function MistralKeyDetails({
                 void keys?.testKey();
               }}
             >
-              Test
+              {ACT_TEST}
             </Button>
             <Button
               data-testid="secrets.mistral-key-settings-clear-problem"
@@ -136,7 +144,7 @@ export function MistralKeyDetails({
                 setReplacing(true);
               }}
             >
-              Replace
+              {ACT_REPLACE}
             </Button>
           </>
         )}
@@ -160,7 +168,7 @@ export function MistralKeyDetails({
               shell.actions.openSettings("account");
             }}
           >
-            {locked ? "Unlock in Account" : "Set up the key"}
+            {locked ? ACT_UNLOCK_IN_ACCOUNT : ACT_SET_UP_KEY}
           </Button>
         )}
       </div>
@@ -210,7 +218,7 @@ export function MistralKeyDetails({
               variant="primary"
               disabled={busy || value.trim() === ""}
             >
-              Replace and test
+              {ACT_REPLACE_AND_TEST}
             </Button>
             <Button
               data-testid="secrets.mistral-key-settings-tb-btn-2"
@@ -219,7 +227,7 @@ export function MistralKeyDetails({
               disabled={busy}
               onClick={close}
             >
-              Cancel
+              {ACT_CANCEL}
             </Button>
           </div>
         </form>

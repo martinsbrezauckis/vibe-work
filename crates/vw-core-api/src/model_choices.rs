@@ -25,8 +25,8 @@ pub(crate) fn unavailable_default_alias(config: &Value) -> Option<String> {
 mod records;
 use records::Records;
 
-mod bootstrap;
-pub(crate) use bootstrap::prepare_builtin_models;
+mod kept_medium;
+pub(crate) use kept_medium::retire_kept_medium;
 
 mod retired;
 

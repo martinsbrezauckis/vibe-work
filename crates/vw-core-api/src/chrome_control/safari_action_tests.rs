@@ -117,7 +117,8 @@ async fn safari_screenshot_keeps_shared_read_permission_and_mcp_image_receipt() 
         super::owner::Answer::Helper(helper),
         "chrome_execute",
         false,
-    );
+    )
+    .unwrap();
     let body = &result["vwMcpResult"]["structuredContent"];
     assert_eq!(body["profileId"], "safari:p");
     assert_eq!(body["status"], "completed");

@@ -64,6 +64,26 @@ pub(crate) fn developer_permissions_enabled(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// The command-started MCP servers the app paused because Developer permissions is off (`command_pause`). Missing or
+/// invalid settings: none.
+pub(crate) fn paused_command_servers(path: &Path) -> Vec<String> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|settings| {
+            settings
+                .get("pausedCommandMcpServers")?
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+        })
+        .unwrap_or_default()
+}
+
 /// The saved scan switch. Earlier versions also saved `autoRedact` (automatic redaction, removed): it is dropped and
 /// never acts, so such a file keeps its scan setting and other writers can still save. Commands refuse the field.
 fn saved_scan(value: &Value) -> serde_json::Result<SecretScanSettings> {

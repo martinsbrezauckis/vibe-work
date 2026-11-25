@@ -29,6 +29,17 @@ pub enum InstallMode {
     LinkOnly,
     /// macOS runs this quarantined copy in a temporary read-only location. Move it before updating.
     MacosTranslocated,
+    /// macOS runs this copy from a read-only disk or volume (e.g., an unquarantined `.dmg`). Move it before updating.
+    MacosReadOnly,
+}
+
+/// Runtime location facts collected on macOS for [`InstallMode::for_running_app_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MacosLocationFacts {
+    /// Answer from `SecTranslocateIsTranslocatedURL`, or `None` when unavailable or failed (falls back to path check).
+    pub translocated: Option<bool>,
+    /// Whether the bundle or its parent sits on a read-only filesystem (`ST_RDONLY`).
+    pub read_only_fs: bool,
 }
 
 impl InstallMode {
@@ -44,23 +55,38 @@ impl InstallMode {
         }
     }
 
-    /// The running executable's parent directories identify macOS App Translocation. Match a whole
-    /// component (not a substring or the executable's name), including both `/var` and `/private/var`.
-    /// Downloads alone is not evidence: a copy there may run without translocation. Other systems keep
-    /// their bundle policy. No private macOS API or extra filesystem access is needed.
+    /// Classifies the running copy using only its executable path (falls back to the exact `AppTranslocation`
+    /// parent directory component check on macOS). Other systems keep their bundle policy.
     #[must_use]
     pub fn for_running_app(bundle: Option<&str>, os: &str, executable: Option<&Path>) -> Self {
-        if bundle == Some("app")
-            && os == "macos"
-            && executable.and_then(Path::parent).is_some_and(|parent| {
-                parent
-                    .components()
-                    .any(|part| part.as_os_str() == "AppTranslocation")
-            })
-        {
+        Self::for_running_app_with(bundle, os, executable, None)
+    }
+
+    /// Classifies the running copy using macOS Security framework / read-only filesystem facts when supplied,
+    /// falling back to the exact `AppTranslocation` directory component when `translocated` is `None`.
+    /// Non-macOS targets and non-`app` bundles keep their bundle policy unchanged.
+    #[must_use]
+    pub fn for_running_app_with(
+        bundle: Option<&str>,
+        os: &str,
+        executable: Option<&Path>,
+        macos: Option<MacosLocationFacts>,
+    ) -> Self {
+        if bundle != Some("app") || os != "macos" {
+            return Self::for_bundle(bundle);
+        }
+        let path_translocated = executable.and_then(Path::parent).is_some_and(|parent| {
+            parent
+                .components()
+                .any(|part| part.as_os_str() == "AppTranslocation")
+        });
+        let facts = macos.unwrap_or_default();
+        if facts.translocated.unwrap_or(path_translocated) {
             Self::MacosTranslocated
+        } else if facts.read_only_fs {
+            Self::MacosReadOnly
         } else {
-            Self::for_bundle(bundle)
+            Self::InApp
         }
     }
 }
@@ -93,7 +119,11 @@ impl UpdateNotice {
         match self {
             Self::MoveToApplications { .. } => (
                 "Move Vibe Work to Applications to update.".to_owned(),
-                "This copy is running from a temporary read-only place. Move Vibe Work into Applications, then open it from there to update.".to_owned(),
+                "This copy is running from a temporary read-only location. Move Vibe Work into Applications, then open it from there to update.".to_owned(),
+            ),
+            Self::ReadOnlyLocation { .. } => (
+                "Vibe Work cannot update from a read-only location.".to_owned(),
+                "This copy is in a read-only location and cannot be replaced here. Move Vibe Work into Applications or another writable folder, then open it from there to update.".to_owned(),
             ),
             Self::Available {
                 version,
@@ -130,9 +160,12 @@ impl From<crate::update_flow::UpdateError> for vw_core_api::CoreError {
         use crate::update_flow::UpdateError as E;
         let code = match &error {
             E::Failed(_) => vw_core_api::ErrorCode::Internal,
-            E::Busy | E::WrongState | E::ConsentRequired | E::LinkOnly | E::MacosTranslocated => {
-                vw_core_api::ErrorCode::Denied
-            }
+            E::Busy
+            | E::WrongState
+            | E::ConsentRequired
+            | E::LinkOnly
+            | E::MacosTranslocated
+            | E::MacosReadOnly => vw_core_api::ErrorCode::Denied,
         };
         Self::new(code, error.to_string())
     }
@@ -277,8 +310,13 @@ pub trait UpdateBackend: Send + Sync {
 /// An OS notification the flow wants shown (the app crate maps it to text and the desktop notifier).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateNotice {
-    /// macOS runs this copy read-only; it must be moved before an update can be installed.
+    /// macOS runs this copy translocated; it must be moved before an update can be installed.
     MoveToApplications {
+        /// The offered version, for once-per-version notification tracking.
+        version: String,
+    },
+    /// macOS runs this copy from a non-translocated read-only disk or volume.
+    ReadOnlyLocation {
         /// The offered version, for once-per-version notification tracking.
         version: String,
     },

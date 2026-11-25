@@ -12,6 +12,7 @@
 import { type ReactElement, useEffect, useRef, useState } from "react";
 
 import { Button } from "../../components/Controls";
+import { ACT_BRING_SELECTED, ACT_LOOK_FOR_SETUPS, ACT_UNDO } from "./actionLabels";
 import { toCallError } from "../../protocol/client/types";
 import type {
   ImportFound as Found,
@@ -166,8 +167,13 @@ export function ImportSettings(): ReactElement {
         Instructions, skills and connectors from the other coding agents on this computer. Vibe Work
         shows what it found first; nothing in their folders changes.
       </p>
-      <Button data-testid="settings.import-scan" disabled={busy} onClick={() => void scan()}>
-        Look for setups
+      <Button
+        data-testid="settings.import-scan"
+        shape="outlined"
+        disabled={busy}
+        onClick={() => void scan()}
+      >
+        {ACT_LOOK_FOR_SETUPS}
       </Button>
       {problem !== null && <p className="key-problem">{problem}</p>}
       {summary !== null && (
@@ -179,7 +185,7 @@ export function ImportSettings(): ReactElement {
             disabled={busy}
             onClick={() => void undo(summary.bring)}
           >
-            Undo
+            {ACT_UNDO}
           </Button>
         </p>
       )}
@@ -234,10 +240,11 @@ export function ImportSettings(): ReactElement {
       {rows !== null && rows.some((r) => r.status !== "cantBring") && (
         <Button
           data-testid="settings.import-bring"
+          shape="outlined"
           disabled={busy || picked.size === 0}
           onClick={() => void bring()}
         >
-          Bring selected
+          {ACT_BRING_SELECTED}
         </Button>
       )}
     </section>

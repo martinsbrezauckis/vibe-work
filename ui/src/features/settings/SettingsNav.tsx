@@ -53,7 +53,7 @@ export function SettingsNav(): ReactElement {
       shell.actions.setSettingsQuery("");
     } else if (e.key === "Enter" && results[0] !== undefined) {
       e.preventDefault();
-      openHit(app, results[0]);
+      openHit(app, results[0], view.query);
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       list.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -130,11 +130,11 @@ export function SettingsNav(): ReactElement {
               type="button"
               className="set-result"
               onClick={() => {
-                openHit(app, r);
+                openHit(app, r, view.query);
               }}
             >
               <span className="set-result-label">
-                <Highlight text={r.label} query={view.query} />
+                <Highlight text={r.label} query={view.query} shortAtWordStart />
               </span>
               <span className="set-result-path">{settingPath(r).join(" › ")}</span>
             </button>

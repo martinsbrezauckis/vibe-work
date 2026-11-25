@@ -56,7 +56,11 @@ sessionId: string,
 /**
  * App preview session id or owned web page key.
  */
-tabId: string, } | { "op": "closeTab",
+tabId: string,
+/**
+ * True for an automatic preview-show event, which cannot undo a stopped wait.
+ */
+passive: boolean, } | { "op": "closeTab",
 /**
  * The loaded session.
  */

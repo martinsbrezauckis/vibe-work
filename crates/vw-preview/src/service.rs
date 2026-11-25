@@ -13,6 +13,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(feature = "e2e-script")]
+use std::{future::Future, pin::Pin};
 
 use url::Url;
 
@@ -51,6 +53,8 @@ mod service_server;
 mod service_shields;
 #[path = "service_visibility.rs"]
 mod service_visibility;
+#[path = "service_waiting.rs"]
+mod service_waiting;
 
 /// Settings.
 #[derive(Clone)]
@@ -84,6 +88,10 @@ pub struct PreviewConfig {
     /// only): a local test server stands in for a public site.
     #[cfg(feature = "e2e-script")]
     pub test_public_origin: Option<Url>,
+    /// Debug test builds only: asynchronously pause admission after eligibility, before registration.
+    #[cfg(feature = "e2e-script")]
+    pub test_before_wait_registration:
+        Option<Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
 }
 
 impl std::fmt::Debug for PreviewConfig {
@@ -105,6 +113,11 @@ impl std::fmt::Debug for PreviewConfig {
         debug.field("test_pool_origins", &self.test_pool_origins);
         #[cfg(feature = "e2e-script")]
         debug.field("test_public_origin", &self.test_public_origin);
+        #[cfg(feature = "e2e-script")]
+        debug.field(
+            "test_before_wait_registration",
+            &self.test_before_wait_registration.is_some(),
+        );
         debug.finish()
     }
 }
@@ -129,6 +142,8 @@ impl PreviewConfig {
             test_pool_origins: Vec::new(),
             #[cfg(feature = "e2e-script")]
             test_public_origin: None,
+            #[cfg(feature = "e2e-script")]
+            test_before_wait_registration: None,
         }
     }
 }

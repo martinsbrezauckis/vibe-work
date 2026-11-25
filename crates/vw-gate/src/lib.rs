@@ -64,7 +64,10 @@ pub use dialog::{
 pub use error::{CallbackFault, DenyReason, GateError, TokenFault};
 pub use gate::{Gate, GateConfig, OFFERED_INSTALL_METHODS, Reply, TRUSTED_SURFACE_METHODS};
 pub use inbound::{InboundKind, classify_server_request};
-pub use mcp_url::{MAX_MCP_URL_LENGTH, McpUrlRefusal, check_mcp_server_url};
+pub use mcp_url::{
+    MAX_MCP_URL_LENGTH, MCP_NOT_VOUCHED, McpUrlRefusal, check_mcp_server_url, is_loopback_mcp_url,
+    local_server_disclosure,
+};
 pub use profile::full_access_escalation;
 pub use table::{classified_methods, classify, forwarded_without_unified_evidence};
 pub use tool_rules::ToolRuleRemoval;

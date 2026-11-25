@@ -5,9 +5,11 @@ import type { Player } from "../features/voice/audioPlayer";
 import type { PrepareCapture } from "../features/voice/pcmCapture";
 import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
+import type { Store } from "./createStore";
 import type { Toasts } from "./toastStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
 import type { JsonValue, SpeechResult } from "../protocol/core";
+import type { VoicePromptState, VoiceQuestionState } from "./voiceTypes";
 
 /** Where voice chat is. `error`: stopped with a reason, waiting for a press (the mode stays on). */
 export type VoiceChatPhase =
@@ -89,6 +91,9 @@ export interface VoiceChatDeps {
   /** Sends a card's answer as the card's own buttons do (default: the core's `answerCallback`). */
   answer?: (sessionId: string, callbackId: string, output: JsonValue) => Promise<boolean>;
   now?: () => number;
+  store?: Store<VoiceChatState> | undefined;
+  promptStore?: Store<VoicePromptState | null> | undefined;
+  questionStore?: Store<VoiceQuestionState | null> | undefined;
 }
 
 /** One queued utterance and its optional prefetched speech result. */

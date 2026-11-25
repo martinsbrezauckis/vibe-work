@@ -26,11 +26,16 @@ import type {
   TurnUserInputEntry,
   UserDisplayContent,
 } from "../../../protocol/generated";
-import { VOICE_INSTRUCTION } from "../../voice/voiceChatText";
 import { parseLoopArgs } from "./loopArgs";
 import { pageContextText } from "./pageText";
 import { isClientCommand } from "./slashNames";
 import type { CodeRef } from "../../files/model/context";
+
+/** The instruction sent with each voice turn as a context entry (never inside the user's message). */
+export const VOICE_INSTRUCTION =
+  "This message was spoken in voice chat and your answer will be read aloud. Answer as speech: concise and " +
+  "conversational, about 6 sentences at most, no tables or code blocks; if you used tools, say in one or two " +
+  "sentences what you did and what you found.";
 
 /** Text the user inserted with "Point Vibe at this", a quote or a page comment: data, never a command. */
 export interface ContextItem {

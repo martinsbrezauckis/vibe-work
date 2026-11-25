@@ -286,17 +286,20 @@ async fn consent(
 }
 
 fn consent_summary(server: &str, address: &str, header: &str, secret_name: &str) -> String {
+    let scope = vw_gate::local_server_disclosure(address)
+        .unwrap_or_else(|| vw_gate::MCP_NOT_VOUCHED.to_owned());
     format!(
         "Let Vibe Work send your secret {} to the MCP server {} at {} in the header {}. Vibe gets only an \
              address on this computer; Vibe Work adds the key to each request, so neither Vibe's config nor the agent's \
              commands hold it. The server gets the key and can use it like any app you give it to. \"{}\" \
              (recommended) lasts until you revoke it in Settings > Project secrets; \"Allow until Vibe Work closes\" \
-             asks again at the next start.",
+             asks again at the next start. {}",
         vw_gate::dialog_quote(secret_name),
         vw_gate::dialog_quote(server),
         vw_gate::dialog_quote(address),
         vw_gate::dialog_quote(header),
-        ALWAYS_LABEL
+        ALWAYS_LABEL,
+        scope
     )
 }
 

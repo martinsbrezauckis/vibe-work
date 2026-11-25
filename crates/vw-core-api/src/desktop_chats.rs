@@ -5,8 +5,14 @@
 //! Invariants:
 //! - Desktop stores its chats in the same `unified/<id>/` folders as Vibe Work, but stamps `meta.json` with
 //!   `runtime_path: "session_api"` (Vibe Work's own chats say `direct`; older ones carry no field).
-//! - Vibe 3.1.2 refuses Desktop's journal (its models forbid the extra `toolCallId`), so such a chat can never be
-//!   opened here. It is therefore not listed, and an open by id is refused in plain words before Vibe is asked.
+//! - Vibe 3.1.2 refused Desktop's journal (its models forbid the extra `toolCallId`). Vibe 3.1.4 lists and reads a
+//!   real Desktop chat, but `session/resume` fails with `plugin_restore_failed`: the chat pins Desktop's own bundled
+//!   plugins (`runtime-state.json` `plugin_lock`, `core_plugins`), which this install does not have. A Desktop chat
+//!   therefore still cannot be continued here: it is not listed, and an open by id is refused in plain words before
+//!   Vibe is asked.
+//! - The stamp alone does not separate a Desktop chat from a chat that Vibe 3.1.4 itself saved with the
+//!   `session_api` runtime: such a chat resumed and continued in a probe, yet is hidden too (card
+//!   `vibe-desktop-chats-in-list`, open question).
 //! - Anything unreadable, linked, oversized or unstamped counts as not Desktop-made: the chat stays listed.
 
 use std::io::Read;

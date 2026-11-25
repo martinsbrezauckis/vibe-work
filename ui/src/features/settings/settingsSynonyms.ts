@@ -102,7 +102,7 @@ export const SETTING_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   "chrome-control": ["chrome extension", "browser extension", "google chrome", "connect chrome"],
   "chrome-control-enabled": ["turn on chrome extension", "chrome on"],
   "edge-control": ["edge extension", "microsoft edge", "connect edge"],
-  "firefox-control": ["firefox extension", "firefox add-on", "connect firefox"],
+  "firefox-control": ["open window", "firefox extension", "firefox add-on", "connect firefox"],
   "safari-control": ["safari extension", "connect safari", "safari web extension"],
   "browser-secret-permissions": ["password autofill", "browser passwords", "login permissions"],
   // Safety

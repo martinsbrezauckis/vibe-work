@@ -28,6 +28,31 @@ async fn unavailable_browser_instructions_are_identical_across_producers() {
     core.shutdown().await;
 }
 
+#[tokio::test]
+async fn unavailable_browser_stays_unavailable_even_when_switched_off() {
+    let core = crate::offline_core::start("browser-unavailable-switched-off").await;
+    let chrome = &core.shared.chrome_control;
+    for browser in [Browser::Chrome, Browser::Edge, Browser::Firefox] {
+        chrome.set_browser_enabled(browser, false).unwrap();
+    }
+    if let Some(dir) = chrome.dir() {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("safari-enabled.json"), b"false").unwrap();
+    }
+    for browser in [
+        Browser::Chrome,
+        Browser::Edge,
+        Browser::Firefox,
+        Browser::Safari,
+    ] {
+        let expected = browser.words("{yourBrowser} is not available in this version of Vibe Work. Use an available browser, or ask the user to install a version that includes it.");
+        let view = browser.addon(&core.shared);
+        assert_eq!(view.state, AddonState::Unavailable, "{browser:?}: {view:?}");
+        assert_eq!(view.instruction, expected, "{browser:?}: {view:?}");
+    }
+    core.shutdown().await;
+}
+
 #[test]
 fn broken_browser_packages_keep_their_reason_and_user_repair_step() {
     for browser in [

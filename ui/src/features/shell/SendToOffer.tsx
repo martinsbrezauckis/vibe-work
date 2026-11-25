@@ -26,6 +26,7 @@ export function SendToOffer() {
       <Button
         data-testid="shell.send-to-offer-add"
         type="button"
+        shape="outlined"
         disabled={pending}
         onClick={() => void sendToRequest(client, { op: "set", on: true })}
       >
@@ -34,6 +35,7 @@ export function SendToOffer() {
       <Button
         data-testid="shell.send-to-offer-not-now"
         type="button"
+        shape="outlined"
         disabled={pending}
         onClick={() => void sendToRequest(client, { op: "notNow" })}
       >

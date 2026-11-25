@@ -53,6 +53,18 @@ async fn start(name: &str, saved: &Value, pin: &str) -> Run {
 }
 
 async fn start_with_config(name: &str, saved: &Value, pin: &str, config: Option<&str>) -> Run {
+    Box::pin(start_with_marker(name, saved, pin, config, false)).await
+}
+
+/// As [`start_with_config`]; `kept_marker` also leaves the marker file that Vibe Work 0.1.16 and 0.1.17 wrote
+/// into the app's sessions folder when they kept the built-in Medium 3.5 row.
+async fn start_with_marker(
+    name: &str,
+    saved: &Value,
+    pin: &str,
+    config: Option<&str>,
+    kept_marker: bool,
+) -> Run {
     use std::os::unix::fs::PermissionsExt;
 
     let base = std::env::var_os("VW_TEST_ROOT").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -62,6 +74,9 @@ async fn start_with_config(name: &str, saved: &Value, pin: &str, config: Option<
     let sessions = root.join("app-sessions");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&sessions).unwrap();
+    if kept_marker {
+        std::fs::write(sessions.join("built-in-medium-choice-v1"), "retained\n").unwrap();
+    }
     if let Some(config) = config {
         std::fs::write(home.join("config.toml"), config).unwrap();
     }
@@ -227,12 +242,12 @@ async fn backend_change_case(send: bool) {
     run.finish().await;
 }
 
-#[path = "retired_bootstrap_tests.rs"]
-mod bootstrap_tests;
 #[path = "retired_cold_catalog_tests.rs"]
 mod cold_catalog_tests;
 #[path = "retired_cold_configured_tests.rs"]
 mod cold_configured_tests;
+#[path = "retired_kept_medium_tests.rs"]
+mod kept_medium_tests;
 
 /// A 0.1.15 record has no provider. If the project's same-name row vanished, its old identity is ambiguous:
 /// reopening must tell the person and keep the Settings fallback instead of silently selecting catalog Mistral.

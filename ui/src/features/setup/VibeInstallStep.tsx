@@ -92,7 +92,7 @@ function Offer({ offer }: { offer: InstallOffer }) {
         <Button
           data-testid="setup.vibe-install-step-cancel"
           type="button"
-
+          shape="outlined"
           disabled={busy}
           onClick={() => void vibe?.cancel()}
         >
@@ -121,7 +121,7 @@ function Existing({ found }: { found: readonly ExistingView[] }) {
               <Button
                 data-testid="setup.vibe-install-step-use-existing"
                 type="button"
-
+                shape="outlined"
                 disabled={busy}
                 onClick={() => void vibe?.useExisting(item.path)}
               >
@@ -171,7 +171,7 @@ export function VibeInstallStep() {
             <Button
               data-testid="setup.vibe-install-step-check-existing"
               type="button"
-
+              shape="outlined"
               disabled={busy}
               onClick={() => void vibe?.checkExisting()}
             >
@@ -206,7 +206,7 @@ export function VibeInstallStep() {
             <Button
               data-testid="setup.vibe-install-step-cancel-2"
               type="button"
-
+              shape="outlined"
               onClick={() => void vibe?.cancel()}
             >
               Cancel

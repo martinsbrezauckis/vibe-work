@@ -11,13 +11,18 @@
  * for the same setting live in settingsSynonyms.ts and find the row too. Ranking: hits whose label holds every typed
  * word, then hits whose synonyms hold every typed word, then label hits on any word, then the rest.
  */
+import { highlightRuns, queryWords } from "../../state/highlight";
 import type { IconName } from "../../components/Icon";
 import { detectMac } from "../../state/shortcuts";
 import { TEXT } from "../../vocabulary";
 import { MISTRAL_LINKS } from "./mistralLinks";
 import { accessibilityCatalog } from "./accessibilityCatalog";
 import { chromeCatalog } from "./chrome/chromeRows";
+import { SETTING_ROW_ACTIONS } from "./actionLabels";
+import { buildPreparedIndex, filterAndRankSettings } from "./searchIndex";
 import { SETTING_SYNONYMS } from "./settingsSynonyms";
+
+export { highlightRuns, queryWords };
 
 /** A category of the Settings page. */
 export interface SettingsCategory {
@@ -61,6 +66,8 @@ export interface SettingEntry {
   keywords: string;
   /** Familiar names for the setting (not shown), from settingsSynonyms.ts; each ranks the row near the top. */
   synonyms?: readonly string[];
+  /** Button and action labels owned by this row, from actionLabels.ts (not shown directly on the row index). */
+  actions?: readonly string[];
   /** Lives on another page (Connectors): a hit opens that page instead of a Settings category. */
   opens?: "connectors";
 }
@@ -676,7 +683,11 @@ export const SEARCH_INDEX: readonly SettingEntry[] = [
     keywords: `${l.keywords} mistral website link`,
   })),
   ...ELSEWHERE,
-].map((e) => ({ ...e, synonyms: SETTING_SYNONYMS[e.id] ?? [] }));
+].map((e) => ({
+  ...e,
+  synonyms: SETTING_SYNONYMS[e.id] ?? [],
+  actions: SETTING_ROW_ACTIONS[e.id] ?? [],
+}));
 
 /** The category with `id`, else the first one. */
 export function categoryOf(id: string): SettingsCategory {
@@ -685,27 +696,14 @@ export function categoryOf(id: string): SettingsCategory {
   );
 }
 
-/** The words of a query (lower case, empty words dropped). */
-function queryWords(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w !== "");
-}
+/** Lower-cased search records built once at module load (searchIndex.ts), so each query only compares strings. */
+const PREPARED_SEARCH = buildPreparedIndex(SEARCH_INDEX, (id) => categoryOf(id).label);
 
 /**
- * Whether `text` holds `word`; a plural ending in "s" also matches its singular ("extensions" finds "extension"), so
- * the most common way people type a setting's name does not miss it.
- */
-function holds(text: string, word: string): boolean {
-  if (text.includes(word)) return true;
-  return word.length > 3 && word.endsWith("s") && text.includes(word.slice(0, -1));
-}
-
-/**
- * Settings matching `query`: every word must appear in the label, description, keywords, synonyms or category name.
- * Ranked in four groups (label holds every word; synonyms hold every word; label holds a word; the rest), each in
- * page order. An empty query matches nothing.
+ * Settings matching `query`: every word must appear in the label, description, keywords, synonyms or category name,
+ * or match the start of a word in the setting's action/button labels.
+ * Ranked in four groups (label holds every word; synonyms or an action hold every word; label holds a word; the rest),
+ * each in page order. An empty query matches nothing.
  */
 export function searchSettings(
   query: string,
@@ -714,62 +712,17 @@ export function searchSettings(
   firefoxAvailable = false,
   safariAvailable = false,
 ): SettingEntry[] {
-  const words = queryWords(query);
-  if (words.length === 0) return [];
-  const hits = SEARCH_INDEX.filter((e) => {
-    if (!chromeAvailable && (e.id.startsWith("chrome-control") || e.id === "chrome-composer"))
-      return false;
-    if (!firefoxAvailable && (e.id.startsWith("firefox-control") || e.id === "firefox-composer"))
-      return false;
-    if (!edgeAvailable && (e.id.startsWith("edge-control") || e.id === "edge-composer"))
-      return false;
-    if (!safariAvailable && (e.id.startsWith("safari-control") || e.id === "safari-composer"))
-      return false;
-    const synonyms = (e.synonyms ?? []).join(" | ");
-    const hay =
-      `${e.label} ${e.description} ${e.keywords} ${synonyms} ${categoryOf(e.category).label}`.toLowerCase();
-    return words.every((w) => holds(hay, w));
-  });
-  const rank = (e: SettingEntry): number => {
-    const label = e.label.toLowerCase();
-    if (words.every((w) => holds(label, w))) return 0;
-    const synonyms = (e.synonyms ?? []).join(" | ");
-    if (words.every((w) => holds(synonyms, w))) return 1;
-    return words.some((w) => holds(label, w)) ? 2 : 3;
-  };
-  // Array.prototype.sort is stable, so page order holds inside each group.
-  return hits
-    .map((e) => ({ e, r: rank(e) }))
-    .sort((a, b) => a.r - b.r)
-    .map(({ e }) => e);
+  return filterAndRankSettings(
+    PREPARED_SEARCH,
+    query,
+    chromeAvailable,
+    edgeAvailable,
+    firefoxAvailable,
+    safariAvailable,
+  );
 }
 
 /** The path a result shows: `Settings › Voice`, or `Tools` for the Tools page's items. */
 export function settingPath(entry: SettingEntry): string[] {
   return entry.opens === "connectors" ? ["Tools"] : ["Settings", categoryOf(entry.category).label];
-}
-
-/**
- * Splits `text` into plain and matched runs for highlighting (case-insensitive, every query word). Adjacent and
- * overlapping matches merge.
- */
-export function highlightRuns(text: string, query: string): { text: string; hit: boolean }[] {
-  const words = queryWords(query);
-  const lower = text.toLowerCase();
-  const marks: boolean[] = new Array<boolean>(text.length).fill(false);
-  for (const w of words) {
-    let at = lower.indexOf(w);
-    while (at !== -1) {
-      for (let i = at; i < at + w.length; i++) marks[i] = true;
-      at = lower.indexOf(w, at + w.length);
-    }
-  }
-  const runs: { text: string; hit: boolean }[] = [];
-  for (let i = 0; i < text.length; i++) {
-    const hit = marks[i] === true;
-    const last = runs[runs.length - 1];
-    if (last !== undefined && last.hit === hit) last.text += text.charAt(i);
-    else runs.push({ text: text.charAt(i), hit });
-  }
-  return runs;
 }

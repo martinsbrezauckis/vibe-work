@@ -40,6 +40,27 @@ pub(crate) fn mode_changed(shared: &Shared, session: &str, before: Option<&str>)
     let old = before.and_then(Tier::from_mode);
     let now = mode(shared, session).as_deref().and_then(Tier::from_mode);
     if old.is_some() && now < old {
+        if let Some(hub) = &shared.preview {
+            let mut withdrawn = hub.service.cancel_browser_wait(session);
+            for tab in hub.service.tabs(session) {
+                if matches!(
+                    tab.owner_kind,
+                    Some(
+                        vw_preview::PageTabOwner::Agent
+                            | vw_preview::PageTabOwner::DelegatedToAgent
+                    )
+                ) {
+                    withdrawn |= hub.service.cancel_browser_wait(&tab.page_key);
+                }
+            }
+            if withdrawn {
+                let _ = shared.store.apply(vw_session::Notification::new(
+                    "warning",
+                    json!({"sessionId":session,"warning":{"code":"browser_wait_mode_lowered",
+                        "message":vw_vocabulary::texts::BROWSER_WAITING_MODE_LOWERED}}),
+                ));
+            }
+        }
         // Ended on purpose (the lower mode must not keep the higher one's lease or installed rules), never silently:
         // the agent's next call says why, the person gets a chat notice; the tabs stay open.
         let ended = shared

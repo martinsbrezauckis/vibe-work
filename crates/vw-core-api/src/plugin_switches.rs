@@ -71,6 +71,7 @@ impl Core {
         if let Some(project) = project {
             params["projectRoot"] = json!(project);
         }
+        crate::project_mcp::admit(&self.shared, "plugins/local/setEnabled", &params).await?;
         self.shared
             .channels
             .request("plugins/local/setEnabled", params)

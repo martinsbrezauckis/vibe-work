@@ -15,6 +15,7 @@
  * - `onAgentStart` fires once each time the agent starts acting in a session (the tab opens for it).
  */
 import { toCallError } from "../../protocol/client/types";
+import { TEXT, wording } from "../../vocabulary";
 import type {
   BrowserRequest,
   BrowserResult,
@@ -87,6 +88,31 @@ export interface ComposerSink {
   ) => void;
 }
 
+/**
+ * Busy-browser and full waiting-queue refusals have agent sentences in the core; the person reads their own
+ * sentence for the same refusal. Null when `message` is neither refusal; raw core and tool errors stay intact.
+ */
+export function browserRefusalSentence(message: string): string | null {
+  if (message === "Not run: the browser is busy with another chat; try again when it is free")
+    return TEXT.browserBusyShown;
+  return fullQueueSentence(message);
+}
+
+/** Full-queue refusals stay visible across background tab reads until the person acts again. */
+function fullQueueSentence(message: string): string | null {
+  const pairs = [
+    [TEXT.browserWaitingChatFull, TEXT.browserWaitingChatFullShown],
+    [TEXT.browserWaitingAppFull, TEXT.browserWaitingAppFullShown],
+  ] as const;
+  for (const [agent, shown] of pairs) {
+    const [before = "", after = ""] = agent.split("{limit}");
+    if (!message.startsWith(before) || !message.endsWith(after)) continue;
+    const limit = message.slice(before.length, message.length - after.length);
+    if (/^\d+$/.test(limit)) return wording(shown, { limit });
+  }
+  return null;
+}
+
 /** Creates the controller for `core`. */
 export function createBrowser(
   core: CoreController,
@@ -97,7 +123,7 @@ export function createBrowser(
   let counter = 0;
   const tabsRead = new Map<string, number>();
   const ended = new Set<string>();
-  // Sessions whose error line is the "picture left out" notice: a background tabs read must not wipe it.
+  // A background tab read must not erase a protected-picture or full waiting-queue refusal.
   const notices = new Set<string>();
 
   const run = async (request: BrowserRequest): Promise<BrowserResult> => {
@@ -107,7 +133,9 @@ export function createBrowser(
   };
   const setError = (sessionId: string, error: string | null) => {
     notices.delete(sessionId);
-    store.set((s) => ({ ...s, error: put(s.error, sessionId, error) }));
+    const shown = error === null ? null : browserRefusalSentence(error);
+    if (error !== null && fullQueueSentence(error) !== null) notices.add(sessionId);
+    store.set((s) => ({ ...s, error: put(s.error, sessionId, shown ?? error) }));
   };
   const setNotes = (
     sessionId: string,
@@ -149,9 +177,9 @@ export function createBrowser(
         setError(sessionId, toCallError(thrown).error.message);
       }
     },
-    async switchTab(sessionId: string, tabId: string): Promise<void> {
+    async switchTab(sessionId: string, tabId: string, passive = false): Promise<void> {
       try {
-        const result = await run({ op: "switchTab", sessionId, tabId });
+        const result = await run({ op: "switchTab", sessionId, tabId, passive });
         if (result.type === "tabs") setTabs(sessionId, result.tabs);
       } catch (thrown) {
         setError(sessionId, toCallError(thrown).error.message);

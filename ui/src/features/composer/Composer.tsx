@@ -62,9 +62,44 @@ import { RewindDialog } from "./RewindDialog";
 import { DictationStrip } from "../voice/DictationStrip";
 import { MicButton } from "../voice/MicButton";
 import { NarrationBar } from "../voice/NarrationBar";
-import { useDictationCaret, useVoiceChat } from "../voice/hooks";
+import { useDictationCaret, useVoiceChat, useVoiceChunkLoad } from "../voice/hooks";
 import { VoiceChatButton } from "../voice/VoiceChatButton";
 import { VoiceChatStrip } from "../voice/VoiceChatStrip";
+import { chunkFailureLine } from "../../components/chunkError";
+
+/** Non-blocking alert shown when the on-demand voice runtime chunk fails to load. */
+function VoiceChunkStrip(): ReactElement | null {
+  const { voice } = useApp();
+  const status = useVoiceChunkLoad((s) => s);
+  if (voice === null || status.phase !== "error" || status.error === null) return null;
+  return (
+    <div className="lazy-error" role="alert" data-testid="voice.chunk-error">
+      <p className="lazy-error-text">
+        {chunkFailureLine(status.actionLabel ?? "voice", status.error)}
+      </p>
+      <Button
+        data-testid="voice.chunk-retry"
+        shape="outlined"
+        onClick={() => {
+          void voice.retryLoad();
+        }}
+      >
+        Try again
+      </Button>
+      <Button
+        data-testid="voice.chunk-dismiss"
+        appearance="compact"
+        aria-label="Dismiss voice load error"
+        title="Dismiss voice load error"
+        onClick={() => {
+          voice.chunkLoad.dismiss();
+        }}
+      >
+        Dismiss
+      </Button>
+    </div>
+  );
+}
 
 /** Most lines the text box grows to (wrapped lines count) before it scrolls. */
 const MAX_ROWS = 8;
@@ -342,6 +377,7 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
           }}
         />
         <PasteChips sessionId={sessionId} onSwap={paste.swap} />
+        <VoiceChunkStrip />
         <DictationStrip sessionId={sessionId} />
         <VoiceChatStrip sessionId={sessionId} />
         <label className="sr" htmlFor={`composer-input-${sessionId}`}>

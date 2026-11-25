@@ -2,6 +2,25 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.18 (2026-11-25)
+
+Built for Vibe 3.1.4 on Python 3.14.8.
+
+- **Diagrams**: every Mermaid diagram type is now drawn right in the chat by Vibe Work itself, from flowcharts and timelines to mind maps and charts. Wide diagrams keep a readable size and scroll sideways; very tall ones scroll inside their own area.
+- **MCP servers**: Tools > Add MCP server connects any server by its address, with no sign-in, an API key, or the server's own sign-in.
+- **Command MCP servers**: with Developer permissions on, you can also add a server that runs as a program on your computer. Vibe Work shows exactly what will run and asks you first.
+- **Built-in browser**: when every browser slot is busy, a new page waits and opens by itself as soon as one frees.
+- **Settings search** also finds the buttons and actions Vibe Work tells you to look for.
+- **Status bar** shows the Vibe Work version next to the Vibe version.
+- **Faster start**: the first screen loads less, and voice chat loads the first time you use it.
+- **Buttons** in cards and Settings now look like buttons, and dialogs keep their buttons in view when the content is long.
+- **macOS**: an app run from a read-only location, such as the opened disk image, now tells you to move it to Applications before it can update.
+- **Models**: "Model changed" appears only when the model really changed.
+- **PDFs**: reading a PDF no longer asks for a key you have already saved.
+- **Settings > Browser** clears an old Edge error once Edge connects.
+- **Keyboard**: switches show the focus ring like buttons do, and on Linux focus returns to the Developer permissions switch after its confirmation.
+- **Very large diagrams** and too many waiting browser pages are refused with a reason instead of slowing Vibe Work down.
+
 ## 0.1.17 (2026-11-23)
 
 Built for Vibe 3.1.4 on Python 3.14.8.

@@ -11,6 +11,7 @@
 import { type ReactElement, useEffect, useState } from "react";
 
 import { Button } from "../../components/Controls";
+import { ACT_ALLOW, ACT_BLOCK } from "../settings/actionLabels";
 import type { SiteAnswer, UnansweredSite } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
 import type { CoreController } from "../../state/coreStore";
@@ -100,24 +101,26 @@ export function LocalNetworkAsk({ sessionId }: { sessionId: string }): ReactElem
           <li key={site} data-item-id={site} data-testid="ask.local-network.site">
             <span className="summary">{site}</span>
             <Button
+              shape="outlined"
               disabled={busy}
-              aria-label={`Allow ${site}`}
+              aria-label={`${ACT_ALLOW} ${site}`}
               data-testid="ask.local-network.allow"
               onClick={() => {
                 answer(site, "allow");
               }}
             >
-              Allow
+              {ACT_ALLOW}
             </Button>
             <Button
+              shape="outlined"
               disabled={busy}
-              aria-label={`Block ${site}`}
+              aria-label={`${ACT_BLOCK} ${site}`}
               data-testid="ask.local-network.block"
               onClick={() => {
                 answer(site, "block");
               }}
             >
-              Block
+              {ACT_BLOCK}
             </Button>
           </li>
         ))}

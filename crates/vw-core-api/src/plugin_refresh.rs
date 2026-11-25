@@ -3,7 +3,9 @@
 //! The per-chat lock covers reload, close and verified attach. Pending work shares Chrome's reopen.
 //! A chat this core started this run and never sent work only re-pins (no reattach). A failed re-pin stays
 //! pending, so every later send of that chat retries it first and is refused while it fails.
+//! Withheld MCP discovery after a completed re-pin is reported without retrying the completed work.
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use vw_platform::sync::LockRecover;
 
@@ -12,8 +14,23 @@ use tracing::warn;
 
 use crate::command::Origin;
 use crate::core::Core;
+use crate::developer_permissions::DeveloperPermissions;
 use crate::error::{CoreError, ErrorCode};
 use crate::event::{AlertKind, CoreEvent};
+use crate::mcp_keys_config::ConfigEditError;
+
+pub(crate) const MCP_DISCOVERY_WITHHELD: &str = "pluginMcpDiscoveryWithheld";
+
+async fn discovery_guard<'a>(
+    permissions: &'a DeveloperPermissions,
+    home: &Path,
+) -> Result<Option<tokio::sync::MutexGuard<'a, ()>>, ConfigEditError> {
+    let held = permissions.mutation_lock().await;
+    if crate::mcp_refresh::blocked_command(home, permissions.enabled())? {
+        return Ok(None);
+    }
+    Ok(Some(held))
+}
 
 #[derive(Default)]
 struct Inner {
@@ -143,7 +160,7 @@ impl Admission<'_> {
 
 /// The calls after which Vibe has built a never-run chat's runtime (vibe 3.0.x `_session.py`: every caller of
 /// `_runtime_for_turn_locked`: start, enqueue, queue replace, context inject, and the shell command's host effect).
-fn builds_runtime(method: &str) -> bool {
+pub(crate) fn builds_runtime(method: &str) -> bool {
     crate::changes::starts_work(method)
         || matches!(
             method,
@@ -240,6 +257,7 @@ impl Core {
             && let Some(id) = crate::routing::result_session(result)
         {
             self.shared.plugin_refresh.created(id);
+            crate::unsaved_stores::started(&self.shared, id);
         }
         if reopens(method)
             && let Some(id) = crate::routing::result_session(result)
@@ -272,6 +290,7 @@ impl Core {
 
     /// The sole internal plugin/reload sender. Vibe rebinds the old lock on reload failure.
     pub(crate) async fn refresh_plugins_held(&self, id: &str) -> Result<(), CoreError> {
+        crate::project_mcp::admit(&self.shared, "plugin/reload", &json!({"sessionId": id})).await?;
         // A chat that ran is reattached after the reload, which binds Vibe Work's host hooks to it again. A chat
         // that never ran has no runtime yet: Vibe keeps the re-pin as its pending binding and builds the runtime at
         // its first turn from the session's own hook bindings (`_session.py::_rewrite_plugins`, `_host.py` `promote`).
@@ -342,22 +361,76 @@ impl Core {
             return Ok(());
         }
         self.reopen_tools(id).await?;
-        self.discover_plugin_mcp_with_children(id).await;
+        self.discover_plugin_mcp_with_children(id).await?;
         Ok(())
     }
 
     /// After the reattach of a chat that has subagents, `mcp_catalog/refresh` makes Vibe discover the MCP servers a
     /// just-turned-on plugin brings, so their tools are there for its later turns (a chat without subagents gets
     /// them from the reattach itself). A failure leaves the chat usable with its other
-    /// tools and is only logged.
-    async fn discover_plugin_mcp_with_children(&self, id: &str) {
+    /// tools and is only logged, except a person-disabled command row explicitly refuses this refresh.
+    async fn discover_plugin_mcp_with_children(&self, id: &str) -> Result<(), CoreError> {
         let has_children = self.shared.store.view(id).is_some_and(|view| {
             view.state["childSessions"]
                 .as_array()
                 .is_some_and(|children| !children.is_empty())
         });
         if !has_children {
-            return;
+            return Ok(());
+        }
+        // Keep the OFF transition from landing between the check and Vibe's
+        // forced discovery: Vibe can start even a disabled stdio row here.
+        let _mutation = match discovery_guard(
+            &self.shared.developer_permissions,
+            &self.shared.instructions.own_home,
+        )
+        .await
+        {
+            Ok(Some(held)) => held,
+            Ok(None) => {
+                if self.shared.developer_permissions.enabled() {
+                    let message =
+                        vw_vocabulary::texts::COMMAND_SERVER_DISABLED_PLUGIN_REFRESH_BLOCKED;
+                    self.shared.emit(CoreEvent::Alert {
+                        session_id: Some(id.to_owned()),
+                        kind: AlertKind::ToolsUnavailable,
+                        message: message.to_owned(),
+                    });
+                    let mut error = CoreError::new(ErrorCode::Denied, message);
+                    error.server_code = Some(MCP_DISCOVERY_WITHHELD.to_owned());
+                    return Err(error);
+                }
+                crate::command_pause::notify_internal_refresh_withheld(
+                    &self.shared,
+                    Some(id),
+                    crate::developer_permissions::RefreshWithheldCause::PausedCommandServer,
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                warn!(session_id = id, %error, "plugins: MCP discovery withheld while command servers cannot be checked");
+                crate::command_pause::notify_internal_refresh_withheld(
+                    &self.shared,
+                    Some(id),
+                    crate::developer_permissions::RefreshWithheldCause::InspectFailed,
+                );
+                return Ok(());
+            }
+        };
+        if let Err(error) = crate::project_mcp::admit(
+            &self.shared,
+            "mcp_catalog/refresh",
+            &json!({"sessionId": id}),
+        )
+        .await
+        {
+            warn!(session_id = id, reason = %error.message, "plugins: project MCP refresh refused");
+            self.shared.emit(CoreEvent::Alert {
+                session_id: Some(id.to_owned()),
+                kind: AlertKind::ToolsUnavailable,
+                message: error.message,
+            });
+            return Ok(());
         }
         if let Err(error) = self
             .shared
@@ -367,6 +440,7 @@ impl Core {
         {
             warn!(session_id = id, %error, "plugins: MCP discovery after the reopen did not finish");
         }
+        Ok(())
     }
 
     /// Close and attach are one bounded operation, shared with the on-demand tool switch.
@@ -412,8 +486,9 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use super::Refresh;
+    use super::{Refresh, discovery_guard};
     use serde_json::json;
+    use std::sync::Arc;
     use std::time::Duration;
     use vw_gate::GateError;
     use vw_rpc::RpcError;
@@ -423,6 +498,198 @@ mod tests {
             method: "turn/start".into(),
             error: serde_json::from_value(json!({"code":"conflict","message":"no"})).unwrap(),
         })
+    }
+
+    #[tokio::test]
+    async fn internal_discovery_refuses_person_disabled_row_while_on() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "mcp_servers = [{name='y',transport='stdio',command='echo',disabled=true}]\n",
+        )
+        .unwrap();
+        let permissions = crate::developer_permissions::DeveloperPermissions::new(None);
+        permissions.set_for_test(true);
+        assert!(
+            discovery_guard(&permissions, dir.path())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_discovery_keeps_clean_on_configs_admitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let permissions = crate::developer_permissions::DeveloperPermissions::new(None);
+        permissions.set_for_test(true);
+        for text in [
+            "",
+            "mcp_servers=[{name='x',transport='stdio',command='echo'}]",
+            "mcp_servers=[{name='h',transport='http',disabled=true}]",
+        ] {
+            std::fs::write(dir.path().join("config.toml"), text).unwrap();
+            assert!(
+                discovery_guard(&permissions, dir.path())
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "{text}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_discovery_refuses_with_visible_reason_and_call_error_while_on() {
+        use crate::refresh_notice_tests::{
+            attach_mock_channel, count_server_refreshes, drain_events, start_with_keys,
+            tools_alerts,
+        };
+        let core = start_with_keys(
+            "addrefresh-plugin-notice",
+            None,
+            true,
+            "mcp_servers=[{name='y',transport='stdio',command='echo',disabled=true}]",
+        )
+        .await;
+        let calls = Arc::default();
+        let _peer = attach_mock_channel(&core, "s1", 1, Arc::clone(&calls));
+        let _ = core.shared.store.load(json!({
+            "session": {"id": "s1", "cwd": core.shared.default_cwd, "status": {"type": "idle"}},
+            "entries": [], "turns": [], "childSessions": [{"id": "child", "status": {"type": "idle"}}]
+        }), vw_session::LoadKind::New).unwrap();
+        let mut sub = core.subscribe(None);
+        let _ = drain_events(&mut sub).await;
+        let reply = format!("{:?}", core.discover_plugin_mcp_with_children("s1").await);
+        assert!(
+            reply.contains("turned off") && reply.contains("refresh plugins again"),
+            "caller did not get refusal: {reply}"
+        );
+        assert!(
+            reply.contains("pluginMcpDiscoveryWithheld"),
+            "completed reload needs a distinct partial outcome: {reply}"
+        );
+        assert_eq!(count_server_refreshes(&calls), 0);
+        let alerts = tools_alerts(&drain_events(&mut sub).await);
+        assert_eq!(alerts.len(), 1);
+        assert!(
+            alerts[0].1.contains("turned off") && alerts[0].1.contains("refresh plugins again")
+        );
+        core.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn internal_discovery_rechecks_off_after_waiting_for_the_mutation_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        std::fs::write(
+            home.join("config.toml"),
+            "mcp_servers = [{ name = \"local\", transport = \"stdio\", command = \"/bin/echo\", disabled = true }]\n",
+        )
+        .unwrap();
+        let permissions = Arc::new(crate::developer_permissions::DeveloperPermissions::new(
+            None,
+        ));
+        permissions.set_for_test(true);
+        let changing = permissions.mutation_lock().await;
+        let waiting = permissions.clone();
+        let task =
+            tokio::spawn(async move { discovery_guard(&waiting, &home).await.unwrap().is_some() });
+        tokio::task::yield_now().await;
+        permissions.set_for_test(false);
+        drop(changing);
+        assert!(
+            !task.await.unwrap(),
+            "an internal refresh would have been sent after OFF"
+        );
+    }
+
+    async fn drain_tools_alerts(
+        sub: &mut crate::CoreSubscription,
+    ) -> Vec<(Option<String>, String)> {
+        let mut alerts = Vec::new();
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(50), sub.next()).await
+        {
+            if let crate::CoreEvent::Alert {
+                session_id,
+                kind: crate::AlertKind::ToolsUnavailable,
+                message,
+            } = event
+            {
+                alerts.push((session_id, message));
+            }
+        }
+        alerts
+    }
+
+    #[tokio::test]
+    async fn internal_plugin_discovery_withheld_emits_deduplicated_tools_alert() {
+        let core = crate::offline_core::start_with("plugin-refresh-withheld", |config, dir| {
+            let app_data = dir.join("app-data");
+            let vibe_home = dir.join("vibe-home");
+            std::fs::create_dir_all(&app_data).unwrap();
+            std::fs::create_dir_all(&vibe_home).unwrap();
+            std::fs::write(
+                app_data.join("settings.json"),
+                r#"{"developerPermissions":false}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                vibe_home.join("config.toml"),
+                "mcp_servers = [{ name = \"local\", transport = \"stdio\", command = \"/bin/echo\", disabled = true }]\n",
+            )
+            .unwrap();
+            config.secret_scan_data = Some(app_data);
+        })
+        .await;
+        let _ = core
+            .shared
+            .store
+            .load(
+                json!({
+                    "session": {"id": "s1", "cwd": "/project", "status": {"type": "idle"}},
+                    "entries": [],
+                    "turns": [],
+                    "childSessions": [{"id": "c1", "status": {"type": "idle"}}]
+                }),
+                vw_session::LoadKind::New,
+            )
+            .unwrap();
+        let mut sub = core.subscribe(None);
+        while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), sub.next()).await {}
+
+        core.discover_plugin_mcp_with_children("s1").await.unwrap();
+        let first = drain_tools_alerts(&mut sub).await;
+        assert_eq!(
+            first.len(),
+            1,
+            "expected one plugin discovery withheld alert: {first:?}"
+        );
+        assert_eq!(first[0].0.as_deref(), Some("s1"));
+        assert_eq!(
+            first[0].1,
+            vw_vocabulary::texts::COMMAND_SERVER_INTERNAL_REFRESH_BLOCKED,
+            "{first:?}"
+        );
+
+        core.discover_plugin_mcp_with_children("s1").await.unwrap();
+        let second = drain_tools_alerts(&mut sub).await;
+        assert_eq!(
+            second,
+            Vec::<(Option<String>, String)>::new(),
+            "second withheld discovery must be deduplicated"
+        );
+        // Cross-path dedupe: an internal converge for the same paused cause in the same OFF period
+        // must also stay quiet.
+        crate::connectors::refresh_servers(&core.shared).await;
+        let converge = drain_tools_alerts(&mut sub).await;
+        assert_eq!(
+            converge,
+            Vec::<(Option<String>, String)>::new(),
+            "converge after plugin discovery in same OFF period must be deduplicated"
+        );
+        core.shutdown().await;
     }
 
     #[test]

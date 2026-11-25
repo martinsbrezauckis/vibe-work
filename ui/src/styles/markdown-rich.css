@@ -17,6 +17,80 @@
 .md-diagram-drawing {
   padding: 12px;
   overflow-x: auto;
+  /* A very tall drawing (a 100 node chain is about 9800 px) scrolls inside the message instead of making it endless. */
+  max-height: max(480px, 70vh);
+  overflow-y: auto;
+}
+/* Floor of a wide drawing: --diagram-m times --diagram-e is set by the two classes MermaidBlock puts on .md-diagram
+   (see diagramFloor.ts). The rungs are 256 px times 2^(i/16) times 2^k. Without the classes min-width is auto. */
+.md-diagram-m0 {
+  --diagram-m: 1;
+}
+.md-diagram-m1 {
+  --diagram-m: 1.0443;
+}
+.md-diagram-m2 {
+  --diagram-m: 1.0905;
+}
+.md-diagram-m3 {
+  --diagram-m: 1.1388;
+}
+.md-diagram-m4 {
+  --diagram-m: 1.1892;
+}
+.md-diagram-m5 {
+  --diagram-m: 1.2419;
+}
+.md-diagram-m6 {
+  --diagram-m: 1.2968;
+}
+.md-diagram-m7 {
+  --diagram-m: 1.3543;
+}
+.md-diagram-m8 {
+  --diagram-m: 1.4142;
+}
+.md-diagram-m9 {
+  --diagram-m: 1.4768;
+}
+.md-diagram-m10 {
+  --diagram-m: 1.5422;
+}
+.md-diagram-m11 {
+  --diagram-m: 1.6105;
+}
+.md-diagram-m12 {
+  --diagram-m: 1.6818;
+}
+.md-diagram-m13 {
+  --diagram-m: 1.7563;
+}
+.md-diagram-m14 {
+  --diagram-m: 1.834;
+}
+.md-diagram-m15 {
+  --diagram-m: 1.9152;
+}
+.md-diagram-e0 {
+  --diagram-e: 256px;
+}
+.md-diagram-e1 {
+  --diagram-e: 512px;
+}
+.md-diagram-e2 {
+  --diagram-e: 1024px;
+}
+.md-diagram-e3 {
+  --diagram-e: 2048px;
+}
+.md-diagram-e4 {
+  --diagram-e: 4096px;
+}
+.md-diagram-e5 {
+  --diagram-e: 8192px;
+}
+.md-diagram-e6 {
+  --diagram-e: 16384px;
 }
 .md-diagram svg {
   display: block;
@@ -24,6 +98,11 @@
   height: auto;
   margin: auto;
   font-family: var(--font-ui);
+}
+/* A wide drawing shrinks to the column only down to its floor; below that it keeps the floor size and
+   .md-diagram-drawing scrolls sideways. Only the root svg: the drawing sits in the role="img" wrapper. */
+.md-diagram-drawing > [role="img"] > svg {
+  min-width: calc(var(--diagram-m) * var(--diagram-e));
 }
 .md-math {
   color: var(--text);
@@ -35,6 +114,9 @@
   margin: 4px 0;
 }
 .md-render-error {
+  margin: 0 0 var(--space-control-gap);
+  padding: 0 var(--space-control-gap);
   color: var(--text-2);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }

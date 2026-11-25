@@ -1,6 +1,7 @@
 /** Owned Firefox window and optional sharing add-on states. Uses confirmed core facts in Browser Settings. */
 import { TEXT, term } from "../../../vocabulary";
 import { Button, SettingsRow } from "../../../components/Controls";
+import { ACT_CONNECTING_ELLIPSIS, ACT_FIREFOX_ADDONS, ACT_FIREFOX_PAIR } from "../actionLabels";
 import type { ChromeControlState } from "./useChromeControl";
 
 /**
@@ -54,11 +55,11 @@ export function FirefoxConnection({ chrome }: { chrome: ChromeControlState }) {
               }}
             >
               {sharing.state === "connected"
-                ? "Add-ons"
+                ? ACT_FIREFOX_ADDONS
                 : connecting
-                  ? "Connecting…"
+                  ? ACT_CONNECTING_ELLIPSIS
                   : waiting
-                    ? "Pair Firefox"
+                    ? ACT_FIREFOX_PAIR
                     : TEXT.connectorConnect}
             </Button>
           ) : null}

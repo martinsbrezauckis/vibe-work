@@ -1,6 +1,7 @@
 /** Git identity in app settings, read and explicitly saved through the core; mounted by SettingsPage. */
 import { GithubReadsSettings } from "./GithubReadsSettings";
 import { Button } from "../../components/Controls";
+import { ACT_SAVE } from "./actionLabels";
 import { useEffect } from "react";
 import { useStore } from "../../state/createStore";
 import { gitIdentityFor, validIdentity } from "../../state/gitIdentity";
@@ -37,7 +38,7 @@ function IdentitySettings({ identity }: { identity: ReturnType<typeof gitIdentit
             disabled={state.busy || state.view === null || (!empty && !validIdentity(state.draft))}
             onClick={() => void identity.save()}
           >
-            {state.busy ? "Saving…" : "Save"}
+            {state.busy ? "Saving…" : ACT_SAVE}
           </Button>
         </div>
         {state.saved && (

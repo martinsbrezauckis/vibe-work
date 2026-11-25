@@ -489,3 +489,13 @@ async fn agent_calls_naming_the_persons_firefox_are_refused_before_the_helper() 
     );
     core.shutdown().await;
 }
+
+/// The refusal used while page sharing is hidden names no control that no longer exists: the Open window button
+/// left Settings in 0.1.17 (the owned window opens by itself when a chat browses).
+#[test]
+fn hidden_sharing_refusal_names_no_removed_control() {
+    let text = super::firefox_sharing::page_sharing_unavailable();
+    assert!(!text.contains("Open window"), "{text}");
+    assert!(text.contains("opens its own"), "{text}");
+    assert!(!text.contains('{'), "placeholders filled: {text}");
+}

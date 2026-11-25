@@ -14,6 +14,7 @@ import { Button } from "../../../components/Controls";
 import { EmptyState } from "../../../components/EmptyState";
 import { AllowedGroup } from "./AllowedGroup";
 import { RevokeAllDialog } from "./RevokeAllDialog";
+import { ACT_CLEAR_SEARCH } from "../actionLabels";
 import type { Allowed, AllowedState } from "./store";
 import { useAllowed, useAllowedFocus, useSettled } from "./useAllowed";
 
@@ -74,7 +75,7 @@ export function AllowedPage(): ReactElement {
                   allowed.clearSearch();
                 }}
               >
-                Clear the search
+                {ACT_CLEAR_SEARCH}
               </Button>
             </EmptyState>
           ) : (

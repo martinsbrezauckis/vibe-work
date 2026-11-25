@@ -5,6 +5,7 @@
 use super::{PreviewError, PreviewService};
 use crate::console;
 use crate::engine::{EngineError, MountId, MountSpec};
+use crate::engine_pool::{MAX_WAITING_PER_CHAT, MAX_WAITING_TOTAL, WaitingLimit};
 use crate::layout::Placement;
 use crate::state::{BrowserMountState, Mount, MountState};
 use url::Url;
@@ -50,27 +51,58 @@ impl PreviewService {
         let external = !session_id.starts_with('\0');
         if external {
             self.make_browser_room(session_id).await;
+            let owner = self.inner.lock().owner_of(session_id);
             let mut pool = self.lock_pool();
-            if !pool.active.contains_key(session_id)
-                && pool.active.len() >= pool.snapshot().effective_cap as usize
-            {
-                pool.waiting.insert(session_id.to_owned());
-                drop(pool);
-                if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
-                    entry.browser_mount = BrowserMountState::Waiting;
-                    entry.set_loading(false);
+            if !pool.active.contains_key(session_id) {
+                let free =
+                    (pool.snapshot().effective_cap as usize).saturating_sub(pool.active.len());
+                // Free slots belong to the chats that waited first; a newer request queues behind them.
+                if free == 0 || pool.waiting_ahead_of(session_id) >= free {
+                    let queued = pool.enqueue_waiting(session_id, &owner);
+                    drop(pool);
+                    if let Err(limit) = queued {
+                        if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
+                            entry.browser_mount = BrowserMountState::Released;
+                            entry.pending_open = None;
+                            entry.set_loading(false);
+                        }
+                        self.inner.changed(session_id);
+                        let (limit, template) = match limit {
+                            WaitingLimit::Chat => (
+                                MAX_WAITING_PER_CHAT,
+                                vw_vocabulary::texts::BROWSER_WAITING_CHAT_FULL,
+                            ),
+                            WaitingLimit::App => (
+                                MAX_WAITING_TOTAL,
+                                vw_vocabulary::texts::BROWSER_WAITING_APP_FULL,
+                            ),
+                        };
+                        return Err(PreviewError::BrowserQueueFull(
+                            template.replace("{limit}", &limit.to_string()),
+                        ));
+                    }
+                    if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
+                        entry.browser_mount = BrowserMountState::Waiting;
+                        entry.set_loading(false);
+                    }
+                    self.inner.changed(session_id);
+                    if free > 0 {
+                        self.schedule_admission();
+                    }
+                    return Err(PreviewError::BrowserBusy);
                 }
-                self.inner.changed(session_id);
-                return Err(PreviewError::BrowserBusy);
             }
             pool.active
                 .insert(session_id.to_owned(), tokio::time::Instant::now());
-            pool.waiting.remove(session_id);
-            if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
+            pool.remove_waiting(session_id);
+            let admitting_waiter = pool.admitting_waiters.contains(session_id);
+            drop(pool);
+            if !admitting_waiter && let Some(entry) = self.inner.lock().entries.get_mut(session_id)
+            {
                 entry.browser_mount = BrowserMountState::Ready;
             }
         } else {
-            self.lock_pool().waiting.remove(session_id);
+            self.lock_pool().remove_waiting(session_id);
             if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
                 entry.browser_mount = BrowserMountState::Ready;
             }
@@ -119,6 +151,16 @@ impl PreviewService {
         placement: Option<Placement>,
     ) -> Result<(), PreviewError> {
         let _operation = self.pool_op.lock().await;
+        self.mount_locked(session_id, url, placement).await
+    }
+
+    /// [`Self::mount`] for a caller that owns `pool_op` (admission and engine mount stay one step).
+    pub(super) async fn mount_locked(
+        &self,
+        session_id: &str,
+        url: Url,
+        placement: Option<Placement>,
+    ) -> Result<(), PreviewError> {
         let external = self.admit_browser(session_id).await?;
         let session_storage = self.storage(session_id);
         let accessor = console::accessor_name();
@@ -204,6 +246,8 @@ impl PreviewService {
             if closed {
                 if external {
                     self.lock_pool().active.remove(session_id);
+                    // The slot the failed page held goes to the next waiting chat.
+                    self.schedule_admission();
                 }
                 let mut state = self.inner.lock();
                 state.by_label.remove(&label);
@@ -216,7 +260,9 @@ impl PreviewService {
             }
             return Err(error.into());
         }
-        if let Some(mount) = self.inner.lock().entry(session_id).mount.as_mut() {
+        if !self.lock_pool().admitting_waiters.contains(session_id)
+            && let Some(mount) = self.inner.lock().entry(session_id).mount.as_mut()
+        {
             mount.state = MountState::Ready;
         }
         Ok(())
@@ -240,7 +286,7 @@ impl PreviewService {
     }
 
     /// Retires a refused target and its request authority before native close, which may fail.
-    fn revoke_failed_mount(&self, session_id: &str, label: &str) {
+    pub(super) fn revoke_failed_mount(&self, session_id: &str, label: &str) {
         self.cancel_pending_navigation(session_id);
         // A refused setup is not a suspended page: layout must never retry its target later.
         // Revoke callbacks before native cleanup, which can fail or time out.
@@ -358,11 +404,18 @@ impl PreviewService {
                 entry.mount = None;
             }
         }
-        self.lock_pool().active.remove(session_id);
-        self.lock_pool().waiting.remove(session_id);
-        if let Some(entry) = self.inner.lock().entries.get_mut(session_id) {
+        {
+            let mut pool = self.lock_pool();
+            pool.active.remove(session_id);
+            pool.remove_waiting(session_id);
+        }
+        if let Some(entry) = self.inner.lock().entries.get_mut(session_id)
+            && entry.browser_mount != BrowserMountState::Withdrawn
+        {
             entry.browser_mount = BrowserMountState::Ready;
         }
+        // The freed slot goes to the oldest waiting chat once the caller's locks are released.
+        self.schedule_admission();
         Ok(())
     }
 

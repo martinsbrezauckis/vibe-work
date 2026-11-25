@@ -156,7 +156,7 @@ export function LocalPlugins(): ReactElement | null {
                 {p.locked ? null : (
                   <Button
                     type="button"
-
+                    shape="outlined"
                     data-testid="marketplace.local-plugin-toggle"
                     onClick={() =>
                       void actions?.changePlugin(p.off ? "turnOnPlugin" : "turnOffPlugin", p.path)

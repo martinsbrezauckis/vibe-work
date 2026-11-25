@@ -110,6 +110,50 @@ pub trait McpResolver: Send + Sync {
     fn resolve<'a>(&'a self, id: &'a str) -> McpFuture<'a>;
 }
 
+/// Why the last request to a key server's upstream did not work. Kept per binding so the Tools page can say the
+/// reason even though Vibe only reports a failed connection; cleared by the next answer in the 2xx range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpProblem {
+    /// The server's certificate is not trusted on this computer (a private certificate authority).
+    CertificateNotTrusted,
+    /// The address could not be reached (name unknown, nothing listening, network down).
+    Unreachable,
+    /// No answer in time.
+    TimedOut,
+    /// The server answered 401 or 403 to the key.
+    KeyRejected {
+        /// The HTTP status (401 or 403).
+        status: u16,
+    },
+}
+
+/// The latest [`McpProblem`] per binding id; shared between the proxy and the core.
+#[derive(Clone, Default)]
+pub struct McpProblems(Arc<std::sync::Mutex<std::collections::HashMap<String, McpProblem>>>);
+
+impl McpProblems {
+    /// The problem of binding `id`, when its last request failed.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<McpProblem> {
+        self.lock().get(id).copied()
+    }
+
+    /// Forgets binding `id` (it was removed, or answered well).
+    pub fn clear(&self, id: &str) {
+        self.lock().remove(id);
+    }
+
+    fn set(&self, id: &str, problem: McpProblem) {
+        self.lock().insert(id.to_owned(), problem);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, McpProblem>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// The slot the core fills after it starts (`None`: every MCP request answers 503).
 pub type McpResolverSlot = Arc<RwLock<Option<Arc<dyn McpResolver>>>>;
 
@@ -204,7 +248,7 @@ pub(crate) fn token_ok(headers: &HeaderMap, accepts: &(dyn Fn(&str) -> bool + Sy
 /// Handles one request on [`MCP_PREFIX`] (module docs for the order).
 pub(crate) async fn handle(
     client: &reqwest::Client,
-    resolver: &McpResolverSlot,
+    config: &crate::server::ProxyConfig,
     accepts: &(dyn Fn(&str) -> bool + Sync),
     parts: Parts,
     body: Body,
@@ -216,6 +260,8 @@ pub(crate) async fn handle(
             "Vibe Work's MCP forwarder has no such address.",
         );
     };
+    // Owned: `parts` moves into the forwarded request below.
+    let id = id.to_owned();
     if parts.uri.query().is_some() {
         return error(
             StatusCode::BAD_REQUEST,
@@ -231,6 +277,7 @@ pub(crate) async fn handle(
             "Vibe Work's MCP forwarder refused this request: it does not carry the current proxy token.",
         );
     }
+    let (resolver, problems) = (&config.mcp, &config.mcp_problems);
     let current = resolver
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -243,19 +290,20 @@ pub(crate) async fn handle(
         );
     };
     let short: String = id.chars().take(24).collect();
-    let target = match current.resolve(id).await {
+    let target = match current.resolve(&id).await {
         Ok(target) => target,
         Err(refusal) => {
             debug!(binding = %short, ?refusal, "mcp forwarder: refused");
             return refusal_response(refusal);
         }
     };
-    forward(client, &short, &target, parts, body).await
+    forward(client, problems, (&id, &short), &target, parts, body).await
 }
 
 async fn forward(
     client: &reqwest::Client,
-    short: &str,
+    problems: &McpProblems,
+    (id, short): (&str, &str),
     target: &McpTarget,
     parts: Parts,
     body: Body,
@@ -292,16 +340,18 @@ async fn forward(
         .body(body)
         .send()
         .await;
-    let Ok(response) = sent else {
-        warn!(binding = %short, "mcp forwarder: upstream unreachable");
-        return error(
-            StatusCode::BAD_GATEWAY,
-            "vibe_work_upstream_unreachable",
-            "Vibe Work could not reach this MCP server.",
-        );
+    let response = match sent {
+        Ok(response) => response,
+        Err(failure) => return upstream_failure(problems, id, short, &failure),
     };
     let status = response.status();
     debug!(binding = %short, status = status.as_u16(), "mcp forwarder: forwarded");
+    if matches!(status.as_u16(), 401 | 403) {
+        return key_rejected(problems, (id, short), status.as_u16(), call.as_ref());
+    }
+    if status.is_success() {
+        problems.clear(id);
+    }
     if status.is_redirection() {
         warn!(binding = %short, status = status.as_u16(), "mcp forwarder: refused a redirect");
         return refused_answer(
@@ -323,15 +373,7 @@ async fn forward(
             "This MCP server sent a compressed answer, which Vibe Work cannot check for your key. Turn compression off for this server.",
         );
     }
-    // Header names arrive lower-cased: they are searched for the key's forms and the lower-cased key's (its hex
-    // forms differ). A lower-cased base64 form cannot be told from other text (`vw-secrets`: transformed values).
-    let lower = Zeroizing::new(key.to_ascii_lowercase());
-    if response.headers().iter().any(|(name, v)| {
-        let name = name.as_str().as_bytes();
-        vw_secrets::holds(name, key)
-            || vw_secrets::holds(name, &lower)
-            || vw_secrets::holds(v.as_bytes(), key)
-    }) {
+    if headers_hold_key(response.headers(), key) {
         warn!(binding = %short, "mcp forwarder: refused an answer header holding the key");
         return refused_answer(
             call.as_ref(),
@@ -355,6 +397,69 @@ async fn forward(
                 "The MCP server's answer could not be passed on.",
             )
         })
+}
+
+/// True when a header name or value of the server's answer holds the inserted `key` in any form the scrub knows.
+/// Header names arrive lower-cased: they are searched for the key's forms and the lower-cased key's (its hex
+/// forms differ). A lower-cased base64 form cannot be told from other text (`vw-secrets`: transformed values).
+fn headers_hold_key(headers: &reqwest::header::HeaderMap, key: &str) -> bool {
+    let lower = Zeroizing::new(key.to_ascii_lowercase());
+    headers.iter().any(|(name, v)| {
+        let name = name.as_str().as_bytes();
+        vw_secrets::holds(name, key)
+            || vw_secrets::holds(name, &lower)
+            || vw_secrets::holds(v.as_bytes(), key)
+    })
+}
+
+/// The answer for a server that rejected the key (401 or 403): recorded for the Tools page, and for a tool call
+/// that call's tool result with the reason, otherwise the 502 (never the 401, which Vibe reads as "needs sign-in").
+fn key_rejected(
+    problems: &McpProblems,
+    (id, short): (&str, &str),
+    status: u16,
+    call: Option<&serde_json::Value>,
+) -> Response {
+    warn!(binding = %short, status, "mcp forwarder: the server rejected the key");
+    problems.set(id, McpProblem::KeyRejected { status });
+    refused_answer(
+        call,
+        "vibe_work_mcp_key_rejected",
+        &format!(
+            "This MCP server rejected the key Vibe Work sent (HTTP {status}). Ask the user to check the key's value and the header it goes in, or to add the server again with another key."
+        ),
+    )
+}
+
+/// The 502 for a request that got no answer from the upstream: each cause has its own kind, message and action.
+fn upstream_failure(
+    problems: &McpProblems,
+    id: &str,
+    short: &str,
+    failure: &reqwest::Error,
+) -> Response {
+    use vw_mistral::network::ProbeKind;
+    let (problem, kind, message) = match vw_mistral::network::classify_request_error(failure, false)
+    {
+        ProbeKind::CertificateNotTrusted => (
+            McpProblem::CertificateNotTrusted,
+            "vibe_work_upstream_certificate",
+            "This MCP server's certificate is not trusted on this computer (a private certificate authority). Ask the user to add the certificate in Settings > Network (Company certificate file), then quit and reopen Vibe Work.",
+        ),
+        ProbeKind::TimedOut => (
+            McpProblem::TimedOut,
+            "vibe_work_upstream_timeout",
+            "This MCP server did not answer in time. Ask the user to check that it is running and that the address is right.",
+        ),
+        _ => (
+            McpProblem::Unreachable,
+            "vibe_work_upstream_unreachable",
+            "Vibe Work could not reach this MCP server. Ask the user to check that it is running and that the address and port are right.",
+        ),
+    };
+    warn!(binding = %short, kind, "mcp forwarder: upstream not reached");
+    problems.set(id, problem);
+    error(StatusCode::BAD_GATEWAY, kind, message)
 }
 
 /// The longest request body read before forwarding to learn whether it is one tool call. MCP requests are small;

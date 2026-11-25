@@ -5,13 +5,15 @@
  * No token value enters React state, the bridge or Debug API UI replies.
  */
 import { Button, IconButton, Switch } from "../../components/Controls";
-import { type ReactElement, useEffect, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 
 import { toCallError } from "../../protocol/client/types";
+import { announce, cancelAnnouncement } from "../../state/announcer";
 import { useKeyUi } from "../setup/useKeys";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { TEXT } from "../../vocabulary";
+import { ACT_REGENERATE_TOKEN } from "./actionLabels";
 
 /** The Developer section. */
 export function DeveloperSettings(): ReactElement {
@@ -25,6 +27,17 @@ export function DeveloperSettings(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [permissions, setPermissions] = useState<boolean | null>(null);
   const [permissionsBusy, setPermissionsBusy] = useState(false);
+  const permissionsSwitch = useRef<HTMLButtonElement>(null);
+  // Set when the switch had keyboard focus as the change started: the native confirmation takes focus away and the
+  // switch is disabled while it is open, so focus has to be given back when the change ends.
+  const refocusPermissions = useRef(false);
+  useEffect(() => {
+    if (!permissionsBusy) return;
+    announce(TEXT.developerPermissionsApplying);
+    return () => {
+      cancelAnnouncement(TEXT.developerPermissionsApplying);
+    };
+  }, [permissionsBusy]);
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;
@@ -47,6 +60,7 @@ export function DeveloperSettings(): ReactElement {
   }, [core, canSwitch, toasts]);
   const flipPermissions = async () => {
     if (core === null || permissions === null || permissionsBusy) return;
+    refocusPermissions.current = document.activeElement === permissionsSwitch.current;
     setPermissionsBusy(true);
     try {
       const result = await core.run({ type: "developerPermissions", enabled: !permissions });
@@ -59,6 +73,16 @@ export function DeveloperSettings(): ReactElement {
       setPermissionsBusy(false);
     }
   };
+  // Whatever the answer (confirmed, declined, failed), focus returns to the switch unless it went to a control on
+  // purpose meanwhile; nothing is pulled to it for a person who never had focus there.
+  useEffect(() => {
+    if (permissionsBusy || !refocusPermissions.current) return;
+    refocusPermissions.current = false;
+    const control = permissionsSwitch.current;
+    const holder = document.activeElement;
+    if (control !== null && !control.disabled && (holder === null || holder === document.body))
+      control.focus({ preventScroll: true });
+  }, [permissionsBusy]);
   useEffect(() => {
     if (core === null || !canSwitch) return;
     let live = true;
@@ -69,7 +93,11 @@ export function DeveloperSettings(): ReactElement {
       .trackAction(
         core.client.debugApiTokenItem(false).then(
           (id) => (id === null ? "Not set" : "In vault"),
-          () => "Vault unavailable" as const,
+          () => {
+            if (vaultState === "unlocked") return TEXT.vaultUnlockedStatus;
+            if (vaultState === "locked") return TEXT.vaultLockedStatus;
+            return "Vault unavailable";
+          },
         ),
       )
       .then((state) => {
@@ -112,12 +140,17 @@ export function DeveloperSettings(): ReactElement {
       <div className="check" data-setting="developer-permissions">
         <span>
           {TEXT.developerPermissionsName}
-          <span className="d">{permissions ? "On" : "Off"}</span>
+          <span className="d" id="developer-permissions-status">
+            {permissionsBusy ? TEXT.developerPermissionsApplying : permissions ? "On" : "Off"}
+          </span>
         </span>
         <div className="set-actions">
           <Switch
+            ref={permissionsSwitch}
             data-testid="settings.developer-permissions-switch"
             aria-label={TEXT.developerPermissionsName}
+            aria-describedby="developer-permissions-status"
+            aria-busy={permissionsBusy}
             aria-checked={permissions === true}
             disabled={!canSwitch || permissions === null || permissionsBusy}
             onClick={() => {
@@ -175,7 +208,7 @@ export function DeveloperSettings(): ReactElement {
                 void core.trackAction(tokenAction(true));
               }}
             >
-              Regenerate token
+              {ACT_REGENERATE_TOKEN}
             </Button>
           </div>
         </div>

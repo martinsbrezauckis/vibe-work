@@ -8,8 +8,17 @@
  * or tampered value falls back to the default); storage can be missing or blocked, so every access is
  * wrapped and writes never throw.
  */
-import { PAUSE_DEFAULT_MS, PAUSE_MAX_MS, PAUSE_MIN_MS } from "../features/voice/turnEnd";
 import { createStore } from "./createStore";
+
+/** Shortest and longest pause a user can choose (the Settings slider). */
+export const PAUSE_MIN_MS = 800;
+/** Longest pause a user can choose. */
+export const PAUSE_MAX_MS = 2_500;
+/**
+ * The default pause: longer than the short pause people make to think inside a sentence, so a turn does not end
+ * on half a sentence. The shortest choice (0.8 s) stays available for quicker turns.
+ */
+export const PAUSE_DEFAULT_MS = 1_200;
 
 const KEY = "vw.voice";
 

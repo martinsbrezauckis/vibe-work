@@ -96,7 +96,7 @@ async fn call_entry(
     let output_request = args.clone();
     call_selected(shared, session, tool, args)
         .await
-        .map(|mut answer| {
+        .and_then(|mut answer| {
             super::connection_notice::refused(shared, session, browser, &answer);
             super::receipt::stamp(shared, tool, &output_request, &mut answer["vwMcpResult"]);
             if tool == "chrome_status" {
@@ -122,12 +122,12 @@ async fn call_entry(
                 super::agent_close::hint(shared, tool, request, result);
                 super::agent_close::remember(shared, session, tool, request, result);
                 if super::output_cache::observation(result) {
-                    super::output_cache::bound(shared, session, request, result);
+                    super::output_cache::bound(shared, session, request, result)?;
                 }
                 super::output::guard(result);
                 crate::paused_tools_gate::note_resumed_helper(shared, session, result);
             }
-            answer
+            Ok(answer)
         })
         .map_err(|reason| browser.text(&reason))
         .inspect(|_| {
@@ -442,14 +442,7 @@ async fn call_prepared(
     if let Some(reply) = super::availability::after_call(shared, browser, tool, request, &answer) {
         return Ok(reply);
     }
-    Ok(super::output_cache::for_model(
-        shared,
-        session,
-        &output_request,
-        answer,
-        tool,
-        clamped,
-    ))
+    super::output_cache::for_model(shared, session, &output_request, answer, tool, clamped)
 }
 
 #[cfg(test)]

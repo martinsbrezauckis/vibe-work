@@ -8,6 +8,7 @@ import { BrowserProfiles } from "./BrowserProfiles";
 import { ProfileNamesAccess } from "./ProfileNamesAccess";
 import { ChromeConnection } from "./ChromeConnection";
 import { chromeAvailable } from "./chromeRows";
+import { ACT_REMOVE_ELLIPSIS } from "../actionLabels";
 import { useChromeControl } from "./useChromeControl";
 import { term, TEXT, wording } from "../../../vocabulary";
 
@@ -119,7 +120,7 @@ export function YourChromeSettings({
               setRemoveOpen(true);
             }}
           >
-            Remove…
+            {ACT_REMOVE_ELLIPSIS}
           </Button>
         </SettingsRow>
       ) : null}

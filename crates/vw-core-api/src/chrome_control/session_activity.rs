@@ -70,7 +70,7 @@ pub(super) async fn before_execute(
             answer,
             "chrome_execute",
             false,
-        )));
+        )?));
     }
     super::gateway::recheck(shared, chat, browser, "chrome_execute", args, consent)?;
     super::gateway::validate_session(shared, chat, "chrome_execute", args)?;

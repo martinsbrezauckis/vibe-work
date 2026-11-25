@@ -82,10 +82,19 @@ mod channels;
 mod chrome_control;
 mod clock;
 mod command;
+mod command_pause;
 mod command_result;
+mod command_secret;
+mod command_servers;
+mod command_servers_config;
+#[cfg(test)]
+mod command_servers_race_tests;
 mod date_text;
 mod developer_permissions;
+mod project_mcp;
 mod read_exclusions;
+#[cfg(test)]
+mod refresh_notice_tests;
 #[cfg(test)]
 mod release_modules_tests;
 pub use chrome_control::{
@@ -99,6 +108,7 @@ mod confirmer;
 mod connector_consent;
 mod connectors;
 mod connectors_config;
+mod connectors_errors;
 mod connectors_project;
 mod connectors_view;
 mod consent_gate;
@@ -213,6 +223,7 @@ mod market_project;
 mod market_view;
 mod mcp_keys;
 mod mcp_keys_config;
+mod mcp_rows;
 mod names;
 mod network;
 mod network_facts;
@@ -259,6 +270,7 @@ mod history_loading;
 mod history_loading_tests;
 #[cfg(test)]
 mod history_test_vibe;
+mod mcp_refresh;
 #[cfg(test)]
 mod offline_core;
 mod own_server;
@@ -341,6 +353,7 @@ mod stops;
 mod stuck;
 mod subagents_setting;
 mod subscription;
+mod switch_apply;
 mod temporary;
 mod terminal_procmon;
 mod terminal_view;
@@ -348,6 +361,7 @@ mod terminals;
 mod title_guard;
 mod tools_list;
 mod transport;
+mod unsaved_stores;
 mod utility_models;
 mod vault_scope;
 mod vibe_install;
@@ -382,8 +396,9 @@ pub use changes_view::{
 pub use command::{Command, CommandResult, Origin};
 pub use command_decode::invalid_command;
 pub use connectors_view::{
-    CatalogLoad, ConnectorView, ConnectorsRequest, ConnectorsResult, ConnectorsView,
-    NewServerSecret, ServerKeyView, ServerView, ToolView,
+    CatalogLoad, CommandConfigView, CommandEnvInput, CommandEnvView, ConnectorView,
+    ConnectorsRequest, ConnectorsResult, ConnectorsView, NewServerSecret, ServerKeyView,
+    ServerView, ToolView,
 };
 pub use core::{Core, CoreConfig, CoreStartError};
 pub use core_viewers::for_window_generation;

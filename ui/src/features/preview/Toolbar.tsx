@@ -32,6 +32,9 @@ const WIDTHS: ReadonlyArray<{ width: DeviceWidth; label: string }> = [
   { width: "fit", label: "Fit" },
 ];
 
+/** Why a queued page's address and navigation controls are greyed. */
+const WAITING_REASON = "Waiting for a free browser slot";
+
 /** The toolbar remains available even before the session has opened a page. */
 export function Toolbar({
   previews,
@@ -123,6 +126,9 @@ export function Toolbar({
   }, [widthOpen]);
   const url = preview?.url ?? "";
   const open = url !== "";
+  // A queued page has no page to steer yet: its address, history and width controls say so instead of acting.
+  const waiting = preview?.waitingForBrowser === true;
+  const gone = (label: string): string => (waiting ? `${label}: ${WAITING_REASON}` : label);
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('[aria-modal="true"]') !== null) return;
     if ((event.target as HTMLElement).closest('[role="combobox"]') !== null) return;
@@ -174,7 +180,8 @@ export function Toolbar({
             data-testid="preview.toolbar-web-action"
             icon="arrow-left"
             label="Back"
-            disabled={busy || !open}
+            title={gone("Back")}
+            disabled={busy || !open || waiting}
             onClick={() =>
               void (webTabId && browser
                 ? browser.webAction(sessionId, webTabId, "back")
@@ -185,7 +192,8 @@ export function Toolbar({
             data-testid="preview.toolbar-web-action-2"
             icon="arrow-right"
             label="Forward"
-            disabled={busy || !open}
+            title={gone("Forward")}
+            disabled={busy || !open || waiting}
             onClick={() =>
               void (webTabId && browser
                 ? browser.webAction(sessionId, webTabId, "forward")
@@ -196,7 +204,8 @@ export function Toolbar({
             data-testid="preview.toolbar-web-action-3"
             icon="refresh-cw"
             label="Reload"
-            disabled={busy || !open}
+            title={gone("Reload")}
+            disabled={busy || !open || waiting}
             onClick={() =>
               void (webTabId && browser
                 ? browser.webAction(sessionId, webTabId, "reload")
@@ -249,8 +258,8 @@ export function Toolbar({
                       widthOpenRef.current = false;
                       setWidthOpen(false);
                     }}
-                    disabled={busy || !open || (collapsed && panel !== "menu")}
-                    title="Device width"
+                    disabled={busy || !open || waiting || (collapsed && panel !== "menu")}
+                    title={gone("Device width")}
                     compact
                   />
                 </div>

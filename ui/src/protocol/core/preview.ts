@@ -412,7 +412,7 @@ freeRamMb: number | null,
  */
 activeSessions: Array<string>,
 /**
- * Sessions whose last mount request was denied.
+ * Sessions whose last mount request was denied, in the order they started waiting.
  */
 waitingSessions: Array<string>,
 /**

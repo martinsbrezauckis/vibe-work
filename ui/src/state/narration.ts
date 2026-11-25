@@ -31,9 +31,12 @@ import {
   turnIdOf,
 } from "../features/transcript/model/entries";
 import type { CoreController } from "./coreStore";
-import { createStore } from "./createStore";
+import { createStore, type Store } from "./createStore";
 import type { Shell } from "./shellStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
+import { NARRATION_IDLE, type NarrationItem, type NarrationState } from "./voiceTypes";
+
+export { NARRATION_IDLE, type NarrationItem, type NarrationState };
 
 /** Longest assistant text sent for one summary (the CLI narrator sends the whole turn; we cap it). */
 const MAX_ANSWER_CHARS = 8_000;
@@ -41,40 +44,6 @@ const MAX_ANSWER_CHARS = 8_000;
 const MAX_QUEUE = 3;
 /** Requested readings include speech being prepared, queued audio and the current reading. */
 const MAX_READINGS = 2;
-
-/** One turn to narrate. */
-export interface NarrationItem {
-  sessionId: string;
-  turnId: string;
-  /** Present only for a requested one-time reading, never an automatic turn summary. */
-  reading?: {
-    text: string;
-    title: string;
-    chunks: readonly string[];
-    firstAudio: string;
-    voice: string | null;
-  };
-}
-
-/** The narration state the bar and the route read. */
-export interface NarrationState {
-  phase: "idle" | "summarizing" | "speaking" | "playing";
-  current: (NarrationItem & { summary: string | null }) | null;
-  queue: readonly NarrationItem[];
-  /** The last sound played. */
-  last: { chars: number; bytes: number; seconds: number; summary: string } | null;
-  /** Why a turn was skipped or failed (shown briefly). */
-  note: string | null;
-}
-
-/** The state with nothing going on. */
-export const NARRATION_IDLE: NarrationState = {
-  phase: "idle",
-  current: null,
-  queue: [],
-  last: null,
-  note: null,
-};
 
 /** The user text and the answer of `turnId` from a session's history. */
 export function turnTexts(
@@ -120,9 +89,10 @@ export function createNarration(deps: {
   dictating: () => boolean;
   /** True when the session is in voice chat (voice chat speaks its turns, narration stays out). */
   voiceChat?: (sessionId: string) => boolean;
+  store?: Store<NarrationState> | undefined;
 }) {
   const { core, shell, settings, player } = deps;
-  const store = createStore<NarrationState>(NARRATION_IDLE);
+  const store = deps.store ?? createStore<NarrationState>(NARRATION_IDLE);
   /** Completed turns already seen, per session (the first sight records history without narrating). */
   const seen = new Map<string, Set<string>>();
   let working = false;
@@ -342,41 +312,42 @@ export function createNarration(deps: {
       // A window receipt that could not reach the core must never start a late reading.
     }
   };
+  const handleReadAloud = (event: Extract<CoreEvent, { type: "readAloud" }>): void => {
+    const state = store.get();
+    const outstanding =
+      preparingReadings.size +
+      (state.current?.reading === undefined ? 0 : 1) +
+      state.queue.filter((item) => item.reading !== undefined).length;
+    if (outstanding >= MAX_READINGS) {
+      void core
+        .run({
+          type: "speech",
+          request: {
+            op: "readingReady",
+            requestId: event.requestId,
+            available: false,
+            busy: true,
+          },
+        })
+        .catch(() => {
+          // A disconnected receipt cannot start playback.
+        });
+      return;
+    }
+    const mine = readingGeneration;
+    const slot = {};
+    preparingReadings.add(slot);
+    preparing = preparing.then(async () => {
+      try {
+        await prepareReading(event, mine);
+      } finally {
+        preparingReadings.delete(slot);
+      }
+    });
+  };
   core.listen((event: CoreEvent) => {
     if (event.type === "snapshot") scan();
-    if (event.type === "readAloud") {
-      const state = store.get();
-      const outstanding =
-        preparingReadings.size +
-        (state.current?.reading === undefined ? 0 : 1) +
-        state.queue.filter((item) => item.reading !== undefined).length;
-      if (outstanding >= MAX_READINGS) {
-        void core
-          .run({
-            type: "speech",
-            request: {
-              op: "readingReady",
-              requestId: event.requestId,
-              available: false,
-              busy: true,
-            },
-          })
-          .catch(() => {
-            // A disconnected receipt cannot start playback.
-          });
-        return;
-      }
-      const mine = readingGeneration;
-      const slot = {};
-      preparingReadings.add(slot);
-      preparing = preparing.then(async () => {
-        try {
-          await prepareReading(event, mine);
-        } finally {
-          preparingReadings.delete(slot);
-        }
-      });
-    }
+    if (event.type === "readAloud") handleReadAloud(event);
   });
 
   /** Stops the sound and clears the queue. */
@@ -390,6 +361,8 @@ export function createNarration(deps: {
 
   return {
     store,
+    enqueue,
+    handleReadAloud,
     stopAll,
     /** Stops the current sound; the next queued turn plays. */
     skip(): void {

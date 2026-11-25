@@ -11,6 +11,9 @@
  * app's exact old Large 4 fallback row. An older experiment row is shown for a chat or default already using it.
  * Mistral's catalog may list one model under two ids with one label (`zai-glm-5-3-flash` and its
  * `zai-glm-5-3-flash-vibe-free` twin): catalog rows that share a label are listed once, the one in use, else the first.
+ * Vibe's built-in Medium 3.5 row (`BUILTIN_MEDIUM`) is not offered: Mistral's own list leaves that model out, so a picker
+ * that showed it before the list loads would offer a model that is gone once the list is there. It stays listed for
+ * the chat or default that already is on it.
  * Depends on nothing. Called by: composer/model/models (the composer menu and new-chat preference),
  * modelChoice (Settings, the default-model card).
  * Invariants: pure; an unknown model shape is never treated as Large 4.
@@ -21,12 +24,25 @@ const LARGE_4 = new Set(["mistral-large-4", "mistral-large-4-0"]);
 /** The alias of Vibe Work's own Large 4 entry (`crates/vw-host/src/default_model.rs`). */
 const OWN_ALIAS = "large-4";
 
+/**
+ * The built-in row of Vibe 3.1.4 for Mistral Medium 3.5 (`MEDIUM_3_5_MODEL_CONFIG`, shown with `source: "local"`).
+ * A row that only shares the alias (another name or source, e.g. a project's own model) is not this row.
+ */
+const BUILTIN_MEDIUM = {
+  alias: "mistral-medium-3.5",
+  name: "mistral-vibe-cli-latest",
+  source: "local",
+};
+
 type Row = { readonly [key: string]: unknown } | null | undefined;
 
 const isLarge4 = (row: Row): boolean => {
   const name = row?.["name"];
   return typeof name === "string" && LARGE_4.has(name);
 };
+
+const isBuiltinMedium = (row: Row): boolean =>
+  Object.entries(BUILTIN_MEDIUM).every(([key, value]) => row?.[key] === value);
 
 /** Mistral's own Large 4 row (from Mistral's lists), never Vibe Work's own entry. */
 const isMistrals = (row: Row): boolean =>
@@ -44,7 +60,8 @@ export function listedRows(
 ): (row: Row) => boolean {
   const twin = catalogTwins(rows, inUse);
   const large4 = large4Rows(rows, inUse);
-  return (row) => !twin.has(row) && large4(row);
+  return (row) =>
+    !twin.has(row) && large4(row) && !(isBuiltinMedium(row) && row?.["alias"] !== inUse);
 }
 
 function large4Rows(rows: readonly Row[], inUse: string | null): (row: Row) => boolean {

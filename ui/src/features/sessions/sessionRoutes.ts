@@ -212,11 +212,11 @@ export function registerSessionRoutes(app: App): () => void {
           const sessionId = id();
           const reason = act.deleteRefusal(sessionId);
           if (reason !== null) return { deleted: false, reason, list: listJson(app) };
-          const deleted = await act.remove(sessionId);
+          const result = await act.removeWithReason(sessionId);
           const leftRunning = (app.leftRunning?.store.get().items ?? []).filter(
             (item) => item.sessionId === sessionId,
           );
-          return { deleted, leftRunning, list: listJson(app) };
+          return { ...result, leftRunning, list: listJson(app) };
         }
         case "retryReopen":
           return { reopened: await act.retryReopen(id()), list: listJson(app) };

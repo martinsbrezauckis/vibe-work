@@ -152,7 +152,6 @@ pub(crate) async fn pick(
                 };
             };
             let outcome = super::accepted(&reply.result)
-                .and_then(|()| super::bootstrap::picked(shared, &confirmed))
                 .and_then(|()| shared.model_choices.accept_pick(id, params, confirmed));
             if let Err(error) = outcome {
                 if error.code == crate::error::ErrorCode::Internal {

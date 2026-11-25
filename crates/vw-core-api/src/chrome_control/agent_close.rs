@@ -129,29 +129,25 @@ async fn close_firefox(
 async fn close_person_browser(
     shared: &Arc<Shared>,
     chat: &str,
-    profile: &str,
+    requested: &str,
     browser: Browser,
     pending: &super::person_stop::PendingCall,
     consent: Option<&Consent>,
 ) -> Result<Value, String> {
     let chrome = &shared.chrome_control;
+    let initial_status = fetch_status(shared).await;
+    let resolved = resolve_from_status(chrome, initial_status.as_ref(), requested)
+        .map_err(|count| super::profile_ids::ambiguous_profile_refusal(browser, count))?;
+    let profile = resolved.as_str();
     let known = profile_bindings::close_known(chrome, chat, profile)
         || chrome.work.lock_or_recover().has_profile(chat, profile);
     if !known {
         return Err(format!(
-            "Not run: this chat has no {} browser session for profileId {profile}. Open a session first.",
+            "Not run: this chat has no {} browser session for profileId {requested}. Open a session first.",
             browser.name()
         ));
     }
-    let mut ids = profile_bindings::close_candidates(chrome, chat, profile);
-    ids.extend(
-        chrome
-            .work
-            .lock_or_recover()
-            .close_candidates(chat, profile),
-    );
-    ids.sort();
-    ids.dedup();
+    let ids = close_candidates(chrome, chat, profile);
     let uncertain = profile_bindings::uncertain(chrome, chat);
     let mut attempted = false;
     let mut closed_live = false;
@@ -167,25 +163,14 @@ async fn close_person_browser(
             continue;
         }
         attempted = true;
+        let cached = (!closed_live).then_some(initial_status.as_ref()).flatten();
         closed_live = true;
-        let resolved = close_own_windows(shared, chat, profile, id, consent, &mut windows).await;
+        let resolved =
+            close_own_windows(shared, chat, profile, id, consent, cached, &mut windows).await;
         if !resolved_profiles.contains(&resolved) {
             resolved_profiles.push(resolved);
         }
-        let answer = tokio::time::timeout(
-            STOP_WAIT,
-            chrome
-                .owner
-                .call("chrome_session", json!({"action":"stop","sessionId":id})),
-        )
-        .await;
-        let stopped = answer.is_ok_and(|answer| {
-            let body = &answer.value()["structuredContent"];
-            answer.value()["isError"] != true
-                && body["error"].is_null()
-                && matches!(body["state"].as_str(), Some("stopped" | "disconnected"))
-        });
-        confirmed &= stopped;
+        confirmed &= stop_session(chrome, id).await;
     }
     if !attempted && uncertain {
         // A failed open may have no session ID. The existing chat-scoped delete control is the
@@ -206,103 +191,118 @@ async fn close_person_browser(
     if crate::stops::personally_stopped(shared, chat) {
         return Err(super::person_stop::refusal(browser));
     }
-    if resolved_profiles.is_empty() {
-        resolved_profiles.extend(fallback_profile(chrome, &ids, profile));
-    }
     release(shared, chat, profile);
     let name = browser.name();
-    let earlier = forget_windows(
+    let (earlier, earlier_warned, unresolvable, has_canonical) = forget_windows(
         shared,
         chat,
         profile,
         &resolved_profiles,
         &windows,
         closed_live,
+        confirmed,
     );
-    if closed_live
-        && confirmed
-        && !earlier
-        && !windows.live_failed
-        && !chrome
-            .agent_windows
-            .lock_or_recover()
-            .has_canonical(chat, profile)
-    {
-        profile_bindings::clear_unclosed_window(chrome, chat, profile);
-    }
+    let clear_unclosed = !has_canonical
+        && ((closed_live && confirmed && !earlier && !windows.live_failed()) || unresolvable);
+    profile_bindings::sync_window_marks(chrome, chat, profile, clear_unclosed, unresolvable);
+    let attempt = if !attempted {
+        CloseAttempt::Ended
+    } else if confirmed {
+        CloseAttempt::StoppedConfirmed
+    } else {
+        CloseAttempt::StoppedUnconfirmed
+    };
     Ok(reply(&answer_text(
-        name, attempted, earlier, confirmed, &windows,
+        name,
+        attempt,
+        earlier,
+        earlier_warned,
+        &windows,
     )))
 }
 
-/// The agent-facing answer of one `close_browser` (texts unchanged since DBK17S).
+fn close_candidates(chrome: &super::ChromeControl, chat: &str, profile: &str) -> Vec<String> {
+    let mut ids = profile_bindings::close_candidates(chrome, chat, profile);
+    ids.extend(
+        chrome
+            .work
+            .lock_or_recover()
+            .close_candidates(chat, profile),
+    );
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+async fn stop_session(chrome: &super::ChromeControl, id: &str) -> bool {
+    let answer = tokio::time::timeout(
+        STOP_WAIT,
+        chrome
+            .owner
+            .call("chrome_session", json!({"action":"stop","sessionId":id})),
+    )
+    .await;
+    answer.is_ok_and(|answer| {
+        let body = &answer.value()["structuredContent"];
+        answer.value()["isError"] != true
+            && body["error"].is_null()
+            && matches!(body["state"].as_str(), Some("stopped" | "disconnected"))
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CloseAttempt {
+    Ended,
+    StoppedConfirmed,
+    StoppedUnconfirmed,
+}
+
+/// The agent-facing answer of one `close_browser`.
 fn answer_text(
     name: &str,
-    attempted: bool,
+    attempt: CloseAttempt,
     earlier: bool,
-    confirmed: bool,
+    earlier_warned: bool,
     windows: &Closing,
 ) -> String {
-    if !attempted && earlier {
-        format!(
-            "The browser session of this chat in {name} ended by close_browser. An agent window from before the browser lost its connection may still be open; to close it, open a new browser session and use close_browser again, or tell the user. The chat may open another browser."
-        )
-    } else if !attempted {
-        format!(
-            "The browser session of this chat in {name} ended by close_browser. The chat may open another browser."
-        )
-    } else if confirmed && windows.failed && windows.closed {
-        format!(
-            "The browser session of this chat in {name} was stopped by close_browser. Some of the agent's own tabs could not be closed (a tab the user moved to another window, a window from before the browser reconnected or restarted, or a close the browser did not confirm); tell the user they may still be open. The chat may open another browser."
-        )
-    } else if confirmed && windows.failed {
-        format!(
-            "The browser session of this chat in {name} was stopped by close_browser. The agent's own tabs could not be closed; tell the user they may still be open. The chat may open another browser."
-        )
-    } else if confirmed && windows.closed {
-        format!(
-            "The browser session of this chat in {name} was stopped by close_browser and the agent's own tabs were closed; tabs the user opened or changed stay open, and so does a window that still holds one. The chat may open another browser."
-        )
-    } else if confirmed {
-        format!(
-            "The browser session of this chat in {name} was stopped by close_browser. The chat may open another browser."
-        )
+    let earlier_clause = if earlier_warned {
+        "; an agent window reported earlier may still be open; tell the user"
     } else {
-        format!(
+        ""
+    };
+    match attempt {
+        CloseAttempt::Ended if earlier => format!(
+            "The browser session of this chat in {name} ended by close_browser. An agent window from before the browser lost its connection may still be open; to close it, open a new browser session and use close_browser again, or tell the user. The chat may open another browser."
+        ),
+        CloseAttempt::Ended => format!(
+            "The browser session of this chat in {name} ended by close_browser{earlier_clause}. The chat may open another browser."
+        ),
+        CloseAttempt::StoppedConfirmed if windows.failed() && windows.closed => format!(
+            "The browser session of this chat in {name} was stopped by close_browser. Some of the agent's own tabs could not be closed (a tab the user moved to another window, a window from before the browser reconnected or restarted, or a close the browser did not confirm); tell the user they may still be open. The chat may open another browser."
+        ),
+        CloseAttempt::StoppedConfirmed if windows.failed() => format!(
+            "The browser session of this chat in {name} was stopped by close_browser. The agent's own tabs could not be closed; tell the user they may still be open. The chat may open another browser."
+        ),
+        CloseAttempt::StoppedConfirmed if windows.closed => format!(
+            "The browser session of this chat in {name} was stopped by close_browser and the agent's own tabs in this browser session were closed; tabs the user opened or changed stay open, and so does a window that still holds one{earlier_clause}. The chat may open another browser."
+        ),
+        CloseAttempt::StoppedConfirmed => format!(
+            "The browser session of this chat in {name} was stopped by close_browser{earlier_clause}. The chat may open another browser."
+        ),
+        CloseAttempt::StoppedUnconfirmed => format!(
             "The browser did not confirm Stop. The agent's tabs may still be open in {name}; tell the user. The session of this chat ended by close_browser and the chat may open another browser."
-        )
+        ),
     }
 }
 
-/// The helper's exact profile ID for `profile` when no live close resolved it (status unanswered, or no live session):
-/// the one connected helper profile of the same canonical ID, else the one profile all this chat's sessions here share.
-fn fallback_profile(
-    chrome: &super::ChromeControl,
-    ids: &[String],
-    profile: &str,
-) -> Option<String> {
-    let live = chrome.owner.connected_profiles.snapshot();
-    let resolved = resolve_live_profile(live.iter().map(|(p, _)| p.as_str()), profile);
-    if resolved == profile {
-        let bound: Vec<String> = ids
-            .iter()
-            .filter_map(|id| {
-                chrome
-                    .work
-                    .lock_or_recover()
-                    .profile_of(id)
-                    .map(str::to_owned)
-                    .or_else(|| profile_bindings::session_profile(chrome, id))
-            })
-            .filter(|p| super::profile_ids::same(p, profile))
-            .collect();
-        bound
-            .first()
-            .filter(|first| bound.iter().all(|p| p == *first))
-            .cloned()
-    } else {
-        Some(resolved)
-    }
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum LiveFailure {
+    #[default]
+    None,
+    /// A live check failed on a window still tracked for retry in `agent_windows`.
+    Tracked,
+    /// A live check left unclosed tabs not tracked in `agent_windows` (reload, moved tab, cap).
+    Unresolvable,
 }
 
 /// What `close_browser`'s window closes did across this chat's live sessions.
@@ -310,13 +310,12 @@ fn fallback_profile(
 struct Closing {
     /// The helper confirmed at least one window close.
     closed: bool,
-    /// A window close failed or was not tried, or an agent window stays that the helper no longer counts as this
-    /// chat's (an extension reload or browser restart ends the extension's record of the agent's tabs), or an
-    /// agent-created tab stays in a window the agent did not open (the person moved it there), or a remembered window
-    /// of another browser incarnation was dropped without being asked (DBK17S-01).
-    failed: bool,
-    /// True when a live close/inventory check itself failed or hit the window cap (not solely an earlier drop mark).
-    live_failed: bool,
+    /// True when `nominate` saw windows dropped on a browser incarnation change.
+    dropped: bool,
+    /// Live close/inventory failure status across the chat's sessions.
+    live_failure: LiveFailure,
+    /// Windows whose `window.close` call was not confirmed; checked against remaining `agent_windows`.
+    failed_windows: Vec<u64>,
     /// Windows already asked; each at most once per `close_browser`.
     tried: Vec<u64>,
     /// Windows whose close the helper confirmed. A tried window absent here (refused, timed out, outcome unknown)
@@ -327,9 +326,24 @@ struct Closing {
 }
 
 impl Closing {
+    fn failed(&self) -> bool {
+        self.dropped || self.live_failed()
+    }
+    fn live_failed(&self) -> bool {
+        self.live_failure != LiveFailure::None
+    }
+    fn untracked_failure(&self) -> bool {
+        self.live_failure == LiveFailure::Unresolvable
+    }
     fn record_live_failure(&mut self, failed: bool) {
-        self.failed |= failed;
-        self.live_failed |= failed;
+        if failed && self.live_failure == LiveFailure::None {
+            self.live_failure = LiveFailure::Tracked;
+        }
+    }
+    fn record_unresolvable(&mut self, unresolvable: bool) {
+        if unresolvable {
+            self.live_failure = LiveFailure::Unresolvable;
+        }
     }
 }
 
@@ -355,9 +369,10 @@ async fn close_own_windows(
     profile: &str,
     id: &str,
     consent: Option<&Consent>,
+    cached_status: Option<&Value>,
     out: &mut Closing,
 ) -> String {
-    let live = live_status(shared, id, profile).await;
+    let live = live_status(shared, id, profile, cached_status).await;
     let current = live.window;
     // DBK17S-01: a remembered window is nominated only while the helper reports the browser incarnation it was opened
     // in. After a browser restart Chrome can reuse the number for a person's window, and the helper would close a tab
@@ -367,7 +382,7 @@ async fn close_own_windows(
         .agent_windows
         .lock_or_recover()
         .nominate(chat, &live.profile, live.incarnation.as_deref());
-    out.failed |= dropped;
+    out.dropped |= dropped;
     let mut pending: std::collections::VecDeque<u64> = current
         .into_iter()
         .chain(remembered.iter().copied())
@@ -381,27 +396,32 @@ async fn close_own_windows(
             && !inventory.owned.contains(&window)
         {
             // An agent window without this chat's tabs: closed already, or no longer the chat's to close.
-            out.record_live_failure(inventory.present.contains(&window));
+            out.record_unresolvable(inventory.present.contains(&window));
             out.settled.push(window);
             continue;
         }
         if out.tried.len() >= MAX_WINDOWS {
             out.record_live_failure(true);
+            out.record_unresolvable(Some(window) == current && !remembered.contains(&window));
             break;
         }
         out.tried.push(window);
         match close_window(shared, chat, id, window, consent).await {
-            None => out.record_live_failure(true),
+            None => {
+                out.record_live_failure(true);
+                out.failed_windows.push(window);
+            }
             Some(inventory) => {
                 out.closed = true;
                 out.confirmed.push(window);
                 if let Some(inventory) = inventory {
                     // An agent-created tab in a window the agent did not open stays open and is reported.
-                    out.record_live_failure(inventory.owned.iter().any(|window| {
+                    let moved = inventory.owned.iter().any(|window| {
                         Some(*window) != current
                             && !remembered.contains(window)
                             && !out.tried.contains(window)
-                    }));
+                    });
+                    out.record_unresolvable(moved);
                     known = Some(inventory);
                 }
             }
@@ -412,30 +432,57 @@ async fn close_own_windows(
 
 /// Resolves `profile` to the helper's exact `profileId` when `live_profiles` has no exact match and names one
 /// matching canonical profile (for example, `chrome_status.selectedProfile` lowercases an uppercase Chrome UUID).
-/// Distinct exact helper IDs keep their exact spellings; ambiguous lists never guess.
+/// Distinct exact helper IDs keep their exact spellings; ambiguous lists return `Err(count)` and never guess.
 fn resolve_live_profile<'a>(
     live_profiles: impl IntoIterator<Item = &'a str>,
     profile: &str,
-) -> String {
-    let mut canonical_match: Option<&str> = None;
-    let mut ambiguous = false;
+) -> Result<String, usize> {
     let wanted = super::profiles::canonical(profile);
+    let mut matches = Vec::new();
     for candidate in live_profiles {
         if candidate == profile {
-            return profile.to_owned();
+            return Ok(profile.to_owned());
         }
-        if target(candidate).is_ok() && super::profiles::canonical(candidate) == wanted {
-            if canonical_match.is_some_and(|seen| seen != candidate) {
-                ambiguous = true;
-            } else {
-                canonical_match = Some(candidate);
-            }
+        if target(candidate).is_ok()
+            && super::profiles::canonical(candidate) == wanted
+            && !matches.contains(&candidate)
+        {
+            matches.push(candidate);
         }
     }
-    match canonical_match {
-        Some(only) if !ambiguous => only.to_owned(),
-        _ => profile.to_owned(),
+    match matches.as_slice() {
+        [only] => Ok((*only).to_owned()),
+        many if many.len() > 1 => Err(many.len()),
+        _ => Ok(profile.to_owned()),
     }
+}
+
+async fn fetch_status(shared: &Arc<Shared>) -> Option<Value> {
+    tokio::time::timeout(
+        WINDOW_WAIT,
+        shared.chrome_control.owner.call("chrome_status", json!({})),
+    )
+    .await
+    .ok()
+    .map(super::owner::Answer::into_value)
+}
+
+fn resolve_from_status(
+    chrome: &super::ChromeControl,
+    status: Option<&Value>,
+    profile: &str,
+) -> Result<String, usize> {
+    if let Some(rows) = status
+        .and_then(|value| value["structuredContent"]["profiles"].as_array())
+        .filter(|rows| !rows.is_empty())
+    {
+        return resolve_live_profile(
+            rows.iter().filter_map(|row| row["profileId"].as_str()),
+            profile,
+        );
+    }
+    let live = chrome.owner.connected_profiles.snapshot();
+    resolve_live_profile(live.iter().map(|(id, _)| id.as_str()), profile)
 }
 
 /// What the helper's status says about one live session: its own window (if it has one), the browser incarnation
@@ -448,48 +495,39 @@ struct Live {
     profile: String,
 }
 
-async fn live_status(shared: &Arc<Shared>, id: &str, profile: &str) -> Live {
-    let Ok(status) = tokio::time::timeout(
-        WINDOW_WAIT,
-        shared.chrome_control.owner.call("chrome_status", json!({})),
-    )
-    .await
-    else {
-        let live = shared.chrome_control.owner.connected_profiles.snapshot();
-        return Live {
-            window: None,
-            incarnation: None,
-            profile: resolve_live_profile(live.iter().map(|(p, _)| p.as_str()), profile),
-        };
-    };
-    let data = &status.value()["structuredContent"];
-    let session = data["sessions"]
-        .as_array()
-        .and_then(|rows| rows.iter().find(|row| row["sessionId"] == id));
-    let session_exact = session.and_then(|row| row["profileId"].as_str()) == Some(profile);
-    let profiles = data["profiles"].as_array();
-    let resolved = if session_exact {
-        profile.to_owned()
-    } else if let Some(rows) = profiles {
-        resolve_live_profile(
-            rows.iter().filter_map(|row| row["profileId"].as_str()),
-            profile,
-        )
+async fn live_status(
+    shared: &Arc<Shared>,
+    id: &str,
+    profile: &str,
+    cached_status: Option<&Value>,
+) -> Live {
+    let fetched;
+    let status = if let Some(value) = cached_status {
+        value
     } else {
-        let live = shared.chrome_control.owner.connected_profiles.snapshot();
-        resolve_live_profile(live.iter().map(|(p, _)| p.as_str()), profile)
+        let Some(value) = fetch_status(shared).await else {
+            let resolved = resolve_from_status(&shared.chrome_control, None, profile)
+                .unwrap_or_else(|_| profile.to_owned());
+            return Live {
+                window: None,
+                incarnation: None,
+                profile: resolved,
+            };
+        };
+        fetched = value;
+        &fetched
     };
-    let wanted = super::profiles::canonical(&resolved);
-    let row = profiles.and_then(|rows| {
+    let data = &status["structuredContent"];
+    let resolved = resolve_from_status(&shared.chrome_control, Some(status), profile)
+        .unwrap_or_else(|_| profile.to_owned());
+    let session = data["sessions"].as_array().and_then(|rows| {
+        rows.iter().find(|row| {
+            row["sessionId"] == id && row["profileId"].as_str() == Some(resolved.as_str())
+        })
+    });
+    let row = data["profiles"].as_array().and_then(|rows| {
         rows.iter()
             .find(|row| row["profileId"].as_str() == Some(resolved.as_str()))
-            .or_else(|| {
-                rows.iter().find(|row| {
-                    row["profileId"]
-                        .as_str()
-                        .is_some_and(|p| super::profiles::canonical(p) == wanted)
-                })
-            })
     });
     Live {
         window: session.and_then(|row| row["windowId"].as_u64()),
@@ -578,7 +616,8 @@ pub(super) fn remember(shared: &Shared, chat: &str, tool: &str, args: &Value, re
         return;
     };
     let live = shared.chrome_control.owner.connected_profiles.snapshot();
-    let profile = resolve_live_profile(live.iter().map(|(id, _)| id.as_str()), &profile);
+    let profile =
+        resolve_live_profile(live.iter().map(|(id, _)| id.as_str()), &profile).unwrap_or(profile);
     // Bound to the browser incarnation the app last saw for the profile; with none known nothing is remembered.
     let added = shared
         .chrome_control
@@ -601,9 +640,9 @@ pub(super) fn remembered(shared: &Shared, chat: &str, profile: &str) -> Vec<u64>
 }
 
 /// Forgets the windows whose close the helper confirmed and those a complete inventory settled, and clears any
-/// observer-dropped mark once a live close ran `close_own_windows` (`closed_live`); true when other remembered
-/// windows or an unreported dropped-window mark remain (when `!attempted`, the agent is told how to reopen and close
-/// them later).
+/// observer-dropped mark once a live close ran `close_own_windows` (`closed_live`). Returns `(earlier,
+/// had_warned_before, unresolvable_now, has_canonical)`: `unresolvable_now` marks `(chat, profile)` so later closes
+/// keep reporting that an earlier window may still be open until the chat is deleted.
 fn forget_windows(
     shared: &Shared,
     chat: &str,
@@ -611,8 +650,11 @@ fn forget_windows(
     resolved_profiles: &[String],
     windows: &Closing,
     closed_live: bool,
-) -> bool {
+    confirmed: bool,
+) -> (bool, bool, bool, bool) {
     let mut all = shared.chrome_control.agent_windows.lock_or_recover();
+    let had_warned_before = all.has_warned(chat, profile);
+    let had_dropped_before = all.has_dropped(chat, profile);
     let targets: Vec<&str> = if resolved_profiles.is_empty() {
         vec![profile]
     } else {
@@ -626,10 +668,23 @@ fn forget_windows(
     if closed_live {
         all.clear_dropped(chat, profile);
     }
-    targets
+    let remaining_for_targets: Vec<u64> = targets
         .iter()
-        .any(|target| !all.of(chat, target).is_empty())
-        || all.has_dropped(chat, profile)
+        .flat_map(|target| all.of(chat, target))
+        .collect();
+    let earlier = !remaining_for_targets.is_empty() || all.has_dropped(chat, profile);
+    let untracked_failed = windows
+        .failed_windows
+        .iter()
+        .any(|window| !remaining_for_targets.contains(window));
+    let consumed_dropped = closed_live && (windows.dropped || had_dropped_before);
+    let unresolvable =
+        consumed_dropped || windows.untracked_failure() || untracked_failed || !confirmed;
+    if unresolvable {
+        all.mark_warned(chat, profile);
+    }
+    let has_canonical = all.has_canonical(chat, profile);
+    (earlier, had_warned_before, unresolvable, has_canonical)
 }
 
 fn release(shared: &Shared, chat: &str, profile: &str) {

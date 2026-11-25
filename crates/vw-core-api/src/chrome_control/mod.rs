@@ -15,6 +15,7 @@ mod safari_startup;
 pub use safari::SafariView;
 mod agent_browser;
 mod agent_close;
+mod agent_output;
 mod agent_windows;
 mod approval;
 #[cfg(all(test, feature = "your-edge"))]
@@ -274,6 +275,7 @@ pub(crate) use state::ChromeControl;
 /// Agent tool gateway: the `chrome_*` MCP tools, their browser choice and the batch/login/consent preparation.
 pub(crate) use agent_browser::{Browser, Fixed as FixedText, selected as selected_browser};
 pub(crate) use agent_close::prepare as prepare_close;
+pub(crate) use agent_output::filter as filter_agent_answer;
 pub(crate) use approval::project as project_approvals;
 pub(crate) use batch::{prepare as prepare_batch, steps as batch_steps};
 #[cfg(test)]
@@ -424,6 +426,8 @@ mod data_export_tests;
 
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 mod agent_close_dbk17u_tests;
+#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
+mod agent_close_dbk17v_tests;
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 mod agent_close_incarnation_tests;
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]

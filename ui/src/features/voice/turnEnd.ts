@@ -12,15 +12,8 @@
  * Invariants: pure apart from its own state; time comes in as arguments (ms), never from a clock.
  */
 
-/** Shortest and longest pause a user can choose (the Settings slider). */
-export const PAUSE_MIN_MS = 800;
-/** Longest pause a user can choose. */
-export const PAUSE_MAX_MS = 2_500;
-/**
- * The default pause: longer than the short pause people make to think inside a sentence, so a turn does not end
- * on half a sentence. The shortest choice (0.8 s) stays available for quicker turns.
- */
-export const PAUSE_DEFAULT_MS = 1_200;
+import { PAUSE_DEFAULT_MS, PAUSE_MAX_MS, PAUSE_MIN_MS } from "../../state/voiceSettings";
+export { PAUSE_DEFAULT_MS, PAUSE_MAX_MS, PAUSE_MIN_MS };
 
 /** RMS (0..1) below which a chunk is quiet in any room. */
 const FLOOR_RMS = 0.01;

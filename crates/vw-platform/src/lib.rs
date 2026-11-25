@@ -16,6 +16,7 @@ pub mod browser;
 pub mod checked_executable;
 pub mod child_env;
 pub mod clipboard;
+pub mod command_resolve;
 pub use clipboard::content as clipboard_content;
 pub mod screen_reader;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -53,6 +54,9 @@ mod harden;
 mod in_front;
 #[allow(unsafe_code)]
 pub mod interface_addresses;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod macos_app_location;
 pub use interface_addresses::interface_addresses;
 pub mod keep_awake;
 #[cfg(all(

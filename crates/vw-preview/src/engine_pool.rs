@@ -3,7 +3,7 @@
 //! An admitted session keeps its slot until its engine is closed.
 //! Ported from ShellX's browser engine pool.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -28,7 +28,7 @@ pub struct EnginePoolSnapshot {
     pub free_ram_mb: Option<u64>,
     /// Page keys with an admitted Browser engine (legacy wire field name).
     pub active_sessions: Vec<String>,
-    /// Sessions whose last mount request was denied.
+    /// Sessions whose last mount request was denied, in the order they started waiting.
     pub waiting_sessions: Vec<String>,
     /// Idle engine release age.
     pub idle_timeout_minutes: u32,
@@ -39,14 +39,37 @@ pub struct EnginePoolSnapshot {
 pub type MemoryProbe = Arc<dyn Fn() -> (Option<u64>, Option<u64>) + Send + Sync>;
 
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+/// The pool admits at most four engines; one chat can keep one cap's worth of pages waiting.
+pub(crate) const MAX_WAITING_PER_CHAT: usize = 4;
+/// Four chats can each fill the per-chat allowance before app-wide refusal.
+pub(crate) const MAX_WAITING_TOTAL: usize = 16;
 const SETTINGS_FILE: &str = "engine-pool.json";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WaitingLimit {
+    Chat,
+    App,
+}
 
 #[derive(Default)]
 pub(crate) struct PoolState {
     memory_probe: Option<MemoryProbe>,
     pub(crate) configured: String,
     pub(crate) active: HashMap<String, Instant>,
-    pub(crate) waiting: HashSet<String>,
+    /// Sessions whose last mount request was denied, oldest first: the order they are admitted in.
+    pub(crate) waiting: VecDeque<String>,
+    /// Chat ownership of each waiting page; kept in step with `waiting` under the pool lock.
+    waiting_owners: HashMap<String, String>,
+    /// An admission pass is scheduled or running (see `PreviewService::schedule_admission`).
+    pub(crate) admission_running: bool,
+    /// A slot freed while a pass was running: the pass runs once more before it ends.
+    pub(crate) admission_again: bool,
+    /// A waiter has left the FIFO and is awaiting native mount; Stop can still withdraw it.
+    pub(crate) admitting_waiters: HashSet<String>,
+    /// Stop or a mode reduction arrived during admission. Checked before exposing the mount.
+    pub(crate) withdrawn_waiters: HashSet<String>,
+    /// The app is quitting: nobody is admitted while every preview closes.
+    pub(crate) shutting_down: bool,
     pub(crate) turn_epochs: HashMap<String, u64>,
     pub(crate) pending_turn_starts: HashSet<String>,
     pub(crate) active_turns: HashSet<String>,
@@ -92,15 +115,59 @@ impl PoolState {
         }
     }
 
+    /// Queues `session_id` behind the sessions already waiting; one that waits keeps its place.
+    pub(crate) fn enqueue_waiting(
+        &mut self,
+        session_id: &str,
+        owner: &str,
+    ) -> Result<(), WaitingLimit> {
+        if self.waiting_owners.contains_key(session_id) {
+            return Ok(());
+        }
+        if self
+            .waiting_owners
+            .values()
+            .filter(|queued| *queued == owner)
+            .count()
+            >= MAX_WAITING_PER_CHAT
+        {
+            return Err(WaitingLimit::Chat);
+        }
+        if self.waiting.len() >= MAX_WAITING_TOTAL {
+            return Err(WaitingLimit::App);
+        }
+        self.waiting.push_back(session_id.to_owned());
+        self.waiting_owners
+            .insert(session_id.to_owned(), owner.to_owned());
+        Ok(())
+    }
+
+    pub(crate) fn remove_waiting(&mut self, session_id: &str) {
+        self.waiting.retain(|queued| queued != session_id);
+        self.waiting_owners.remove(session_id);
+    }
+
+    pub(crate) fn clear_waiting(&mut self) {
+        self.waiting.clear();
+        self.waiting_owners.clear();
+    }
+
+    /// Waiting sessions ahead of `session_id`, or all of them when it does not wait yet.
+    pub(crate) fn waiting_ahead_of(&self, session_id: &str) -> usize {
+        self.waiting
+            .iter()
+            .position(|queued| queued == session_id)
+            .unwrap_or(self.waiting.len())
+    }
+
     pub(crate) fn snapshot(&self) -> EnginePoolSnapshot {
         let (total, free) = self
             .memory_probe
             .as_ref()
             .map_or_else(detect_memory, |probe| probe());
         let mut active_sessions: Vec<_> = self.active.keys().cloned().collect();
-        let mut waiting_sessions: Vec<_> = self.waiting.iter().cloned().collect();
+        let waiting_sessions: Vec<_> = self.waiting.iter().cloned().collect();
         active_sessions.sort();
-        waiting_sessions.sort();
         EnginePoolSnapshot {
             configured_parallel_sessions: self.configured.clone(),
             effective_cap: effective_browser_cap(&self.configured, total, free),

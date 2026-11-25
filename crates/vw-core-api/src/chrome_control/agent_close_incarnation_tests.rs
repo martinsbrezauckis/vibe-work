@@ -3,8 +3,8 @@
 //! and `test_support`.
 use super::{
     agent_close_window_tests::{
-        MIXED_FAILURE, closed, closes, created_by, created_in, observed, observed_by_owner,
-        profile_row, status, status_with, stopped, two_chats,
+        MIXED_FAILURE, REPORTED_EARLIER, closed, closes, created_by, created_in, observed,
+        observed_by_owner, profile_row, status, status_with, stopped, two_chats,
     },
     agent_firefox_close_tests::fixture,
     gateway, profile_bindings, test_support,
@@ -13,7 +13,7 @@ use crate::{Origin, ask::tool_calls};
 use serde_json::{Value, json};
 use vw_platform::sync::LockRecover;
 
-pub(super) const ALL_CLOSED: &str = "the agent's own tabs were closed";
+pub(super) const ALL_CLOSED: &str = "the agent's own tabs in this browser session were closed";
 
 pub(super) fn open_session(
     core: &crate::Core,
@@ -376,6 +376,7 @@ async fn dbk17t_observer_drop_must_report_older_tabs_may_remain() {
     .await;
     assert_eq!(closes(&sent_second), vec![json!(10)]);
     assert!(second.to_string().contains(ALL_CLOSED), "{second}");
+    assert!(second.to_string().contains(REPORTED_EARLIER), "{second}");
     core.shutdown().await;
 }
 
@@ -416,6 +417,7 @@ async fn observer_drop_with_no_new_window_warns_then_clears() {
         !second.to_string().contains("could not be closed"),
         "{second}"
     );
+    assert!(second.to_string().contains(REPORTED_EARLIER), "{second}");
     core.shutdown().await;
 }
 
@@ -464,6 +466,7 @@ async fn observer_drop_without_live_session_counts_as_earlier_window() {
     )
     .await;
     assert!(clean.to_string().contains(ALL_CLOSED), "{clean}");
+    assert!(clean.to_string().contains(REPORTED_EARLIER), "{clean}");
     core.shutdown().await;
 }
 
@@ -645,11 +648,11 @@ async fn edge_uuid_and_access_modes_preserve_and_clear_observer_mark() {
     let lower_uuid = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     super::profiles::paired(&core.shared.chrome_control, lower_uuid, None);
     observed_by_owner(&core, &profile_row(lower_uuid, "u-a"));
-    bind_session(&core, "s", "uuid-s1", upper_uuid);
+    bind_session(&core, "s", "uuid-s1", lower_uuid);
     created_by(&core, "s", "uuid-s1", 7);
     observed_by_owner(&core, &profile_row(lower_uuid, "u-b"));
 
-    open_session(&core, "s", "uuid-s2", upper_uuid, "active");
+    open_session(&core, "s", "uuid-s2", lower_uuid, "active");
     let (uuid_answer, _) = close_chat_with(
         &core,
         "s",
@@ -721,8 +724,9 @@ async fn edge_uuid_and_access_modes_preserve_and_clear_observer_mark() {
         &[],
     )
     .await;
+    let text = edge_second.to_string();
     assert!(
-        edge_second.to_string().contains(ALL_CLOSED),
+        text.contains(ALL_CLOSED) && text.contains(REPORTED_EARLIER),
         "{edge_second}"
     );
     core.shutdown().await;

@@ -59,11 +59,15 @@ async fn start_supervisor(
     secrets: Arc<dyn SecretProvider>,
     config: &CoreConfig,
 ) -> Result<Arc<Supervisor>, SupervisorError> {
-    crate::model_choices::prepare_builtin_models(
-        &supervisor.vibe_home,
-        config.sessions_dir.as_deref(),
-    );
+    crate::model_choices::retire_kept_medium(&supervisor.vibe_home, config.sessions_dir.as_deref());
     crate::mcp_keys::prepare_config(&supervisor.vibe_home, config.keys.as_ref()); // Use this run's port.
+    // Command servers (also older or brought ones) are paused before Vibe can start them, unless Developer permissions is on.
+    crate::command_pause::at_start(&supervisor.vibe_home, config.secret_scan_data.as_deref())
+        .map_err(|_| {
+            SupervisorError::BeforeLaunch(
+                vw_vocabulary::texts::COMMAND_SERVER_STARTUP_BLOCKED.to_owned(),
+            )
+        })?;
     if !config.start_vibe {
         // Local startup recovery and plugin admission still belong to the core even when a test needs no server.
         if let Some(check) = &supervisor.before_launch {
@@ -226,6 +230,7 @@ fn own_callbacks(supervisor: &mut SupervisorConfig) -> Arc<OnceLock<Weak<Shared>
 
 /// Services prepared in startup order, then moved into the shared state without spawning its tasks.
 struct Startup {
+    default_cwd: std::path::PathBuf,
     model_requests: Option<Arc<dyn vw_supervisor::ModelRequests>>,
     mistral_proxy_route: Option<String>,
     vibe_processes: crate::vibe_processes::VibeProcesses,
@@ -325,6 +330,7 @@ fn build_shared(state: Startup) -> Shared {
         github_reads: state.github_reads,
         keep_awake: crate::keep_awake::from_config(config),
         developer_permissions: DeveloperPermissions::new(config.secret_scan_data.as_deref()),
+        default_cwd: state.default_cwd,
         new_chat: crate::new_chat::Draft::new(config.sessions_dir.as_deref()),
         skills_lock: tokio::sync::Mutex::new(()),
         queue_returns: crate::queue_return::Returns::default(),
@@ -457,6 +463,7 @@ impl Core {
         let app_context = crate::app_context::Context::new(&supervisor, &config);
         let model_requests = secrets.model_requests();
         let mistral_proxy_route = mistral_proxy_route(&supervisor.extra_env);
+        let default_cwd = supervisor.cwd.clone();
         let supervisor = start_supervisor(supervisor, secrets, &config).await?;
         let first = supervisor.current().map(|conn| conn.subscribe());
         let (feeds, feeds_rx) = mpsc::unbounded_channel();
@@ -489,6 +496,7 @@ impl Core {
         let (preview, pages, files) = crate::core_viewers::open(&config);
         let plan_profile = crate::plan_profile::PlanProfile::new();
         let shared = Arc::new(build_shared(Startup {
+            default_cwd,
             model_requests,
             mistral_proxy_route,
             vibe_processes,
@@ -556,6 +564,11 @@ async fn start_tasks(
     )
     .await;
     Box::pin(crate::session_delete::sweep(&Core {
+        shared: shared.clone(),
+    }))
+    .await;
+    // A chat Vibe never saved leaves no route to its browser storage: clear it now.
+    Box::pin(crate::unsaved_stores::sweep(&Core {
         shared: shared.clone(),
     }))
     .await;

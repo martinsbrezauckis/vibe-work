@@ -332,8 +332,8 @@ pub(super) async fn handle(State(shared): State<Arc<Shared>>, request: Request) 
     if parts.uri.path().starts_with(MCP_PREFIX) {
         let tokens = Arc::clone(&shared.tokens);
         let accepts = move |t: &str| tokens.accepts(t);
-        let (client, mcp) = (shared.client.get(), &shared.config.mcp);
-        return crate::mcp::handle(&client, mcp, &accepts, parts, body).await;
+        let client = shared.client.get();
+        return crate::mcp::handle(&client, &shared.config, &accepts, parts, body).await;
     }
     let route = match admit(&shared, &parts) {
         Ok(route) => route,

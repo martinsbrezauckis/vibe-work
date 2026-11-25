@@ -18,7 +18,6 @@ import { registerPlaceholderTabs } from "./features/shell/PlaceholderTabs";
 import { registerFilesTab } from "./features/files/register";
 import { registerPagesTab } from "./features/pages/register";
 import { registerPreviewTab } from "./features/preview/register";
-import { startBrowserVideo } from "./features/preview/browserVideo";
 import { registerProjects } from "./features/projects/register";
 import { Shell } from "./features/shell/Shell";
 import { registerTerminalTab } from "./features/terminal/register";
@@ -73,7 +72,10 @@ if (container === null) {
 }
 
 const app: App = createApp({ client: selectClient() });
-if (insideTauri()) void startBrowserVideo().catch(() => undefined);
+if (insideTauri())
+  void import("./features/preview/browserVideo")
+    .then((m) => m.startBrowserVideo())
+    .catch(() => undefined);
 registerPlaceholderTabs(app.panelTabs);
 registerTerminalTab(app);
 registerChangesTab(app);

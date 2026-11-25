@@ -1,10 +1,15 @@
 /** Renders Vibe's spending/counters and native subagent shares from the session usage store in Settings. */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { formatTokens } from "../../state/account";
 import { costText, sessionUsageOf, createSubagentUsage } from "../../state/sessionUsage";
 import { useStore } from "../../state/createStore";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
+
+/** A reported number keeps the tabular number font; a missing one reads as text, like "Not reported" elsewhere. */
+function Value({ value, children }: { value: number | null; children: ReactNode }) {
+  return <dd className={value === null ? undefined : "mono"}>{children}</dd>;
+}
 
 /** Session-owned counters, with subagents priced separately by Vibe. */
 export function SessionUsageFacts({ sessionId }: { sessionId: string }) {
@@ -24,19 +29,19 @@ export function SessionUsageFacts({ sessionId }: { sessionId: string }) {
       <dl className="set-facts" data-testid="session-cost">
         <div className="check">
           <dt>Cost (USD)</dt>
-          <dd className="mono">{costText(usage.cost)}</dd>
+          <Value value={usage.cost}>{costText(usage.cost)}</Value>
         </div>
         <div className="check">
           <dt>Steps</dt>
-          <dd className="mono">{formatTokens(usage.steps)}</dd>
+          <Value value={usage.steps}>{formatTokens(usage.steps)}</Value>
         </div>
         <div className="check">
           <dt>Cached tokens</dt>
-          <dd className="mono">{formatTokens(usage.cached)}</dd>
+          <Value value={usage.cached}>{formatTokens(usage.cached)}</Value>
         </div>
         <div className="check">
           <dt>Tool calls</dt>
-          <dd className="mono">{formatTokens(usage.tools)}</dd>
+          <Value value={usage.tools}>{formatTokens(usage.tools)}</Value>
         </div>
       </dl>
       {(current?.rows.length ?? 0) > 0 && (
@@ -46,18 +51,18 @@ export function SessionUsageFacts({ sessionId }: { sessionId: string }) {
             <dl className="set-facts" key={row.id}>
               <div className="check">
                 <dt>{row.name}</dt>
-                <dd className="mono">
+                <Value value={row.cost}>
                   {costText(row.cost)}
-                  {row.estimated ? " (estimated)" : ""}
-                </dd>
+                  {row.cost !== null && row.estimated ? " (estimated)" : ""}
+                </Value>
               </div>
               <div className="check">
                 <dt>Steps</dt>
-                <dd className="mono">{formatTokens(row.steps)}</dd>
+                <Value value={row.steps}>{formatTokens(row.steps)}</Value>
               </div>
               <div className="check">
                 <dt>Cached tokens</dt>
-                <dd className="mono">{formatTokens(row.cached)}</dd>
+                <Value value={row.cached}>{formatTokens(row.cached)}</Value>
               </div>
             </dl>
           ))}

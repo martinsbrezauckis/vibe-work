@@ -4,7 +4,9 @@
 //! `gateway`, `profile_bindings`, and `test_support`.
 use super::{
     agent_close_incarnation_tests::{ALL_CLOSED, close_chat_with, live_status, open_session},
-    agent_close_window_tests::{MIXED_FAILURE, closes, observed_by_owner, profile_row},
+    agent_close_window_tests::{
+        MIXED_FAILURE, REPORTED_EARLIER, closes, observed_by_owner, profile_row,
+    },
     edge_agent_tests, gateway, profile_bindings, test_support,
 };
 use serde_json::json;
@@ -75,6 +77,29 @@ async fn open_and_remember_window(
     .unwrap_or_else(|error| panic!("tabs.create failed: {error}"));
 }
 
+fn assert_noop_window_mark_sync(core: &crate::Core, chat: &str, profile: &str) {
+    let Some(dir) = core.shared.chrome_control.dir() else {
+        panic!("expected chrome_control dir");
+    };
+    let bindings_path = dir.join("chat-profiles.json");
+    let raw = std::fs::read(&bindings_path)
+        .unwrap_or_else(|error| panic!("read chat-profiles.json failed: {error}"));
+    let mut doc: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&raw)
+        .unwrap_or_else(|error| panic!("parse chat-profiles.json failed: {error}"));
+    doc.insert("_noop_sentinel".into(), json!("untouched"));
+    let encoded = serde_json::to_vec(&doc)
+        .unwrap_or_else(|error| panic!("encode chat-profiles.json failed: {error}"));
+    std::fs::write(&bindings_path, encoded)
+        .unwrap_or_else(|error| panic!("write chat-profiles.json failed: {error}"));
+    profile_bindings::sync_window_marks(&core.shared.chrome_control, chat, profile, true, true);
+    let after = std::fs::read_to_string(&bindings_path)
+        .unwrap_or_else(|error| panic!("re-read chat-profiles.json failed: {error}"));
+    assert!(
+        after.contains("\"_noop_sentinel\""),
+        "no-op window mark sync with warned mark already persisted must not rewrite chat-profiles.json"
+    );
+}
+
 #[tokio::test]
 async fn fix3_app_restart_warns_once_and_clears_persisted_mark_on_live_close() {
     let fixture_name = "fix3-restart-warns-once";
@@ -114,8 +139,9 @@ async fn fix3_app_restart_warns_once_and_clears_persisted_mark_on_live_close() {
             .is_none(),
         "live close after restart must clear persisted mark"
     );
+    assert_noop_window_mark_sync(&core2, "s", profile);
 
-    // Second close answers normally with no warning.
+    // Second close closes only its own session's window and keeps the reported-earlier clause.
     open_session(&core2, "s", "s3", profile, "active");
     let (second, sent2) = close_chat_with(
         &core2,
@@ -127,10 +153,11 @@ async fn fix3_app_restart_warns_once_and_clears_persisted_mark_on_live_close() {
     .await;
     assert_eq!(closes(&sent2), vec![json!(10)]);
     assert!(second.to_string().contains(ALL_CLOSED), "{second}");
+    assert!(second.to_string().contains(REPORTED_EARLIER), "{second}");
     assert!(!second.to_string().contains(MIXED_FAILURE), "{second}");
     core2.shutdown().await;
 
-    // A subsequent app restart sees no persisted mark and does not warn either.
+    // A subsequent app restart still knows an earlier window was reported until the chat is deleted.
     let core3 = edge_agent_tests::fixture(fixture_name, profiles).await;
     open_session(&core3, "s", "s4", profile, "active");
     observed_by_owner(&core3, &profile_row(profile, "inc-1"));
@@ -144,7 +171,34 @@ async fn fix3_app_restart_warns_once_and_clears_persisted_mark_on_live_close() {
     .await;
     assert_eq!(closes(&sent3), vec![json!(11)]);
     assert!(third.to_string().contains(ALL_CLOSED), "{third}");
+    assert!(third.to_string().contains(REPORTED_EARLIER), "{third}");
     assert!(!third.to_string().contains(MIXED_FAILURE), "{third}");
+    core3.shared.chrome_control.end_chat("s", true);
+    assert!(
+        read_bindings_json(&core3)
+            .get("warned_windows")
+            .and_then(|marks| marks.get("s"))
+            .is_none(),
+        "deleting a chat must clear its warned_windows mark"
+    );
+    test_support::chat(&core3.shared, "s");
+    open_session(&core3, "s", "s5", profile, "active");
+    let (after_delete, _) = close_chat_with(
+        &core3,
+        "s",
+        profile,
+        live_status("s5", "s", profile, Some(12), "inc-1"),
+        &[],
+    )
+    .await;
+    assert!(
+        after_delete.to_string().contains(ALL_CLOSED),
+        "{after_delete}"
+    );
+    assert!(
+        !after_delete.to_string().contains(REPORTED_EARLIER),
+        "{after_delete}"
+    );
     core3.shutdown().await;
 }
 

@@ -25,8 +25,8 @@
   /* A row of the chrome under the toolbar: the native page moves down while it shows, and the page tabs above stay
      visible (an error floated over them hid the tab strip). */
   margin: 4px 0 0;
-  max-height: 48px;
-  overflow: auto;
+  /* The row wraps to its whole text: a refusal that says what to do must never sit below an inner scroll. */
+  overflow-wrap: anywhere;
 }
 .preview-focus {
   margin: 0;
@@ -76,6 +76,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Why a queued page waits and what to do: a short sentence block, not the one-line address style above. */
+.preview-wait-reason {
+  max-width: 38ch;
+  margin: 6px auto 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-helper);
 }
 .preview-who {
   font-size: var(--text-sm);

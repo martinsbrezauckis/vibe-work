@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import type { SafetyResult } from "../../protocol/core";
 import { problem, safety } from "../../state/secrets";
 import { useApp } from "../shell/AppContext";
+import { ACT_ADD_RULE, ACT_REMOVE } from "../settings/actionLabels";
 
 /** The section. */
 export function SafetySettings() {
@@ -103,7 +104,7 @@ export function SafetySettings() {
               change({ op: "removeCustom", id: c.id });
             }}
           >
-            Remove
+            {ACT_REMOVE}
           </Button>
         </div>
       ))}
@@ -140,7 +141,7 @@ export function SafetySettings() {
           shape="outlined"
           disabled={busy || text.trim() === ""}
         >
-          Add rule
+          {ACT_ADD_RULE}
         </Button>
       </form>
       {error !== null && (

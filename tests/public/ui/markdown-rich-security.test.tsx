@@ -79,7 +79,7 @@ describe("untrusted diagram source", () => {
     'graph TD\nA[Start]\nclick A "https://evil.invalid"',
     '%%{init: {"securityLevel":"loose","htmlLabels":true}}%%\ngraph TD\nA --> B',
     "graph TD\nA --> B\nstyle A fill:url(https://evil.invalid/x)",
-    `graph TD\n${"A --> B\n".repeat(200)}`,
+    `graph TD\n${"A --> B\n".repeat(250)}`,
   ])(
     "falls back for unsafe directives and oversized diagrams",
     async (source) => {

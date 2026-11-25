@@ -135,11 +135,34 @@ impl PreviewService {
         owner: &str,
         page_key: &str,
     ) -> Result<bool, PreviewError> {
+        self.front_tab_if_visible_with_intent(owner, page_key, true)
+            .await
+    }
+
+    /// Applies an automatic tab selection without reviving a withdrawn waiting page.
+    ///
+    /// # Errors
+    /// An unknown tab, invalid placement, or native engine failure.
+    pub async fn front_tab_if_visible_passive(
+        &self,
+        owner: &str,
+        page_key: &str,
+    ) -> Result<bool, PreviewError> {
+        self.front_tab_if_visible_with_intent(owner, page_key, false)
+            .await
+    }
+
+    async fn front_tab_if_visible_with_intent(
+        &self,
+        owner: &str,
+        page_key: &str,
+        explicit: bool,
+    ) -> Result<bool, PreviewError> {
         if self.page_window_id(page_key).is_some() {
             return Ok(false);
         }
         let _layout = self.layout_op.lock().await;
-        self.switch_tab(owner, page_key)?;
+        self.select_tab(owner, page_key, explicit)?;
         let area = {
             let state = self.inner.lock();
             state
@@ -391,6 +414,10 @@ impl PreviewService {
     /// # Errors
     /// The page is not owned by this session.
     pub fn switch_tab(&self, owner: &str, page_key: &str) -> Result<(), PreviewError> {
+        self.select_tab(owner, page_key, true)
+    }
+
+    fn select_tab(&self, owner: &str, page_key: &str, explicit: bool) -> Result<(), PreviewError> {
         let mut state = self.inner.lock();
         if page_key != owner
             && state
@@ -406,7 +433,8 @@ impl PreviewService {
         tabs.selected = Some(page_key.to_owned());
         tabs.agent_selected = false;
         if let Some(entry) = state.entries.get_mut(page_key)
-            && entry.browser_mount == BrowserMountState::Released
+            && (entry.browser_mount == BrowserMountState::Released
+                || (explicit && entry.browser_mount == BrowserMountState::Withdrawn))
         {
             entry.browser_mount = BrowserMountState::Ready;
         }

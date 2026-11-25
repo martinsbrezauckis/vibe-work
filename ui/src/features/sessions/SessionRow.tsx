@@ -14,13 +14,14 @@
 import { Badge } from "../../components/Controls";
 import { useState } from "react";
 
+import { createLazyComponent } from "../../components/LazyChunk";
 import { Icon } from "../../components/Icon";
 import { createStore, useStore } from "../../state/createStore";
 import { BADGE_LABEL, isTemporaryFolder } from "../../state/sessionSummary";
 import { NO_SESSION_TOOLS } from "../../state/sessionTools";
+import { VOICE_CHAT_OFF, type VoiceChatState } from "../../state/voiceTypes";
 import { useApp } from "../shell/AppContext";
 import { useCoreState, useShellState } from "../shell/hooks";
-import { VoiceChatTag } from "../voice/VoiceChatTag";
 import { ActivityMark } from "./ActivityMark";
 import { LoopsTag } from "./LoopsTag";
 import { PausedTag } from "./PausedTag";
@@ -34,6 +35,14 @@ import { useGroupActions, useGroups } from "./useGroups";
 
 /** Stands in for the retry store when the app has no core (no session actions). */
 const NO_RETRIES = createStore<ReadonlySet<string>>(new Set());
+const NO_VOICE_CHAT = createStore<VoiceChatState>(VOICE_CHAT_OFF);
+
+/** Lazy session-row voice chat indicator; loaded only when voice chat activates. */
+export const LazyVoiceChatTag = createLazyComponent({
+  label: "voice chat status",
+  testIdPrefix: "voice.chat-tag",
+  load: async () => ({ default: (await import("../voice/VoiceChatTag")).VoiceChatTag }),
+});
 
 /** The row's session and its nested children: they move together. */
 function ids(node: RowNode): string[] {
@@ -68,6 +77,10 @@ export function SessionRow({
   );
   const groups = useGroupActions();
   const grouped = useGroups((g) => g.data !== null);
+  const voiceChatActive = useStore(
+    app.voice?.voiceChat.store ?? NO_VOICE_CHAT,
+    (x) => x.on && x.owner === s.id,
+  );
   const [dragging, setDragging] = useState(false);
 
   // A stuck session offers the two ways out first.
@@ -242,7 +255,7 @@ export function SessionRow({
                 <span>{node.chip}</span>
               </Badge>
             )}
-            <VoiceChatTag sessionId={s.id} />
+            {voiceChatActive && <LazyVoiceChatTag sessionId={s.id} />}
             <LoopsTag sessionId={s.id} />
             <UsingBrowserTag sessionId={s.id} />
             <PausedTag sessionId={s.id} />

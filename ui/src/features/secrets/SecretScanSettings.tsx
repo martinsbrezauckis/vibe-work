@@ -4,6 +4,7 @@ import { Button } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
 import { scanStatus } from "../../state/secretScanText";
 import { useApp } from "../shell/AppContext";
+import { ACT_CHECK_NOW } from "../settings/actionLabels";
 
 /** The status and Check now exist only while scanning is enabled. */
 export function SecretScanSettings() {
@@ -62,7 +63,7 @@ function ScanSettings({ scan }: { scan: NonNullable<ReturnType<typeof useApp>["s
                 void scan.run({ op: "checkNow" });
               }}
             >
-              Check now
+              {ACT_CHECK_NOW}
             </Button>
           </div>
         </div>

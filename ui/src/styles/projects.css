@@ -127,10 +127,14 @@
   display: grid;
   gap: 4px;
 }
+.pj-needs li {
+  min-width: 0;
+}
 .pj-needs li button {
   width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   text-align: left;
@@ -145,14 +149,27 @@
 .pj-needs li button:hover:where(:not(:disabled)) {
   background: color-mix(in srgb, var(--orange) 12%, transparent);
 }
+.pj-needs-description {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
 .pj-needs .what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
 }
 .pj-needs .where {
+  flex: none;
+  white-space: nowrap;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
 .pj-needs .kind {
+  white-space: nowrap;
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   color: var(--orange-2);
@@ -161,6 +178,7 @@
   padding: 1px 6px;
 }
 .pj-needs .age {
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: var(--weight-regular);
@@ -308,7 +326,21 @@
   gap: 6px;
 }
 .pj-chip {
+  min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pj-session-title {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pj-session-status {
+  flex: none;
 }
 .pj-chip .d {
   width: 7px;

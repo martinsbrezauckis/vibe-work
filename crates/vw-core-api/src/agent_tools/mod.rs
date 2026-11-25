@@ -22,6 +22,7 @@ mod browser_batch;
 mod browser_dialog_tests;
 mod browser_sending;
 mod browser_tools;
+mod browser_waiting;
 pub(crate) use browser_tools::check_current as check_browser_current;
 #[cfg(feature = "video")]
 mod video_budget;

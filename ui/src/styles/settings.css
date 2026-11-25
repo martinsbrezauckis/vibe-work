@@ -88,6 +88,23 @@
 [data-setting="browser-local-network-sites"] > :not(:first-child) {
   grid-column: 1 / -1;
 }
+[data-setting="browser-local-network-sites"] ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+[data-setting="browser-local-network-sites"] li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-control-gap);
+  padding: var(--space-control-gap) 0;
+}
+[data-setting="browser-local-network-sites"] li > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 [data-setting="browser-profile"] {
   flex-wrap: wrap;
   gap: 10px;

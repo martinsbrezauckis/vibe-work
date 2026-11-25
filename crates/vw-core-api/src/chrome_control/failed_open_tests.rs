@@ -22,6 +22,14 @@ fn captured(profile: &str) -> Value {
     row["profileId"] = json!(profile);
     row
 }
+/// Agent-opened external browsers in this build: Firefox exists only with `your-firefox`.
+fn external_profiles() -> Vec<&'static str> {
+    let mut profiles = vec!["edge:work"];
+    if cfg!(feature = "your-firefox") {
+        profiles.insert(0, "firefox:agent");
+    }
+    profiles
+}
 fn status(rows: Value) -> Value {
     let mut reply = json!({"structuredContent":{"version":1,"clientId":"vibework-owner",
         "firefoxWindow":"Window open","profiles":[
@@ -42,7 +50,7 @@ fn not_ready(row: Value) -> Value {
 
 #[tokio::test]
 async fn failed_open_after_unconfirmed_stop_does_not_rebind_or_persist() {
-    for profile in ["firefox:agent", "edge:work"] {
+    for profile in external_profiles() {
         let core = connected(&format!("failed-open-terminal-{profile}")).await;
         let chrome = &core.shared.chrome_control;
         *chrome.owner.firefox_pairing.lock().unwrap() = (control::PairingState::WindowOpen, None);
@@ -110,7 +118,7 @@ async fn failed_open_after_unconfirmed_stop_does_not_rebind_or_persist() {
 
 #[tokio::test]
 async fn failed_open_connecting_is_uncertain_until_a_terminal_inventory() {
-    for profile in ["firefox:agent", "edge:work"] {
+    for profile in external_profiles() {
         let core = connected(&format!("failed-open-connecting-{profile}")).await;
         let chrome = &core.shared.chrome_control;
         *chrome.owner.firefox_pairing.lock().unwrap() = (control::PairingState::WindowOpen, None);
@@ -245,20 +253,20 @@ async fn uncertain_open_does_not_claim_a_prior_preference_is_live() {
 
 #[tokio::test]
 async fn active_first_browser_still_refuses_a_second_with_vocabulary_text() {
-    let core = connected("failed-open-active-control").await;
-    let chrome = &core.shared.chrome_control;
-    *chrome.owner.firefox_pairing.lock().unwrap() = (control::PairingState::WindowOpen, None);
-    open(&core, "firefox:agent").await.unwrap();
-    let refusal = open(&core, "chrome:work").await.unwrap_err();
-    let expected = vw_vocabulary::texts::BROWSER_PROFILE_AGENT_REFUSAL.replace(
-        "{profile}",
-        &control::profiles::label(chrome, "firefox:agent"),
-    );
-    assert_eq!(
-        refusal,
-        format!(
-            "{expected} To release this chat's hold, use chrome_session close_browser (profileId firefox:agent), then open a new browser session."
-        )
-    );
-    core.shutdown().await;
+    for profile in external_profiles() {
+        let core = connected(&format!("failed-open-active-control-{profile}")).await;
+        let chrome = &core.shared.chrome_control;
+        *chrome.owner.firefox_pairing.lock().unwrap() = (control::PairingState::WindowOpen, None);
+        open(&core, profile).await.unwrap();
+        let refusal = open(&core, "chrome:work").await.unwrap_err();
+        let expected = vw_vocabulary::texts::BROWSER_PROFILE_AGENT_REFUSAL
+            .replace("{profile}", &control::profiles::label(chrome, profile));
+        assert_eq!(
+            refusal,
+            format!(
+                "{expected} To release this chat's hold, use chrome_session close_browser (profileId {profile}), then open a new browser session."
+            )
+        );
+        core.shutdown().await;
+    }
 }

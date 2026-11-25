@@ -53,7 +53,7 @@ pub use check::{
     has_sign_in, mask_proxy_url, scrub, with_loopback, without_loopback,
 };
 pub use prepare::{PreparedSettings, prepare_settings};
-pub use probe::{Probe, ProbeKind, probe};
+pub use probe::{Probe, ProbeKind, classify_request_error, probe};
 pub use record::{LoadedSettings, NetworkMacKey, read_settings, seal_settings};
 
 /// Vibe's six keys, in the order its `/proxy-setup` lists them.

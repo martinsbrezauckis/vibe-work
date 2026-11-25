@@ -59,9 +59,14 @@
   .shead {
     padding-left: 14px;
   }
-  .welcome {
+  .welcome,
+  .new-chat-composer {
     padding-left: 16px;
     padding-right: 16px;
+  }
+  .welcome .new-chat-composer {
+    padding-left: 0;
+    padding-right: 0;
   }
 }
 

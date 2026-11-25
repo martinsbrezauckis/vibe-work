@@ -56,8 +56,8 @@ fn check_view(view: Option<(f64, f64)>, request: &Request) -> Result<(), ActErro
     });
     if width < MIN_VIEW.0 || height < MIN_VIEW.1 {
         return Err(refused(format!(
-            "this session's browser has no usable size ({width} x {height} px), so a {} capture would \
-             measure a tiny page: ask the user to show this session's Browser tab, then capture again (media \
+            "this chat's browser has no usable size ({width} x {height} px), so a {} capture would \
+             measure a tiny page: ask the user to show this chat's Browser tab, then capture again (media \
              and the page's text formats work without it)",
             request.what.name()
         )));

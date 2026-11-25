@@ -53,6 +53,12 @@ impl Core {
         debug!(session_id, "opening a channel for the session");
         let canonical = self.shared.channels.canonical(session_id);
         let session_id = canonical.as_str();
+        crate::project_mcp::admit(
+            &self.shared,
+            "session/resume",
+            &json!({"sessionId": session_id}),
+        )
+        .await?;
         crate::interrupted_send::prepare(self, session_id).await?;
         let restore = self.begin_restore(session_id, None).await;
         if restore.attached && !force {
@@ -257,7 +263,7 @@ pub(crate) fn close_idle(shared: &Arc<Shared>) {
 
 /// Whether Vibe holds scheduled loops for `id` (`loops/list`; Vibe sends no events for loops). An unanswered
 /// or malformed list counts as none: the session closes as it did before loops existed.
-async fn has_loops(shared: &Arc<Shared>, id: &str) -> bool {
+pub(crate) async fn has_loops(shared: &Arc<Shared>, id: &str) -> bool {
     let list = shared
         .channels
         .request("loops/list", serde_json::json!({ "sessionId": id }));

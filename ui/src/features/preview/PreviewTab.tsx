@@ -27,7 +27,7 @@ import { useCoreState } from "../shell/hooks";
 import type { Capture } from "./capture";
 import { CaptureMenu } from "./CaptureMenu";
 import { Annotations } from "./Annotations";
-import type { Browser } from "./browser";
+import { type Browser, browserRefusalSentence } from "./browser";
 import { isLocalPage } from "./browserModel";
 import { PageTabs } from "./PageTabs";
 import { PreviewNotes, Servers } from "./Servers";
@@ -139,7 +139,8 @@ export function PreviewTab({
   const paused = open && preview.state === "suspended" && !waiting;
   const stopped = !webTabId && preview?.state === "stopped";
   const local = !webTabId && open && isLocalPage(preview.url);
-  const shownError = error ?? agentError;
+  const rawError = error ?? agentError;
+  const shownError = rawError === null ? null : (browserRefusalSentence(rawError) ?? rawError);
   const servers =
     list === undefined ? (
       <div className="empty">Reading this chat's servers…</div>
@@ -205,6 +206,7 @@ export function PreviewTab({
             title={preview?.title ?? null}
             loading={preview?.loading ?? false}
             busy={busy}
+            waiting={waiting}
           />
         }
         activity={<AgentStrip state={agent} />}

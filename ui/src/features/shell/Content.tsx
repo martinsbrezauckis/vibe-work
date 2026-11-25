@@ -18,6 +18,7 @@ import { type ReactNode, useLayoutEffect, useRef } from "react";
 
 import { BrandMark } from "../../components/BrandMark";
 import { Icon } from "../../components/Icon";
+import { createLazyComponent } from "../../components/LazyChunk";
 import { useStore } from "../../state/createStore";
 import { TAB_KINDS, TAB_META, type TabKind, panelOf } from "../../state/shellState";
 import { LazyComposer } from "../composer/LazyComposer";
@@ -32,19 +33,13 @@ import { SessionHeldNote, useHeldBy } from "../sessions/SessionHeldNote";
 import { TemporaryChip } from "../sessions/TemporaryChip";
 import { useFindKeys } from "../search/useFindKeys";
 import { Transcript } from "../transcript/Transcript";
-import { ConnectorsPage } from "../connectors/ConnectorsPage";
-import { SkillsPage } from "../skills/SkillsPage";
-import { MarketplacePage } from "../marketplace/MarketplacePage";
 import { useMarket } from "../marketplace/hooks";
-import { LibrariesPage } from "../libraries/LibrariesPage";
 import { OrphanList } from "../worktrees/OrphanList";
 import { IncludeNote } from "../worktrees/IncludeNote";
 import { WorktreeChip } from "../worktrees/WorktreeChip";
 import { GrantsChip } from "../ask/GrantsChip";
 import { PrChip } from "../git/PrChip";
 import { useSessionGit } from "../git/useSessionGit";
-import { ProjectsPage } from "../projects/ProjectsPage";
-import { SettingsPage } from "../settings/SettingsPage";
 import { useApp } from "./AppContext";
 import { ImportHint } from "./ImportHint";
 import { KeyNotice } from "./KeyNotice";
@@ -54,6 +49,45 @@ import { CoveredByPage } from "./coverContext";
 import { useCoveringPage } from "./coveringPage";
 import { TAB_ICON } from "./tabIcons";
 import { useCoreState, useLayout, useSessionSummaries, useShellState } from "./hooks";
+
+/** Settings page loaded on demand so first paint stays small. */
+export const LazySettingsPage = createLazyComponent({
+  label: "Settings",
+  testIdPrefix: "shell.settings-page",
+  load: async () => ({ default: (await import("../settings/SettingsPage")).SettingsPage }),
+});
+/** Projects page loaded on demand when opened. */
+export const LazyProjectsPage = createLazyComponent({
+  label: "Projects",
+  testIdPrefix: "shell.projects-page",
+  load: async () => ({ default: (await import("../projects/ProjectsPage")).ProjectsPage }),
+});
+/** Connectors page loaded on demand when opened. */
+export const LazyConnectorsPage = createLazyComponent({
+  label: "Connectors",
+  testIdPrefix: "shell.connectors-page",
+  load: async () => ({ default: (await import("../connectors/ConnectorsPage")).ConnectorsPage }),
+});
+/** Skills page loaded on demand when opened. */
+export const LazySkillsPage = createLazyComponent({
+  label: "Skills",
+  testIdPrefix: "shell.skills-page",
+  load: async () => ({ default: (await import("../skills/SkillsPage")).SkillsPage }),
+});
+/** Marketplace page loaded on demand when opened. */
+export const LazyMarketplacePage = createLazyComponent({
+  label: "Marketplace",
+  testIdPrefix: "shell.marketplace-page",
+  load: async () => ({
+    default: (await import("../marketplace/MarketplacePage")).MarketplacePage,
+  }),
+});
+/** Libraries page loaded on demand when opened. */
+export const LazyLibrariesPage = createLazyComponent({
+  label: "Libraries",
+  testIdPrefix: "shell.libraries-page",
+  load: async () => ({ default: (await import("../libraries/LibrariesPage")).LibrariesPage }),
+});
 
 function ServerNote() {
   const server = useCoreState((s) => s.server);
@@ -189,24 +223,24 @@ export function Content() {
   const toolsTab = useMarket((s) => s.tab);
   const pageView =
     page === "settings" ? (
-      <SettingsPage />
+      <LazySettingsPage />
     ) : page === "projects" ? (
       <div className="view">
-        <ProjectsPage />
+        <LazyProjectsPage />
       </div>
     ) : page === "tools" ? (
       <div className="view">
         {toolsTab === "skills" ? (
-          <SkillsPage />
+          <LazySkillsPage />
         ) : toolsTab === "marketplace" ? (
-          <MarketplacePage />
+          <LazyMarketplacePage />
         ) : (
-          <ConnectorsPage />
+          <LazyConnectorsPage />
         )}
       </div>
     ) : page === "libraries" ? (
       <div className="view">
-        <LibrariesPage />
+        <LazyLibrariesPage />
       </div>
     ) : null;
   // Ctrl F finds in the open conversation or the File tab (pages over the work view have their own).
@@ -264,24 +298,26 @@ export function Content() {
               <div className="view view-welcome">
                 {/* The calm idle state: a faint construction grid fading out from the centre; nothing moves. */}
                 <div className="welcome-grid" aria-hidden="true" />
-                <div className="welcome">
-                  <div className="welcome-intro">
-                    <BrandMark />
-                    <h2>What should Vibe work on?</h2>
-                    <p>
-                      Type below to start a chat in the folder, pick one from the list, or press{" "}
-                      {formatKeys("Mod+K")} for everything else.
-                    </p>
-                    <KeyNotice />
-                    <SendToOffer />
-                    <ImportHint />
-                    <OrphanList />
-                    <ServerNote />
+                <div className="welcome-scroll">
+                  <div className="welcome">
+                    <div className="welcome-intro">
+                      <BrandMark />
+                      <h2>What should Vibe work on?</h2>
+                      <p>
+                        Type below to start a chat in the folder, pick one from the list, or press{" "}
+                        {formatKeys("Mod+K")} for everything else.
+                      </p>
+                      <KeyNotice />
+                      <SendToOffer />
+                      <ImportHint />
+                      <OrphanList />
+                      <ServerNote />
+                    </div>
+                    <NewChatPanel />
                   </div>
-                  <NewChatPanel />
-                  <div className="new-chat-composer">
-                    <LazyComposer sessionId={NEW_CHAT} />
-                  </div>
+                </div>
+                <div className="new-chat-composer">
+                  <LazyComposer sessionId={NEW_CHAT} />
                 </div>
               </div>
             </>

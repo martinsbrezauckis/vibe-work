@@ -61,7 +61,7 @@ pub(crate) struct Leases {
     data: Option<PathBuf>,
     instance: String,
     claims: Arc<Claims>,
-    active: Mutex<HashMap<String, Arc<Lease>>>,
+    active: Mutex<HashMap<String, (crate::channels::ChannelKey, Arc<Lease>)>>,
     #[cfg(test)]
     before_wait: Mutex<Option<tests::Pause>>,
 }
@@ -216,10 +216,30 @@ impl Leases {
     }
 
     /// A channel keeps its claim until its acknowledged close or core shutdown.
-    pub(crate) fn retain(&self, id: &str, lease: Option<Arc<Lease>>) {
+    pub(crate) fn retain(
+        &self,
+        id: &str,
+        key: crate::channels::ChannelKey,
+        lease: Option<Arc<Lease>>,
+    ) {
         if let Some(lease) = lease {
-            self.active.lock_or_recover().insert(id.to_owned(), lease);
+            self.active
+                .lock_or_recover()
+                .insert(id.to_owned(), (key, lease));
         }
+    }
+
+    /// Cancellation may finish after a replacement bound; only this channel's retention may end.
+    pub(crate) fn release_channel(
+        &self,
+        id: &str,
+        key: crate::channels::ChannelKey,
+    ) -> Option<Arc<Lease>> {
+        let mut active = self.active.lock_or_recover();
+        if active.get(id).is_some_and(|(owner, _)| *owner == key) {
+            return active.remove(id).map(|(_, lease)| lease);
+        }
+        None
     }
 
     pub(crate) fn release(&self, id: &str) {

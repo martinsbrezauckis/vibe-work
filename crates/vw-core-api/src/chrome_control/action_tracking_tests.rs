@@ -36,7 +36,8 @@ async fn external_receipts_use_host_binding_and_never_retain_typed_values() {
             Answer::Helper(receipt),
             "chrome_execute",
             false,
-        );
+        )
+        .unwrap();
         assert!(output["vwMcpResult"]["structuredContent"].is_object());
         let event = events
             .try_recv()

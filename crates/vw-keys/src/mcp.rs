@@ -101,6 +101,7 @@ impl KeyService {
         if !mcp_binding::is_binding_id(&id) {
             return Err(KeyError::InvalidSecret("not an MCP binding id"));
         }
+        self.mcp_problems.clear(&id);
         let vault = self.vault();
         blocking(move || vault.delete_item(&id).map(|_| ()))
             .await?
@@ -110,6 +111,12 @@ impl KeyService {
     /// Installs the core's MCP resolver in the proxy; until then every MCP request answers 503.
     pub fn set_mcp_resolver(&self, resolver: Arc<dyn vw_keyproxy::McpResolver>) {
         *self.mcp.write_or_recover() = Some(resolver);
+    }
+
+    /// Why the last request to the key server of binding `id` failed, `None` when it did not (or not yet).
+    #[must_use]
+    pub fn mcp_problem(&self, id: &str) -> Option<vw_keyproxy::McpProblem> {
+        self.mcp_problems.get(id)
     }
 
     /// Removes the resolver (core shutdown): MCP requests answer 503 again.

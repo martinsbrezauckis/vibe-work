@@ -40,6 +40,41 @@ fn plain_value(value: &Value) -> String {
     }
 }
 
+/// The lines an add-server confirmation shows beyond the address: sign-in scopes, connection mode and what is true
+/// about the address (a server on this computer, or the plain-HTTP rule).
+fn mcp_add_parts(params: &Value, parts: &mut Vec<String>) {
+    if let Some(scopes) = params.get("scopes").and_then(Value::as_array) {
+        parts.push(format!(
+            "Requested sign-in scopes: {}",
+            scopes
+                .iter()
+                .filter_map(Value::as_str)
+                .map(dialog_quote)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(mode) = named(params, "transport", "Connection mode", false) {
+        parts.push(mode);
+    }
+    let local = params
+        .get("url")
+        .and_then(Value::as_str)
+        .and_then(crate::local_server_disclosure);
+    if let Some(local) = local {
+        parts.push(local);
+    } else {
+        parts.push(
+            if params.get("allowInsecureHttp").and_then(Value::as_bool) == Some(true) {
+                "Unencrypted HTTP is allowed; network traffic may be read or changed.".to_owned()
+            } else {
+                "Unencrypted HTTP is not allowed.".to_owned()
+            },
+        );
+        parts.push(crate::MCP_NOT_VOUCHED.to_owned());
+    }
+}
+
 /// Plain action for each confirmed method, or the gate rule's specific description.
 fn action_sentence<'a>(method: &str, params: &Value, base: &'a str) -> &'a str {
     match method {
@@ -206,27 +241,7 @@ pub(crate) fn confirmation_summary(method: &str, params: &Value, base: &str) -> 
         }
     }
     if matches!(method, "mcp/add" | "mcp_catalog/add") {
-        if let Some(scopes) = params.get("scopes").and_then(Value::as_array) {
-            parts.push(format!(
-                "Requested sign-in scopes: {}",
-                scopes
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(dialog_quote)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if let Some(mode) = named(params, "transport", "Connection mode", false) {
-            parts.push(mode);
-        }
-        parts.push(
-            if params.get("allowInsecureHttp").and_then(Value::as_bool) == Some(true) {
-                "Unencrypted HTTP is allowed; network traffic may be read or changed.".to_owned()
-            } else {
-                "Unencrypted HTTP is not allowed.".to_owned()
-            },
-        );
+        mcp_add_parts(params, &mut parts);
     }
     if let Some(config) = params.get("agentConfig") {
         if let Some(name) = named(config, "agent", "Agent", false) {

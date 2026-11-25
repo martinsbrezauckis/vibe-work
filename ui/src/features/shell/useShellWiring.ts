@@ -39,8 +39,7 @@ import { registerComposerRoutes } from "../composer/composerRoutes";
 import { registerDocumentRoutes } from "../composer/documentRoutes";
 import { useHandOverWiring } from "../files/handOver";
 import { registerPointShortcut } from "../files/point";
-import { registerVoiceKeys } from "../voice/hooks";
-import { registerVoiceRoutes } from "../voice/voiceRoutes";
+import { registerVoiceKeys } from "../../state/voiceKeys";
 import { registerSetupRoutes } from "../setup/setupRoutes";
 import { registerSettingsRoutes } from "../settings/settingsRoutes";
 import { registerConnectorRoutes } from "../connectors/connectorRoutes";
@@ -78,9 +77,15 @@ export function useShellWiring(): void {
         dialogs.disconnect();
       },
       voice.prompts.watch(),
-      voice.voiceChat.store.subscribe(voice.prompts.resume),
-      voice.dictation.store.subscribe(voice.prompts.resume),
-      voice.narration.store.subscribe(voice.prompts.resume),
+      voice.voiceChat.store.subscribe(() => {
+        voice.prompts.resume();
+      }),
+      voice.dictation.store.subscribe(() => {
+        voice.prompts.resume();
+      }),
+      voice.narration.store.subscribe(() => {
+        voice.prompts.resume();
+      }),
     ];
     return () => {
       for (const stop of stops) stop();
@@ -216,7 +221,14 @@ export function useShellWiring(): void {
   useEffect(() => registerTranscriptRoutes(app), [app]);
   useEffect(() => registerComposerRoutes(app), [app]);
   useEffect(() => registerDocumentRoutes(app), [app]);
-  useEffect(() => registerVoiceRoutes(app), [app]);
+  useEffect(
+    () =>
+      app.uiControl.register("voice", async (body) => {
+        const { handleVoice } = await import("../voice/voiceRoutes");
+        return handleVoice(app, body);
+      }),
+    [app],
+  );
   useEffect(() => registerVoiceKeys(app), [app]);
   useEffect(() => registerSetupRoutes(app), [app]);
   useEffect(() => registerSettingsRoutes(app), [app]);

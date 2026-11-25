@@ -46,7 +46,6 @@ import { DeveloperSettings } from "./DeveloperSettings";
 import { ErrorDetailSetting } from "./ErrorDetailSetting";
 import { InstructionsSettings } from "./InstructionsSettings";
 import { MistralLinks } from "./MistralLinkRows";
-import { NetworkSettings } from "./NetworkSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { SignedInAccounts } from "./SignedInAccounts";
 import { SecretScanSettings } from "../secrets/SecretScanSettings";
@@ -65,6 +64,10 @@ import { searchSettings } from "./catalog";
 // Loaded when the category opens: its forms and the connector picker stay out of the window's first paint.
 const KnowledgeSettings = lazy(() =>
   import("./KnowledgeSettings").then((m) => ({ default: m.KnowledgeSettings })),
+);
+// Loaded when the category opens: proxy/certificate forms and network store stay out of the first paint.
+const NetworkSettings = lazy(() =>
+  import("./NetworkSettings").then((m) => ({ default: m.NetworkSettings })),
 );
 
 /** The sections each category shows, in order. */
@@ -160,7 +163,11 @@ function sections(category: string): ReactElement {
         </>
       );
     case "network":
-      return <NetworkSettings />;
+      return (
+        <Suspense fallback={null}>
+          <NetworkSettings />
+        </Suspense>
+      );
     case "updates":
       return <UpdateSettings />;
     case "developer":
@@ -177,9 +184,29 @@ const FLASH_MS = 1500;
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
-/** Moves focus to the first control of a found setting (or the setting itself), so the next key acts there. */
-function focusInto(row: HTMLElement): void {
-  const control = row.querySelector<HTMLElement>(FOCUSABLE);
+function findActionControl(row: HTMLElement, action: string | null): HTMLElement | null {
+  if (action === null) return null;
+  const target = action.replace(/…+$/, "").trim().toLowerCase();
+  if (target === "") return null;
+  const controls = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  const exact = controls.find((el) => {
+    const label = (el.getAttribute("aria-label") ?? "").replace(/…+$/, "").trim().toLowerCase();
+    const text = el.textContent.replace(/…+$/, "").trim().toLowerCase();
+    return text === target || label === target;
+  });
+  if (exact !== undefined) return exact;
+  return (
+    controls.find((el) => {
+      const label = (el.getAttribute("aria-label") ?? "").toLowerCase();
+      const text = el.textContent.toLowerCase();
+      return text.includes(target) || label.includes(target);
+    }) ?? null
+  );
+}
+
+/** Moves focus to the matched action control (or the first control of a found setting), so the next key acts there. */
+function focusInto(row: HTMLElement, targetAction: string | null): void {
+  const control = findActionControl(row, targetAction) ?? row.querySelector<HTMLElement>(FOCUSABLE);
   if (control !== null) {
     control.focus({ preventScroll: true });
     return;
@@ -192,6 +219,7 @@ function focusInto(row: HTMLElement): void {
 function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
   const { shell } = useApp();
   const target = useShellState((s) => (s.settings.open ? s.settings.target : null));
+  const targetAction = useShellState((s) => (s.settings.open ? s.settings.targetAction : null));
   const category = useShellState((s) => s.settings.category);
   useEffect(() => {
     if (target === null) return;
@@ -205,10 +233,20 @@ function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
         frame = requestAnimationFrame(attempt);
         return;
       }
+      if (
+        row !== null &&
+        targetAction !== null &&
+        findActionControl(row, targetAction) === null &&
+        tries < 15
+      ) {
+        tries += 1;
+        frame = requestAnimationFrame(attempt);
+        return;
+      }
       const lit = row ?? page?.querySelector<HTMLElement>(".set-head") ?? null;
       if (lit !== null) {
         if (typeof lit.scrollIntoView === "function") lit.scrollIntoView({ block: "center" });
-        focusInto(lit);
+        focusInto(lit, targetAction);
         lit.classList.add("set-flash");
         lit.setAttribute("data-flash", "true");
         const done = lit;
@@ -225,7 +263,7 @@ function useTargetFlash(root: React.RefObject<HTMLDivElement | null>) {
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [target, category, root, shell]);
+  }, [target, targetAction, category, root, shell]);
 }
 
 /** Esc does what Home does (outside text fields, menus and open inline forms, `data-settings-form`, whose typed
@@ -315,7 +353,7 @@ export function SettingsPage(): ReactElement {
           <>
             <header className="set-head">
               <h2>Results</h2>
-              <p className="set-path">{count}</p>
+              {results.length > 0 && <p className="set-path">{count}</p>}
             </header>
             {offered
               .filter((c) => results.some((r) => r.category === c.id))
@@ -332,15 +370,15 @@ export function SettingsPage(): ReactElement {
                         type="button"
                         className="set-hit"
                         onClick={() => {
-                          openHit(app, r);
+                          openHit(app, r, view.query);
                         }}
                       >
                         <span>
                           <b>
-                            <Highlight text={r.label} query={view.query} />
+                            <Highlight text={r.label} query={view.query} shortAtWordStart />
                           </b>
                           <span className="d">
-                            <Highlight text={r.description} query={view.query} />
+                            <Highlight text={r.description} query={view.query} shortAtWordStart />
                           </span>
                         </span>
                         <Icon name="chevron-right" />

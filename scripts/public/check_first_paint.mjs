@@ -21,8 +21,10 @@ import { REPO_ROOT } from "./lib_files.mjs";
 // 2_010_000 -> 2_015_000 on purpose for the 0.1.15 last fixes: voice chat silent-microphone notice and wait, page-crash notice,
 // knowledge-base edits.
 // 2_015_000 -> 2_017_000 on purpose for the 0.1.16 fixes: one-word voice answers matched to question cards and the
-// chat-switch capture notice (68 bytes over). Moving voice-chat code out of the eager chunk follows in 0.1.17.
-const BUDGET = 2_017_000;
+// chat-switch capture notice (68 bytes over).
+// 2_017_000 -> 1_650_000 after moving voice chat, covering pages and side-panel tabs into on-demand chunks
+// (measured 1,561,545 bytes; requirement: <= 2,010,000). The macOS move-to-Applications update copy adds about 486 bytes.
+const BUDGET = 1_650_000;
 // A class name only CodeMirror's view package carries; survives minification.
 const EDITOR_MARK = "cm-scroller";
 

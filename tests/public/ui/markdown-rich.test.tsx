@@ -19,6 +19,8 @@ describe("diagrams in Markdown", () => {
     "stateDiagram-v2\n[*] --> Ready\nReady --> Done\nDone --> [*]",
     "classDiagram\nAnimal <|-- Dog\nAnimal : +name",
     "erDiagram\nCUSTOMER ||--o{ ORDER : places",
+    'pie title Pets\n"Dogs" : 40\n"Cats" : 60',
+    "gantt\ndateFormat YYYY-MM-DD\nTask one : a, 2026-01-01, 3d\nTask two : after a, 2d",
   ])("draws the supported Mermaid diagram families: %s", async (source) => {
     const view = render(
       <Markdown source={`\`\`\`mermaid\n${source}\n\`\`\``} />,

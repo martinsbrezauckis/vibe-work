@@ -8,6 +8,13 @@
  */
 import { Button } from "../../components/Controls";
 import { PathLine } from "../../components/PathLine";
+import {
+  ACT_BACK_TO_EDITING,
+  ACT_DISCARD_CHANGES,
+  ACT_LOAD_FILE_AGAIN,
+  ACT_REVIEW_CHANGES,
+  ACT_SAVE,
+} from "./actionLabels";
 import type { ReactNode } from "react";
 
 import { type DocView, isDirty, reviewDiff } from "../../state/instructions";
@@ -131,7 +138,7 @@ export function DocEditorView({
                   actions.review();
                 }}
               >
-                Review changes
+                {ACT_REVIEW_CHANGES}
               </Button>
             ) : (
               <Button
@@ -144,7 +151,7 @@ export function DocEditorView({
                   void actions.save();
                 }}
               >
-                {view.busy === "saving" ? "Saving…" : "Save"}
+                {view.busy === "saving" ? "Saving…" : ACT_SAVE}
               </Button>
             )}
             {dirty && (
@@ -158,7 +165,7 @@ export function DocEditorView({
                   actions.discard();
                 }}
               >
-                Discard changes
+                {ACT_DISCARD_CHANGES}
               </Button>
             )}
             {extra}
@@ -176,7 +183,7 @@ export function DocEditorView({
                 void actions.save();
               }}
             >
-              {view.busy === "saving" ? "Saving…" : "Save"}
+              {view.busy === "saving" ? "Saving…" : ACT_SAVE}
             </Button>
             <Button
               data-testid="settings.doc-editor-back"
@@ -187,7 +194,7 @@ export function DocEditorView({
                 actions.back();
               }}
             >
-              Back to editing
+              {ACT_BACK_TO_EDITING}
             </Button>
           </>
         )}
@@ -200,7 +207,7 @@ export function DocEditorView({
               void actions.reload();
             }}
           >
-            Load the file again
+            {ACT_LOAD_FILE_AGAIN}
           </Button>
         )}
       </div>

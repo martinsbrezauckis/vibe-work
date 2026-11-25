@@ -78,7 +78,7 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
     let mut reader = BufReader::new(read.take(limit));
     let mut line = String::new();
     let read = tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut line)).await;
-    let (answer, filter_page_answer) = match read {
+    let (answer, filter_page_answer, connected_tool) = match read {
         Ok(Ok(n)) if n > 0 && n <= wire::MAX_PROPOSAL_LINE && line.ends_with('\n') => {
             match serde_json::from_str::<Request>(&line) {
                 Ok(request)
@@ -89,10 +89,15 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                                 == format!("mcp_vw.{}", names::PROPOSE_PROTECTED_CHANGE)) =>
                 {
                     let browser_answer = names::BROWSER_TOOLS.contains(&request.tool.as_str());
+                    let connected_tool = names::CHROME_TOOLS
+                        .iter()
+                        .copied()
+                        .find(|tool| *tool == request.tool);
                     // Direct vault capture returns app metadata only. Its requested name must stay usable;
                     // the page-key heuristic is for observations, while the stored-value scrub still applies.
-                    let filter_page_answer =
-                        browser_answer && request.tool != names::BROWSER_CAPTURE_SECRET;
+                    let filter_page_answer = (browser_answer
+                        && request.tool != names::BROWSER_CAPTURE_SECRET)
+                        || connected_tool.is_some();
                     let answer = if browser_answer {
                         // The socket owns this browser call. Dropping its future on EOF or timeout
                         // also drops a pending native permission wait and its action guard.
@@ -133,12 +138,12 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
                     } else {
                         answer(&shared, request).await
                     };
-                    (answer, filter_page_answer)
+                    (answer, filter_page_answer, connected_tool)
                 }
-                Ok(_) | Err(_) => (Answer::Error("bad request".to_owned()), false),
+                Ok(_) | Err(_) => (Answer::Error("bad request".to_owned()), false, None),
             }
         }
-        _ => (Answer::Error("bad request".to_owned()), false),
+        _ => (Answer::Error("bad request".to_owned()), false, None),
     };
     if let Ok(text) = serde_json::to_vec(&answer) {
         // No stored secret leaves through an agent tool answer, in any form `vw-secrets` searches
@@ -159,20 +164,32 @@ async fn serve_one(stream: TcpStream, shared: Weak<Shared>) {
         if filter_page_answer {
             let mut filtered = serde_json::from_slice::<Answer>(&text)
                 .unwrap_or_else(|_| Answer::Error("browser answer withheld".to_owned()));
-            match &mut filtered {
-                Answer::Ok(value) => vw_browser::filter_agent_output(value),
-                Answer::Error(reason) => {
-                    let mut value = Value::String(std::mem::take(reason));
-                    vw_browser::filter_agent_output(&mut value);
-                    value.as_str().unwrap_or_default().clone_into(reason);
-                }
-            }
+            filter_browser_answer(&mut filtered, connected_tool);
             text = serde_json::to_vec(&filtered)
                 .unwrap_or_else(|_| b"{\"error\":\"browser answer withheld\"}".to_vec());
         }
         text.push(b'\n');
         let _ = write.write_all(&text).await;
         let _ = write.shutdown().await;
+    }
+}
+
+fn filter_browser_answer(answer: &mut Answer, connected_tool: Option<&str>) {
+    match answer {
+        Answer::Ok(value) => {
+            if let Some(tool) = connected_tool {
+                if let Err(reason) = crate::chrome_control::filter_agent_answer(value, tool) {
+                    *answer = Answer::Error(reason.to_owned());
+                }
+            } else {
+                vw_browser::filter_agent_output(value);
+            }
+        }
+        Answer::Error(reason) => {
+            let mut value = Value::String(std::mem::take(reason));
+            vw_browser::filter_agent_output(&mut value);
+            value.as_str().unwrap_or_default().clone_into(reason);
+        }
     }
 }
 

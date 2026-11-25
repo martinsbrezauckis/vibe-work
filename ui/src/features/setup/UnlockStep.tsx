@@ -83,7 +83,7 @@ export function UnlockStep({ choice }: { choice?: VaultChoice }) {
         <Button
           data-testid="setup.unlock-step-dismiss"
           type="button"
-
+          shape="outlined"
           onClick={() => keys?.dismiss()}
         >
           Not now

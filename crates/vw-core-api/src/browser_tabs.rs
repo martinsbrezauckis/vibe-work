@@ -172,11 +172,23 @@ pub(crate) async fn run(
                         }
                     }
                 }
-                (2, BrowserRequest::SwitchTab { tab_id, .. }) => {
-                    service
-                        .front_tab_if_visible(owner, tab_id)
-                        .await
-                        .map_err(|e| core_error(&e))?;
+                (
+                    2,
+                    BrowserRequest::SwitchTab {
+                        tab_id, passive, ..
+                    },
+                ) => {
+                    if *passive {
+                        service
+                            .front_tab_if_visible_passive(owner, tab_id)
+                            .await
+                            .map_err(|e| core_error(&e))?;
+                    } else {
+                        service
+                            .front_tab_if_visible(owner, tab_id)
+                            .await
+                            .map_err(|e| core_error(&e))?;
+                    }
                 }
                 (3, BrowserRequest::CloseTab { tab_id, .. }) => {
                     web_page(service, owner, tab_id)?;

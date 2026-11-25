@@ -1,19 +1,6 @@
 /** Plain speech text and sentence chunks for narration and one-time reading; called by the narration store. */
-import { stripEmphasis } from "./voiceChatText";
-
-/** Narration cleanup; one-time readings name skipped code blocks and keep up to 10,000 characters. */
-export function speakable(text: string, limit = 2_000, describeCode = false): string {
-  const plain = text
-    .replace(/```[^\n`]*\n?([\s\S]*?)```/g, (_block: string, code: string) =>
-      describeCode ? ` (code block, ${String(code.trimEnd().split("\n").length)} lines) ` : " ",
-    )
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+)/gm, "")
-    .replace(/^[ \t]*\|.*$/gm, " ");
-  return Array.from(stripEmphasis(plain).replace(/\s+/g, " ").trim()).slice(0, limit).join("");
-}
+import { speakable } from "../../state/speechPlain";
+export { speakable };
 
 /** Speech calls stay under the provider's character cap, preferring whole sentences in every language. */
 export function readingChunks(text: string, truncated = false): string[] {

@@ -41,8 +41,8 @@ use tokio::sync::watch;
 use crate::settings::HostSettings;
 use crate::update_store::{Pending, UpdateStore};
 pub use crate::update_view::{
-    BoxFuture, InstallMode, OFFICIAL_RELEASE_TAGS, Offer, Phase, Progress, Stage, UpdateBackend,
-    UpdateHooks, UpdateNotice, UpdateRequester, UpdateView, release_page_for,
+    BoxFuture, InstallMode, MacosLocationFacts, OFFICIAL_RELEASE_TAGS, Offer, Phase, Progress,
+    Stage, UpdateBackend, UpdateHooks, UpdateNotice, UpdateRequester, UpdateView, release_page_for,
 };
 use crate::updates::UpdateStatus;
 
@@ -64,12 +64,27 @@ pub enum UpdateError {
         "Vibe Work does not update this copy itself: download the new version from the release page"
     )]
     LinkOnly,
-    /// macOS runs this copy from a temporary read-only place.
-    #[error("Move Vibe Work into Applications, then open it from there to update.")]
+    /// macOS runs this copy from a temporary read-only location.
+    #[error(
+        "This copy is running from a temporary read-only location. Move Vibe Work into Applications, then open it from there to update."
+    )]
     MacosTranslocated,
+    /// macOS runs this copy from a read-only disk or volume (for example, a mounted disk image).
+    #[error(
+        "This copy is in a read-only location and cannot be replaced here. Move Vibe Work into Applications or another writable folder, then open it from there to update."
+    )]
+    MacosReadOnly,
     /// A step failed; the text says why in plain words.
     #[error("{0}")]
     Failed(String),
+}
+
+pub(crate) fn macos_blocked_error(mode: InstallMode) -> Option<UpdateError> {
+    match mode {
+        InstallMode::MacosTranslocated => Some(UpdateError::MacosTranslocated),
+        InstallMode::MacosReadOnly => Some(UpdateError::MacosReadOnly),
+        InstallMode::InApp | InstallMode::LinkOnly => None,
+    }
 }
 
 /// What the manager needs to know about this build and installation.
@@ -290,7 +305,8 @@ impl UpdateManager {
         let (first, status) = self.with(|s| {
             let (slot, version) = match &notice {
                 UpdateNotice::Available { version, .. }
-                | UpdateNotice::MoveToApplications { version } => {
+                | UpdateNotice::MoveToApplications { version }
+                | UpdateNotice::ReadOnlyLocation { version } => {
                     (&mut s.status.notified_available, version)
                 }
                 UpdateNotice::Ready { version } => (&mut s.status.notified_ready, version),
@@ -437,17 +453,20 @@ impl UpdateManager {
         });
         self.save_status("available", Some(&offer.version), None);
         let downloading = auto && mode == InstallMode::InApp;
-        self.notify_once(if mode == InstallMode::MacosTranslocated {
-            UpdateNotice::MoveToApplications {
+        let notice = match mode {
+            InstallMode::MacosTranslocated => UpdateNotice::MoveToApplications {
                 version: offer.version.clone(),
-            }
-        } else {
-            UpdateNotice::Available {
+            },
+            InstallMode::MacosReadOnly => UpdateNotice::ReadOnlyLocation {
+                version: offer.version.clone(),
+            },
+            InstallMode::InApp | InstallMode::LinkOnly => UpdateNotice::Available {
                 version: offer.version.clone(),
                 downloading,
                 link_only: mode == InstallMode::LinkOnly,
-            }
-        });
+            },
+        };
+        self.notify_once(notice);
         if downloading {
             self.download_inner(offer).await;
         }

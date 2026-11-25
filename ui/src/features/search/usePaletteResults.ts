@@ -55,7 +55,13 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
           });
     const setting: Result[] =
       mode === "text"
-        ? searchSettings(text, chromeAvailable(chrome), chrome?.edge !== undefined).map((e) => ({
+        ? searchSettings(
+            text,
+            chromeAvailable(chrome),
+            chrome?.edge !== undefined,
+            chrome?.firefox !== undefined,
+            chrome?.safari !== undefined,
+          ).map((e) => ({
             id: `setting:${e.id}`,
             kind: "setting",
             title: e.label,
@@ -66,7 +72,7 @@ export function usePaletteResults(query: string, found: CoreResults): ResultGrou
                 ? "Opens the Tools page"
                 : `Opens Settings › ${categoryOf(e.category).label} at this setting`,
             run: () => {
-              openHit(app, e);
+              openHit(app, e, text);
             },
           }))
         : [];

@@ -21,19 +21,21 @@
 //! - Nothing from a sign-in other than the page address passes through here: the browser gives the code to
 //!   Mistral or to Vibe's loopback port, and the token stays at Mistral or in Vibe's keyring.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use vw_platform::sync::LockRecover;
 
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-use vw_gate::{ConfirmationToken, GateError, TRUSTED_SURFACE_METHODS};
+use vw_gate::{ConfirmationToken, Confirmer, GateError, TRUSTED_SURFACE_METHODS};
 use vw_keys::KeyPresence;
 
 use crate::command::{CommandResult, Origin};
 use crate::connectors_config::configured_servers;
+use crate::connectors_errors::{PROBE_REUSE, Probed};
 use crate::connectors_project::{
     catalog_load, connectors, merge_plugin_sources, merge_session_connectors, merge_session_servers,
 };
@@ -52,9 +54,24 @@ pub(crate) struct ConnectorsState {
     removed: Mutex<HashSet<String>>,
     /// MCP servers that need a key (`mcp_keys.rs`): grants until Vibe Work closes and use counters.
     pub(crate) mcp_keys: crate::mcp_keys::McpKeysState,
+    /// The latest probe of a failed direct server's address (`connectors_errors`), by name and address.
+    probes: Mutex<HashMap<String, (Instant, Probed)>>,
 }
 
 impl ConnectorsState {
+    /// The probe answer for `key` when it is younger than `PROBE_REUSE`.
+    pub(crate) fn cached_probe(&self, key: &str) -> Option<Probed> {
+        let probes = self.probes.lock_or_recover();
+        let (at, reason) = probes.get(key)?;
+        (at.elapsed() < PROBE_REUSE).then(|| reason.clone())
+    }
+
+    pub(crate) fn keep_probe(&self, key: String, reason: Probed) {
+        let mut probes = self.probes.lock_or_recover();
+        probes.retain(|_, (at, _)| at.elapsed() < PROBE_REUSE);
+        probes.insert(key, (Instant::now(), reason));
+    }
+
     pub(crate) fn removed_tool(&self, tool: &str) -> bool {
         self.removed
             .lock_or_recover()
@@ -123,6 +140,9 @@ impl Drop for ConnectorsState {
         }
     }
 }
+
+/// The dialog's method name for a server added without sign-in (not a Vibe method).
+const NO_AUTH_METHOD: &str = "vibe-work/mcpNoAuthServer";
 
 fn invalid(message: impl Into<String>) -> CoreError {
     CoreError::new(ErrorCode::InvalidParams, message)
@@ -214,20 +234,19 @@ impl Core {
             ConnectorsRequest::AddServer { url, name } => {
                 self.add_server(origin, url, name).await?
             }
+            ConnectorsRequest::AddNoAuthServer { url, name } => {
+                self.add_no_auth_server(origin, url, name).await?
+            }
+            request @ (ConnectorsRequest::AddCommandServer { .. }
+            | ConnectorsRequest::UpdateCommandServer { .. }) => {
+                self.command_server_request(origin, request).await?
+            }
             ConnectorsRequest::SignInServer { name } => {
                 checked_name(&name)?;
                 self.start_server_sign_in(origin, name).await?
             }
             ConnectorsRequest::CancelSignIn {} => {
-                let taken = self.shared.connectors.slot().take();
-                if let Some((name, task)) = taken {
-                    task.abort();
-                    self.shared.emit(CoreEvent::ConnectorSignIn {
-                        name,
-                        outcome: "cancelled".to_owned(),
-                        message: None,
-                    });
-                }
+                self.cancel_sign_in();
                 self.view_result(origin).await
             }
             ConnectorsRequest::SignOutServer { name } => {
@@ -240,9 +259,11 @@ impl Core {
                     .await?;
                 // A key server's vault record goes with it.
                 crate::mcp_keys::forget_server(&self.shared, &name).await;
+                self.forget_paused(&name);
                 result
             }
             ConnectorsRequest::SetServerOff { name, off } => {
+                self.check_server_off(origin, &name, off)?;
                 let params = json!({"name": name, "source": "server", "disabled": off});
                 self.server_change(origin, "mcp_catalog/toggle", params)
                     .await?
@@ -251,6 +272,19 @@ impl Core {
             | ConnectorsRequest::AllowServerKey { .. }) => self.key_server(origin, request).await?,
         };
         Ok(CommandResult::Connectors { result })
+    }
+
+    /// Stops waiting for the running server sign-in and tells the window.
+    fn cancel_sign_in(&self) {
+        let taken = self.shared.connectors.slot().take();
+        if let Some((name, task)) = taken {
+            task.abort();
+            self.shared.emit(CoreEvent::ConnectorSignIn {
+                name,
+                outcome: "cancelled".to_owned(),
+                message: None,
+            });
+        }
     }
 
     /// `addKeyServer` and `allowServerKey` (`mcp_keys`), then every open session re-reads its servers.
@@ -416,6 +450,75 @@ impl Core {
         })
     }
 
+    /// `addNoAuthServer`: the address rule, the native dialog (what is true about the address), then Vibe
+    /// Work's own config gets an entry without an `auth` table, so Vibe connects without a credential and no
+    /// sign-in is ever started. The same address under the same name, already without sign-in, is `created: false`.
+    async fn add_no_auth_server(
+        &self,
+        origin: Origin,
+        url: String,
+        name: Option<String>,
+    ) -> Result<ConnectorsResult, CoreError> {
+        let url =
+            vw_gate::check_mcp_server_url(&url).map_err(|refusal| invalid(refusal.to_string()))?;
+        let name = crate::mcp_keys::server_name(name.as_deref(), &url)?;
+        let home = &self.shared.instructions.own_home;
+        let existing = configured_servers(home)
+            .into_iter()
+            .find(|server| server.name == name);
+        let created = match existing {
+            Some(server)
+                if server.sign_in == "none"
+                    && server.address.as_deref()
+                        == crate::connectors_config::public_address(&url).as_deref() =>
+            {
+                false
+            }
+            Some(_) => {
+                return Err(invalid(format!(
+                    "an MCP server named {} is already configured with other settings: remove it first or pick another name",
+                    vw_gate::dialog_value(&name, 64)
+                )));
+            }
+            None => true,
+        };
+        if created {
+            let request = vw_gate::ConfirmationRequest {
+                method: NO_AUTH_METHOD.to_owned(),
+                requester: crate::command::requester(origin),
+                summary: crate::connector_consent::no_auth_summary(&name, &url),
+                params: json!({"server": name, "address": url}),
+                always: None,
+            };
+            let answer = self.shared.confirmer.confirm(&request).await;
+            if matches!(answer, vw_gate::Confirmation::Declined) {
+                return Err(CoreError::new(
+                    ErrorCode::ConfirmationDeclined,
+                    answer.agent_text("adding this MCP server"),
+                ));
+            }
+            crate::mcp_keys_config::add_unauthenticated_entry(home, &name, &url).map_err(
+                |error| {
+                    let code = match error {
+                        crate::mcp_keys_config::ConfigEditError::NameTaken => {
+                            ErrorCode::InvalidParams
+                        }
+                        _ => ErrorCode::Internal,
+                    };
+                    CoreError::new(code, error.to_string())
+                },
+            )?;
+        }
+        self.shared.connectors.mark_removed(&name, false);
+        self.converge(Converge::Servers).await;
+        info!(created, "connectors: MCP server added without sign-in");
+        Ok(ConnectorsResult::ServerAdded {
+            name,
+            created,
+            view: self.connectors_view(origin, None).await,
+        })
+    }
+
     /// `signInServer`: checks and confirms now, then runs Vibe's blocking login in an owned task.
     async fn start_server_sign_in(
         &self,
@@ -539,10 +642,19 @@ impl Core {
             Value::Null
         });
         let mut list = connectors(&read);
+        // A command server turned on behind the app's back while Developer permissions is off is paused again.
+        let mutation = self.shared.developer_permissions.mutation_lock().await;
+        let (repaused, pause_error) = enforce_for_view(&self.shared);
+        catalog_error = pause_error.or(catalog_error);
         let mut servers = configured_servers(&self.shared.instructions.own_home);
+        drop(mutation);
         // key servers show their key's name, header and grant, and the address the key goes to.
         crate::mcp_keys::merge_views(&self.shared, &mut servers).await;
-        let open = session_id.filter(|id| self.shared.channels.has_channel(id));
+        // A chat that has not applied the last Developer permissions switch yet shows what its next work will
+        // use (the config), not its old runtime (`switch_apply.rs`).
+        let open = session_id.filter(|id| {
+            self.shared.channels.has_channel(id) && !self.shared.channels.switch_stale(id)
+        });
         if let Some(id) = &open {
             let params = json!({"sessionId": id});
             match self
@@ -577,6 +689,8 @@ impl Core {
                 }
             }
         }
+        crate::connectors_errors::merge_key_problems(&self.shared, &mut servers).await;
+        self.explain_direct_failures(&mut servers).await;
         if let Some(id) = &open
             && self
                 .shared
@@ -585,6 +699,10 @@ impl Core {
                 .is_some_and(|tools| tools.table.has_session(id))
         {
             crate::connectors_project::mark_injected_server(&mut servers);
+        }
+        crate::command_pause::project(&self.shared, &mut servers);
+        if repaused {
+            refresh_servers(&self.shared).await;
         }
         ConnectorsView {
             catalog: catalog_load(&read),
@@ -598,6 +716,7 @@ impl Core {
                 .and_then(crate::connectors_project::manage_link),
             session_id: open,
             signing_in: self.shared.connectors.running(),
+            developer_permissions: Some(self.shared.developer_permissions.enabled()),
         }
     }
 
@@ -608,36 +727,60 @@ impl Core {
             .map_err(|error| error.message)
     }
 }
-
+fn enforce_for_view(shared: &Shared) -> (bool, Option<String>) {
+    match crate::command_pause::enforce(shared) {
+        Ok(changed) => (changed, None),
+        Err(error) => {
+            warn!(%error, "connectors: command servers could not be inspected and paused");
+            (
+                false,
+                Some(vw_vocabulary::texts::COMMAND_SERVER_ENFORCE_FAILED.to_owned()),
+            )
+        }
+    }
+}
 /// Asks every session with an open channel to pick up a change made on the lobby.
 async fn converge_shared(shared: &Shared, what: Converge) {
+    let _mutation = if what == Converge::Servers {
+        Some(shared.developer_permissions.mutation_lock().await)
+    } else {
+        None
+    };
+    converge_shared_locked(shared, what).await;
+}
+async fn converge_shared_locked(shared: &Shared, what: Converge) {
+    if what == Converge::Servers && !crate::mcp_refresh::admit_shared(shared) {
+        return;
+    }
     let method = match what {
         Converge::Connectors => "connector_catalog/refresh",
         Converge::Servers => "mcp_catalog/refresh",
     };
     for open in shared.channels.open_channels() {
         let params = json!({"sessionId": open.session_id});
+        if !crate::project_mcp::admit_refresh(shared, method, &params).await {
+            continue;
+        }
         if let Err(error) = shared.gate.call(method, params, None).await {
             warn!(method, %error, "connectors: a session did not take the change");
         }
     }
 }
-
-/// Lets every open session re-read its MCP servers (after a key grant was revoked elsewhere, or given at a key
-/// server's first use).
+/// Re-read MCP servers after a shared key grant changes.
 pub(crate) async fn refresh_servers(shared: &Shared) {
     converge_shared(shared, Converge::Servers).await;
 }
-
-/// Aborts a running server sign-in (core shutdown), and removes the MCP forwarder's resolver, so no
-/// request is forwarded with a key once the core shuts down.
+/// Used only by callers already holding the Developer-permissions mutation lock.
+pub(crate) async fn refresh_servers_locked(shared: &Shared) {
+    converge_shared_locked(shared, Converge::Servers).await;
+}
+/// Abort sign-in and remove the MCP resolver at shutdown.
 pub(crate) fn abort_sign_in(shared: &Shared) {
     crate::mcp_keys::uninstall(shared);
     if let Some((_, task)) = shared.connectors.slot().take() {
         task.abort();
     }
 }
-
 #[cfg(test)]
 mod fx18_tests {
     use super::ConnectorsState;

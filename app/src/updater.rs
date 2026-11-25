@@ -126,11 +126,25 @@ pub fn start<R: Runtime>(
         return;
     };
     let bundle = tauri::utils::platform::bundle_type().map(|b| b.to_string());
-    let mode = InstallMode::for_running_app(
-        bundle.as_deref(),
-        std::env::consts::OS,
-        std::env::current_exe().ok().as_deref(),
-    );
+    let exe = std::env::current_exe().ok();
+    #[cfg(target_os = "macos")]
+    let mode = {
+        let macos = vw_platform::macos_app_location::facts(exe.as_deref()).map(|f| {
+            vw_host::update_flow::MacosLocationFacts {
+                translocated: f.translocated,
+                read_only_fs: f.read_only_fs,
+            }
+        });
+        InstallMode::for_running_app_with(
+            bundle.as_deref(),
+            std::env::consts::OS,
+            exe.as_deref(),
+            macos,
+        )
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mode =
+        InstallMode::for_running_app(bundle.as_deref(), std::env::consts::OS, exe.as_deref());
     tracing::info!(?bundle, ?mode, "update install mode");
     let manager = UpdateManager::new(
         UpdateConfig {

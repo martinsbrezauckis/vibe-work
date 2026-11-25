@@ -134,14 +134,27 @@
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  max-height: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: clamp(24px, 8vh, 80px) 32px 22px;
+  padding: clamp(24px, 8vh, 80px) 32px 4px;
 }
-.welcome-intro {
+/* The start view's composer is pinned to the bottom of the content area, as in the chat view; everything above it
+   (heading, notes, folder row, plans) scrolls in .welcome-scroll when the window is too short. When it all fits,
+   .welcome-scroll keeps its natural height (no grow) and the composer follows the content as before. */
+.view.view-welcome {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.welcome-scroll {
+  flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
+  position: relative;
+}
+.welcome-intro {
+  flex-shrink: 0;
 }
 .welcome .new-chat-composer {
   flex-shrink: 0;
@@ -152,7 +165,9 @@
   font-weight: var(--weight-heading);
   margin: 0 0 6px;
 }
-.welcome p {
+.welcome p,
+.new-chat-composer p {
+  /* The composer's notes under the box kept this look when it sat inside .welcome; it is pinned outside now. */
   color: var(--text-2);
   margin: 0;
 }

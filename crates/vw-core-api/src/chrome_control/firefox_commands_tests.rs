@@ -622,6 +622,27 @@ fn a_closed_window_is_ready_for_automatic_open_not_a_person_step() {
     assert!(view.instruction.contains("session has ended"));
     assert!(!view.instruction.contains("Open window"));
 }
+
+#[test]
+fn unavailable_package_precedes_switched_off_when_window_is_not_open() {
+    assert_eq!(
+        state_view(PairingState::WindowClosed, false, false).state,
+        super::super::AddonState::Unavailable
+    );
+    assert_eq!(
+        state_view(PairingState::NotInstalled, false, false).state,
+        super::super::AddonState::Unavailable
+    );
+    assert_eq!(
+        state_view(PairingState::WindowClosed, false, true).state,
+        super::super::AddonState::SwitchedOff
+    );
+    assert_eq!(
+        state_view(PairingState::WindowOpen, false, false).state,
+        super::super::AddonState::SwitchedOff
+    );
+}
+
 #[tokio::test]
 async fn firefox_facts_use_its_window_controls_and_connection_state() {
     let core = crate::offline_core::start_with("firefox-window-facts", |config, dir| {

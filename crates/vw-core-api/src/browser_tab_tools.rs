@@ -47,6 +47,7 @@ fn tab_json(tab: &PageTab) -> Value {
         "owner": tab.owner_kind,
         "active": tab.active,
         "suspended": tab.preview.as_ref().is_some_and(|view| view.state == PreviewState::Suspended),
+        "waiting": tab.preview.as_ref().is_some_and(|view| view.waiting_for_browser),
     })
 }
 

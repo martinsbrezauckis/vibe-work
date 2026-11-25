@@ -312,7 +312,8 @@ async fn measure_helper_receipts() {
             Answer::Helper(json!({"structuredContent":receipt,"content":[]})),
             "chrome_execute",
             false,
-        );
+        )
+        .unwrap();
         let body = &result["vwMcpResult"]["structuredContent"];
         assert!(super::output::fits(body, 4000));
         metrics.push(json!({"task":call["task"],"action":call["action"],"helper":receipt.to_string().len(),
@@ -372,7 +373,8 @@ async fn compact_observations_keep_bound_identity_and_host_failure_reasons() {
         }))),
         "chrome_execute",
         false,
-    );
+    )
+    .unwrap();
     assert_identity(&result, "chrome:profile");
     let body = &result["vwMcpResult"]["structuredContent"];
     assert_eq!(

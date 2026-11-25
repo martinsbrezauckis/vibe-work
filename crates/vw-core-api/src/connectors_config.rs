@@ -5,18 +5,20 @@
 //! Depends on: `toml` (parsing), `url` (address without query), `connectors_view`. Called by: `connectors`.
 //! Invariants:
 //! - Only Vibe Work's own home is read, never `~/.vibe`, and nothing is ever written.
-//! - Nothing that can hold a secret leaves this module: no headers, no `api_key_env`, no environment of a
-//!   local server, no command line, no query string or fragment of an address. What is kept: the name, the
+//! - A command server's program, arguments, folder and variables are shown (`CommandConfigView`); a variable whose
+//!   value looks like a key (`command_secret`) is listed by name only.
+//! - Nothing that can hold a secret leaves this module: no headers, no `api_key_env`, no environment value that looks
+//!   like a key, no query string or fragment of an address. What is kept: the name, the
 //!   transport, the address as scheme + host + port + path, the kind of sign-in, the off flag. Every
 //!   credential-like value read is also registered as a stored secret (`vw_secrets`).
-//! - A missing, unreadable or malformed file is "no servers" (logged), never an error: Vibe itself reports
-//!   a broken config at startup.
+//! - A missing, unreadable or malformed file is "no servers" in this view (logged). The core refuses startup
+//!   while Developer permissions is off if it cannot inspect and pause MCP rows.
 
 use std::path::Path;
 
 use tracing::warn;
 
-use crate::connectors_view::ServerView;
+use crate::connectors_view::{CommandConfigView, CommandEnvView, ServerView};
 
 /// Largest config file read (Vibe's configs are a few kilobytes).
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
@@ -81,6 +83,37 @@ fn register_credentials(server: &toml::Table) {
     }
 }
 
+/// The command server's settings for the Tools page: a value that looks like a key is hidden, never copied.
+fn command_view(entry: crate::command_servers_config::CommandEntry) -> CommandConfigView {
+    CommandConfigView {
+        command: entry.command,
+        args: entry
+            .args
+            .into_iter()
+            .map(|arg| {
+                if crate::command_secret::looks_like_secret(None, &arg) {
+                    crate::command_secret::HIDDEN_ARGUMENT.to_owned()
+                } else {
+                    arg
+                }
+            })
+            .collect(),
+        cwd: entry.cwd,
+        env: entry
+            .env
+            .into_iter()
+            .map(|(name, value)| {
+                let hidden = crate::command_secret::looks_like_secret(Some(&name), &value);
+                CommandEnvView {
+                    name,
+                    value: (!hidden).then_some(value),
+                    hidden,
+                }
+            })
+            .collect(),
+    }
+}
+
 fn server_view(server: &toml::Table) -> Option<ServerView> {
     register_credentials(server);
     let name = server.get("name")?.as_str()?.to_owned();
@@ -103,10 +136,12 @@ fn server_view(server: &toml::Table) -> Option<ServerView> {
         status: None,
         tools: Vec::new(),
         error: None,
+        error_kind: None,
         plugin: None,
         source: None,
         configured: true,
         key: None,
+        command_config: crate::command_servers_config::command_entry_of(server).map(command_view),
     })
 }
 
@@ -139,14 +174,11 @@ pub(crate) fn configured_servers(home: &Path) -> Vec<ServerView> {
         warn!("connectors: Vibe's config is not valid TOML; servers not listed");
         return Vec::new();
     };
-    table
-        .get("mcp_servers")
-        .and_then(toml::Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(toml::Value::as_table)
-                .filter_map(server_view)
-                .collect()
-        })
-        .unwrap_or_default()
+    match crate::mcp_rows::read_rows(&table) {
+        Ok(rows) => rows.into_iter().filter_map(server_view).collect(),
+        Err(error) => {
+            warn!(%error, "connectors: Vibe's MCP server rows could not be inspected");
+            Vec::new()
+        }
+    }
 }

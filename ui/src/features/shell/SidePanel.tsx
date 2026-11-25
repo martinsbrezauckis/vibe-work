@@ -76,6 +76,25 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = tabStrip.current;
+    if (!element || active === null) return;
+    // Scroll the whole group so its separate close control stays beside the selected tab.
+    const reveal = () => {
+      element
+        .querySelector<HTMLElement>('.ptab-group[data-selected="true"]')
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(element);
+    // Intrinsic tab width can change after fonts load without resizing the strip.
+    const selected = element.querySelector<HTMLElement>('.ptab-group[data-selected="true"]');
+    if (selected) observer.observe(selected);
+    return () => {
+      observer.disconnect();
+    };
+  }, [active, panel.tabs, sessionId]);
+  useLayoutEffect(() => {
+    const element = tabStrip.current;
     if (!element || !files || sessionId === null) return;
     const fit = () => {
       const fixed = [

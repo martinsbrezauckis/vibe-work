@@ -1,5 +1,5 @@
 /**
- * The status bar: Vibe server state, the selected session's folder, the rate-limit warning, the context readout,
+ * The status bar: Vibe server state and the app's own version, the selected session's folder, the rate-limit warning, the context readout,
  * "N left running" while processes from deleted sessions still run, the vault access
  * switch, the Mistral key's blocking state, and the "Debug API on" indicator
  * (visible whenever the API runs).
@@ -15,6 +15,7 @@ import { useVibeUi } from "../setup/VibeInstallStep";
 import { installStatus } from "../../state/vibeInstall";
 import { isTemporaryFolder } from "../../state/sessionSummary";
 import { VaultLockControls } from "../secrets/VaultLockControls";
+import { TEXT, wording } from "../../vocabulary";
 import { useApp } from "./AppContext";
 import { useKeyReadiness } from "./KeyNotice";
 import { LeftRunningButton } from "./LeftRunning";
@@ -64,6 +65,22 @@ function Server() {
         </span>
       );
   }
+}
+
+/**
+ * The app's own name and version ("Vibe Work 0.1.18"), right after the Vibe server item in every server state so a
+ * person sees at once which version they work on. An unknown version leaves it out. It gives way at narrow widths
+ * with the server's version (`sb-tail`).
+ */
+function AppVersion() {
+  const version = useCoreState((s) => s.appVersion);
+  if (version === null || version === "") return null;
+  const label = wording(TEXT.statusBarAppVersion, { version });
+  return (
+    <span className="sb-app sb-tail" title={label}>
+      {label}
+    </span>
+  );
 }
 
 /**
@@ -169,6 +186,7 @@ export function StatusBar({ children }: { children?: ReactNode }) {
   return (
     <footer className="statusbar">
       <Server />
+      <AppVersion />
       {key !== null && (
         <span
           className="warn"

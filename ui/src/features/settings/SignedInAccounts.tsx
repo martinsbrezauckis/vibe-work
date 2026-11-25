@@ -5,6 +5,7 @@
  */
 import { Button } from "../../components/Controls";
 import { useCallback, useEffect, useState } from "react";
+import { ACT_DONE_CHECKING, ACT_REFRESH_ACCOUNTS } from "./actionLabels";
 
 import { NativeViewport } from "../../components/NativeViewport";
 import type { Provider, ProviderAccount, Rect } from "../../protocol/core";
@@ -156,7 +157,7 @@ export function SignedInAccounts() {
           disabled={core === null || busy}
           onClick={() => void refresh().catch(problem)}
         >
-          Refresh accounts
+          {ACT_REFRESH_ACCOUNTS}
         </Button>
       </div>
       {error !== null && (
@@ -176,7 +177,7 @@ export function SignedInAccounts() {
               disabled={busy}
               onClick={() => void finish()}
             >
-              Done
+              {ACT_DONE_CHECKING}
             </Button>
           </div>
           <NativeViewport

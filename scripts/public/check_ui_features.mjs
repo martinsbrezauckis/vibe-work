@@ -6,11 +6,18 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
-const dist = resolve(root, "ui/dist/assets");
-const entry = readdirSync(dist).filter((name) => /^index-.*\.js$/.test(name));
+// Optional first argument: another assets folder (tests); default is the built UI.
+const dist = process.argv[2]
+  ? resolve(process.argv[2])
+  : resolve(root, "ui/dist/assets");
+const scripts = readdirSync(dist).filter((name) => name.endsWith(".js"));
+const entry = scripts.filter((name) => /^index-.*\.js$/.test(name));
 if (entry.length !== 1)
   throw new Error(`expected one production entry chunk, found ${entry.length}`);
-const bundle = readFileSync(resolve(dist, entry[0]), "utf8");
+// Lazy pages (Settings since first paint) are their own chunks: a feature counts in any production chunk.
+const bundle = scripts
+  .map((name) => readFileSync(resolve(dist, name), "utf8"))
+  .join("\n");
 for (const [feature, marker] of [
   ["plan-usage", "Monthly plan usage"],
   ["context-composition", "Context breakdown"],
@@ -19,4 +26,6 @@ for (const [feature, marker] of [
   const present = bundle.includes(marker);
   if (!present) throw new Error(`${feature} UI must always be present`);
 }
-console.log("Production UI: plan usage, context breakdown and feedback permanent");
+console.log(
+  "Production UI: plan usage, context breakdown and feedback permanent",
+);

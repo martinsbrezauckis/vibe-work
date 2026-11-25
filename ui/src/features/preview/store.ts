@@ -8,6 +8,7 @@
  * - Nothing here loads a URL the core did not accept: refusals come back as errors and are shown as text.
  * - A `previewChanged` event reloads a session the store already shows (a `null` session reloads them all).
  * - `layout` calls are serialized and only the newest one is sent (a resize sends many).
+ * - A recovered layout clears its own refusal, while a newer action's error stays visible.
  */
 import { toCallError } from "../../protocol/client/types";
 import type {
@@ -62,9 +63,40 @@ function sameShown(a: Shown, b: Shown): boolean {
   );
 }
 
+/** Reads the requested page's queue recovery from the core, without retiring a different refusal. */
+function queuedOpen(
+  preview: PreviewView | null | undefined,
+  target: { port: number } | { url: string },
+  error: string | null | undefined,
+): "waiting" | "open" | null {
+  // PreviewError::BrowserBusy has no distinct core code; match its legacy sentence only here.
+  if (
+    !/^Not run: the browser is busy with another chat; try again when it is free$/.test(
+      error ?? "",
+    ) ||
+    preview === undefined ||
+    preview === null ||
+    preview.url === null
+  )
+    return null;
+  try {
+    const url = new URL(preview.url);
+    const matches =
+      "url" in target
+        ? url.href === new URL(target.url).href
+        : (url.port || (url.protocol === "https:" ? "443" : "80")) === String(target.port);
+    if (!matches) return null;
+    if (preview.waitingForBrowser) return "waiting";
+    return preview.state === "live" || preview.state === "hidden" ? "open" : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Creates the controller for `core`. */
 export function createPreviews(core: CoreController) {
   const store = createStore<PreviewUi>(initial);
+  const errorOwners = new Map<string, { source: "action" | "layout" | null }>();
 
   const run = async (request: PreviewRequest): Promise<PreviewResult> => {
     const result = await core.run({ type: "preview", request });
@@ -74,7 +106,12 @@ export function createPreviews(core: CoreController) {
   const setBusy = (sessionId: string, busy: boolean) => {
     store.set((s) => ({ ...s, busy: put(s.busy, sessionId, busy) }));
   };
-  const setError = (sessionId: string, error: string | null) => {
+  const setError = (
+    sessionId: string,
+    error: string | null,
+    source: "action" | "layout" = "action",
+  ) => {
+    errorOwners.set(sessionId, { source: error === null ? null : source });
     store.set((s) => ({ ...s, error: put(s.error, sessionId, error) }));
   };
   const setPreview = (sessionId: string, preview: PreviewView | null) => {
@@ -111,6 +148,7 @@ export function createPreviews(core: CoreController) {
       while (sent === undefined || !sameShown(sent, shown)) {
         const target = shown;
         sent = target;
+        const owner = target === null ? undefined : errorOwners.get(target.sessionId);
         try {
           await run(
             target === null
@@ -122,8 +160,21 @@ export function createPreviews(core: CoreController) {
                   ...(target.rect === null ? {} : { rect: target.rect }),
                 },
           );
+          if (
+            target !== null &&
+            target.rect !== null &&
+            sameShown(target, shown) &&
+            owner?.source === "layout" &&
+            errorOwners.get(target.sessionId) === owner
+          )
+            setError(target.sessionId, null);
         } catch (thrown) {
-          if (target !== null) setError(target.sessionId, toCallError(thrown).error.message);
+          if (
+            target !== null &&
+            owner?.source !== "action" &&
+            errorOwners.get(target.sessionId) === owner
+          )
+            setError(target.sessionId, toCallError(thrown).error.message, "layout");
         }
       }
     } finally {
@@ -172,8 +223,19 @@ export function createPreviews(core: CoreController) {
     },
     /** Opens a port (or URL) of the session in its preview. */
     async open(sessionId: string, target: { port: number } | { url: string }): Promise<void> {
-      await act(sessionId, { op: "open", sessionId, ...target });
+      const result = await act(sessionId, { op: "open", sessionId, ...target });
+      const owner = errorOwners.get(sessionId);
       await controller.load(sessionId);
+      const current = store.get();
+      if (result === null && owner !== undefined && errorOwners.get(sessionId) === owner) {
+        const queued = queuedOpen(
+          current.lists[sessionId]?.preview,
+          target,
+          current.error[sessionId],
+        );
+        if (queued === "waiting") errorOwners.set(sessionId, { source: "layout" });
+        else if (queued === "open") setError(sessionId, null);
+      }
     },
     back: (sessionId: string) => act(sessionId, { op: "back", sessionId }),
     forward: (sessionId: string) => act(sessionId, { op: "forward", sessionId }),
@@ -203,6 +265,7 @@ export function createPreviews(core: CoreController) {
 
   // a deleted session's entries go with it.
   core.onSessionsGone((ids) => {
+    for (const id of ids) errorOwners.delete(id);
     store.set((s) => pruneSessions(s, ["lists", "busy", "error"], ids));
   });
   const stopListening = core.listen((event) => {

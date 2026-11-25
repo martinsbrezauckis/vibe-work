@@ -114,11 +114,15 @@ async fn propose(shared: &Arc<Shared>, session_id: &str, args: Value) -> Result<
         .unwrap_or(&0);
     let root = shared.instructions.own_home.clone();
     let sid = session_id.to_owned();
-    let proposal = tokio::task::spawn_blocking(move || {
-        crate::protected_changes_validate::capture(&root, &sid, args)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    // Validation and the proposal's base hash must observe one Developer-switch state.
+    let proposal = {
+        let _mutation = shared.developer_permissions.mutation_lock().await;
+        tokio::task::spawn_blocking(move || {
+            crate::protected_changes_validate::capture(&root, &sid, args)
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
     let mut view = review(&proposal);
     view.turn_id = shared.store.view(session_id).and_then(|session| {
         session
@@ -359,7 +363,7 @@ pub(crate) async fn decide(
             "the decline note must be plain text of at most 8000 bytes",
         ));
     }
-    {
+    let config_write = {
         let hub = shared.protected_changes.lock();
         let pending = hub
             .pending
@@ -368,7 +372,19 @@ pub(crate) async fn decide(
         if session_id != pending.proposal.session_id() {
             return Err(invalid("this proposal belongs to another chat"));
         }
-    }
+        approve
+            && pending
+                .proposal
+                .review()
+                .iter()
+                .any(|file| file.path == std::path::Path::new("config.toml"))
+    };
+    // A stale base is checked inside apply; keep OFF from changing the base between that check and the write.
+    let _mutation = if config_write {
+        Some(shared.developer_permissions.mutation_lock().await)
+    } else {
+        None
+    };
     // A No is settled like any decision: nothing is written, the proposal call returns the declined result and the
     // turn goes on.
     let shared = shared.clone();

@@ -129,7 +129,7 @@ async function startUntilMicPending(
 }
 
 /** Runs one `ui/voice` request. */
-async function handleVoice(app: App, body: unknown): Promise<unknown> {
+export async function handleVoice(app: App, body: unknown): Promise<unknown> {
   const input = bodyObject(body);
   const voice = app.voice;
   if (voice === null) throw new UiControlError("serverUnavailable", "the app has no core");
@@ -177,6 +177,15 @@ async function handleVoice(app: App, body: unknown): Promise<unknown> {
         voice.narration.skip();
         return readVoice(app);
       case "voiceChat":
+        if (input["on"] === true) {
+          const loaded = await voice.ensureLoaded("voice chat");
+          if (!loaded) {
+            throw new UiControlError(
+              "internal",
+              voice.chunkLoad.store.get().error ?? "Could not load voice chat",
+            );
+          }
+        }
         switchVoiceChat(voice, input, sessionId);
         return readVoice(app);
       case "voiceChatEnd":

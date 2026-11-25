@@ -29,7 +29,7 @@ use vw_import::{Found, Homes, Kind, Payload, Status, Taken};
 use vw_platform::sync::LockRecover;
 
 use crate::command::Origin;
-use crate::core::Core;
+use crate::core::{Core, Shared};
 use crate::error::{CoreError, ErrorCode};
 use crate::import_view::{ImportPick, ImportRequest, ImportResult, ImportSummary};
 
@@ -103,6 +103,76 @@ fn backup_dir(home: &Path, bring: &str) -> Result<PathBuf, CoreError> {
         return Err(invalid("not a bring id"));
     }
     Ok(home.join("import-backup").join(bring))
+}
+
+/// Resolve each imported program before showing its native confirmation; report rows that cannot run.
+async fn prepare_import_commands(
+    chosen: Vec<(Found, Payload)>,
+) -> Result<(Vec<(Found, Payload)>, Vec<String>), CoreError> {
+    let mut ready = Vec::with_capacity(chosen.len());
+    let mut left = Vec::new();
+    for (found, payload) in chosen {
+        let payload = match payload {
+            Payload::Server(Server::Stdio { command, args, env }) => {
+                let resolved = crate::worktrees::blocking(move || {
+                    vw_platform::command_resolve::resolve_here(&command, None)
+                })
+                .await?;
+                match resolved.and_then(|program| {
+                    vw_platform::command_resolve::check_launch(
+                        vw_platform::command_resolve::OsKind::current(),
+                        &program,
+                        &args,
+                    )?;
+                    Ok(program)
+                }) {
+                    Ok(command) => Payload::Server(Server::Stdio { command, args, env }),
+                    Err(reason) => {
+                        left.push(format!("{}: {reason}", found.name));
+                        continue;
+                    }
+                }
+            }
+            other => other,
+        };
+        ready.push((found, payload));
+    }
+    Ok((ready, left))
+}
+
+/// Keep an undoable result for a selection where every command was unresolved, so the UI's Undo stays valid.
+fn empty_bring(core: &Core, home: &Path, left: Vec<String>) -> Result<ImportResult, CoreError> {
+    let bring = now_ms().to_string();
+    let backup = backup_dir(home, &bring)?;
+    std::fs::create_dir_all(&backup)
+        .map_err(|error| failed("The empty backup could not be made", error))?;
+    let summary = ImportSummary {
+        bring: bring.clone(),
+        brought: 0,
+        changed: 0,
+        left,
+    };
+    core.shared.import_brings.0.lock_or_recover().insert(
+        bring,
+        Record {
+            at_ms: now_ms(),
+            summary: Some(summary.clone()),
+            ..Record::default()
+        },
+    );
+    Ok(ImportResult::Brought { summary })
+}
+
+async fn enforce_import_pause(shared: &Shared) -> Result<(), CoreError> {
+    if crate::command_pause::enforce(shared).map_err(|_| {
+        CoreError::new(
+            ErrorCode::Internal,
+            vw_vocabulary::texts::COMMAND_SERVER_ENFORCE_FAILED,
+        )
+    })? {
+        crate::connectors::refresh_servers_locked(shared).await;
+    }
+    Ok(())
 }
 
 impl Core {
@@ -185,7 +255,17 @@ impl Core {
         if chosen.is_empty() {
             return Err(invalid("None of the picked rows can be brought."));
         }
-        let summary_text = confirmation(home, &chosen);
+        // The exact resolved absolute program shown in the dialog is the one saved.
+        let (chosen, left) = prepare_import_commands(chosen).await?;
+        if chosen.is_empty() {
+            return empty_bring(self, home, left);
+        }
+        let has_command = chosen
+            .iter()
+            .any(|(_, payload)| matches!(payload, Payload::Server(Server::Stdio { .. })));
+        let switch_revision = self.shared.developer_permissions.revision();
+        let switch_on = self.shared.developer_permissions.enabled();
+        let summary_text = confirmation(home, &chosen, switch_on);
         self.ask_native(
             crate::command::requester(origin),
             METHOD,
@@ -193,6 +273,16 @@ impl Core {
             summary_text,
         )
         .await?;
+        let _mutation = self.shared.developer_permissions.mutation_lock().await;
+        if has_command && self.shared.developer_permissions.revision() != switch_revision {
+            return Err(CoreError::new(
+                ErrorCode::Denied,
+                vw_vocabulary::texts::COMMAND_SERVER_CHANGED,
+            ));
+        }
+        if !self.shared.developer_permissions.enabled() {
+            enforce_import_pause(&self.shared).await?;
+        }
         let bring = now_ms().to_string();
         let backup = backup_dir(home, &bring)?;
         let mut record = Record::default();
@@ -200,7 +290,7 @@ impl Core {
             bring: bring.clone(),
             brought: 0,
             changed: 0,
-            left: Vec::new(),
+            left,
         };
         std::fs::create_dir_all(&backup).map_err(|e| failed("The backup could not be made", e))?;
         for file in ["AGENTS.md", "config.toml"] {
@@ -220,6 +310,8 @@ impl Core {
                 Err(why) => summary.left.push(format!("{}: {why}", found.name)),
             }
         }
+        // A command server brought from another agent starts only with Developer permissions on.
+        enforce_import_pause(&self.shared).await?;
         record.at_ms = now_ms();
         record.summary = Some(summary.clone());
         self.shared
@@ -316,8 +408,16 @@ impl Core {
                     },
                     stdio @ Server::Stdio { .. } => stdio,
                 };
-                crate::mcp_keys_config::add_imported(home, &name, &server)
+                let paused = matches!(server, Server::Stdio { .. })
+                    && !self.shared.developer_permissions.enabled();
+                crate::mcp_keys_config::add_imported(home, &name, &server, paused)
                     .map_err(|e| e.to_string())?;
+                if paused {
+                    crate::command_pause::remember_paused(
+                        self.shared.developer_permissions.settings_path(),
+                        &name,
+                    );
+                }
                 record.servers.push(name);
                 Ok(())
             }
@@ -332,19 +432,48 @@ fn stale(message: &str) -> CoreError {
 }
 
 /// The confirmation: every file written and every key that goes to the vault (names only).
-fn confirmation(home: &Path, chosen: &[(Found, Payload)]) -> String {
+fn confirmation(home: &Path, chosen: &[(Found, Payload)], switch_on: bool) -> String {
     let mut lines = vec![format!(
         "Bring {} item(s) from other coding agents into Vibe Work? Nothing in their folders changes.",
         chosen.len()
     )];
-    for (found, _) in chosen {
-        let line = match found.kind {
-            Kind::Instructions => format!(
+    for (found, payload) in chosen {
+        let line = match payload {
+            Payload::Server(Server::Stdio { command, args, env }) => {
+                let names: Vec<(String, Option<String>)> =
+                    env.iter().map(|(name, _)| (name.clone(), None)).collect();
+                let detail = crate::connector_consent::command_server_summary(
+                    &crate::connector_consent::CommandDialog {
+                        change: false,
+                        enable: false,
+                        import: true,
+                        name: &found.name,
+                        program: command,
+                        args,
+                        cwd: None,
+                        env: &names,
+                    },
+                );
+                let detail = format!(
+                    "From {} (saved in {}).\n{detail}",
+                    vw_gate::dialog_quote(&found.source),
+                    vw_gate::dialog_quote(&home.join("config.toml").to_string_lossy())
+                );
+                if switch_on {
+                    detail
+                } else {
+                    format!(
+                        "{detail}\n{}",
+                        vw_vocabulary::texts::COMMAND_SERVER_IMPORT_STARTS_PAUSED
+                    )
+                }
+            }
+            _ if found.kind == Kind::Instructions => format!(
                 "- {}: add to {}",
                 vw_gate::dialog_value(&format!("{} instructions", found.agent.label()), 64),
                 vw_gate::dialog_quote(&home.join("AGENTS.md").to_string_lossy())
             ),
-            Kind::Skill => format!(
+            _ if found.kind == Kind::Skill => format!(
                 "- skill {}: copy into {}",
                 vw_gate::dialog_value(&found.name, 64),
                 vw_gate::dialog_quote(&home.join("skills").join(&found.name).to_string_lossy())
@@ -401,6 +530,7 @@ fn last_bring(core: &Core) -> Option<ImportSummary> {
 }
 
 async fn import_undo(core: &Core, home: &Path, bring: &str) -> Result<(), CoreError> {
+    let _mutation = core.shared.developer_permissions.mutation_lock().await;
     let backup = backup_dir(home, bring)?;
     let record = core
         .shared
@@ -412,6 +542,44 @@ async fn import_undo(core: &Core, home: &Path, bring: &str) -> Result<(), CoreEr
         .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "No such bring to undo."))?;
     if now_ms().saturating_sub(record.at_ms) > UNDO_MS {
         return Err(invalid("A bring can be undone for 24 hours only."));
+    }
+    if record.backed_up.iter().any(|name| name == "config.toml") {
+        let saved = backup.join("config.toml");
+        let metadata = std::fs::symlink_metadata(&saved)
+            .map_err(|_| failed("The backup config could not be inspected", "missing file"))?;
+        if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+            return Err(CoreError::new(
+                ErrorCode::Denied,
+                vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE,
+            ));
+        }
+        let current = match std::fs::read(home.join("config.toml")) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => {
+                return Err(CoreError::new(
+                    ErrorCode::Denied,
+                    vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE,
+                ));
+            }
+        };
+        let restored = std::fs::read(&saved)
+            .map_err(|_| failed("The backup config could not be read", "read failed"))?;
+        match crate::command_servers_config::stdio_change(&current, &restored) {
+            crate::command_servers_config::StdioChange::Safe => {}
+            crate::command_servers_config::StdioChange::Unsafe => {
+                return Err(CoreError::new(
+                    ErrorCode::Denied,
+                    vw_vocabulary::texts::COMMAND_SERVER_UNDO_REFUSED,
+                ));
+            }
+            crate::command_servers_config::StdioChange::Uncheckable => {
+                return Err(CoreError::new(
+                    ErrorCode::Denied,
+                    vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE,
+                ));
+            }
+        }
     }
     for imported in &record.key_servers {
         crate::mcp_keys::remove_imported(&core.shared, imported).await?;
@@ -437,6 +605,7 @@ async fn import_undo(core: &Core, home: &Path, bring: &str) -> Result<(), CoreEr
             std::fs::remove_file(&path).map_err(|e| failed("A file could not be removed", e))?;
         }
     }
+    enforce_import_pause(&core.shared).await?;
     std::fs::remove_dir_all(&backup).map_err(|e| failed("The backup could not be removed", e))?;
     core.shared.import_brings.0.lock_or_recover().remove(bring);
     core.shared.emit(crate::event::CoreEvent::SecretsChanged {});

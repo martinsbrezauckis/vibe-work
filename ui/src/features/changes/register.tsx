@@ -9,16 +9,23 @@
  * Invariants: without a core nothing is registered (the placeholder stays); the returned function undoes
  * every registration and stops following events.
  */
+import { createLazyComponent } from "../../components/LazyChunk";
 import { statusType } from "../../state/sessionSummary";
 import { registerGitRoute } from "../git/gitRoutes";
 import { barShown } from "../git/model";
 import { createTurnRefresh } from "../git/turnRefresh";
 import type { App } from "../shell/AppContext";
-import { ChangesTab } from "./ChangesTab";
 import { registerChangesRoute } from "./changesRoutes";
 import { LineCommentsProvider } from "./LineCommentsContext";
 import { createLineComments } from "./lineComments";
 import { hasChanges } from "./model";
+
+/** Changes tab body loaded on demand when opened. */
+export const LazyChangesTab = createLazyComponent({
+  label: "the changes tab",
+  testIdPrefix: "changes.tab",
+  load: async () => ({ default: (await import("./ChangesTab")).ChangesTab }),
+});
 
 /** Registers the Changes tab and route on `app`; returns the function that removes them. */
 export function registerChangesTab(app: App): () => void {
@@ -28,7 +35,7 @@ export function registerChangesTab(app: App): () => void {
   const comments = createLineComments(app, core, changes);
   const removeBody = app.panelTabs.register("changes", () => (
     <LineCommentsProvider value={comments}>
-      <ChangesTab changes={changes} />
+      <LazyChangesTab changes={changes} />
     </LineCommentsProvider>
   ));
   const removeRoute = registerChangesRoute(app, changes, comments);

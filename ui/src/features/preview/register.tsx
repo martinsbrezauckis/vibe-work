@@ -8,16 +8,23 @@
  * registrations, hides every preview and stops following events. Notes go to the composer as chips and pictures
  * only (data, never a command).
  */
+import { createLazyComponent } from "../../components/LazyChunk";
 import { insertChip } from "../pages/point";
 import { panelOwner } from "../../state/shellState";
 import type { App } from "../shell/AppContext";
 import { createBrowser } from "./browser";
 import { createCapture } from "./capture";
 import { registerBrowserRoute } from "./browserRoutes";
-import { PreviewTab } from "./PreviewTab";
 import { createPreviews } from "./store";
 import { reportPreviewVisibility } from "./visibility";
 import { registerReloadKeys } from "./reloadKeys";
+
+/** Browser tab body loaded on demand when the tab is rendered. */
+export const LazyPreviewTab = createLazyComponent({
+  label: "the browser tab",
+  testIdPrefix: "preview.tab",
+  load: async () => ({ default: (await import("./PreviewTab")).PreviewTab }),
+});
 
 /** Registers the Browser tab body and route on `app`; returns the function that removes them. */
 export function registerPreviewTab(app: App): () => void {
@@ -50,13 +57,13 @@ export function registerPreviewTab(app: App): () => void {
   const removeReloadKeys = registerReloadKeys(app, previews, browser);
   const stopVisibility = reportPreviewVisibility(core, app, browser);
   const removeBody = app.panelTabs.register("browser", () => (
-    <PreviewTab previews={previews} browser={browser} capture={capture} />
+    <LazyPreviewTab previews={previews} browser={browser} capture={capture} />
   ));
   const stopPreviewRequests = core.listen((event) => {
     if (event.type === "previewShowRequested") {
       // A previous web tab can still be selected. Finish selecting App preview
       // before revealing the panel, including when the tool did not ask for a width.
-      void browser.switchTab(event.sessionId, event.sessionId).then(() => {
+      void browser.switchTab(event.sessionId, event.sessionId, true).then(() => {
         app.shell.actions.openTab("browser", event.sessionId);
       });
     }

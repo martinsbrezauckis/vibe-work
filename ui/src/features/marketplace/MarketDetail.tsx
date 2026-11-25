@@ -149,7 +149,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
         <Button
           data-testid="marketplace.market-detail-cancel"
           type="button"
-
+          shape="outlined"
           onClick={() => void actions?.cancel()}
         >
           Stop
@@ -161,7 +161,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
             <Button
               data-testid="marketplace.market-detail-install-2"
               type="button"
-
+              shape="outlined"
               onClick={() => void actions?.install(e.entry.id)}
             >
               Reinstall
@@ -170,7 +170,7 @@ function Actions({ e }: { e: MarketEntryView }): ReactElement {
           {e.folder ? (
             <Button
               type="button"
-
+              shape="outlined"
               data-testid="marketplace.market-detail-toggle"
               onClick={() => {
                 if (e.folder)

@@ -84,6 +84,7 @@ impl ChromeControl {
         let chat_profiles = bindings.chats();
         let mut agent_windows = super::agent_windows::AgentWindows::default();
         agent_windows.seed_dropped(bindings.unclosed_windows());
+        agent_windows.seed_warned(bindings.warned_windows());
         let paired_once = dir.as_deref().is_some_and(store::paired_once);
         let edge_paired_once = dir
             .as_deref()

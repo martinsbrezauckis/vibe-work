@@ -41,7 +41,7 @@ use tokio::task::JoinHandle;
 
 use crate::key::{KeyCell, KeyNeed};
 use crate::limits::{LimitsGate, RateLimits};
-use crate::mcp::McpResolverSlot;
+use crate::mcp::{McpProblems, McpResolverSlot};
 use crate::token::TokenSlot;
 
 #[path = "server_forward.rs"]
@@ -101,6 +101,8 @@ pub struct ProxyConfig {
     /// The core's MCP binding resolver (`mcp.rs`), filled after the core starts; shared, so a clone of
     /// this config fills the same slot.
     pub mcp: McpResolverSlot,
+    /// Why each key server's last request failed (`mcp.rs`); shared like `mcp`, so the core can read it.
+    pub mcp_problems: McpProblems,
 }
 
 impl Default for ProxyConfig {
@@ -113,6 +115,7 @@ impl Default for ProxyConfig {
             on_wait: Arc::new(|_| {}),
             on_rate_limits: Arc::new(|_| {}),
             mcp: McpResolverSlot::default(),
+            mcp_problems: McpProblems::default(),
         }
     }
 }

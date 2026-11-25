@@ -10,6 +10,7 @@ import { useState } from "react";
 import { TEXT } from "../../../vocabulary";
 import { Button, SettingsRow, Switch } from "../../../components/Controls";
 import { Selector } from "../../../components/Selector";
+import { ACT_REMOVE_ELLIPSIS } from "../actionLabels";
 import type { BrowserProfile, ProfileState } from "../../../protocol/core";
 import type { ChromeControlState } from "./useChromeControl";
 import { ProfileRemoveDialog } from "./ChromeDialogs";
@@ -72,7 +73,7 @@ function ProfileRow({
             onRemove(profile);
           }}
         >
-          Remove…
+          {ACT_REMOVE_ELLIPSIS}
         </Button>
         <label className="browser-profile-use" htmlFor={switchId}>
           {TEXT.browserProfileUse}

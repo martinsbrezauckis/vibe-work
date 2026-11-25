@@ -76,6 +76,57 @@ pub enum ConnectorsRequest {
         #[cfg_attr(feature = "ts", ts(optional))]
         name: Option<String>,
     },
+    /// Adds an MCP server that needs no sign-in and no key (a server on this computer, or an open one): Vibe
+    /// Work writes its config entry without an `auth` table, so Vibe connects at once and never starts an
+    /// OAuth sign-in. Always asks the native dialog, which says what is true about the address.
+    AddNoAuthServer {
+        /// `https://...` (or `http://` on this computer); no query or fragment.
+        url: String,
+        /// Name in Vibe's config; derived from the address when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        name: Option<String>,
+    },
+    /// Adds a command-started (stdio) MCP server: a program on this computer that Vibe starts and talks to.
+    /// Only the person's window may send it, only with Developer permissions on, and the native dialog shows the
+    /// resolved program, every argument, the working folder, the variables and what it means (`command_servers`).
+    AddCommandServer {
+        /// Name in Vibe's config; derived from the program when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        name: Option<String>,
+        /// A program name (`npx`) or a path.
+        command: String,
+        /// One argument per entry.
+        #[serde(default)]
+        args: Vec<String>,
+        /// The working folder, absolute; absent: Vibe's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
+        /// Environment variables (plain values only).
+        #[serde(default)]
+        env: Vec<CommandEnvInput>,
+    },
+    /// Changes the program, arguments, working folder or variables of a command server: the same rules and the same
+    /// native dialog as `addCommandServer`. The whole new setting is sent; a hidden variable of an older entry is kept
+    /// with `keepExisting`, or left out to remove it.
+    UpdateCommandServer {
+        /// The server's name.
+        name: String,
+        /// A program name or path.
+        command: String,
+        /// One argument per entry.
+        #[serde(default)]
+        args: Vec<String>,
+        /// The working folder; absent: Vibe's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        cwd: Option<String>,
+        /// Environment variables.
+        #[serde(default)]
+        env: Vec<CommandEnvInput>,
+    },
     /// Starts the sign-in of an added server (`mcp_catalog/login`) in the background: the answer is
     /// immediate, the page address arrives as the `mcp_catalog/authUrl` notice, the outcome as the
     /// `connectorSignIn` event. One at a time (Vibe's callback port is fixed).
@@ -132,6 +183,23 @@ pub enum ConnectorsRequest {
         /// The server's name.
         name: String,
     },
+}
+
+/// One environment variable of a command server, as typed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommandEnvInput {
+    /// The variable's name.
+    pub name: String,
+    /// A plain value; absent with `keepExisting`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub value: Option<String>,
+    /// Keep the value already saved for this name (a value that is hidden here).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub keep_existing: Option<bool>,
 }
 
 /// A new secret for `addKeyServer`.
@@ -222,6 +290,10 @@ pub struct ConnectorsView {
     pub session_id: Option<String>,
     /// The server whose sign-in is running now, if any.
     pub signing_in: Option<String>,
+    /// Developer permissions is on (command servers can be added and started).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub developer_permissions: Option<bool>,
 }
 
 /// One Mistral-hosted connector.
@@ -283,8 +355,14 @@ pub struct ServerView {
     pub status: Option<String>,
     /// Tools, from the merged session.
     pub tools: Vec<ToolView>,
-    /// Vibe's error text, when it has one.
+    /// Why the server cannot be used, when it cannot: a readable reason with its action when the cause is
+    /// known, else Vibe's own text.
     pub error: Option<String>,
+    /// The cause of `error` when it is known: `certificate`, `unreachable`, `timeout`, `keyRejected`,
+    /// `needsCredentials` or `forbidden`; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub error_kind: Option<String>,
     /// The plugin that provides it (`null`: Vibe's config).
     pub plugin: Option<String>,
     /// Origin: built-in for app-injected tools or a built-in plugin; otherwise the pinned plugin’s scope, when known.
@@ -295,6 +373,42 @@ pub struct ServerView {
     pub configured: bool,
     /// The key Vibe Work adds for it (`null`: not a key server).
     pub key: Option<ServerKeyView>,
+    /// The program, arguments, working folder and variables of a command server (hidden values are not here).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub command_config: Option<CommandConfigView>,
+}
+
+/// What starts a command server. A value that looks like a key is hidden: the name is shown, never the value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CommandConfigView {
+    /// The program as saved (an absolute path when added in Tools).
+    pub command: String,
+    /// The arguments.
+    pub args: Vec<String>,
+    /// The working folder, if one was set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub cwd: Option<String>,
+    /// The variables, in the file's order.
+    pub env: Vec<CommandEnvView>,
+}
+
+/// One variable of a command server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CommandEnvView {
+    /// The variable's name.
+    pub name: String,
+    /// The plain value; absent when hidden.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub value: Option<String>,
+    /// True when the value looks like a key and is kept out of the view.
+    pub hidden: bool,
 }
 
 /// How a key server gets its key. Names only, never a value.

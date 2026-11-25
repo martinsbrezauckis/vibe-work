@@ -4,6 +4,7 @@
 import { TEXT } from "../../vocabulary";
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Controls";
+import { ACT_REFRESH_USAGE } from "./actionLabels";
 import { clockText } from "../../state/account";
 import { useStore } from "../../state/createStore";
 import { sessionForPick } from "../../state/modelChoice";
@@ -108,7 +109,7 @@ export function PlanUsageSettings() {
               void ledger.refresh();
             }}
           >
-            Refresh usage
+            {ACT_REFRESH_USAGE}
           </Button>
         </>
       )}

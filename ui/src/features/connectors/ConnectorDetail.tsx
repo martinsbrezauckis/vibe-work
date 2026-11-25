@@ -1,7 +1,8 @@
 /**
  * The details panel of the selected connector or server: what it is, its state with Vibe's
  * own reason, the tools Vibe reports, who keeps the sign-in, and its actions (sign in or connect, turn off or on,
- * manage at Mistral; for servers also sign out and remove).
+ * manage at Mistral; for servers also sign out and remove; for a command server also what starts it, Edit command and
+ * the way back from a pause: `CommandServerPart`).
  * Depends on: AppContext (link dialog), hooks, CategoryIcon, model/meta, model/view. Called by:
  * ConnectorsPage.
  * Invariants: links (Mistral's console) open only through the link dialog; plugin servers are shown, not
@@ -9,12 +10,13 @@
  */
 import { builtinServerText } from "../../state/builtinToolsText";
 import { Badge, Button } from "../../components/Controls";
-import type { ReactElement } from "react";
+import { Fragment, type ReactElement, type ReactNode } from "react";
 
 import type { ServerView, ToolView } from "../../protocol/core";
 import { useApp } from "../shell/AppContext";
 import { KeyNotice, useKeyReadiness } from "../shell/KeyNotice";
 import { CategoryIcon } from "./CategoryIcon";
+import { CommandServerPart } from "./CommandServerPart";
 import { useConnectorActions, useConnectors } from "./hooks";
 import { CATEGORIES } from "./model/meta";
 import { type Tile, serverStatusText, serverTone, tileOf } from "./model/view";
@@ -130,6 +132,16 @@ function ConnectorPart({
 }
 
 /**: which key a key server gets, the grant, and "Allow key" when it is not allowed now. */
+/** An address that may wrap only after "/", ".", "?" or "-", never inside a word; the text stays the full address. */
+function breakableAddress(address: string): ReactNode {
+  return (address.match(/[^/.?-]*[/.?-]|[^/.?-]+$/g) ?? [address]).map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 ? <wbr /> : null}
+      {part}
+    </Fragment>
+  ));
+}
+
 function KeyLine({ server }: { server: ServerView }): ReactElement {
   const actions = useConnectorActions();
   const vaultBlocked = useKeyReadiness("vault") !== null;
@@ -176,6 +188,7 @@ function KeyLine({ server }: { server: ServerView }): ReactElement {
 
 function ServerPart({ server }: { server: ServerView }): ReactElement {
   const actions = useConnectorActions();
+  const { shell } = useApp();
   const tone = serverTone(server);
   const display = builtinServerText(server);
   return (
@@ -186,15 +199,36 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
         </span>
         <div>
           <h2>{display?.name ?? server.displayName}</h2>
-          <p className="cmuted mono">{server.address ?? "Runs on this computer"}</p>
+          <p className="cmuted mono">
+            {server.address === null ? "Runs on this computer" : breakableAddress(server.address)}
+          </p>
         </div>
       </header>
       <p>
         <Badge presentation="connector-status" state={tone}>
           {serverStatusText(server)}
         </Badge>
-        {server.error === null ? null : <span className="creason"> {server.error}</span>}
+        {server.error === null ? null : (
+          <span className="creason" data-error-kind={server.errorKind}>
+            {" "}
+            {server.error}
+          </span>
+        )}
       </p>
+      {server.errorKind === "certificate" ? (
+        <p>
+          <Button
+            data-testid="connectors.connector-detail-network-settings"
+            type="button"
+            shape="outlined"
+            onClick={() => {
+              shell.actions.openSettings("network", "network-certificate");
+            }}
+          >
+            Network settings
+          </Button>
+        </p>
+      ) : null}
       {display ? (
         <>
           <p>{display.description}</p>
@@ -206,6 +240,9 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
       ) : null}
       <h3>What it can do</h3>
       <Tools tools={server.tools} empty="Its tools show once a chat has connected to it." />
+      {server.transport === "stdio" && server.configured ? (
+        <CommandServerPart server={server} />
+      ) : null}
       <h3>Sign-in</h3>
       {server.key !== null ? (
         <KeyLine server={server} />
@@ -215,7 +252,7 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
             ? "Vibe signs in for you; the token stays in this computer's keychain (Vibe's), never in Vibe Work."
             : server.signIn === "static"
               ? "Signs in with a key or header in Vibe's config (set up outside Vibe Work)."
-              : "No sign-in."}
+              : "No sign-in: Vibe connects without a key or token."}
         </p>
       )}
       {server.plugin !== null ? (
@@ -242,6 +279,7 @@ function ServerPart({ server }: { server: ServerView }): ReactElement {
             data-testid="connectors.connector-detail-set-server-off"
             type="button"
             shape="outlined"
+            disabled={server.errorKind === "developerPermissionsOff"}
             onClick={() => void actions?.setServerOff(server.name, !server.off)}
           >
             {server.off ? "Turn on" : "Turn off"}

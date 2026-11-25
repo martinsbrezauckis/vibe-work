@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 
 import { Button } from "../../../components/Controls";
 import { Modal } from "../../../components/Modal";
+import { ACT_CANCEL, ACT_REMOVE } from "../actionLabels";
 import type { ChromeControlState } from "./useChromeControl";
 
 /**
@@ -55,7 +56,7 @@ export function ChromeRemoveDialog({
             data-dialog-initial-focus="true"
             onClick={onClose}
           >
-            Cancel
+            {ACT_CANCEL}
           </Button>
           <Button
             data-testid={`settings.${prefix}-remove-confirm`}
@@ -67,7 +68,7 @@ export function ChromeRemoveDialog({
               });
             }}
           >
-            Remove
+            {ACT_REMOVE}
           </Button>
         </footer>
       </Modal>
@@ -117,7 +118,7 @@ export function ProfileRemoveDialog({
             data-dialog-initial-focus="true"
             onClick={onClose}
           >
-            Cancel
+            {ACT_CANCEL}
           </Button>
           <Button
             data-testid="settings.browser-profile-remove-confirm"
@@ -130,7 +131,7 @@ export function ProfileRemoveDialog({
               });
             }}
           >
-            Remove
+            {ACT_REMOVE}
           </Button>
         </footer>
       </Modal>

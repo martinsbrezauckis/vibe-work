@@ -1,7 +1,7 @@
 //! Preview maintenance: release idle browsers, report stopped servers, withdraw expired port rights and keep the
 //! previews' URL rules on the chats' current server ports.
 //! Depends on preview changes and process attribution; started and aborted by the preview hub.
-//! Sleeps without a timer when there are no admitted browsers, port rights or stopped-server notices.
+//! Sleeps without a timer when there are no admitted or waiting browsers, port rights or stopped-server notices.
 //! A chat server's exit (`super::server_exited`, from the process exit watch on macOS) ends the wait at once: the App
 //! preview's content rules drop its port within the rule update time, not at the next round (up to 3 s). That is not
 //! a check per request, and a server that closes its socket but keeps running is still found only by the next round.
@@ -25,6 +25,7 @@ pub(super) fn start(shared: &Arc<Shared>) -> JoinHandle<()> {
             let Some(active) = weak.upgrade().and_then(|shared| {
                 shared.preview.as_ref().map(|hub| {
                     hub.service.has_active_browsers()
+                        || hub.service.has_waiting_browsers()
                         || !hub.service.sessions_with_ports().is_empty()
                 })
             }) else {
@@ -57,6 +58,8 @@ pub(super) fn start(shared: &Arc<Shared>) -> JoinHandle<()> {
             if let Err(error) = hub.service.reap_idle_browsers().await {
                 tracing::debug!(%error, "idle browser release failed");
             }
+            // Memory that freed up raises the cap without any setting change: waiting chats get the slots.
+            hub.service.admit_waiting().await;
             let sessions = hub.service.sessions_with_ports();
             if sessions.is_empty() {
                 continue;

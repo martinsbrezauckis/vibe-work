@@ -1,6 +1,13 @@
 /** Browser connection labels and search entries. Used by Settings and its Debug API route. */
 import type { ChromeAddonAction, ChromeControlView } from "../../../protocol/core";
 import type { SettingEntry } from "../catalog";
+import {
+  ACT_OPEN_PAIRING_PAGE,
+  ACT_REMOVE_ELLIPSIS,
+  ACT_SETUP_AGAIN,
+  ACT_TURN_ON,
+  connectBrowserLabel,
+} from "../actionLabels";
 import { term, TEXT, wording } from "../../../vocabulary";
 /** True when the core reports a Chrome connection at all (a view whose setup is not `absent`). */
 export function chromeAvailable(view: ChromeControlView | null | undefined): boolean {
@@ -113,11 +120,11 @@ export function stepLabel(
   action: ChromeAddonAction,
   browser: "Chrome" | "Edge" | "Safari" = "Chrome",
 ): string {
-  if (action === "remove") return "Remove…";
-  if (action === "openPairingPage") return "Open pairing page";
-  if (action === "setupAgain") return "Set up again";
-  if (action === "turnOn") return "Turn on";
-  return `Connect ${browser}`;
+  if (action === "remove") return ACT_REMOVE_ELLIPSIS;
+  if (action === "openPairingPage") return ACT_OPEN_PAIRING_PAGE;
+  if (action === "setupAgain") return ACT_SETUP_AGAIN;
+  if (action === "turnOn") return ACT_TURN_ON;
+  return connectBrowserLabel(browser);
 }
 /** The compare code belongs to the pairing step only. */
 export function pairingStep(view: ChromeControlView | null): boolean {

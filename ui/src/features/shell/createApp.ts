@@ -24,7 +24,7 @@ import { createCore } from "../../state/coreStore";
 import { createDocuments } from "../../state/documents";
 import { createFiles } from "../../state/files";
 import { createKeys } from "../../state/keyStore";
-import { keyReadiness, vaultReadiness } from "../../state/keyReadiness";
+import { keyReadiness, vaultReadiness, whenKeySettled } from "../../state/keyReadiness";
 import { type Libraries, createLibraries } from "../../state/libraries";
 import { createLeftRunning } from "../../state/leftRunning";
 import { createProjects } from "../../state/projects";
@@ -144,6 +144,7 @@ export function createApp(options: CreateAppOptions): App {
         });
   const keyGuard = () => (keys === null ? null : (keyReadiness(keys.store.get())?.message ?? null));
   const canUseKey = () => keyGuard() === null;
+  const keyReady = () => (keys === null ? Promise.resolve() : whenKeySettled(keys.store));
   const canUseVault = () => keys === null || vaultReadiness(keys.store.get()) === null;
   const sessionTools = core === null ? null : createSessionTools({ core, shell, toasts });
   const composer = createComposer({
@@ -251,7 +252,10 @@ export function createApp(options: CreateAppOptions): App {
     sessionProcesses: core === null ? null : createSessionProcesses({ core, shell, toasts }),
     composer,
     projects,
-    documents: core === null ? null : createDocuments({ core, composer, shell, toasts, canUseKey }),
+    documents:
+      core === null
+        ? null
+        : createDocuments({ core, composer, shell, toasts, canUseKey, keyReady }),
     files,
     newChat,
     voice:

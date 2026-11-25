@@ -1,4 +1,4 @@
-//! Vibe Work's MCP entries in its own Vibe config: a key server is an `[[mcp_servers]]` entry whose
+//! Vibe Work's MCP entries in its own Vibe config: a key server is an `mcp_servers` entry whose
 //! address is the MCP forwarder on the model proxy, `http://127.0.0.1:<port>/vw-mcp/<binding id>`, with static auth
 //! `api_key_env = "VW_MCP_TOKEN"` (Vibe sends the proxy token from its environment; `core/config/models.py:338-349`).
 //! No key and no upstream address is ever written here.
@@ -14,14 +14,15 @@
 //! Invariants:
 //! - Only Vibe Work's own `VIBE_HOME/config.toml` is touched (never `~/.vibe`, same rule as `title_model`).
 //! - Only entries whose address has the forwarder's shape are re-ported; every other entry is left byte-identical.
-//! - An empty inline list (`mcp_servers = []`, as Vibe saves it) becomes the `[[mcp_servers]]` list at the first
-//!   add; a non-empty inline list is refused as `Unsupported`.
+//! - Both `[[mcp_servers]]` and Vibe's inline array are edited in place; an unclassifiable row is refused.
 //! - The edit is checked before it is written (the new text parses and has the expected entry), and the file is
 //!   re-read right before the rename: a change in between (Vibe wrote it) is retried once, then refused.
 
 use std::path::Path;
 
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
+use toml_edit::{DocumentMut, Item, Table, Value, value};
+
+use crate::mcp_rows::edit_rows;
 
 /// The variable Vibe reads the forwarder token from (`vw_supervisor::MCP_TOKEN_VAR`).
 pub(crate) const TOKEN_ENV: &str = vw_supervisor::MCP_TOKEN_VAR;
@@ -44,6 +45,9 @@ pub(crate) enum ConfigEditError {
     /// The file changed twice while we edited it.
     #[error("Vibe's config changed while Vibe Work edited it; try again")]
     Busy,
+    /// No command-started server of that name (a change of one that is gone, or of another kind).
+    #[error("no command server with that name is configured")]
+    NotACommandServer,
 }
 
 /// The forwarder address of binding `id` on the proxy at `base` (`http://127.0.0.1:<port>`).
@@ -62,7 +66,7 @@ pub(crate) fn forwarder_id(url: &str) -> Option<&str> {
     vw_vault::mcp_binding::is_binding_id(id).then_some(id)
 }
 
-fn read(path: &Path) -> Result<String, ConfigEditError> {
+pub(crate) fn read(path: &Path) -> Result<String, ConfigEditError> {
     match std::fs::metadata(path) {
         Ok(meta) if meta.len() > MAX_CONFIG_BYTES => Err(ConfigEditError::Unsupported),
         Ok(_) => {
@@ -74,7 +78,7 @@ fn read(path: &Path) -> Result<String, ConfigEditError> {
 }
 
 /// Applies `edit` to `<home>/config.toml` (see the module invariants). `edit` returns false for "nothing to do".
-fn edit_file(
+pub(crate) fn edit_file(
     home: &Path,
     edit: impl Fn(&mut DocumentMut) -> Result<bool, ConfigEditError>,
 ) -> Result<bool, ConfigEditError> {
@@ -101,32 +105,14 @@ fn edit_file(
     Err(ConfigEditError::Busy)
 }
 
-fn servers(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables, ConfigEditError> {
-    // Vibe's own writer saves an empty list inline (`mcp_servers = []`): it holds no entry, so it becomes the
-    // table list. A non-empty inline list stays refused (rewriting it would change the person's entries).
-    let empty_inline = doc
-        .get("mcp_servers")
-        .and_then(Item::as_array)
-        .is_some_and(toml_edit::Array::is_empty);
-    if empty_inline || !doc.contains_key("mcp_servers") {
-        doc.insert("mcp_servers", Item::ArrayOfTables(ArrayOfTables::new()));
-    }
-    doc.get_mut("mcp_servers")
-        .and_then(Item::as_array_of_tables_mut)
-        .ok_or(ConfigEditError::Unsupported)
-}
-
 /// Adds the entry for key server `name` at forwarder address `url`.
 ///
 /// # Errors
 /// [`ConfigEditError`].
 pub(crate) fn add_entry(home: &Path, name: &str, url: &str) -> Result<(), ConfigEditError> {
     edit_file(home, |doc| {
-        let list = servers(doc)?;
-        if list
-            .iter()
-            .any(|t| t.get("name").and_then(Item::as_str) == Some(name))
-        {
+        let mut list = edit_rows(doc)?;
+        if list.has_name(name)? {
             return Err(ConfigEditError::NameTaken);
         }
         let mut auth = Table::new();
@@ -137,6 +123,31 @@ pub(crate) fn add_entry(home: &Path, name: &str, url: &str) -> Result<(), Config
         entry.insert("transport", value("streamable-http"));
         entry.insert("url", value(url));
         entry.insert("auth", Item::Table(auth));
+        list.push(entry);
+        Ok(true)
+    })
+    .map(|_| ())
+}
+
+/// Adds the entry for a server that needs no sign-in: no `auth` table, so Vibe connects without a credential
+/// and never asks the server for a sign-in.
+///
+/// # Errors
+/// [`ConfigEditError`].
+pub(crate) fn add_unauthenticated_entry(
+    home: &Path,
+    name: &str,
+    url: &str,
+) -> Result<(), ConfigEditError> {
+    edit_file(home, |doc| {
+        let mut list = edit_rows(doc)?;
+        if list.has_name(name)? {
+            return Err(ConfigEditError::NameTaken);
+        }
+        let mut entry = Table::new();
+        entry.insert("name", value(name));
+        entry.insert("transport", value("streamable-http"));
+        entry.insert("url", value(url));
         list.push(entry);
         Ok(true)
     })
@@ -156,28 +167,19 @@ pub(crate) fn rewrite_ports(home: &Path, base: &str) -> Result<usize, ConfigEdit
     let changed = std::sync::atomic::AtomicUsize::new(0);
     edit_file(home, |doc| {
         changed.store(0, std::sync::atomic::Ordering::Relaxed);
-        let Some(list) = doc
-            .get_mut("mcp_servers")
-            .and_then(Item::as_array_of_tables_mut)
-        else {
-            return Ok(false);
-        };
-        for table in list.iter_mut() {
-            let Some(id) = table
-                .get("url")
-                .and_then(Item::as_str)
-                .and_then(forwarder_id)
-                .map(str::to_owned)
-            else {
-                continue;
+        let mut list = edit_rows(doc)?;
+        list.for_each(|mut row| {
+            let Some(id) = row.get_str("url").and_then(forwarder_id).map(str::to_owned) else {
+                return Ok(false);
             };
             let url = forwarder_url(base, &id);
-            if table.get("url").and_then(Item::as_str) != Some(url.as_str()) {
-                table.insert("url", value(url));
+            if row.get_str("url") != Some(url.as_str()) {
+                row.set("url", Value::from(url));
                 changed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Ok(true);
             }
-        }
-        Ok(changed.load(std::sync::atomic::Ordering::Relaxed) > 0)
+            Ok(false)
+        })
     })?;
     Ok(changed.load(std::sync::atomic::Ordering::Relaxed))
 }
@@ -191,13 +193,11 @@ pub(crate) fn add_imported(
     home: &Path,
     name: &str,
     server: &vw_import::mcp::Server,
+    paused: bool,
 ) -> Result<(), ConfigEditError> {
     edit_file(home, |doc| {
-        let list = servers(doc)?;
-        if list
-            .iter()
-            .any(|t| t.get("name").and_then(Item::as_str) == Some(name))
-        {
+        let mut list = edit_rows(doc)?;
+        if list.has_name(name)? {
             return Err(ConfigEditError::NameTaken);
         }
         let pairs = |items: &[(String, String)]| {
@@ -213,6 +213,9 @@ pub(crate) fn add_imported(
             vw_import::mcp::Server::Stdio { command, args, env } => {
                 entry.insert("transport", value("stdio"));
                 entry.insert("command", value(command.as_str()));
+                if paused {
+                    entry.insert("disabled", value(true));
+                }
                 let mut list = toml_edit::Array::new();
                 for arg in args {
                     list.push(arg.as_str());

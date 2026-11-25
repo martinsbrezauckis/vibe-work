@@ -50,7 +50,7 @@ impl Navigate for CoreNav {
 /// `example.com/x` -> `https://example.com/x`, `localhost:5173` -> `http://localhost:5173` (what the address bar and
 /// the agent often write). Anything that already names a scheme (`https:`, `file:`, `javascript:`) is left for the
 /// policy to judge.
-fn with_scheme(url: &str) -> String {
+pub(crate) fn with_scheme(url: &str) -> String {
     let url = url.trim();
     let named_scheme = url.split_once(':').is_some_and(|(scheme, rest)| {
         !scheme.is_empty()
@@ -283,6 +283,8 @@ pub(crate) fn stop_for_chat(shared: &Shared, session_id: &str) {
         for page in std::iter::once(session_id.to_owned()).chain(hub.service.web_tabs(session_id)) {
             hub.browser.sessions().stop(&page);
             hub.browser.sessions().cancel_confirmations(&page);
+            // A stopped chat must not take a slot that frees later; the next waiting chat gets it.
+            hub.service.cancel_browser_wait(&page);
         }
     }
 }
@@ -426,8 +428,10 @@ impl Core {
             },
             BrowserRequest::Stop { session_id } => {
                 driver.sessions().stop(&session_id);
+                hub(shared)?.service.cancel_browser_wait(&session_id);
                 for key in hub(shared)?.service.web_tabs(&session_id) {
                     driver.sessions().stop(&key);
+                    hub(shared)?.service.cancel_browser_wait(&key);
                     hub(shared)?.service.dismiss_dialog(&key).await;
                 }
                 BrowserResult::State {
@@ -647,7 +651,7 @@ async fn annotate_request(
     // annotation is for the app preview (the session's own dev server) only.
     if service.page_class(session_id) != Some(vw_preview::PageClass::Local) {
         return Err(denied(
-            "annotations are for this session's own app preview (a page of its local server), not \
+            "annotations are for this chat's own app preview (a page of its local server), not \
                  for web pages"
                 .to_owned(),
         ));

@@ -119,6 +119,7 @@ export function createPromptAudio(deps: {
     }
   };
   return {
+    arrived,
     /** Reads queued prompts when dictation or voice chat has finished using the output. */
     resume: () => {
       void drain();

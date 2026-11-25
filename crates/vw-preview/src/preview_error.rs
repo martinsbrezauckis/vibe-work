@@ -27,6 +27,9 @@ pub enum PreviewError {
     /// The external browser cap has no free engine.
     #[error("Not run: the browser is busy with another chat; try again when it is free")]
     BrowserBusy,
+    /// The built-in browser's bounded waiting queue cannot hold another page.
+    #[error("{0}")]
+    BrowserQueueFull(String),
     /// The pool setting is invalid.
     #[error("browser pool setting: {0}")]
     PoolSetting(String),

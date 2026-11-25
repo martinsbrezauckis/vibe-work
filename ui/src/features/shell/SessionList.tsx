@@ -16,6 +16,7 @@ import { useMemo, useRef } from "react";
 import { EmptyState } from "../../components/EmptyState";
 import { Badge, Button, IconButton } from "../../components/Controls";
 
+import { createLazyComponent } from "../../components/LazyChunk";
 import { Icon } from "../../components/Icon";
 import { useModalFocus } from "../../hooks/useModalFocus";
 import { formatKeys } from "../../state/shortcuts";
@@ -28,8 +29,14 @@ import { NewProjectField } from "../sessions/NewProjectField";
 import { ProjectGroupView } from "../sessions/ProjectGroupView";
 import { SessionRows } from "../sessions/SessionRows";
 import { SessionListSkeleton } from "../sessions/SessionListSkeleton";
-import { SettingsNav } from "../settings/SettingsNav";
 import { UnfiledSection } from "../sessions/UnfiledSection";
+
+/** Settings navigation column loaded on demand when Settings opens. */
+export const LazySettingsNav = createLazyComponent({
+  label: "Settings navigation",
+  testIdPrefix: "shell.settings-nav",
+  load: async () => ({ default: (await import("../settings/SettingsNav")).SettingsNav }),
+});
 import { useGroupActions, useGroups } from "../sessions/useGroups";
 import { useApp } from "./AppContext";
 import { useCoreState, useLayout, useSessionSummaries, useShellState } from "./hooks";
@@ -143,7 +150,7 @@ export function SessionList() {
       />
       {settings && (
         <div className="column-inner">
-          <SettingsNav />
+          <LazySettingsNav />
         </div>
       )}
       {/* While Settings is open the session list stays mounted underneath (its scroll and folds kept), inert. */}

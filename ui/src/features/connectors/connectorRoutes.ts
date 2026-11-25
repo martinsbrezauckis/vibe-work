@@ -8,7 +8,7 @@
  * - `open`, `close`, `filter {filter}`, `search {text}`, `select {id|null}`, `refresh`;
  * - `signIn {alias}`, `connect {alias}` (a connector that needs no sign-in), `stopWaiting`, `turnOff {alias}`,
  *   `turnOn {alias}`;
- * - `addServer {url, name?}`, `signInServer {name}`, `signOutServer {name}`, `removeServer {name}`,
+ * - `addServer {url, name?}` (with sign-in), `addNoAuthServer {url, name?}` (no sign-in, no key), `signInServer {name}`, `signOutServer {name}`, `removeServer {name}`,
  *   `serverOff {name}`, `serverOn {name}`;
  * -: `addKeyServer {url, name?, secretId? | newSecret {name, value}, header?}` and `allowServerKey {name}`:
  *   the Debug API starts them, the native dialog in the window decides (the core never answers that dialog for the
@@ -21,7 +21,7 @@ import type { KeyChoice } from "../../state/connectors";
 import { UiControlError } from "../../state/uiControl";
 import { bodyObject } from "../../state/uiControlBody";
 import type { App } from "../shell/AppContext";
-import { FILTERS, type Filter, groups } from "./model/view";
+import { FILTERS, type Filter, groups, serverStatusText } from "./model/view";
 
 function text(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -60,8 +60,11 @@ function read(app: App): unknown {
       name: x.name,
       address: x.address,
       signIn: x.signIn,
-      status: x.status,
+      status: x.errorKind === "developerPermissionsOff" ? "paused" : x.status,
+      statusText: serverStatusText(x),
       off: x.off,
+      reason: x.error,
+      errorKind: x.errorKind ?? null,
       tools: x.tools.map((t) => t.name),
       plugin: x.plugin,
       configured: x.configured,
@@ -109,6 +112,7 @@ async function handleConnectors(app: App, body: unknown): Promise<unknown> {
   try {
     switch (input["action"] ?? "read") {
       case "read":
+        await a.load();
         break;
       case "open":
         await a.open();
@@ -155,6 +159,12 @@ async function handleConnectors(app: App, body: unknown): Promise<unknown> {
       }
       case "addServer":
         await a.addServer(
+          text(input, "url"),
+          typeof input["name"] === "string" ? input["name"] : null,
+        );
+        break;
+      case "addNoAuthServer":
+        await a.addNoAuthServer(
           text(input, "url"),
           typeof input["name"] === "string" ? input["name"] : null,
         );

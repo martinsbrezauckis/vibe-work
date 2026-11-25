@@ -62,6 +62,8 @@ pub(crate) enum BrowserMountState {
     Waiting,
     /// A completed turn released the browser until request or panel reopening.
     Released,
+    /// A waiting request was withdrawn; passive layout must not remount it.
+    Withdrawn,
 }
 
 /// Whether a session's preview runs.

@@ -71,7 +71,7 @@ pub(crate) struct PreviewHub {
     pub(crate) browser: vw_browser::Browser,
     /// Forwards the agent browser's state changes.
     browser_task: Mutex<Option<JoinHandle<()>>>,
-    pending_wipes: PathBuf,
+    pub(crate) pending_wipes: PathBuf,
     task: Mutex<Option<JoinHandle<()>>>,
     /// Re-checks the previews' ports.
     ports_task: Mutex<Option<JoinHandle<()>>>,
@@ -299,6 +299,9 @@ pub(crate) async fn session_ended(shared: &Shared, session_id: &str, deleted: bo
         hub.browser.sessions().session_ended(session_id);
     }
     let left = hub.service.session_ended(session_id, deleted).await;
+    if deleted {
+        crate::unsaved_stores::forget(shared, session_id);
+    }
     hub.browser.clear_secret_choice(session_id);
     if deleted && let Err(error) = hub.browser.forget_delegation_receipts(session_id) {
         tracing::warn!(%error, session_id, "deleted session's browser receipts could not be removed");
@@ -345,6 +348,7 @@ pub(crate) fn core_error(error: &PreviewError) -> CoreError {
         }
         PreviewError::ScreenshotHidden(_)
         | PreviewError::BrowserBusy
+        | PreviewError::BrowserQueueFull(_)
         | PreviewError::Refused(_)
         | PreviewError::Engine(EngineError::FocusRequired | EngineError::Unsupported(_)) => {
             ErrorCode::Denied

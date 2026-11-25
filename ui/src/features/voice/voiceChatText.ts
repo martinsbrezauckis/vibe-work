@@ -9,11 +9,9 @@
  * every result fits the core's `speak` limit (2,000 characters).
  */
 
-/** The instruction sent with each voice turn as a context entry (never inside the user's message). */
-export const VOICE_INSTRUCTION =
-  "This message was spoken in voice chat and your answer will be read aloud. Answer as speech: concise and " +
-  "conversational, about 6 sentences at most, no tables or code blocks; if you used tools, say in one or two " +
-  "sentences what you did and what you found.";
+import { stripEmphasis } from "../../state/speechPlain";
+export { stripEmphasis };
+export { VOICE_INSTRUCTION } from "../composer/model/message";
 
 /** The longest text sent to text-to-speech (the core refuses more than 2,000 characters). */
 export const MAX_SPOKEN_CHARS = 1_800;
@@ -28,16 +26,6 @@ export const REST_SAID = "The rest is in the chat.";
 /** Removes Markdown table blocks (two or more lines starting with `|`), one sentence in their place. */
 function dropTables(text: string): string {
   return text.replace(/(?:^[ \t]*\|.*\|[ \t]*(?:\n|$)){2,}/gm, `${TABLE_SAID}\n`);
-}
-
-/**
- * Removes emphasis marks at word edges only (`**bold**`, `_it_`, `~~gone~~`): `snake_case`, `a*b` and `a > b` stay.
- * Shared with narration (`state/narration` `speakable`).
- */
-export function stripEmphasis(text: string): string {
-  return text
-    .replace(/(^|[\s(])(\*{1,3}|_{1,3}|~~)(?=\S)/g, "$1")
-    .replace(/(\S)(\*{1,3}|_{1,3}|~~)(?=$|[\s.,;:!?)])/g, "$1");
 }
 
 /** Cuts `text` to `max` characters at the last sentence end, adding `REST_SAID`. */

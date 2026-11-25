@@ -113,6 +113,8 @@ impl Channels {
         method: &str,
         params: Value,
     ) -> Result<Value, RpcError> {
+        // Captured before the open: Vibe reads the command-server config after this point.
+        let applied = self.switch_generation();
         let (conn, key) = self.open(method).await?;
         match conn.request(method, params).await {
             Ok(result) => {
@@ -140,8 +142,8 @@ impl Channels {
                                 return Err(local_error(method, error));
                             }
                         };
-                        self.leases.retain(id, lease);
-                        self.bind(id, conn, key);
+                        self.leases.retain(id, key, lease);
+                        self.bind_applied(id, conn, key, applied);
                     }
                     None => conn.close_input().await,
                 }

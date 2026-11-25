@@ -107,7 +107,7 @@ export function ResultStep() {
               <Button
                 data-testid="setup.result-step-set-replacing"
                 type="button"
-
+                shape="outlined"
                 onClick={() => {
                   setReplacing(true);
                 }}
@@ -118,7 +118,7 @@ export function ResultStep() {
             <Button
               data-testid="setup.result-step-finish"
               type="button"
-
+              shape="outlined"
               onClick={() => {
                 keys?.finish();
               }}

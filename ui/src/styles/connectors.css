@@ -221,6 +221,8 @@
   text-overflow: ellipsis;
 }
 .srow-addr {
+  /* A button centres its text; the address column starts at the same place in every row. */
+  text-align: left;
   font-size: var(--text-sm);
   color: var(--text-3);
   overflow: hidden;
@@ -253,9 +255,13 @@
   align-items: center;
   margin-bottom: 8px;
 }
+.cdetail-head > div {
+  min-width: 0;
+}
+/* The address breaks only at the <wbr> after / . ? - ; a single piece longer than the column wraps as a last resort. */
 .cdetail-head .cmuted {
   margin: 2px 0 0;
-  word-break: break-all;
+  overflow-wrap: break-word;
 }
 .cdetail-close {
   float: right;
@@ -281,6 +287,50 @@
   font-size: var(--text-base);
   color: var(--text-2);
 }
+/* Field labels follow the design sheet's field-label (13 px semibold), the same as the shared SecretField's label. */
+.add-server .cfield > span,
+.add-server .cfield > label {
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+/* An input with its action button on the same row (Working folder + Choose folder…). */
+.add-server .cfield-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.add-server .cfield-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A group of choices in the add dialog is a labelled block like the fields above it, never the browser's boxed fieldset. */
+.add-server .cchoice {
+  min-width: 0;
+  margin: 0 0 var(--space-control-gap);
+  padding: 0;
+  border: 0;
+}
+.add-server .cchoice > legend {
+  margin: 0 0 4px;
+  padding: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+.add-server .key-problem,
+.add-server .cmuted {
+  margin: 0 0 var(--space-control-gap);
+}
+.csteps + .key-problem,
+.csteps + .cmuted {
+  margin-top: var(--space-control-gap);
+}
+.add-server .cfield-reason {
+  margin: 0 auto 0 0;
+  align-self: center;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
 .add-server input {
   background: var(--bg);
   color: var(--text);
@@ -297,6 +347,16 @@
   padding-left: 18px;
   font-size: var(--text-base);
   color: var(--text-2);
+}
+/* The detail stacks when the available work area shrinks beside an open Browser panel. */
+@container (max-width: 760px) {
+  .cpage.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cpage.has-detail .cdetail {
+    position: static;
+    order: -1;
+  }
 }
 @media (max-width: 900px) {
   .cpage,

@@ -65,7 +65,7 @@ function Progress(): ReactElement | null {
           <Button
             data-testid="marketplace.marketplace-page-cancel"
             type="button"
-
+            shape="outlined"
             onClick={() => void actions?.cancel()}
           >
             Stop

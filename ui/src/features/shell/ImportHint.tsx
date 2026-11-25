@@ -109,6 +109,7 @@ export function ImportHint(): ReactElement | null {
       <Button
         data-testid="shell.import-hint-look"
         type="button"
+        shape="outlined"
         onClick={(e) => {
           end(true, e.currentTarget);
         }}
@@ -118,6 +119,7 @@ export function ImportHint(): ReactElement | null {
       <Button
         data-testid="shell.import-hint-not-now"
         type="button"
+        shape="outlined"
         onClick={(e) => {
           end(false, e.currentTarget);
         }}

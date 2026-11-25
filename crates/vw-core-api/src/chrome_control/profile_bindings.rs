@@ -48,6 +48,9 @@ pub(super) struct Bindings {
     /// Chats with agent browser windows in a canonical profile not yet confirmed closed across restarts.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     unclosed_windows: HashMap<String, Vec<String>>,
+    /// Chats that already warned in a canonical profile that earlier unresolvable windows may still be open.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    warned_windows: HashMap<String, Vec<String>>,
     #[serde(skip)]
     generations: HashMap<String, u64>,
     #[serde(skip)]
@@ -82,6 +85,11 @@ impl Bindings {
     }
     pub(super) fn unclosed_windows(&self) -> impl Iterator<Item = (&str, &[String])> {
         self.unclosed_windows
+            .iter()
+            .map(|(chat, profiles)| (chat.as_str(), profiles.as_slice()))
+    }
+    pub(super) fn warned_windows(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.warned_windows
             .iter()
             .map(|(chat, profiles)| (chat.as_str(), profiles.as_slice()))
     }
@@ -235,33 +243,26 @@ pub(super) fn close_candidates(chrome: &ChromeControl, chat: &str, profile: &str
 }
 
 pub(super) fn close_known(chrome: &ChromeControl, chat: &str, profile: &str) -> bool {
-    if selected(chrome, chat)
-        .as_deref()
-        .is_some_and(|id| super::profile_ids::same(id, profile))
-    {
+    if selected(chrome, chat).as_deref() == Some(profile) {
         return true;
     }
     let saved = chrome.bindings.lock_or_recover();
     saved
         .chats
         .get(chat)
-        .is_some_and(|id| super::profile_ids::same(&id.profile, profile))
-        || saved.leases.get(chat).is_some_and(|leases| {
-            leases
-                .iter()
-                .any(|lease| super::profile_ids::same(&lease.profile, profile))
-        })
-        || saved.uncertain_opens.get(chat).is_some_and(|open| {
-            open.profile
-                .as_deref()
-                .is_some_and(|id| super::profile_ids::same(id, profile))
-        })
-        || saved.pending.get(chat).is_some_and(|change| {
-            change
-                .releases
-                .iter()
-                .any(|lease| super::profile_ids::same(&lease.profile, profile))
-        })
+        .is_some_and(|id| id.profile == profile)
+        || saved
+            .leases
+            .get(chat)
+            .is_some_and(|leases| leases.iter().any(|lease| lease.profile == profile))
+        || saved
+            .uncertain_opens
+            .get(chat)
+            .is_some_and(|open| open.profile.as_deref() == Some(profile))
+        || saved
+            .pending
+            .get(chat)
+            .is_some_and(|change| change.releases.iter().any(|lease| lease.profile == profile))
 }
 
 pub(super) fn other_firefox_hold(chrome: &ChromeControl, chat: &str) -> bool {
@@ -290,37 +291,35 @@ pub(super) fn close_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
     if saved
         .chats
         .get(chat)
-        .is_some_and(|id| super::profile_ids::same(&id.profile, profile))
+        .is_some_and(|id| id.profile == profile)
     {
         saved.chats.remove(chat);
     }
     if let Some(leases) = saved.leases.get_mut(chat) {
-        leases.retain(|lease| !super::profile_ids::same(&lease.profile, profile));
+        leases.retain(|lease| lease.profile != profile);
         if leases.is_empty() {
             saved.leases.remove(chat);
         }
     }
-    if saved.uncertain_opens.get(chat).is_some_and(|open| {
-        open.profile
-            .as_deref()
-            .is_some_and(|id| super::profile_ids::same(id, profile))
-    }) {
+    if saved
+        .uncertain_opens
+        .get(chat)
+        .is_some_and(|open| open.profile.as_deref() == Some(profile))
+    {
         saved.uncertain_opens.remove(chat);
     }
-    if saved.pending.get(chat).is_some_and(|change| {
-        change
-            .releases
-            .iter()
-            .any(|lease| super::profile_ids::same(&lease.profile, profile))
-    }) {
+    if saved
+        .pending
+        .get(chat)
+        .is_some_and(|change| change.releases.iter().any(|lease| lease.profile == profile))
+    {
         saved.pending.remove(chat);
     }
-    saved.ambiguous.remove(chat);
+    if !saved.leases.contains_key(chat) {
+        saved.ambiguous.remove(chat);
+    }
     let retired = saved.retired_profiles.entry(chat.to_owned()).or_default();
-    if !retired
-        .iter()
-        .any(|id| super::profile_ids::same(id, profile))
-    {
+    if !retired.iter().any(|id| id == profile) {
         retired.push(profile.to_owned());
     }
     if let Err(reason) = saved.save(chrome.dir()) {
@@ -328,18 +327,12 @@ pub(super) fn close_agent(chrome: &ChromeControl, chat: &str, profile: &str) -> 
     }
     drop(saved);
     let mut selected = chrome.chat_profiles.lock_or_recover();
-    if selected
-        .get(chat)
-        .is_some_and(|id| super::profile_ids::same(id, profile))
-    {
+    if selected.get(chat).is_some_and(|id| id == profile) {
         selected.remove(chat);
     }
     drop(selected);
     let mut picked = chrome.picked_profiles.lock_or_recover();
-    if picked
-        .get(chat)
-        .is_some_and(|id| super::profile_ids::same(id, profile))
-    {
+    if picked.get(chat).is_some_and(|id| id == profile) {
         picked.remove(chat);
     }
     ids
@@ -351,14 +344,11 @@ fn close_candidates_from(saved: &Bindings, chat: &str, profile: &str) -> Vec<Str
         .get(chat)
         .into_iter()
         .flatten()
-        .filter(|lease| super::profile_ids::same(&lease.profile, profile))
+        .filter(|lease| lease.profile == profile)
         .map(|lease| lease.id.clone())
         .collect::<Vec<_>>();
     if let Some(uncertain) = saved.uncertain_opens.get(chat)
-        && uncertain
-            .profile
-            .as_deref()
-            .is_some_and(|id| super::profile_ids::same(id, profile))
+        && uncertain.profile.as_deref() == Some(profile)
         && let Some(id) = &uncertain.id
         && !ids.contains(id)
     {
@@ -493,6 +483,7 @@ pub(super) fn forget(chrome: &ChromeControl, chat: &str) {
     saved.uncertain_opens.remove(chat);
     saved.retired_profiles.remove(chat);
     saved.unclosed_windows.remove(chat);
+    saved.warned_windows.remove(chat);
     if let Err(reason) = saved.save(chrome.dir()) {
         tracing::warn!(%reason, "Browser binding removal could not be saved");
     }
@@ -500,35 +491,78 @@ pub(super) fn forget(chrome: &ChromeControl, chat: &str) {
 
 /// Persists that `chat` has unclosed agent windows in canonical `profile`; writes only when absent.
 pub(super) fn mark_unclosed_window(chrome: &ChromeControl, chat: &str, profile: &str) {
-    set_unclosed_window(chrome, chat, profile, true);
+    update_window_marks(chrome, chat, profile, Some(true), None);
 }
 
 /// Clears the persisted unclosed-window mark for `(chat, canonical profile)`; writes only when present.
+#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 pub(super) fn clear_unclosed_window(chrome: &ChromeControl, chat: &str, profile: &str) {
-    set_unclosed_window(chrome, chat, profile, false);
+    update_window_marks(chrome, chat, profile, Some(false), None);
 }
 
-fn set_unclosed_window(chrome: &ChromeControl, chat: &str, profile: &str, present: bool) {
+/// Updates persisted `unclosed_windows` and `warned_windows` marks in one atomic write only on state change.
+pub(super) fn sync_window_marks(
+    chrome: &ChromeControl,
+    chat: &str,
+    profile: &str,
+    clear_unclosed: bool,
+    add_warned: bool,
+) {
+    update_window_marks(
+        chrome,
+        chat,
+        profile,
+        clear_unclosed.then_some(false),
+        add_warned.then_some(true),
+    );
+}
+
+fn has_canonical_entry(map: &HashMap<String, Vec<String>>, chat: &str, canonical: &str) -> bool {
+    map.get(chat)
+        .is_some_and(|profiles| profiles.iter().any(|seen| seen == canonical))
+}
+
+fn set_canonical_entry(
+    map: &mut HashMap<String, Vec<String>>,
+    chat: &str,
+    canonical: &str,
+    present: bool,
+) {
+    if present {
+        let entry = map.entry(chat.into()).or_default();
+        if !entry.iter().any(|seen| seen == canonical) {
+            entry.push(canonical.to_owned());
+        }
+    } else if let Some(profiles) = map.get_mut(chat) {
+        profiles.retain(|seen| seen != canonical);
+        if profiles.is_empty() {
+            map.remove(chat);
+        }
+    }
+}
+
+fn update_window_marks(
+    chrome: &ChromeControl,
+    chat: &str,
+    profile: &str,
+    unclosed: Option<bool>,
+    warned: Option<bool>,
+) {
     let canonical = super::profiles::canonical(profile);
     let mut saved = chrome.bindings.lock_or_recover();
-    let already_present = saved
-        .unclosed_windows
-        .get(chat)
-        .is_some_and(|profiles| profiles.iter().any(|seen| seen == &canonical));
-    if already_present == present {
+    let unclosed_change = unclosed
+        .is_some_and(|want| has_canonical_entry(&saved.unclosed_windows, chat, &canonical) != want);
+    let warned_change = warned
+        .is_some_and(|want| has_canonical_entry(&saved.warned_windows, chat, &canonical) != want);
+    if !unclosed_change && !warned_change {
         return;
     }
     let mut next = saved.clone();
-    if present {
-        next.unclosed_windows
-            .entry(chat.into())
-            .or_default()
-            .push(canonical);
-    } else if let Some(profiles) = next.unclosed_windows.get_mut(chat) {
-        profiles.retain(|seen| seen != &canonical);
-        if profiles.is_empty() {
-            next.unclosed_windows.remove(chat);
-        }
+    if let Some(want) = unclosed {
+        set_canonical_entry(&mut next.unclosed_windows, chat, &canonical, want);
+    }
+    if let Some(want) = warned {
+        set_canonical_entry(&mut next.warned_windows, chat, &canonical, want);
     }
     match next.save(chrome.dir()) {
         Ok(()) => *saved = next,

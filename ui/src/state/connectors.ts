@@ -11,6 +11,7 @@
  * (the core never sends one).
  */
 import type {
+  CommandEnvInput,
   ConnectorsRequest,
   ConnectorsResult,
   ConnectorsView,
@@ -67,6 +68,17 @@ export interface KeyChoice {
   newSecret: NewServerSecret | null;
   /** `null`: `Authorization: Bearer <key>`. */
   header: string | null;
+}
+
+/** What the person typed for a command server (`addCommandServer` / `updateCommandServer`). */
+export interface CommandInput {
+  /** `null`: the core derives a name from the program. */
+  name: string | null;
+  command: string;
+  args: string[];
+  /** `null`: Vibe's own folder. */
+  cwd: string | null;
+  env: CommandEnvInput[];
 }
 
 const INITIAL: ConnectorsState = {
@@ -276,6 +288,77 @@ export function createConnectors(deps: {
         } catch (thrown) {
           fail(thrown);
           return null;
+        }
+      },
+      /**
+       * Adds a server that needs no sign-in and no key: the core confirms natively and writes the entry without
+       * an auth block, so no sign-in starts. Returns the saved name, or null.
+       */
+      async addNoAuthServer(url: string, name: string | null): Promise<string | null> {
+        try {
+          const result = await request(origin, {
+            op: "addNoAuthServer",
+            url,
+            ...(name === null ? {} : { name }),
+          });
+          show(result);
+          await reload(origin);
+          if (result.kind !== "serverAdded") return null;
+          patch({
+            addOpen: false,
+            addPrefill: null,
+            selected: `s:${result.name}`,
+            note: result.created ? null : `${result.name} was already added.`,
+          });
+          return result.name;
+        } catch (thrown) {
+          fail(thrown);
+          return null;
+        }
+      },
+      /**
+       * Adds a command-started server under Developer permissions: the core checks, resolves the program and
+       * confirms natively. Returns the saved name, or null (the reason is the page's note).
+       */
+      async addCommandServer(input: CommandInput): Promise<string | null> {
+        try {
+          const result = await request(origin, {
+            op: "addCommandServer",
+            ...(input.name === null ? {} : { name: input.name }),
+            command: input.command,
+            args: input.args,
+            ...(input.cwd === null ? {} : { cwd: input.cwd }),
+            env: input.env,
+          });
+          show(result);
+          await reload(origin);
+          if (result.kind !== "serverAdded") return null;
+          patch({ addOpen: false, addPrefill: null, selected: `s:${result.name}`, note: null });
+          return result.name;
+        } catch (thrown) {
+          fail(thrown);
+          return null;
+        }
+      },
+      /** Saves a command server's new settings (the same checks and dialog). True when saved. */
+      async updateCommandServer(name: string, input: CommandInput): Promise<boolean> {
+        try {
+          show(
+            await request(origin, {
+              op: "updateCommandServer",
+              name,
+              command: input.command,
+              args: input.args,
+              ...(input.cwd === null ? {} : { cwd: input.cwd }),
+              env: input.env,
+            }),
+          );
+          patch({ note: null });
+          await reload(origin);
+          return true;
+        } catch (thrown) {
+          fail(thrown);
+          return false;
         }
       },
       /**

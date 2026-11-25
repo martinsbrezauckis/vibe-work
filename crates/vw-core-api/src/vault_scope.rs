@@ -215,6 +215,10 @@ fn connectors_act(request: &ConnectorsRequest) -> Option<&'static str> {
         | ConnectorsRequest::Connect { .. }
         | ConnectorsRequest::SetConnectorOff { .. }
         | ConnectorsRequest::AddServer { .. }
+        | ConnectorsRequest::AddNoAuthServer { .. }
+        // A program the person starts: plain values only, never the vault (`command_secret`).
+        | ConnectorsRequest::AddCommandServer { .. }
+        | ConnectorsRequest::UpdateCommandServer { .. }
         | ConnectorsRequest::SignInServer { .. }
         | ConnectorsRequest::CancelSignIn {}
         | ConnectorsRequest::SignOutServer { .. }

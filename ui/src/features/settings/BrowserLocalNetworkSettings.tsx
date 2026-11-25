@@ -12,6 +12,7 @@
  */
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Controls";
+import { ACT_ALLOW, ACT_BLOCK, ACT_FORGET } from "./actionLabels";
 import { Selector } from "../../components/Selector";
 import type { LocalNetworkSite, SiteAnswer } from "../../protocol/core";
 import { toCallError } from "../../protocol/client/types";
@@ -110,24 +111,26 @@ export function BrowserLocalNetworkSettings({
                 <span className="d">Not answered</span>
               </span>
               <Button
+                shape="outlined"
                 disabled={busy !== null}
-                aria-label={`Allow ${site}`}
+                aria-label={`${ACT_ALLOW} ${site}`}
                 data-testid="settings.browser-local-network.allow"
                 onClick={() => {
                   change(site, "allow");
                 }}
               >
-                Allow
+                {ACT_ALLOW}
               </Button>
               <Button
+                shape="outlined"
                 disabled={busy !== null}
-                aria-label={`Block ${site}`}
+                aria-label={`${ACT_BLOCK} ${site}`}
                 data-testid="settings.browser-local-network.block"
                 onClick={() => {
                   change(site, "block");
                 }}
               >
-                Block
+                {ACT_BLOCK}
               </Button>
             </li>
           ))}
@@ -152,13 +155,13 @@ export function BrowserLocalNetworkSettings({
               <Button
                 shape="ghost"
                 disabled={busy !== null}
-                aria-label={`Forget ${site}`}
+                aria-label={`${ACT_FORGET} ${site}`}
                 data-testid="settings.browser-local-network.forget"
                 onClick={() => {
                   change(site, null);
                 }}
               >
-                Forget
+                {ACT_FORGET}
               </Button>
             </li>
           ))}

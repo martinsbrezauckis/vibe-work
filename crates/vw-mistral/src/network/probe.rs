@@ -74,7 +74,7 @@ pub async fn probe(settings: &NetworkSettings, url: &str) -> Probe {
             }
         }
         Err(error) => Probe {
-            kind: classify(&error, settings.has_proxy()),
+            kind: classify_request_error(&error, settings.has_proxy()),
             status: None,
         },
     }
@@ -92,8 +92,9 @@ fn chain_text(error: &reqwest::Error) -> String {
     text.to_ascii_lowercase()
 }
 
-/// Sorts a failed request into a [`ProbeKind`].
-fn classify(error: &reqwest::Error, via_proxy: bool) -> ProbeKind {
+/// Sorts a failed request into a [`ProbeKind`] (shared with the MCP forwarder, which reports the same causes).
+#[must_use]
+pub fn classify_request_error(error: &reqwest::Error, via_proxy: bool) -> ProbeKind {
     if error.is_timeout() {
         return ProbeKind::TimedOut;
     }

@@ -38,18 +38,39 @@ export type NoticeAction = "download" | "install" | "openReleasePage" | "retry" 
 
 const NOTES_MAX = 200;
 
-const MOVE_HEADLINE = "Move Vibe Work to Applications to update.";
-const MOVE_DETAIL =
-  "This copy is running from a temporary read-only place. Move Vibe Work into Applications, then open it from there to update.";
+const BLOCKED_COPY = {
+  macosTranslocated: {
+    headline: "Move Vibe Work to Applications to update.",
+    detail:
+      "This copy is running from a temporary read-only location. Move Vibe Work into Applications, then open it from there to update.",
+    keyPrefix: "move",
+  },
+  macosReadOnly: {
+    headline: "Vibe Work cannot update from a read-only location.",
+    detail:
+      "This copy is in a read-only location and cannot be replaced here. Move Vibe Work into Applications or another writable folder, then open it from there to update.",
+    keyPrefix: "readonly",
+  },
+} as const;
 
-/** The copy must be moved before either a new or an already downloaded update can be installed. */
-function needsMove(view: UpdateView): boolean {
-  return (
-    view.mode === "macosTranslocated" &&
-    (view.phase.type === "available" ||
-      view.phase.type === "ready" ||
-      (view.phase.type === "failed" && view.phase.stage !== "check"))
-  );
+function blockedEntry(mode: UpdateView["mode"]) {
+  return mode === "macosTranslocated" || mode === "macosReadOnly" ? BLOCKED_COPY[mode] : null;
+}
+
+/** Short reason shown on disabled Download/Install controls when macOS blocks an in-place update. */
+export function blockedReason(view: UpdateView): string | null {
+  return blockedEntry(view.mode)?.detail ?? null;
+}
+
+/** Headline, detail and dismissal key prefix when a macOS location cannot update an offered/ready/failed release. */
+function blockedLocationText(view: UpdateView) {
+  const entry = blockedEntry(view.mode);
+  if (entry === null) return null;
+  const activeOffer =
+    view.phase.type === "available" ||
+    view.phase.type === "ready" ||
+    (view.phase.type === "failed" && view.phase.stage !== "check");
+  return activeOffer ? entry : null;
 }
 
 /**
@@ -121,14 +142,15 @@ export function offersUpdate(view: UpdateView | null): boolean {
 /** The notice for `view`; plain words. `null` for idle, checking, a failed check, and the install in progress. */
 export function noticeFor(view: UpdateView): NoticeModel | null {
   const phase = view.phase;
-  if (needsMove(view))
+  const blocked = blockedLocationText(view);
+  if (blocked !== null)
     return {
       tone: "info",
-      headline: MOVE_HEADLINE,
-      detail: MOVE_DETAIL,
+      headline: blocked.headline,
+      detail: blocked.detail,
       progress: null,
       actions: view.releasePage === null ? ["later"] : ["openReleasePage", "later"],
-      key: `move:${phase.type}:${"version" in phase ? (phase.version ?? "") : ""}`,
+      key: `${blocked.keyPrefix}:${phase.type}:${"version" in phase ? (phase.version ?? "") : ""}`,
     };
   const linkOnly = view.mode === "linkOnly";
   switch (phase.type) {
@@ -215,7 +237,8 @@ export function noticeFor(view: UpdateView): NoticeModel | null {
 
 /** One line for Settings: what is going on, including a failed check. */
 export function statusLine(view: UpdateView): string {
-  if (needsMove(view)) return `${MOVE_HEADLINE} ${MOVE_DETAIL}`;
+  const blocked = blockedLocationText(view);
+  if (blocked !== null) return `${blocked.headline} ${blocked.detail}`;
   const phase = view.phase;
   switch (phase.type) {
     case "idle":

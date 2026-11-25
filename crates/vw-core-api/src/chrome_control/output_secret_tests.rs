@@ -2,7 +2,42 @@
 //! Uses the offline core and helper fixture; a private runner can supply a headless Chromium renderer.
 use super::{gateway, output_tests, read_output_tests, test_support};
 use serde_json::{Value, json};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use vw_secrets::{SecretKind, marker, register};
+
+async fn assert_frozen_refusal(core: &crate::core::Core, read: &Value) {
+    let reason = gateway::call(&core.shared, "s", "chrome_execute", read.clone())
+        .await
+        .expect_err("a changed complete receipt must refuse before freezing");
+    assert!(
+        reason.contains("key-like") && reason.contains("Narrow the read"),
+        "{reason}"
+    );
+    assert!(reason.contains("do not replay writes"), "{reason}");
+}
+
+async fn frozen_export_read(
+    core: &crate::core::Core,
+    key_page: &AtomicBool,
+    read: &Value,
+) -> Value {
+    assert_frozen_refusal(core, read).await;
+    // Keep the cached-export coverage using the same registered values outside key context.
+    key_page.store(false, Ordering::SeqCst);
+    let first = gateway::call(&core.shared, "s", "chrome_execute", read.clone())
+        .await
+        .unwrap();
+    assert!(
+        first["vwMcpResult"]["structuredContent"]["continuation"]["args"].is_object(),
+        "the fixture must exceed the inline budget to exercise a frozen export"
+    );
+    // The direct export still reads the original key page; the cursor export reads the safe frozen body.
+    key_page.store(true, Ordering::SeqCst);
+    first
+}
 
 async fn exported_secrets(mode: &str) {
     let (core, folder) = read_output_tests::fixture(&format!("chrome-secret-export-{mode}")).await;
@@ -11,8 +46,6 @@ async fn exported_secrets(mode: &str) {
         .observe_request("session/agent/update", "s", &json!({"agentName":mode}));
     let vault = format!("export-vault-{mode}-\"\\-value");
     let app = format!("export-app-{mode}-credential");
-    register(SecretKind::VaultValue, &vault);
-    register(SecretKind::ConnectorCredential, &app);
     let mut raw = json!({"status":"completed","action":"page.read","data":{
         "readId":"rendered-account-page","text":format!("Account keys: {vault} {app} {}", "page text ".repeat(3000)),
         "refs":[{"name":vault,"value":app}],"coverage":{"complete":true}}});
@@ -35,21 +68,32 @@ async fn exported_secrets(mode: &str) {
         );
     }
     let copy = raw.clone();
+    let key_page = Arc::new(AtomicBool::new(true));
+    let context = key_page.clone();
+    let mut plain = raw.clone();
+    plain["data"]["text"] = json!(format!(
+        "Account details: {vault} {app} {}",
+        "page text ".repeat(3000)
+    ));
     let seen = test_support::answering(&core.shared, move |tool, args| {
         if tool == "chrome_status" {
             output_tests::status(args)
         } else {
-            output_tests::mcp(copy.clone())
+            output_tests::mcp(if context.load(Ordering::SeqCst) {
+                copy.clone()
+            } else {
+                plain.clone()
+            })
         }
     });
     let read = json!({"sessionId":"t","action":"page.read","args":{}});
-    let first = gateway::call(&core.shared, "s", "chrome_execute", read.clone())
-        .await
-        .unwrap();
-    assert!(
-        first["vwMcpResult"]["structuredContent"]["continuation"]["args"].is_object(),
-        "the fixture must exceed the inline budget to exercise a frozen export"
-    );
+    let first = frozen_export_read(&core, &key_page, &read).await;
+    register(SecretKind::VaultValue, &vault);
+    register(SecretKind::ConnectorCredential, &app);
+    // Registration after freezing must still protect exports; a fresh inline read now refuses too.
+    key_page.store(false, Ordering::SeqCst);
+    assert_frozen_refusal(&core, &read).await;
+    key_page.store(true, Ordering::SeqCst);
     for args in [
         json!({}),
         first["vwMcpResult"]["structuredContent"]["continuation"]["args"].clone(),
@@ -83,7 +127,7 @@ async fn exported_secrets(mode: &str) {
             .iter()
             .filter(|(tool, _)| tool == "chrome_execute")
             .count(),
-        2
+        4
     );
     core.shutdown().await;
 }

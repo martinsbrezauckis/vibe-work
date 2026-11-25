@@ -46,7 +46,55 @@ url: string,
 /**
  * Name in Vibe's config; Vibe derives one from the address when absent.
  */
-name?: string, } | { "op": "signInServer",
+name?: string, } | { "op": "addNoAuthServer",
+/**
+ * `https://...` (or `http://` on this computer); no query or fragment.
+ */
+url: string,
+/**
+ * Name in Vibe's config; derived from the address when absent.
+ */
+name?: string, } | { "op": "addCommandServer",
+/**
+ * Name in Vibe's config; derived from the program when absent.
+ */
+name?: string,
+/**
+ * A program name (`npx`) or a path.
+ */
+command: string,
+/**
+ * One argument per entry.
+ */
+args: Array<string>,
+/**
+ * The working folder, absolute; absent: Vibe's own.
+ */
+cwd?: string,
+/**
+ * Environment variables (plain values only).
+ */
+env: Array<CommandEnvInput>, } | { "op": "updateCommandServer",
+/**
+ * The server's name.
+ */
+name: string,
+/**
+ * A program name or path.
+ */
+command: string,
+/**
+ * One argument per entry.
+ */
+args: Array<string>,
+/**
+ * The working folder; absent: Vibe's own.
+ */
+cwd?: string,
+/**
+ * Environment variables.
+ */
+env: Array<CommandEnvInput>, } | { "op": "signInServer",
 /**
  * The server's name.
  */
@@ -160,7 +208,11 @@ sessionId: string | null,
 /**
  * The server whose sign-in is running now, if any.
  */
-signingIn: string | null, };
+signingIn: string | null,
+/**
+ * Developer permissions is on (command servers can be added and started).
+ */
+developerPermissions?: boolean, };
 
 export type CatalogLoad = "fresh" | "cached" | "notLoaded";
 
@@ -234,9 +286,15 @@ status: string | null,
  */
 tools: Array<ToolView>,
 /**
- * Vibe's error text, when it has one.
+ * Why the server cannot be used, when it cannot: a readable reason with its action when the cause is
+ * known, else Vibe's own text.
  */
 error: string | null,
+/**
+ * The cause of `error` when it is known: `certificate`, `unreachable`, `timeout`, `keyRejected`,
+ * `needsCredentials` or `forbidden`; absent otherwise.
+ */
+errorKind?: string,
 /**
  * The plugin that provides it (`null`: Vibe's config).
  */
@@ -252,7 +310,11 @@ configured: boolean,
 /**
  * The key Vibe Work adds for it (`null`: not a key server).
  */
-key: ServerKeyView | null, };
+key: ServerKeyView | null,
+/**
+ * The program, arguments, working folder and variables of a command server (hidden values are not here).
+ */
+commandConfig?: CommandConfigView, };
 
 export type ToolView = {
 /**
@@ -291,3 +353,49 @@ header: string | null,
  * `always`, `untilClose` (allowed until Vibe Work closes), `none` (not allowed now), `locked` (vault locked).
  */
 grant: string, };
+
+export type CommandConfigView = {
+/**
+ * The program as saved (an absolute path when added in Tools).
+ */
+command: string,
+/**
+ * The arguments.
+ */
+args: Array<string>,
+/**
+ * The working folder, if one was set.
+ */
+cwd?: string,
+/**
+ * The variables, in the file's order.
+ */
+env: Array<CommandEnvView>, };
+
+export type CommandEnvInput = {
+/**
+ * The variable's name.
+ */
+name: string,
+/**
+ * A plain value; absent with `keepExisting`.
+ */
+value?: string,
+/**
+ * Keep the value already saved for this name (a value that is hidden here).
+ */
+keepExisting?: boolean, };
+
+export type CommandEnvView = {
+/**
+ * The variable's name.
+ */
+name: string,
+/**
+ * The plain value; absent when hidden.
+ */
+value?: string,
+/**
+ * True when the value looks like a key and is kept out of the view.
+ */
+hidden: boolean, };

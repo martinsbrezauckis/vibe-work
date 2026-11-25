@@ -78,6 +78,9 @@ pub enum BrowserRequest {
         session_id: String,
         /// App preview session id or owned web page key.
         tab_id: String,
+        /// True for an automatic preview-show event, which cannot undo a stopped wait.
+        #[serde(default)]
+        passive: bool,
     },
     /// Closes a web tab. The app preview cannot be closed here.
     CloseTab {

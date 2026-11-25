@@ -94,7 +94,11 @@ export function Viewport({
         </div>
       ) : waiting ? (
         <div className="empty" role="status">
-          Waiting for the browser
+          <p>Waiting for the browser</p>
+          <p className="preview-wait-reason">
+            Another page is using the last free browser slot. This page opens by itself when a slot
+            is free. Close a tab you do not need to free one.
+          </p>
         </div>
       ) : paused ? (
         <div className="browser-paused" role="status">

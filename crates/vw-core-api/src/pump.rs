@@ -252,10 +252,18 @@ impl Pump {
                 crate::title_guard::withhold_in(&shared, &mut n.params);
                 let completed = (n.method == "turn/completed").then(|| n.params.clone());
                 let session = item.key.and_then(|key| shared.channels.session_of(key));
+                let stale = session
+                    .as_ref()
+                    .filter(|sid| completed.is_some() && shared.channels.switch_stale(sid))
+                    .cloned();
                 let applied = warnings::apply(&shared.store, n, session);
                 self.after_apply(&shared, &applied);
                 if let Some(params) = completed {
                     crate::model_choices::provider_completed(&shared, &params);
+                }
+                // A chat that has not applied the last Developer permissions switch applies it once idle.
+                if let Some(sid) = stale {
+                    tokio::spawn(crate::switch_apply::after_turn(shared.clone(), sid));
                 }
             }
             Some(Inbound::Gap(reason)) => {

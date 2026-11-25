@@ -16,7 +16,8 @@ import { type ReactElement } from "react";
 import type { JsonValue } from "../../protocol/core";
 import { TEXT, wording } from "../../vocabulary";
 import { Button } from "../../components/Controls";
-import { useVoicePrompt } from "../voice/hooks";
+import { createStore, useStore } from "../../state/createStore";
+import type { VoicePromptState } from "../../state/voiceTypes";
 import { useApp } from "../shell/AppContext";
 import { useCoreState } from "../shell/hooks";
 import { useHeldBy } from "../sessions/SessionHeldNote";
@@ -127,6 +128,8 @@ function stateText(o: {
   return o.offered ? "" : TEXT.askNotOffered;
 }
 
+const NO_VOICE_PROMPT = createStore<VoicePromptState | null>(null);
+
 /** Renders an open approval, or its audit row once the core recorded the outcome. */
 export function ApprovalAsk({
   entry,
@@ -139,7 +142,7 @@ export function ApprovalAsk({
   /** The transcript's own session (the parent of a subagent). */
   hostSessionId: string;
 }): ReactElement {
-  const { core, transcript } = useApp();
+  const { core, transcript, voice } = useApp();
   const callbackId = str(entry["callbackId"]) ?? "";
   const askId = `callback:${callbackId}`;
   const ask = useCoreState((s) => s.asks[askId]);
@@ -186,7 +189,9 @@ export function ApprovalAsk({
         : null;
     },
   );
-  const voicePhrase = useVoicePrompt((s) => (s?.callbackId === callbackId ? s.phrase : null));
+  const voicePhrase = useStore(voice?.voiceChat.prompt.store ?? NO_VOICE_PROMPT, (s) =>
+    s?.callbackId === callbackId ? s.phrase : null,
+  );
   if (closed) return <AuditRow record={record} summary={summary} callbackId={callbackId} />;
 
   const always = alwaysControl(ask?.alwaysSetting);

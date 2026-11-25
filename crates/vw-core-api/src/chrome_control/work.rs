@@ -91,8 +91,7 @@ impl Work {
     pub(super) fn close_chat_profile(&mut self, chat: &str, profile: &str) -> Vec<String> {
         let mut ids = Vec::new();
         for session in &mut self.0 {
-            if session.row.session_id == chat && super::profile_ids::same(&session.profile, profile)
-            {
+            if session.row.session_id == chat && session.profile == profile {
                 ids.push(session.id.clone());
                 session.stop = Stop::Ended;
                 session.row.state = "disconnected".into();
@@ -108,7 +107,7 @@ impl Work {
             .iter()
             .filter(|session| {
                 session.row.session_id == chat
-                    && super::profile_ids::same(&session.profile, profile)
+                    && session.profile == profile
                     && !matches!(session.row.state.as_str(), "stopped" | "disconnected")
             })
             .map(|session| session.id.clone())
@@ -116,9 +115,9 @@ impl Work {
     }
 
     pub(super) fn has_profile(&self, chat: &str, profile: &str) -> bool {
-        self.0.iter().any(|session| {
-            session.row.session_id == chat && super::profile_ids::same(&session.profile, profile)
-        })
+        self.0
+            .iter()
+            .any(|session| session.row.session_id == chat && session.profile == profile)
     }
 
     pub(super) fn other_live_firefox(&self, chat: &str) -> bool {

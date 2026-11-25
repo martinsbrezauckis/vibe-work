@@ -52,6 +52,19 @@ impl Core {
         loaded.settings
     }
 
+    /// The network settings Vibe connects with (saved ones over the environment's), for a probe of an MCP
+    /// server's address; `None` when a proxy sign-in is part of them (it lives in the vault: no probe without it).
+    pub(crate) async fn server_probe_settings(&self) -> Option<NetworkSettings> {
+        let used = NetworkSettings::effective(
+            &self.saved_settings().await,
+            &NetworkSettings::from_environment(),
+        );
+        let signs_in = net::KEYS[..3]
+            .iter()
+            .any(|key| used.get(key).is_some_and(|value| has_sign_in(&value)));
+        (!signs_in).then_some(used)
+    }
+
     /// Writes the core's own file, user-only, atomically.
     async fn persist(&self, prepared: &PreparedSettings) -> Result<(), CoreError> {
         let file = self

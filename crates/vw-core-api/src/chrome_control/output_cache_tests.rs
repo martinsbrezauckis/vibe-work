@@ -157,7 +157,8 @@ async fn batch_buffer_remains_bound_to_the_same_session() {
         "s",
         &json!({"sessionId":"t","steps":[{"action":"page.read","args":{}}]}),
         &mut result,
-    );
+    )
+    .unwrap();
     let body = &result["structuredContent"];
     let next = &body["continuation"];
     let reply = gateway::call(

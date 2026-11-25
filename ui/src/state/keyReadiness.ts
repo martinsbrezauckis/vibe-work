@@ -4,6 +4,7 @@
  * Invariants: one stable description per state; no secrets or I/O; only a rejected key test blocks
  * sending. Runs without a key service keep their existing environment-key flow.
  */
+import type { Store } from "./createStore";
 import type { KeyUi } from "./keyStore";
 import { VAULT_LOCKED_NOTICE } from "./keyText";
 import { stepOf } from "./keyView";
@@ -121,3 +122,37 @@ const VAULT_MISSING: KeyReadiness = {
   action: "Choose a vault",
   destination: "setup",
 };
+
+/** How long a read waits for a key that is still being read or tested before it goes on with what it knows. */
+const KEY_SETTLE_LIMIT_MS = 30_000;
+
+/**
+ * True while the key is neither usable nor refused yet: its first status has not arrived, or its test is running.
+ * A locked vault, a missing key and a rejected test are answers, not moments of waiting.
+ */
+function keySettling(state: KeyUi): boolean {
+  return state.availability === "loading" || keyReadiness(state)?.kind === "testing";
+}
+
+/**
+ * Resolves once the stored key can be judged: at once when it already can, else when the first status arrives or the
+ * running test ends. Gives up after `limitMs` so a stalled status read cannot hold a request for ever; the caller then
+ * decides with `keyReadiness` as it stands. Never rejects.
+ */
+export function whenKeySettled(
+  store: Store<KeyUi>,
+  limitMs: number = KEY_SETTLE_LIMIT_MS,
+): Promise<void> {
+  if (!keySettling(store.get())) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      stop();
+      resolve();
+    };
+    const stop = store.subscribe(() => {
+      if (!keySettling(store.get())) finish();
+    });
+    const timer = setTimeout(finish, limitMs);
+  });
+}

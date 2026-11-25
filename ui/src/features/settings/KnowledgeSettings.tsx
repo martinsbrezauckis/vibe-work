@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KnowledgePlace } from "../../protocol/core";
 import { Button } from "../../components/Controls";
 import { announce } from "../../state/announcer";
+import { ACT_ADD_FOLDER, ACT_ADD_LIBRARY } from "./actionLabels";
 import { useKnowledge } from "../../state/useKnowledge";
 import { AddLibrary, AddLocal, Field, type Knowledge } from "./KnowledgeForms";
 import { useApp } from "../shell/AppContext";
@@ -214,7 +215,7 @@ export function KnowledgeSettings() {
               void knowledge.loadLibraries();
             }}
           >
-            Add a library
+            {ACT_ADD_LIBRARY}
           </Button>
         )}
       </div>
@@ -239,7 +240,7 @@ export function KnowledgeSettings() {
               setAdding("local");
             }}
           >
-            Add a folder or drive
+            {ACT_ADD_FOLDER}
           </Button>
         )}
       </div>

@@ -217,14 +217,17 @@ pub(super) fn addon(shared: &crate::core::Shared) -> super::AddonView {
 }
 fn state_view(state: PairingState, enabled: bool, package: bool) -> super::AddonView {
     use super::AddonState as A;
-    let (state, label, instruction) = if !enabled {
-        (A::SwitchedOff, "Off", super::browser_text::SWITCHED_OFF)
-    } else if (!package && state != PairingState::WindowOpen) || !cfg!(feature = "your-firefox") {
+    // Unavailable (not compiled in, or no package) outranks Off, as in addon::state and safari::diagnose.
+    let (state, label, instruction) = if (!package && state != PairingState::WindowOpen)
+        || !cfg!(feature = "your-firefox")
+    {
         (
             A::Unavailable,
             "Unavailable",
             super::browser_text::UNAVAILABLE,
         )
+    } else if !enabled {
+        (A::SwitchedOff, "Off", super::browser_text::SWITCHED_OFF)
     } else if state == PairingState::NotInstalled {
         (
             A::ChromeMissing,

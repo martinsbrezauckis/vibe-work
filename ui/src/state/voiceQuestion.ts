@@ -24,27 +24,10 @@ import type { JsonValue, SpeechRequest, SpeechResult } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import { TEXT, wording } from "../vocabulary";
 import type { CoreController } from "./coreStore";
-import { createStore } from "./createStore";
+import { createStore, type Store } from "./createStore";
+import { VOICE_ANSWER_ENDED, type VoiceQuestionReply, type VoiceQuestionState } from "./voiceTypes";
 
-/** The question card being answered by voice. */
-export interface VoiceQuestionState {
-  sessionId: string;
-  callbackId: string;
-  /** The question being asked now (0-based). */
-  index: number;
-  /** Ready to listen: its reading played. */
-  ready: boolean;
-  /** The microphone is open for this answer. */
-  listening: boolean;
-}
-
-/** What voice chat does after one spoken answer: read `again` and listen once more, and/or say `said`. */
-export interface VoiceQuestionReply {
-  again: string | null;
-  said: string | null;
-  /** What was heard when it was not understood ("I heard “glue”."): spoken first and shown on the strip. */
-  heard?: string;
-}
+export { VOICE_ANSWER_ENDED, type VoiceQuestionReply, type VoiceQuestionState };
 
 /**
  * The sentence telling the person what was heard (`""`: nothing to add). Also used for a missed permission answer
@@ -59,9 +42,6 @@ export function heardSentence(text: string, free: boolean): string {
 /** How long the microphone waits for an answer before the card is left for the screen. */
 const SILENCE_MS = 60_000;
 const TOTAL_ANSWER_MS = 180_000;
-/** Spoken and shown when a card's voice-answer window really ends (question and permission cards alike). */
-export const VOICE_ANSWER_ENDED =
-  "Voice answers for this question ended. Answer on the card in the chat.";
 
 /**
  * The card's questions when every one can take a spoken answer, else `null`. A card shown here for another chat (a
@@ -113,8 +93,9 @@ export function createVoiceQuestion(deps: {
   answer: (sessionId: string, callbackId: string, output: JsonValue) => Promise<boolean>;
   /** The voice answer ended without an answer (card closed, silence): voice chat stops listening for it. */
   interrupted: (message?: string) => void;
+  store?: Store<VoiceQuestionState | null> | undefined;
 }) {
-  const store = createStore<VoiceQuestionState | null>(null);
+  const store = deps.store ?? createStore<VoiceQuestionState | null>(null);
   let questions: Question[] = [];
   let picks: Picked[] = [];
   let misses = 0;

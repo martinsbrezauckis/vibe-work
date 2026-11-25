@@ -225,21 +225,25 @@ pub(super) async fn call_with_sending(
     ) {
         return Err(vw_browser::STOPPED.to_owned());
     }
-    let page = crate::browser_tabs::agent_page(
-        &crate::previews::hub(shared)
-            .map_err(|error| error.message)?
-            .service,
-        session_id,
-        tab,
-    )
-    .map_err(|error| error.message)?;
-    crate::browser_tabs::front_page(
-        &crate::previews::hub(shared).map_err(|e| e.message)?.service,
-        session_id,
-        &page,
-    )
-    .await
-    .map_err(|e| e.message)?;
+    let service = &crate::previews::hub(shared)
+        .map_err(|error| error.message)?
+        .service;
+    if tool == names::BROWSER_ACT
+        && let Some(page) = super::browser_waiting::existing(service, session_id, tab, &args)?
+    {
+        crate::browser_tabs::agent_page(service, session_id, Some(&page))
+            .map_err(|error| error.message)?;
+        return super::browser_waiting::receipt(shared, &page);
+    }
+    let page =
+        crate::browser_tabs::agent_page(service, session_id, tab).map_err(|error| error.message)?;
+    if let Err(error) = crate::browser_tabs::front_page(service, session_id, &page).await
+        && !(tool == names::BROWSER_ACT
+            && args["action"] == "navigate"
+            && super::browser_waiting::busy(&error.message))
+    {
+        return Err(error.message);
+    }
     if tool == names::BROWSER_ACT
         && matches!(
             args["action"].as_str(),
@@ -364,10 +368,15 @@ async fn act_on_page(
     };
     check_agent(shared, session_id)?;
     shared.browser_dialogs.check()?;
-    let mut receipt = driver
+    let result = driver
         .act_with_sending(page, action, Actor::Agent, &nav, allow_send)
-        .await
-        .map_err(|e| e.text)?;
+        .await;
+    let mut receipt = match result {
+        Err(error) if args["action"] == "navigate" && super::browser_waiting::busy(&error.text) => {
+            return super::browser_waiting::receipt(shared, page);
+        }
+        result => result.map_err(|error| error.text)?,
+    };
     crate::browser_recording::save(shared, session_id, &mut receipt)?;
     // The act already completed. Its own navigation may have stopped the page;
     // preserve what happened instead of turning sent input into a refusal.

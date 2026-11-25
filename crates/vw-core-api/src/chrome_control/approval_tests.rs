@@ -62,7 +62,8 @@ async fn click_card_uses_only_the_helpers_observed_ref_name() {
         }})),
         "chrome_execute",
         false,
-    );
+    )
+    .unwrap();
     // PREDICT (page.drag): a long press card and the send card it raises named no target, so neither said which
     // button the press activates; page.drag now projects the same observed name as page.click.
     for action in ["page.click", "page.drag"] {

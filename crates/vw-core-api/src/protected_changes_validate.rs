@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use std::path::{Component, Path};
 use vw_proposals::{Change, Proposal, Request};
+
+use crate::command_servers_config::{StdioChange, stdio_change};
 const MAX_FILES: usize = 20;
 const MAX_BYTES: u64 = 1024 * 1024;
 #[derive(Deserialize)]
@@ -17,6 +19,25 @@ struct FileInput {
     path: String,
     kind: String,
     content: Option<String>,
+}
+
+fn check_config_proposal(root: &Path, after: &[u8]) -> Result<(), String> {
+    let path = root.join("config.toml");
+    let before = match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Ok(meta) if meta.is_file() && meta.len() <= MAX_BYTES => std::fs::read(&path)
+            .map_err(|_| vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE.to_owned())?,
+        _ => return Err(vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE.to_owned()),
+    };
+    match stdio_change(&before, after) {
+        StdioChange::Safe => Ok(()),
+        StdioChange::Unsafe => {
+            Err(vw_vocabulary::texts::COMMAND_SERVER_PROPOSAL_REFUSED.to_owned())
+        }
+        StdioChange::Uncheckable => {
+            Err(vw_vocabulary::texts::COMMAND_SERVER_CONFIG_UNCHECKABLE.to_owned())
+        }
+    }
 }
 
 pub(super) fn capture(
@@ -81,14 +102,26 @@ pub(super) fn capture(
             Ok(text.as_bytes().to_vec())
         };
         changes.push(match file.kind.as_str() {
-            "add" => Change::Add {
-                path: path.into(),
-                content: content()?,
-            },
-            "edit" => Change::Edit {
-                path: path.into(),
-                content: content()?,
-            },
+            "add" => {
+                let bytes = content()?;
+                if file.path == "config.toml" {
+                    check_config_proposal(root, &bytes)?;
+                }
+                Change::Add {
+                    path: path.into(),
+                    content: bytes,
+                }
+            }
+            "edit" => {
+                let bytes = content()?;
+                if file.path == "config.toml" {
+                    check_config_proposal(root, &bytes)?;
+                }
+                Change::Edit {
+                    path: path.into(),
+                    content: bytes,
+                }
+            }
             "remove" if file.content.is_none() => Change::Remove { path: path.into() },
             _ => {
                 return Err(
@@ -124,6 +157,74 @@ pub(super) fn capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_cannot_propose_adding_a_command_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let error = capture(root, "session", serde_json::json!({
+            "reason":"add a local server",
+            "changes":[{"path":"config.toml","kind":"add","content":"[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\n"}]
+        }))
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("command") && error.contains("Tools"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn agent_cannot_propose_enabling_a_paused_command_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("config.toml"), "[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\ndisabled = true\n").unwrap();
+        let error = capture(root, "session", serde_json::json!({
+            "reason":"enable local server",
+            "changes":[{"path":"config.toml","kind":"edit","content":"[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\ndisabled = false\n"}]
+        }))
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("command") && error.contains("Tools"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn agent_cannot_propose_changing_a_command_server_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("config.toml"), "[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\nargs = ['one']\ndisabled = true\n").unwrap();
+        let error = capture(root, "session", serde_json::json!({
+            "reason":"change local server",
+            "changes":[{"path":"config.toml","kind":"edit","content":"[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\nargs = ['two']\ndisabled = true\n"}]
+        }))
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("command") && error.contains("Tools"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn unrelated_config_edit_keeps_paused_command_server_and_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let server = "[[mcp_servers]]\nname = 'local'\ntransport = 'stdio'\ncommand = 'fixture'\ndisabled = true\n";
+        std::fs::write(root.join("config.toml"), server).unwrap();
+        let after = format!("theme = 'dark'\n{server}");
+        capture(
+            root,
+            "session",
+            serde_json::json!({
+                "reason":"change theme",
+                "changes":[{"path":"config.toml","kind":"edit","content":after}]
+            }),
+        )
+        .expect("an unrelated config edit should remain available");
+    }
 
     #[test]
     fn p3b_invalid_path_explains_the_protected_root_and_relative_example() {

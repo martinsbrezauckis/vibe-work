@@ -212,10 +212,19 @@ select:disabled {
 /* A row with long words beside several actions (Updates status): the words keep a readable column and the actions
    wrap under each other, instead of the actions squeezing the words to one per line in a narrow window. */
 .check.check-wrap-actions {
-  grid-template-columns: minmax(min(24ch, 100%), 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+.check.check-wrap-actions > :first-child {
+  flex: 1 1 36ch;
+  min-width: 0;
 }
 .check.check-wrap-actions > .set-actions {
+  flex: 0 1 auto;
   justify-content: flex-end;
+  margin-left: auto;
 }
 .set-row > span,
 .set-row > p {
@@ -459,4 +468,29 @@ select:disabled {
   gap: 2px;
   margin: 6px 10px 2px;
   padding: 2px;
+}
+
+/* On-demand chunk status and error recovery; non-blocking and token-only. */
+.lazy-status {
+  padding: var(--space-card-gap);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+.lazy-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-control-gap);
+  padding: var(--space-card-gap);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--red-soft);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.lazy-error-text {
+  margin: 0;
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

@@ -14,6 +14,7 @@ import { Selector } from "../../components/Selector";
 import { announce } from "../../state/announcer";
 import { type NewPlace, useKnowledge } from "../../state/useKnowledge";
 import { useApp } from "../shell/AppContext";
+import { ACT_ADD, ACT_CANCEL, ACT_CHOOSE_FOLDER } from "./actionLabels";
 
 /** The `useKnowledge` result the Knowledge base forms read and act on. */
 export type Knowledge = ReturnType<typeof useKnowledge>;
@@ -132,14 +133,14 @@ export function AddLibrary({ knowledge, onDone }: { knowledge: Knowledge; onDone
               });
           }}
         >
-          Add
+          {ACT_ADD}
         </Button>
         <Button
           data-testid="settings.knowledge-add-library-cancel"
           shape="outlined"
           onClick={onDone}
         >
-          Cancel
+          {ACT_CANCEL}
         </Button>
       </div>
     </div>
@@ -264,7 +265,7 @@ export function AddLocal({ knowledge, onDone }: { knowledge: Knowledge; onDone: 
                   .catch(() => undefined);
               }}
             >
-              Choose folder…
+              {ACT_CHOOSE_FOLDER}
             </Button>
           }
         />
@@ -294,10 +295,10 @@ export function AddLocal({ knowledge, onDone }: { knowledge: Knowledge; onDone: 
             });
           }}
         >
-          Add
+          {ACT_ADD}
         </Button>
         <Button data-testid="settings.knowledge-add-local-cancel" shape="outlined" onClick={onDone}>
-          Cancel
+          {ACT_CANCEL}
         </Button>
       </div>
     </div>

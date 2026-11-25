@@ -8,6 +8,7 @@ import { Modal } from "../../components/Modal";
 import type { MistralKeyView } from "../../protocol/core";
 import { savedTestText } from "../../state/mistralKeys";
 import { ForgotPassword } from "../setup/ForgotPassword";
+import { ACT_ADD_KEY, ACT_CANCEL, ACT_REMOVE, ACT_SAVE, ACT_USE_THIS_KEY } from "./actionLabels";
 import { KeyStep } from "../setup/KeyStep";
 import { PasswordAsk } from "../setup/PasswordAsk";
 import { Problem } from "../setup/fields";
@@ -121,7 +122,7 @@ export function MistralKeys() {
                           type="submit"
                           disabled={busy || name.trim() === ""}
                         >
-                          Save
+                          {ACT_SAVE}
                         </Button>
                         <Button
                           data-testid="settings.mistral-keys-cancel-name"
@@ -131,7 +132,7 @@ export function MistralKeys() {
                             rowFocus(item.itemId);
                           }}
                         >
-                          Cancel
+                          {ACT_CANCEL}
                         </Button>
                       </div>
                     </form>
@@ -157,7 +158,7 @@ export function MistralKeys() {
                         });
                       }}
                     >
-                      {switching === item.itemId ? "Switching…" : "Use this key"}
+                      {switching === item.itemId ? "Switching…" : ACT_USE_THIS_KEY}
                     </Button>
                   )}
                   <LinkButton
@@ -198,7 +199,7 @@ export function MistralKeys() {
                 setAdding(true);
               }}
             >
-              Add key
+              {ACT_ADD_KEY}
             </Button>
           )}
           {adding && (
@@ -225,7 +226,7 @@ export function MistralKeys() {
                 disabled={busy}
                 onClick={cancelAdd}
               >
-                Cancel
+                {ACT_CANCEL}
               </Button>
             </div>
           )}
@@ -258,7 +259,7 @@ export function MistralKeys() {
                 setRemoving(null);
               }}
             >
-              Cancel
+              {ACT_CANCEL}
             </Button>
             <Button
               data-testid="settings.mistral-keys-confirm-remove"
@@ -275,7 +276,7 @@ export function MistralKeys() {
                 });
               }}
             >
-              Remove
+              {ACT_REMOVE}
             </Button>
           </footer>
           <Problem text={ownProblem} />

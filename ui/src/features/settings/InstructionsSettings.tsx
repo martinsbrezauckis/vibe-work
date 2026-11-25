@@ -6,6 +6,7 @@
  * editor's (never a link, never an edit of the terminal's files). Nothing is written until Save.
  */
 import { Button } from "../../components/Controls";
+import { ACT_ADD_TERMINAL_INSTRUCTIONS } from "./actionLabels";
 import { useEffect } from "react";
 
 import { useCoreState } from "../shell/hooks";
@@ -41,7 +42,7 @@ export function InstructionsSettings() {
                 void controller.loadCli();
               }}
             >
-              Add my terminal's AGENTS.md
+              {ACT_ADD_TERMINAL_INSTRUCTIONS}
             </Button>
           ) : null
         }

@@ -12,7 +12,7 @@ use vw_platform::sync::LockRecover;
 
 use crate::update_flow::{
     InstallMode, Offer, Phase, Progress, Stage, UpdateError, UpdateManager, UpdateNotice,
-    UpdateRequester,
+    UpdateRequester, macos_blocked_error,
 };
 use crate::update_verify::verify_package;
 
@@ -21,13 +21,15 @@ impl UpdateManager {
     /// the Debug API alike.
     ///
     /// # Errors
-    /// [`UpdateError::LinkOnly`], [`UpdateError::WrongState`], [`UpdateError::Busy`], or
-    /// [`UpdateError::Failed`] with the download's failure (the phase is then `failed`).
+    /// [`UpdateError::LinkOnly`], [`UpdateError::MacosTranslocated`], [`UpdateError::MacosReadOnly`],
+    /// [`UpdateError::WrongState`], [`UpdateError::Busy`], or [`UpdateError::Failed`] with the download's
+    /// failure (the phase is then `failed`).
     pub async fn download(&self, requester: UpdateRequester) -> Result<(), UpdateError> {
-        match self.0.cfg.mode {
-            InstallMode::LinkOnly => return Err(UpdateError::LinkOnly),
-            InstallMode::MacosTranslocated => return Err(UpdateError::MacosTranslocated),
-            InstallMode::InApp => {}
+        if self.0.cfg.mode == InstallMode::LinkOnly {
+            return Err(UpdateError::LinkOnly);
+        }
+        if let Some(error) = macos_blocked_error(self.0.cfg.mode) {
+            return Err(error);
         }
         let offer = self.downloadable()?;
         tracing::info!(?requester, version = %offer.version, "update: download asked");

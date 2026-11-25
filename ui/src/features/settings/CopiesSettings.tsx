@@ -11,6 +11,7 @@ import { useStore } from "../../state/createStore";
 import type { Worktrees } from "../../state/worktrees";
 import { useApp } from "../shell/AppContext";
 import { openCopies } from "../worktrees/openCopies";
+import { ACT_REVIEW_COPIES } from "./actionLabels";
 
 /** How many copies the inventory holds, read when Settings opens. */
 function useCopyCount(worktrees: Worktrees): number {
@@ -44,9 +45,10 @@ function Row({ worktrees }: { worktrees: Worktrees }) {
       ) : (
         <Button
           data-testid="settings.copies-settings-open-copies"
+          shape="outlined"
           onClick={() => void openCopies(app)}
         >
-          Review copies
+          {ACT_REVIEW_COPIES}
         </Button>
       )}
     </div>

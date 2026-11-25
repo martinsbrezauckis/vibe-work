@@ -1,12 +1,16 @@
 //! Forwarded commands, confirmation tokens and profile restoration for the core dispatcher.
 //! Depends on the existing gate, channels and session projection; called by Core dispatch methods.
-//! The order of authority checks, transport calls and result projection is unchanged.
+//! Rechecks the Developer switch after awaited preparation, just before forwarding work.
 use crate::command::{CommandResult, Origin};
 use crate::core::Core;
 use crate::error::{CoreError, ErrorCode};
 use crate::sessions;
 use serde_json::Value;
 use vw_gate::{ConfirmationToken, GateError, Reply, TRUSTED_SURFACE_METHODS};
+
+#[cfg(test)]
+#[path = "dispatch_forward_switch_tests.rs"]
+mod switch_tests;
 
 impl Core {
     /// A call whose result is a session state: forwarded, loaded, answered with the snapshot.
@@ -105,14 +109,71 @@ impl Core {
         trusted_access_switch: bool,
         stop: Option<u64>,
     ) -> Result<Reply, CoreError> {
+        crate::desktop_chats::check_open(&self.shared, method, &params)?;
+        let server_toggle = crate::command_servers::is_server_toggle(method, &params);
+        let server_refresh = matches!(method, "mcp_catalog/refresh" | "mcp/refresh");
+        let approved_command = if server_toggle {
+            self.prepare_forwarded_toggle(origin, method, &params)
+                .await?
+        } else {
+            None
+        };
+        let command_mutation = if server_toggle || server_refresh {
+            Some(self.shared.developer_permissions.mutation_lock().await)
+        } else {
+            None
+        };
+        if server_refresh {
+            match crate::mcp_refresh::blocked_command(
+                &self.shared.instructions.own_home,
+                self.shared.developer_permissions.enabled(),
+            ) {
+                Ok(false) => {}
+                Ok(true) => {
+                    let message = if self.shared.developer_permissions.enabled() {
+                        if crate::command_origin::debug_api_acts(&self.shared, origin) {
+                            vw_vocabulary::texts::COMMAND_SERVER_DISABLED_REFRESH_BLOCKED_AGENT
+                        } else {
+                            vw_vocabulary::texts::COMMAND_SERVER_DISABLED_REFRESH_BLOCKED
+                        }
+                    } else if crate::command_origin::debug_api_acts(&self.shared, origin) {
+                        vw_vocabulary::texts::COMMAND_SERVER_REFRESH_BLOCKED_AGENT
+                    } else {
+                        vw_vocabulary::texts::COMMAND_SERVER_REFRESH_BLOCKED
+                    };
+                    return Err(CoreError::new(ErrorCode::Denied, message).with_method(method));
+                }
+                Err(_) => {
+                    return Err(CoreError::new(
+                        ErrorCode::Internal,
+                        if self.shared.developer_permissions.enabled() {
+                            vw_vocabulary::texts::COMMAND_SERVER_INSPECT_FAILED
+                        } else {
+                            vw_vocabulary::texts::COMMAND_SERVER_ENFORCE_FAILED
+                        },
+                    )
+                    .with_method(method));
+                }
+            }
+        }
+        if server_refresh {
+            crate::project_mcp::admit(&self.shared, method, &params).await?;
+        }
+        let command_target = if server_toggle {
+            self.check_forwarded_toggle(origin, &params, approved_command.as_ref())?
+        } else {
+            false
+        };
         let mut params = params;
         let selected = crate::model_choices::selected(&self.shared, method, &mut params);
         if let Some(reply) = crate::stop_tree::interrupt(&self.shared, method, &params).await? {
             return Ok(reply);
         }
         crate::session_ownership::check_delete(&self.shared, method, &params).await?;
-        crate::desktop_chats::check_open(&self.shared, method, &params)?;
         let _refresh = self.plugin_refresh_lock(method, &params, stop).await?;
+        // A chat whose channel predates the last Developer permissions switch applies it before new work
+        // (`switch_apply.rs`), the way a reopen restores the access mode first.
+        crate::switch_apply::before_work(&self.shared, method, &params).await?;
         // Under the chat's send lock (`stops.rs`): a Stop's interrupt reaches a turn a checked send started; a Stop
         // since the continuation was scheduled refuses it here, before a stopped chat is reopened (the test that
         // decides runs again right before the send, `turn_start::call`).
@@ -135,6 +196,9 @@ impl Core {
         let restore = self
             .resume_restore(method, &mut params, token.is_some())
             .await?;
+        if !server_refresh {
+            crate::project_mcp::admit(&self.shared, method, &params).await?;
+        }
         if token.is_none() && method != "config/model/write" {
             token = self
                 .own_token(origin, method, &params, trusted_access_switch)
@@ -175,6 +239,9 @@ impl Core {
         let was_full = self.full_before(method, &params);
         let deleted_children =
             crate::session_end::deletion_children(&self.shared, method, &params).await;
+        // Preparation above can await while the switch writes a new config and marks this channel stale.
+        // Refuse at the final dispatch boundary; the next attempt applies the change before work.
+        crate::switch_apply::at_send(&self.shared, method, &params)?;
         let mut reply = Box::pin(self.send_call(crate::dispatch_call::Sending {
             method,
             params: &params,
@@ -185,6 +252,10 @@ impl Core {
             selected,
         }))
         .await?;
+        if command_target && let Some(name) = params.get("name").and_then(Value::as_str) {
+            crate::command_pause::forget(self.shared.developer_permissions.settings_path(), name);
+        }
+        drop(command_mutation);
         // Before the store, the name cache or any client sees it: chat titles hold no vault value (`title_guard`).
         crate::title_guard::withhold_in(&self.shared, &mut reply.result);
         if let Some(opening) = entry_project {

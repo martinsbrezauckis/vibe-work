@@ -1,5 +1,6 @@
 /** Confirmed Chrome connection state and settings commands. Used by the Browser section and dialogs. */
 import { browserView, type SettingsBrowser } from "./browserView";
+import { chromeUsable, firefoxUsable } from "./chromeRows";
 import { TEXT } from "../../../vocabulary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -16,7 +17,11 @@ import { useCoreState } from "../../shell/hooks";
 interface ChromeStatus {
   text: string;
   alert: boolean;
-  kind?: "removed" | "hint";
+  /**
+   * `connectError`: a Connect step failed (store or pairing page not opened, setup refused); it is moot once the connection
+   * it was about exists. `enableError`: turning the browser on failed; it is moot once the browser is usable.
+   */
+  kind?: "removed" | "hint" | "connectError" | "enableError";
   /** After "Removed.": the core's note that the removal could not be saved (shown as an alert). */
   note?: string;
 }
@@ -122,14 +127,19 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
     connecting.current = true;
     setBusy("connect");
     setStatus(null);
+    // The step a failure belongs to, for the kind of its status line.
+    let failure: "connectError" | "enableError" = "connectError";
     try {
       const current = core.store.get().chromeControl;
       if (browser === "Safari") {
-        if (current?.safari?.enabled === false)
+        if (current?.safari?.enabled === false) {
+          failure = "enableError";
           await core.run({
             type: "chromeControl",
             request: { op: "setSafariEnabled", enabled: true },
           });
+          failure = "connectError";
+        }
         if (current?.safari?.addon.action !== "turnOn") {
           const opened = await core.run({
             type: "chromeControl",
@@ -143,6 +153,7 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
       if (browser === "Firefox") {
         const state = current?.firefoxSharing?.state;
         if (state === "switchedOff") {
+          failure = "enableError";
           await core.run({
             type: "chromeControl",
             request: { op: "setFirefoxEnabled", enabled: true },
@@ -182,6 +193,7 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
         setup?.addon?.action === "turnOn" ||
         (setup?.addon === undefined && setup?.pairingState === "paired")
       ) {
+        failure = "enableError";
         await core.run({
           type: "chromeControl",
           request: { op: browser === "Edge" ? "setEdgeEnabled" : "setEnabled", enabled: true },
@@ -200,7 +212,7 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
           });
       }
     } catch (thrown) {
-      setStatus({ text: toCallError(thrown).error.message, alert: true });
+      setStatus({ kind: failure, text: toCallError(thrown).error.message, alert: true });
     } finally {
       connecting.current = false;
       setBusy(null);
@@ -226,6 +238,9 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
   // Pairing guidance is moot once the browser is connected; it is dropped, not only hidden, so a later
   // disconnect does not bring it back. (State adjusted during render: React re-renders before committing.)
   if (status?.kind === "hint" && view?.setup.pairingState === "paired") setStatus(null);
+  // A failed Connect or Turn on is dropped the same way once what it was about is true, so the card cannot say
+  // "Connected" under a red banner. A failure of another change (`run`) has no kind and stays until the next action.
+  if (staleFailure(status, view, browser)) setStatus(null);
   const liveStatus =
     status?.kind === "removed"
       ? {
@@ -243,4 +258,21 @@ export function useChromeControl(browser: SettingsBrowser = "Chrome"): ChromeCon
         }
       : status;
   return { view, busy, status: liveStatus, readError, run, connect };
+}
+
+/** Whether a connection failure's subject has since come true: paired (and live), or usable. */
+function staleFailure(
+  status: ChromeStatus | null,
+  view: ChromeControlView | null,
+  browser: SettingsBrowser,
+): boolean {
+  if (view === null) return false;
+  if (status?.kind === "enableError")
+    return browser === "Firefox" ? firefoxUsable(view) : chromeUsable(view);
+  if (status?.kind !== "connectError") return false;
+  if (browser === "Firefox") return view.firefoxSharing?.state === "connected";
+  const addon = view.setup.addon;
+  return (
+    view.setup.pairingState === "paired" && (addon === undefined || addon.state === "connected")
+  );
 }

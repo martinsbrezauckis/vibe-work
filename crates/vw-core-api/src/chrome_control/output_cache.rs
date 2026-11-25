@@ -66,7 +66,7 @@ pub(super) fn for_model(
     answer: super::owner::Answer,
     tool: &str,
     clamped: bool,
-) -> Value {
+) -> Result<Value, String> {
     if tool == "chrome_execute"
         && let super::owner::Answer::Helper(result) = &answer
     {
@@ -83,10 +83,10 @@ pub(super) fn for_model(
         && result["isError"] != true
         && result["structuredContent"]["error"].is_null()
     {
-        return save(shared, chat, request, &result["structuredContent"]);
+        return Ok(save(shared, chat, request, &result["structuredContent"]));
     }
     if tool != "chrome_execute" || !observation(&result) {
-        return super::output::finish(result, tool, clamped);
+        return Ok(super::output::finish(result, tool, clamped));
     }
     super::output_receipt::compact(&mut result);
     if clamped {
@@ -96,16 +96,27 @@ pub(super) fn for_model(
         ));
         super::output::sync_text(&mut result);
     }
-    bound(shared, chat, request, &mut result);
-    json!({"vwMcpResult":result})
+    bound(shared, chat, request, &mut result)?;
+    Ok(json!({"vwMcpResult":result}))
 }
 
 /// Save the exact marked body before any extra app trimming, including a combined batch's whole body.
-pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut Value) {
+pub(super) fn bound(
+    shared: &Shared,
+    chat: &str,
+    request: &Value,
+    result: &mut Value,
+) -> Result<(), String> {
     let body = &result["structuredContent"];
     let limit = super::output::limit(body);
     if super::output::fits(body, limit) {
-        return;
+        return Ok(());
+    }
+    // Check the complete value: filtering serialized fragments can miss context or invalidate offsets/JSON.
+    let mut filtered = body.clone();
+    super::agent_output::filter_complete(&mut filtered, "chrome_execute")?;
+    if filtered != *body {
+        return Err("Result withheld: a frozen receipt would change under the built-in key-like text filter. Narrow the read with find, ref or frameId; do not replay writes.".into());
     }
     let encoded = body.to_string();
     let mut random = [0u8; 16];
@@ -118,7 +129,7 @@ pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut V
         );
         result["structuredContent"] = header;
         super::output::sync_text(result);
-        return;
+        return Ok(());
     }
     let id = format!("{:032x}", u128::from_be_bytes(random));
     let request = request.clone();
@@ -142,6 +153,7 @@ pub(super) fn bound(shared: &Shared, chat: &str, request: &Value, result: &mut V
     }
     cache.entries.push_back(entry);
     super::output::sync_text(result);
+    Ok(())
 }
 
 pub(super) fn resume(

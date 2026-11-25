@@ -9,12 +9,25 @@
  * Invariants: without a core nothing is registered (the placeholder stays); the returned function undoes every
  * registration, hides the viewer and stops following events.
  */
+import { createLazyComponent } from "../../components/LazyChunk";
 import { term } from "../../vocabulary";
 import type { App } from "../shell/AppContext";
-import { PagesTab } from "./PagesTab";
-import { PlanChecklist } from "./PlanChecklist";
 import { registerPagesRoute, registerPlanRoute } from "./pagesRoutes";
 import { createPages, type Pages } from "./store";
+
+/** Handbook tab body loaded on demand when opened. */
+export const LazyPagesTab = createLazyComponent({
+  label: "the project tab",
+  testIdPrefix: "pages.tab",
+  load: async () => ({ default: (await import("./PagesTab")).PagesTab }),
+});
+
+/** Plan checklist tab body loaded on demand when opened. */
+export const LazyPlanChecklist = createLazyComponent({
+  label: "Plan checklist",
+  testIdPrefix: "pages.plan-checklist",
+  load: async () => ({ default: (await import("./PlanChecklist")).PlanChecklist }),
+});
 
 /** Opens the Project tab on the current plan of the selected session. */
 function openPlan(app: App, pages: Pages): void {
@@ -48,8 +61,8 @@ export function registerPagesTab(app: App): () => void {
   };
   const removers = [
     stopTheme,
-    app.panelTabs.register("project", () => <PagesTab pages={pages} />),
-    app.panelTabs.register("plan", () => <PlanChecklist pages={pages} openStep={openStep} />),
+    app.panelTabs.register("project", () => <LazyPagesTab pages={pages} />),
+    app.panelTabs.register("plan", () => <LazyPlanChecklist pages={pages} openStep={openStep} />),
     registerPlanRoute(app, pages, openStep),
     app.commands.register({
       id: "project.plan",

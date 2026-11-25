@@ -509,10 +509,13 @@ pub(crate) async fn apply_pending(
     };
     // Even a failed plugin reload must not strand an independently requested Chrome switch.
     if let Err(error) = refreshed {
-        // Fail closed: the change stays pending, so every later call of this chat that can build or use its runtime
+        // A completed reload with withheld MCP discovery needs no retry; its caller still gets the refusal.
+        // Actual re-pin failures stay pending, so every later call of this chat that can build or use its runtime
         // (turn, queue, shell command, context) retries the re-pin first and is refused while it fails (a removed or
         // turned-off plugin never runs again).
-        if plugins {
+        let discovery_withheld = error.code == crate::ErrorCode::Denied
+            && error.server_code.as_deref() == Some(crate::plugin_refresh::MCP_DISCOVERY_WITHHELD);
+        if plugins && !discovery_withheld {
             shared.plugin_refresh.request(id);
         }
         if error.code == crate::ErrorCode::ServerError && pending.is_some() {

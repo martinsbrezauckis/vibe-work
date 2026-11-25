@@ -60,6 +60,8 @@ pub(crate) struct Shared {
     pub(crate) github_reads: Arc<crate::github_reads::Reader>,
     pub(crate) keep_awake: crate::keep_awake::AwakeState,
     pub(crate) developer_permissions: crate::developer_permissions::DeveloperPermissions,
+    /// The Vibe process folder when a new session omits its own cwd (project config discovery).
+    pub(crate) default_cwd: std::path::PathBuf,
     /// The New chat screen's owner of terminals, browser and port lease before the first message (`new_chat`).
     pub(crate) new_chat: crate::new_chat::Draft,
     /// Orders skills changes with admitting new work so a busy check cannot race a turn start.

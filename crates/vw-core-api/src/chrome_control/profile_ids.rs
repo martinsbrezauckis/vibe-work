@@ -96,12 +96,20 @@ pub(super) fn resolve_browser(args: &mut Value, status: &Value) -> Result<(), St
         args["profileId"] = Value::String((*profile).to_owned());
         Ok(())
     } else {
-        Err(format!(
-            "Not run: {} has {} connected profiles. Use chrome_status and supply the exact profileId for the intended profile; do not guess a profile.",
-            browser.name(),
-            profiles.len()
-        ))
+        Err(ambiguous_profile_refusal(browser, profiles.len()))
     }
+}
+
+/// Readable refusal when multiple profiles match and no exact `profileId` was supplied.
+pub(super) fn ambiguous_profile_refusal(
+    browser: super::agent_browser::Browser,
+    count: usize,
+) -> String {
+    format!(
+        "Not run: {} has {} connected profiles. Use chrome_status and supply the exact profileId for the intended profile; do not guess a profile.",
+        browser.name(),
+        count
+    )
 }
 
 /// Old saved bindings and new helper labels can name the same Chrome profile; never an Edge profile.

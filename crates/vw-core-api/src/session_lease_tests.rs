@@ -145,6 +145,32 @@ fn ownership_probes_release_a_lock_inherited_by_a_fork() {
     drop(inherited);
 }
 
+#[test]
+fn a_cancelled_channel_cannot_release_a_replacements_shared_lease() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let first = Leases::new(&home, Some(&dir.path().join("first"))).unwrap();
+    let other = Leases::new(&home, Some(&dir.path().join("other"))).unwrap();
+    let old = first.claim("chat").unwrap().unwrap();
+    first.retain("chat", (1, 7), Some(old.clone()));
+    let replacement = first.claim("chat").unwrap().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&old, &replacement));
+    first.retain("chat", (1, 8), Some(replacement));
+    assert!(first.release_channel("chat", (1, 7)).is_none());
+    drop(old);
+    assert!(
+        other.claim("chat").is_err(),
+        "replacement must retain ownership"
+    );
+    let closing = first.release_channel("chat", (1, 8)).unwrap();
+    assert!(
+        other.claim("chat").is_err(),
+        "cleanup keeps the OS claim through close"
+    );
+    drop(closing);
+    assert!(other.claim("chat").is_ok());
+}
+
 #[cfg(unix)]
 #[test]
 fn releasing_a_lease_frees_a_lock_inherited_by_a_fork() {
@@ -160,7 +186,7 @@ fn releasing_a_lease_frees_a_lock_inherited_by_a_fork() {
         .err()
         .expect("the live owner keeps its lease");
     assert_eq!(refused.server_code.as_deref(), Some("sessionHeld"));
-    first.retain("s1", Some(lease));
+    first.retain("s1", (1, 1), Some(lease));
     first.release_all();
     let next_owner = next
         .claim("s1")

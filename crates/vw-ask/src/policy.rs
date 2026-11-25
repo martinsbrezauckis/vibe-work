@@ -69,6 +69,8 @@ const NATIVE: &[&str] = &[
     "vw/plugins/turnOn",
     "vw/plugins/remove",
     "vibe-work/mcpServerKey",
+    "vibe-work/mcpNoAuthServer",
+    "vibe-work/mcpCommandServer",
     "vibe-work/captureSecret",
     "vibe-work/replaceVaultSecret",
     "vibe-work/replaceVaultLoginPassword",
@@ -141,6 +143,7 @@ pub fn policy(kind: &str) -> Option<Policy> {
                     | "chrome/control/pair"
                     | "vibe-work/localNetworkAccess"
                     | "vibe-work/developerPermissions"
+                    | "vibe-work/mcpCommandServer"
             ),
         always_setting: ALWAYS_SETTINGS
             .iter()

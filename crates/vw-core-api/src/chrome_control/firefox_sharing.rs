@@ -8,7 +8,7 @@ use vw_platform::sync::LockRecover;
 /// Firefox page sharing ("Ask Vibe Work" through the signed add-on). The helper relays the add-on and limits it to a
 /// person's shares (no agent session on the person's Firefox). When false: Settings and agent facts carry no sharing
 /// view, Firefox setup registers the helper without opening the add-on prompt, and the add-on request is refused.
-/// The owned Firefox window (`WebDriver` `BiDi`, Open window) is separate and unaffected.
+/// The owned Firefox window (`WebDriver` `BiDi`, opened by itself when a chat browses) is separate and unaffected.
 pub(super) const PAGE_SHARING_AVAILABLE: bool = true;
 
 /// What the agent is told about a connected sharing add-on: shares arrive from the person; it cannot reach the tabs.
@@ -31,10 +31,11 @@ fn change_in_extension_sentence() -> String {
     format!("O{}", &step[1..])
 }
 
-/// The plain refusal for the add-on request while page sharing is hidden; names the owned window's control instead.
+/// The plain refusal for the add-on request while page sharing is hidden; says how the agent browses instead (the
+/// owned window opens by itself when a chat browses; there is no Open window control since 0.1.17).
 pub(super) fn page_sharing_unavailable() -> String {
     Browser::Firefox.words(
-        "Sharing pages from {browser} is not available in this version of Vibe Work. Use Open window in Settings > Browser > {yourBrowser} instead.",
+        "Sharing pages from {browser} is not available in this version of Vibe Work. When a chat uses {yourBrowser}, the agent opens its own {browser} window by itself.",
     )
 }
 

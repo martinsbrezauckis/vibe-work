@@ -147,12 +147,22 @@ pub(crate) fn merge_session_servers(servers: &mut Vec<ServerView>, read: &Value)
             continue;
         };
         let status = text(source, "status");
-        let error = text(source, "error").filter(|e| !e.is_empty());
+        // Vibe 3.x reports a failed connection in `mcp.discoveryErrors` (keyed by name); an older read puts it on
+        // the source.
+        let raw_error = text(source, "error")
+            .filter(|e| !e.is_empty())
+            .or_else(|| text(&mcp["discoveryErrors"], &name));
         let plugin = text(source, "pluginName");
         if let Some(server) = servers.iter_mut().find(|s| s.name == name) {
+            let (error, kind) = crate::connectors_errors::for_server(
+                raw_error.as_deref(),
+                status.as_deref(),
+                &server.sign_in,
+            );
             server.status = status;
             server.tools = tools(source);
             server.error = error;
+            server.error_kind = kind.map(str::to_owned);
             server.plugin = plugin;
             if let Some(display) = text(source, "displayName").filter(|d| !d.is_empty()) {
                 server.display_name = display;
@@ -169,11 +179,13 @@ pub(crate) fn merge_session_servers(servers: &mut Vec<ServerView>, read: &Value)
             off: false,
             status,
             tools: tools(source),
-            error,
+            error: raw_error.filter(|e| e != crate::connectors_errors::NOT_ACTIVE),
+            error_kind: None,
             plugin,
             source: None,
             configured: false,
             key: None,
+            command_config: None,
             name,
         });
     }

@@ -280,6 +280,10 @@
   font-size: var(--text-sm);
 }
 .modal-actions {
+  /* A dialog taller than the window scrolls under its action row: the row stays at the dialog's bottom edge. */
+  position: sticky;
+  bottom: 0;
+  background: var(--raised);
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -426,12 +430,24 @@
   color: var(--text);
   font-size: var(--text-sm);
 }
-/* The composer sits in the welcome column (the column's own padding replaces the composer's). */
+/* The composer is pinned under the scrolling welcome column, in the same column width; it keeps the chat view's
+   bottom spacing (the column's own side padding replaces the composer's). */
 .new-chat-composer {
-  margin: 14px 0 4px;
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 760px;
+  margin: 10px auto 0;
+  padding: 0 32px;
 }
 .new-chat-composer .composer-wrap {
-  padding: 0;
+  padding-inline: 0;
+}
+/* Fixtures that still nest the composer in the welcome column get no second set of side padding. */
+.welcome .new-chat-composer {
+  margin-top: 14px;
+  padding-inline: 0;
 }
 
 .srow-main .loops-row,

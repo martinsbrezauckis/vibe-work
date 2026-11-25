@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 import { Button, SettingsRow } from "../../../components/Controls";
 import type { CoversPart } from "../../../protocol/core";
 import type { Allowed } from "./store";
+import { ACT_REVOKE } from "../actionLabels";
 import { type LeafView, moreLabel } from "./view";
 
 /** Covers words: code parts as `<code>`. */
@@ -50,7 +51,7 @@ export function AllowedRows({
               disabled={running}
               onClick={() => void allowed.revoke(e.key)}
             >
-              {running ? "Revoking…" : "Revoke"}
+              {running ? "Revoking…" : ACT_REVOKE}
             </Button>
           </SettingsRow>
         );

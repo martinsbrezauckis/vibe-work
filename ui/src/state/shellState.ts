@@ -79,6 +79,7 @@ interface SettingsView {
   category: string;
   query: string;
   target: string | null;
+  targetAction: string | null;
 }
 
 /** Theme names (tokens.css: dark is the default, light via `data-theme`). */
@@ -190,7 +191,7 @@ export function initialShell(
     markVibeLines: true,
     saveBeforeSend: true,
     openHtmlMarkdownAs: "preview",
-    settings: { open: false, category: "general", query: "", target: null },
+    settings: { open: false, category: "general", query: "", target: null, targetAction: null },
     drawer: false,
   };
 }
@@ -336,7 +337,12 @@ export function setOverlay(
  * Opens the Settings page: at `category` (else the one it showed last) and, with `target`, at that setting.
  * Closes the palette and the list drawer: the page has the column to itself.
  */
-export function openSettings(state: ShellState, category?: string, target?: string): ShellState {
+export function openSettings(
+  state: ShellState,
+  category?: string,
+  target?: string,
+  targetAction?: string,
+): ShellState {
   return {
     ...state,
     overlay: null,
@@ -346,6 +352,7 @@ export function openSettings(state: ShellState, category?: string, target?: stri
       category: category ?? state.settings.category,
       query: target === undefined ? state.settings.query : "",
       target: target ?? null,
+      targetAction: target === undefined ? null : (targetAction ?? null),
     },
   };
 }
@@ -360,11 +367,18 @@ export function setSettingsCategory(
   state: ShellState,
   category: string,
   target?: string,
+  targetAction?: string,
 ): ShellState {
   return {
     ...state,
     drawer: false,
-    settings: { ...state.settings, category, query: "", target: target ?? null },
+    settings: {
+      ...state.settings,
+      category,
+      query: "",
+      target: target ?? null,
+      targetAction: target === undefined ? null : (targetAction ?? null),
+    },
   };
 }
 
@@ -375,9 +389,9 @@ export function setSettingsQuery(state: ShellState, query: string): ShellState {
 
 /** Forgets the one-shot `target` (after the page scrolled to it and lit it). */
 export function clearSettingsTarget(state: ShellState): ShellState {
-  return state.settings.target === null
+  return state.settings.target === null && state.settings.targetAction === null
     ? state
-    : { ...state, settings: { ...state.settings, target: null } };
+    : { ...state, settings: { ...state.settings, target: null, targetAction: null } };
 }
 
 /** Collapses or expands one project id (folder path before filing) in the list. */

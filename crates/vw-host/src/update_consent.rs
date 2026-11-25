@@ -10,20 +10,22 @@
 //!
 //! Depends on: [`crate::update_flow`] (state), [`crate::update_store`]. Called by: `app` (`commands.rs`), tests.
 
-use crate::update_flow::Consent;
-use crate::update_flow::{Phase, Stage, UpdateError, UpdateManager, UpdateRequester};
+use crate::update_flow::{
+    Consent, Phase, Stage, UpdateError, UpdateManager, UpdateRequester, macos_blocked_error,
+};
 use crate::update_store::Pending;
-use crate::update_view::{InstallMode, Offer};
+use crate::update_view::Offer;
 
 impl UpdateManager {
     /// Records the user's agreement to install the `ready` version: the main window's click or the Debug API's
     /// request.
     ///
     /// # Errors
-    /// [`UpdateError::WrongState`] (nothing is `ready`), [`UpdateError::Busy`].
+    /// [`UpdateError::MacosTranslocated`], [`UpdateError::MacosReadOnly`], [`UpdateError::WrongState`]
+    /// (nothing is `ready`), [`UpdateError::Busy`].
     pub fn consent(&self, requester: UpdateRequester) -> Result<(), UpdateError> {
-        if self.0.cfg.mode == InstallMode::MacosTranslocated {
-            return Err(UpdateError::MacosTranslocated);
+        if let Some(error) = macos_blocked_error(self.0.cfg.mode) {
+            return Err(error);
         }
         let version = self.ready_version()?;
         tracing::info!(?requester, %version, "update: install agreed");
@@ -49,11 +51,12 @@ impl UpdateManager {
     /// The consent is used up by the attempt.
     ///
     /// # Errors
-    /// [`UpdateError::ConsentRequired`] without consent; [`UpdateError::WrongState`]; [`UpdateError::Busy`];
-    /// [`UpdateError::Failed`] when the package is bad or the install fails (phase `failed`, offer kept).
+    /// [`UpdateError::MacosTranslocated`], [`UpdateError::MacosReadOnly`], [`UpdateError::ConsentRequired`]
+    /// without consent; [`UpdateError::WrongState`]; [`UpdateError::Busy`]; [`UpdateError::Failed`] when the
+    /// package is bad or the install fails (phase `failed`, offer kept).
     pub async fn install(&self) -> Result<(), UpdateError> {
-        if self.0.cfg.mode == InstallMode::MacosTranslocated {
-            return Err(UpdateError::MacosTranslocated);
+        if let Some(error) = macos_blocked_error(self.0.cfg.mode) {
+            return Err(error);
         }
         // The check and the take happen under one lock, together with the move to `installing`.
         let (offer, pending) = self.with(|s| {

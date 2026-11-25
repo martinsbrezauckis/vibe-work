@@ -1,10 +1,9 @@
 /** Announce completed turns once, never snapshots or streaming patches. Uses the shared announcer and preferences. */
 import { announce } from "../../state/announcer";
 import { turnDeclinedLine } from "../../state/declineAnnounce";
-import { finalAnswer } from "../../state/voiceChatTurns";
+import { finalAnswer, speakable } from "../../state/speechPlain";
 import { declinedTurns } from "./model/build";
 import { arr, obj, str } from "./model/entries";
-import { speakable } from "../voice/speechText";
 import type { App } from "../shell/AppContext";
 
 /**

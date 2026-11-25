@@ -8,12 +8,19 @@
  * dialog is gone).
  * Invariants: the switch only saves the preference (the host stores it); installing is the same "Install and
  * restart" request as the notice's, so it is never offered before the download is verified. A package-manager
- * install (`linkOnly`) gets no download switch. A translocated Mac copy explains the move and disables
- * Download/Install; neither copy downloads updates here.
+ * install (`linkOnly`) gets no download switch. A translocated or read-only Mac copy explains the move and
+ * disables Download/Install with the reason; neither copy downloads updates here.
  */
 import { Button, Switch } from "../../components/Controls";
 import { useStore } from "../../state/createStore";
-import { statusLine } from "../../state/updates";
+import { blockedReason, statusLine } from "../../state/updates";
+import {
+  ACT_CHECK_FOR_UPDATES,
+  ACT_DOWNLOAD,
+  ACT_INSTALL_AND_RESTART,
+  ACT_OPEN_RELEASE_PAGE,
+  ACT_UPDATE_VIBE,
+} from "../settings/actionLabels";
 import { vibeStatusLine } from "../../state/vibeUpdates";
 import { useVibeUi } from "../setup/VibeInstallStep";
 import { useApp } from "../shell/AppContext";
@@ -47,6 +54,8 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
     );
   if (!state.available || view === null) return null;
   const phase = view.phase;
+  const reason = blockedReason(view);
+  const blocked = reason !== null;
   const busy = ["checking", "downloading", "installing", "restarting"].includes(phase.type);
   const run = (step: () => Promise<void>) => () => {
     step().catch(() => undefined);
@@ -74,10 +83,11 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
               data-testid="updates.update-settings-run"
               type="button"
               shape="outlined"
-              disabled={view.mode === "macosTranslocated"}
+              disabled={blocked}
+              title={reason ?? undefined}
               onClick={run(updates.download)}
             >
-              Download
+              {ACT_DOWNLOAD}
             </Button>
           )}
           {phase.type === "ready" && (
@@ -86,15 +96,18 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
               type="button"
               shape="outlined"
               variant="primary"
-              disabled={view.mode === "macosTranslocated"}
+              disabled={blocked}
+              title={reason ?? undefined}
               onClick={run(updates.install)}
             >
-              Install and restart
+              {ACT_INSTALL_AND_RESTART}
             </Button>
           )}
           {((phase.type === "available" && view.mode === "linkOnly") ||
-            (view.mode === "macosTranslocated" &&
-              (phase.type === "available" || phase.type === "ready" || phase.type === "failed"))) &&
+            (blocked &&
+              (phase.type === "available" ||
+                phase.type === "ready" ||
+                (phase.type === "failed" && phase.stage !== "check")))) &&
             view.releasePage !== null && (
               <>
                 <Button
@@ -103,7 +116,7 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
                   shape="outlined"
                   onClick={run(updates.openReleasePage)}
                 >
-                  Open release page
+                  {ACT_OPEN_RELEASE_PAGE}
                 </Button>
                 <ReleaseHost url={view.releasePage} />
               </>
@@ -115,13 +128,11 @@ function Section({ updates }: { updates: NonNullable<ReturnType<typeof useApp>["
             disabled={busy}
             onClick={run(updates.check)}
           >
-            Check for updates
+            {ACT_CHECK_FOR_UPDATES}
           </Button>
-          {phase.type === "failed" &&
-            phase.stage !== "check" &&
-            view.mode !== "macosTranslocated" && (
-              <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />
-            )}
+          {phase.type === "failed" && phase.stage !== "check" && !blocked && (
+            <FeedbackAction core={core} title="Vibe Work update failed" text={statusLine(view)} />
+          )}
         </span>
       </div>
       <VibeRow />
@@ -173,7 +184,7 @@ function VibeRow() {
             disabled={busy}
             onClick={() => void vibe.prepareUpdate()}
           >
-            Update Vibe
+            {ACT_UPDATE_VIBE}
           </Button>
         </span>
       )}

@@ -102,7 +102,7 @@ https://github.com/containers/bubblewrap and https://gstreamer.freedesktop.org/s
 
 Chat diagrams and formulas
 
-beautiful-mermaid 0.1.3 and Dagre/Graphlib (MIT) render diagrams. KaTeX 0.19.1 (MIT) renders formulas
+Dagre and Graphlib (MIT) lay out flowchart diagrams. KaTeX 0.19.1 (MIT) renders formulas
 as MathML. Saxes 6.0.0 (ISC) and xmlchars (MIT) parse the renderer output before the UI rebuilds passive
-elements. License texts are in third_party/beautiful-mermaid, third_party/dagrejs-dagre,
+elements. License texts are in third_party/dagrejs-dagre,
 third_party/dagrejs-graphlib, third_party/katex, third_party/commander, third_party/saxes and third_party/xmlchars.

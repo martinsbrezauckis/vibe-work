@@ -198,6 +198,8 @@ pub struct KeyService {
     limits: Arc<std::sync::Mutex<Option<RateLimits>>>,
     /// The proxy's MCP resolver slot, filled by the core (`set_mcp_resolver`).
     pub(crate) mcp: vw_keyproxy::McpResolverSlot,
+    /// Why each key server's last request failed (the proxy writes it, the Tools page reads it).
+    pub(crate) mcp_problems: vw_keyproxy::McpProblems,
     /// how often the logins were looked up and a password was handed out (diagnostics; never values).
     pub(crate) login_counters: crate::logins::Counters,
     pub(crate) network: Arc<std::sync::Mutex<crate::network::Network>>,

@@ -85,6 +85,8 @@ impl PreviewService {
         save_setting(&path, &data)?;
         self.lock_pool().configured = setting;
         drop(operation);
+        // A higher cap frees slots at once (a lower one admits nobody beyond it).
+        self.admit_waiting().await;
         Ok(self.engine_pool())
     }
 
@@ -179,7 +181,10 @@ impl PreviewService {
     /// True if the latest external mount request could not get a slot.
     #[must_use]
     pub fn browser_waiting(&self, session_id: &str) -> bool {
-        self.lock_pool().waiting.contains(session_id)
+        self.lock_pool()
+            .waiting
+            .iter()
+            .any(|queued| queued == session_id)
     }
 
     /// Marks a newly started turn before its session state is observed.

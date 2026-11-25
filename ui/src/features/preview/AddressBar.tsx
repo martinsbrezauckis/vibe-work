@@ -19,6 +19,7 @@ export function AddressBar({
   url,
   loading,
   busy,
+  waiting = false,
   title,
 }: {
   previews: Previews;
@@ -28,6 +29,8 @@ export function AddressBar({
   url: string;
   loading: boolean;
   busy: boolean;
+  /** The page is queued for a browser slot: nothing to type into yet. */
+  waiting?: boolean;
   /** Page title, shown only as a tooltip; page text is never interpreted as markup. */
   title?: string | null;
 }): ReactElement {
@@ -51,11 +54,11 @@ export function AddressBar({
         data-testid="preview.address-bar-set-draft"
         className="preview-address"
         aria-label="Address"
-        title={title ?? url}
+        title={waiting ? "Address: Waiting for a free browser slot" : (title ?? url)}
         placeholder="Type a web address or a local server (localhost:5173)"
         spellCheck={false}
         data-loading={loading}
-        disabled={busy}
+        disabled={busy || waiting}
         value={text}
         onBlur={() => {
           setDraft(null);

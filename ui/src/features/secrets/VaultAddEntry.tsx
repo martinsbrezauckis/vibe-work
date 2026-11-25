@@ -10,6 +10,7 @@ import type { SecretsRequest } from "../../protocol/core";
 import { term } from "../../vocabulary";
 import { SecretField } from "../setup/fields";
 import { GeneratorOptions, useGeneratorOptions } from "./GeneratorOptions";
+import { ACT_CANCEL, ACT_GENERATE } from "../settings/actionLabels";
 import { PERMISSION_OPTIONS } from "./VaultEntryRow";
 import type { EntryPermission, VaultAct, VaultListing } from "./vaultEntries";
 
@@ -232,25 +233,25 @@ export function VaultAddEntry(props: {
         <Button
           data-testid="secrets.vault-add-entry-save"
           type="button"
-
+          shape="outlined"
           disabled={props.busy || !valid || !generator.valid}
           onClick={() => {
             save(true);
           }}
         >
-          Generate
+          {ACT_GENERATE}
         </Button>
         <Button
           data-testid="secrets.vault-add-entry-set-value-2"
           type="button"
-
+          shape="outlined"
           disabled={props.busy}
           onClick={() => {
             setValue("");
             props.onClose();
           }}
         >
-          Cancel
+          {ACT_CANCEL}
         </Button>
       </GeneratorOptions>
     </form>

@@ -17,6 +17,8 @@
 //! - The switch counts only when Vibe's answer reports the requested profile as active. Otherwise the
 //!   session's channel is closed (no usable channel is ever left in an unverified mode), the command
 //!   is refused with `accessModeUnverified`, an alert says so, and the next command tries again.
+//! - Cancellation removes only the exact channel captured by resume before clearing the restore mark.
+//!   Its transport closes in an owned task retaining the restore lock and OS ownership lease.
 //! - Full access (`auto-approve`) in this app's own record of the session (`access.rs`: the user confirmed it
 //!   for this session, in this run or an earlier one; never Vibe's session file, which the agent can write)
 //!   is put back: an ordinary resume names `ask` (a caller's resume may not carry Full
@@ -39,7 +41,7 @@ use crate::error::{CoreError, ErrorCode};
 use crate::event::{AlertKind, CoreEvent};
 use crate::sessions;
 
-/// A session being restored after a resume; ends the restore when dropped (also on an error).
+/// A session being restored after a resume. An unverified drop removes its exact channel first.
 pub(crate) struct Restoring {
     shared: Arc<Shared>,
     session_id: String,
@@ -50,12 +52,39 @@ pub(crate) struct Restoring {
     /// folder), not from Vibe's session file or a caller. Only then is Full access put back without a dialog.
     ours: bool,
     /// Held through verification; another open or runtime read cannot cross the restore.
-    _held: tokio::sync::OwnedMutexGuard<()>,
+    held: Option<tokio::sync::OwnedMutexGuard<()>>,
+    channel: crate::channels::RestoreChannel,
+    verified: bool,
     pub(crate) attached: bool,
 }
 
 impl Drop for Restoring {
     fn drop(&mut self) {
+        let closing =
+            self.shared
+                .channels
+                .finish_restore(&self.session_id, &self.channel, self.verified);
+        if let Some(bound) = closing {
+            let held = self.held.take();
+            // The slot is already unusable. The task owns both guards through acknowledged close;
+            // cancellation of the caller cannot cancel this cleanup or release its OS lease early.
+            tokio::spawn(async move {
+                let _held = held;
+                let _lease = bound.lease;
+                if tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    bound.conn.close_input().await;
+                    bound.conn.closed().await;
+                })
+                .await
+                .is_err()
+                {
+                    warn!(
+                        channel_id = bound.key.1,
+                        "an unverified channel close was not acknowledged within 10 s"
+                    );
+                }
+            });
+        }
         self.shared.channels.end_restore(&self.session_id);
     }
 }
@@ -148,6 +177,19 @@ impl Core {
         let held = self.shared.access.lock_restore(session_id).await;
         let attached = self.shared.channels.has_channel(session_id);
         self.shared.channels.begin_restore(session_id);
+        let channel = self.shared.channels.track_restore(session_id);
+        // Own the mark before the first await, including cancellation while reading the profile.
+        let mut restore = Restoring {
+            shared: self.shared.clone(),
+            session_id: session_id.to_owned(),
+            wanted: FALLBACK_PROFILE.to_owned(),
+            model: None,
+            ours: false,
+            held: Some(held),
+            channel,
+            verified: false,
+            attached,
+        };
         let remembered = self.shared.access.remembered(session_id);
         let recorded = self.recorded_session(session_id).await;
         let model = recorded.as_ref().and_then(crate::model_choices::recorded);
@@ -168,15 +210,10 @@ impl Core {
                 false,
             ),
         };
-        Restoring {
-            shared: self.shared.clone(),
-            session_id: session_id.to_owned(),
-            wanted,
-            model,
-            ours,
-            _held: held,
-            attached,
-        }
+        restore.wanted = wanted;
+        restore.model = model;
+        restore.ours = ours;
+        restore
     }
 
     /// Read stored pins before resume skips unavailable model overrides.
@@ -209,11 +246,8 @@ impl Core {
         let actual = self.shared.channels.canonical(&restore.session_id);
         if actual != restore.session_id {
             crate::handoff::handed_off(&self.shared, &restore.session_id, &actual).await;
-            self.shared.channels.end_restore(&restore.session_id);
-            self.shared.channels.begin_restore(&actual);
-            restore.session_id = actual;
         }
-        let id = restore.session_id.clone();
+        let id = actual;
         let wanted = restore.wanted.clone();
         let method = "session/approvalPolicy/update";
         let switch = |agent: &str| json!({"sessionId": id, "approvalPolicy": agent});
@@ -253,7 +287,7 @@ impl Core {
             Ok(reply) => reply,
             Err(error) => {
                 warn!(session_id = id, %error, "switching a resumed session's profile failed");
-                return Err(self.fail_closed(restore, agent).await);
+                return Err(self.fail_closed(restore, agent));
             }
         };
         let active = reply
@@ -267,8 +301,9 @@ impl Core {
                 active,
                 "Vibe reports another profile after the switch"
             );
-            return Err(self.fail_closed(restore, agent).await);
+            return Err(self.fail_closed(restore, agent));
         }
+        restore.verified = true;
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
         let runtime = Box::pin(crate::model_choices::restore(
             &self.shared,
@@ -308,9 +343,8 @@ impl Core {
 
     /// Closes the session's channel while it is still "being restored" (so nothing can use it), tells
     /// the user, and returns the error for the command.
-    async fn fail_closed(&self, restore: Restoring, agent: &str) -> CoreError {
-        let id = restore.session_id.clone();
-        self.shared.channels.close(&id).await;
+    fn fail_closed(&self, restore: Restoring, agent: &str) -> CoreError {
+        let id = self.shared.channels.canonical(&restore.session_id);
         drop(restore);
         warn!(
             session_id = id,
@@ -347,6 +381,10 @@ fn reports_agent(result: &Value, wanted: &str) -> bool {
         .and_then(Value::as_str)
         == Some(wanted)
 }
+
+#[cfg(all(test, unix))]
+#[path = "restore_cancel_tests.rs"]
+mod cancel_tests;
 
 #[cfg(test)]
 mod tests {

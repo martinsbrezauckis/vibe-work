@@ -114,9 +114,29 @@ export function counts(view: ConnectorsView | null): Record<Filter, number> {
   };
 }
 
+/** The short status for a server whose failure the core recognised (`ServerView.errorKind`). */
+const ERROR_KIND_STATUS: Readonly<Record<string, string>> = {
+  certificate: "Certificate not trusted",
+  unreachable: "Can't reach it",
+  timeout: "No answer",
+  keyRejected: "Key rejected",
+  needsCredentials: "Needs credentials",
+  forbidden: "Access refused",
+};
+
+/** True for a server that Vibe marks `needs_auth` although it has no OAuth sign-in to start. */
+function needsAuthWithoutSignIn(s: ServerView): boolean {
+  return s.status === "needs_auth" && s.signIn !== "oauth" && s.signIn !== "unknown";
+}
+
 /** A server's state in words. */
 export function serverStatusText(s: ServerView): string {
+  if (s.errorKind === "developerPermissionsOff") return "Paused";
   if (s.off) return "Off";
+  if (s.errorKind !== undefined && ERROR_KIND_STATUS[s.errorKind] !== undefined) {
+    return ERROR_KIND_STATUS[s.errorKind] ?? "Unavailable";
+  }
+  if (needsAuthWithoutSignIn(s)) return "Unavailable";
   // a key server whose key is not allowed now (or the vault is locked) cannot connect.
   if (s.key?.grant === "none") return "Key not allowed";
   if (s.key?.grant === "locked") return "Vault locked";
@@ -148,8 +168,11 @@ export function serverStatusText(s: ServerView): string {
 export function serverTone(s: ServerView): TileStatus {
   if (s.off || s.status === "disabled") return "off";
   if (s.key?.grant === "none" || s.key?.grant === "locked") return "signin";
+  if (s.errorKind !== undefined || needsAuthWithoutSignIn(s)) return "unavailable";
   if (s.status === "connected" || (s.status === "enabled" && s.tools.length > 0))
     return "connected";
+  // "Added": on the list but its tools are not known yet. Neutral, not the red of a failure or the amber of a sign-in.
+  if (s.status === "enabled" || (s.status === null && s.signIn !== "oauth")) return "off";
   if (s.status === "needs_auth" || s.status === null) return "signin";
   return "unavailable";
 }

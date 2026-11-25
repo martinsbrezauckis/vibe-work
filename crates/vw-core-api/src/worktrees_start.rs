@@ -394,6 +394,7 @@ impl Core {
             new_branch.clone(),
             planned.base_commit.clone(),
         );
+        crate::project_mcp::check_checkout(root.clone(), commit.clone()).await?;
         blocking(move || {
             // The preflight again, right before the branch: an agent could have added a setting meanwhile.
             if let Some(reason) = vw_worktrees::preflight(&root).map_err(core_error)? {

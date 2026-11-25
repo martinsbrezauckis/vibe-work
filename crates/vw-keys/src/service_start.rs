@@ -82,6 +82,7 @@ impl KeyService {
         let hook_events = events.clone();
         let mut proxy_config = config.proxy;
         let mcp = proxy_config.mcp.clone();
+        let mcp_problems = proxy_config.mcp_problems.clone();
         proxy_config.on_wait = Arc::new(move |need| {
             let _ = hook_events.send(KeyEvent::KeyNeeded(need));
         });
@@ -123,6 +124,7 @@ impl KeyService {
             cleanup_notices: Arc::default(),
             limits,
             mcp,
+            mcp_problems,
             login_counters: crate::logins::Counters::default(),
             network: Arc::new(std::sync::Mutex::new(network)),
             network_use: Arc::default(),

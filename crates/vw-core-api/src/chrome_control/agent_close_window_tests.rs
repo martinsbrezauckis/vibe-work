@@ -7,6 +7,9 @@ use vw_platform::sync::LockRecover;
 /// The answer when some own tabs stay open after a window closed: it names the possible causes (a moved tab, a reconnect
 /// or browser restart, a close the browser did not confirm) and asserts none of them (DBK17S-02).
 pub(super) const MIXED_FAILURE: &str = "Some of the agent's own tabs could not be closed (a tab the user moved to another window, a window from before the browser reconnected or restarted, or a close the browser did not confirm); tell the user they may still be open.";
+/// Clause kept on later closes in the same chat and profile after a warning that an earlier window may remain.
+pub(super) const REPORTED_EARLIER: &str =
+    "an agent window reported earlier may still be open; tell the user";
 
 /// The app's status observer reads a helper status (`structuredContent`), as the owner loop does for every helper
 /// answer: here it learns the browser incarnation of each profile row.
@@ -161,7 +164,7 @@ async fn chrome_close_closes_the_agents_own_window_before_the_stop() {
     assert!(
         closed
             .to_string()
-            .contains("the agent's own tabs were closed"),
+            .contains("the agent's own tabs in this browser session were closed"),
         "{closed}"
     );
     assert_eq!(
@@ -291,7 +294,7 @@ async fn older_windows_holding_this_chats_tabs_close_too() {
     assert!(
         closed
             .to_string()
-            .contains("the agent's own tabs were closed"),
+            .contains("the agent's own tabs in this browser session were closed"),
         "{closed}"
     );
     core.shutdown().await;
@@ -322,7 +325,7 @@ async fn a_window_the_agent_created_closes_when_the_session_has_none() {
     assert!(
         closed
             .to_string()
-            .contains("the agent's own tabs were closed"),
+            .contains("the agent's own tabs in this browser session were closed"),
         "{closed}"
     );
     assert!(
@@ -544,9 +547,10 @@ async fn an_unconfirmed_window_close_keeps_the_window_for_a_later_retry() {
     assert!(
         second
             .to_string()
-            .contains("the agent's own tabs were closed"),
+            .contains("the agent's own tabs in this browser session were closed"),
         "{second}"
     );
+    assert!(!second.to_string().contains(REPORTED_EARLIER), "{second}");
     assert!(
         super::agent_close::remembered(&core.shared, "s", "chrome:work").is_empty(),
         "a confirmed close is forgotten"

@@ -27,12 +27,14 @@ struct Held {
 }
 
 /// Chats in the order their first window was remembered, each with its windows oldest first, per-chat canonical
-/// profiles whose earlier windows were dropped on an incarnation mismatch (`dropped`), and the browser incarnation the
-/// app last saw for each profile (the helper's status, `observe`).
+/// profiles whose earlier windows were dropped on an incarnation mismatch (`dropped`), per-chat canonical profiles
+/// that already received a "may still be open" warning for unresolvable windows (`warned`), and the browser
+/// incarnation the app last saw for each profile (the helper's status, `observe`).
 #[derive(Default)]
 pub(super) struct AgentWindows {
     chats: Vec<(String, Vec<Held>)>,
     dropped: Vec<(String, Vec<String>)>,
+    warned: Vec<(String, Vec<String>)>,
     incarnations: HashMap<String, String>,
 }
 
@@ -143,7 +145,7 @@ impl AgentWindows {
             self.chats.remove(at);
         }
         if dropped {
-            self.mark_dropped(chat, &canonical);
+            push_mark(&mut self.dropped, chat, &canonical);
         }
         (self.of(chat, profile), dropped || had_dropped)
     }
@@ -166,11 +168,12 @@ impl AgentWindows {
     /// Whether `chat` had remembered windows in `profile` dropped on a browser incarnation change and not yet reported
     /// by a live `close_browser`.
     pub(super) fn has_dropped(&self, chat: &str, profile: &str) -> bool {
-        let canonical = super::profiles::canonical(profile);
-        self.dropped
-            .iter()
-            .find(|(id, _)| id == chat)
-            .is_some_and(|(_, profiles)| profiles.iter().any(|seen| seen == &canonical))
+        has_mark(&self.dropped, chat, profile)
+    }
+
+    /// Whether `chat` already received a "may still be open" warning in `profile` for windows no later close confirmed closed.
+    pub(super) fn has_warned(&self, chat: &str, profile: &str) -> bool {
+        has_mark(&self.warned, chat, profile)
     }
 
     /// True if `chat` still retains any remembered window or dropped mark under `profile`'s canonical ID.
@@ -204,26 +207,40 @@ impl AgentWindows {
         changed
     }
 
+    /// Marks `(chat, canonical profile)` as having warned that earlier windows may still be open.
+    pub(super) fn mark_warned(&mut self, chat: &str, profile: &str) {
+        let canonical = super::profiles::canonical(profile);
+        push_mark(&mut self.warned, chat, &canonical);
+    }
+
     /// Seeds per-(chat, canonical profile) dropped marks loaded on app start so the next `close_browser`
     /// warns that earlier-run agent windows may still be open.
     pub(super) fn seed_dropped<'a>(
         &mut self,
         marks: impl IntoIterator<Item = (&'a str, &'a [String])>,
     ) {
-        for (chat, profiles) in marks {
-            for profile in profiles {
-                self.mark_dropped(chat, &super::profiles::canonical(profile));
-            }
-        }
+        seed_marks(&mut self.dropped, marks);
     }
 
-    /// Forgets everything of a chat that was deleted; true when it had windows or dropped marks.
+    /// Seeds persisted earlier-warning marks loaded on app start until the chat is deleted.
+    pub(super) fn seed_warned<'a>(
+        &mut self,
+        marks: impl IntoIterator<Item = (&'a str, &'a [String])>,
+    ) {
+        seed_marks(&mut self.warned, marks);
+    }
+
+    /// Forgets everything of a chat that was deleted; true when it had windows or marks.
     pub(super) fn remove_chat(&mut self, chat: &str) -> bool {
         let before_chats = self.chats.len();
         self.chats.retain(|(id, _)| id != chat);
         let before_dropped = self.dropped.len();
         self.dropped.retain(|(id, _)| id != chat);
-        self.chats.len() != before_chats || self.dropped.len() != before_dropped
+        let before_warned = self.warned.len();
+        self.warned.retain(|(id, _)| id != chat);
+        self.chats.len() != before_chats
+            || self.dropped.len() != before_dropped
+            || self.warned.len() != before_warned
     }
 
     /// Forgets every chat's windows of canonical `profile` (a browser that restarted) and marks each affected chat so
@@ -239,18 +256,36 @@ impl AgentWindows {
         }
         self.chats.retain(|(_, seen)| !seen.is_empty());
         for chat in affected {
-            self.mark_dropped(&chat, profile);
+            push_mark(&mut self.dropped, &chat, profile);
         }
     }
+}
 
-    fn mark_dropped(&mut self, chat: &str, canonical_profile: &str) {
-        let profiles = chat_slot(&mut self.dropped, chat);
-        if profiles.iter().any(|seen| seen == canonical_profile) {
-            return;
-        }
-        profiles.push(canonical_profile.to_owned());
-        if profiles.len() > MAX_PER_CHAT {
-            profiles.remove(0);
+fn has_mark(list: &[(String, Vec<String>)], chat: &str, profile: &str) -> bool {
+    let canonical = super::profiles::canonical(profile);
+    list.iter()
+        .find(|(id, _)| id == chat)
+        .is_some_and(|(_, profiles)| profiles.iter().any(|seen| seen == &canonical))
+}
+
+fn push_mark(list: &mut Vec<(String, Vec<String>)>, chat: &str, canonical_profile: &str) {
+    let profiles = chat_slot(list, chat);
+    if profiles.iter().any(|seen| seen == canonical_profile) {
+        return;
+    }
+    profiles.push(canonical_profile.to_owned());
+    if profiles.len() > MAX_PER_CHAT {
+        profiles.remove(0);
+    }
+}
+
+fn seed_marks<'a>(
+    list: &mut Vec<(String, Vec<String>)>,
+    marks: impl IntoIterator<Item = (&'a str, &'a [String])>,
+) {
+    for (chat, profiles) in marks {
+        for profile in profiles {
+            push_mark(list, chat, &super::profiles::canonical(profile));
         }
     }
 }

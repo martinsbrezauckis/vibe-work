@@ -90,3 +90,59 @@ pub(crate) async fn ask(shared: &Arc<Shared>, binding: &McpBinding) -> bool {
         Err(_) => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crate::refresh_notice_tests::{
+        assert_paused_notice_text, attach_mock_channel, count_server_refreshes, drain_events,
+        memory_keys, start_with_keys, tools_alerts,
+    };
+
+    #[tokio::test]
+    async fn first_use_key_grant_while_off_with_inline_paused_stdio_emits_one_alert() {
+        let key_root = std::env::temp_dir().join(format!(
+            "vw-refresh-first-use-keys-{}-{}",
+            std::process::id(),
+            vw_changes::now_ms()
+        ));
+        let keys = memory_keys(&key_root).await;
+        let core = start_with_keys(
+            "refresh-note-first-use",
+            Some(keys.clone()),
+            false,
+            "mcp_servers = [{ name = \"inline-stdio\", transport = \"stdio\", command = \"/nonexistent/inline\", disabled = true }]\n",
+        )
+        .await;
+        let imported = crate::mcp_keys::import_key_server(
+            &core.shared,
+            "wiki",
+            "https://wiki.example.com/mcp",
+            "x-api-key",
+            "wiki-secret-123".to_owned(),
+        )
+        .await
+        .unwrap();
+        let binding = keys.mcp_binding(imported.binding).await.unwrap().unwrap();
+
+        let calls: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let _p1 = attach_mock_channel(&core, "s1", 1, calls.clone());
+        let mut sub = core.subscribe(None);
+        let _ = drain_events(&mut sub).await;
+
+        assert!(super::ask(&core.shared, &binding).await);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let mut found = Vec::new();
+        while tokio::time::Instant::now() < deadline && found.is_empty() {
+            found.extend(tools_alerts(&drain_events(&mut sub).await));
+        }
+        assert_eq!(found.len(), 1, "first-use grant should emit one alert");
+        assert_paused_notice_text(&found[0].1);
+        assert_eq!(count_server_refreshes(&calls), 0);
+
+        core.shutdown().await;
+        let _ = std::fs::remove_dir_all(&key_root);
+    }
+}

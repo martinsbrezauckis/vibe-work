@@ -41,17 +41,17 @@ import {
 } from "./voiceChatState";
 export {
   VOICE_CHAT_OFF,
+  SENTENCE_GAP_MS,
   type VoiceChatState,
   type VoiceChatPhase,
   type TurnEndedBy,
   type SpokenKind,
-  SENTENCE_GAP_MS,
 } from "./voiceChatState";
 /** Creates the one-owner voice chat controller. */
 export function createVoiceChat(deps: VoiceChatDeps) {
   const { core, composer, settings, toasts, player } = deps;
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
-  const store = createStore<VoiceChatState>(VOICE_CHAT_OFF);
+  const store = deps.store ?? createStore<VoiceChatState>(VOICE_CHAT_OFF);
   let gen = 0;
   let busy: "listen" | "send" | "speak" | null = null;
   let capture: { stop(): void } | null = null;
@@ -110,6 +110,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     blocked: () => deps.promptBlocked?.() === true || deps.canUseKey?.() === false,
     language: () => settings.store.get().language,
     interrupted,
+    ...(deps.promptStore === undefined ? {} : { store: deps.promptStore }),
   });
   const question = createVoiceQuestion({
     core,
@@ -125,6 +126,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
           () => false,
         )),
     interrupted,
+    ...(deps.questionStore === undefined ? {} : { store: deps.questionStore }),
   });
   const stamp = (stage: keyof VoiceLatency): void => {
     const t = store.get().latency;
@@ -678,11 +680,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       patch({ phase: "waiting" });
       return;
     }
-    if (sessionBusy(entry)) {
-      patch({ phase: "thinking" });
-      return;
-    }
-    if (expecting !== null && now() - expecting < EXPECT_MS) {
+    if (sessionBusy(entry) || (expecting !== null && now() - expecting < EXPECT_MS)) {
       patch({ phase: "thinking" });
       return;
     }
@@ -725,13 +723,13 @@ export function createVoiceChat(deps: VoiceChatDeps) {
     return null;
   };
 
-  deps.accessibility?.store.subscribe(() => {
+  const reconcileAll = (): void => {
     prompt.reconcile();
     question.reconcile();
-  });
+  };
+  deps.accessibility?.store.subscribe(reconcileAll);
   core.store.subscribe(() => {
-    prompt.reconcile();
-    question.reconcile();
+    reconcileAll();
     if (store.get().on) settle();
   });
   let sendingBefore = composer.store.get().sending;
@@ -789,12 +787,7 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       }
       return null;
     },
-    owns(sessionId: string): boolean {
-      const s = store.get();
-      return s.on && s.owner === sessionId;
-    },
-    active(): boolean {
-      return store.get().on;
-    },
+    owns: (sessionId: string): boolean => store.get().on && store.get().owner === sessionId,
+    active: (): boolean => store.get().on,
   };
 }

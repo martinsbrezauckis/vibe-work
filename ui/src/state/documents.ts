@@ -82,6 +82,8 @@ export function createDocuments(deps: {
   toasts: Toasts;
   /** OCR readiness; local attachment operations remain available without a key. */
   canUseKey?: () => boolean;
+  /** Resolves when the key can be judged (its status is read and its test is not running); reading waits for it. */
+  keyReady?: () => Promise<void>;
 }) {
   const { core, composer, shell, toasts } = deps;
   const store = createStore<DocumentsState>(EMPTY);
@@ -273,6 +275,8 @@ export function createDocuments(deps: {
       setBusy(id, true);
       const pending = (async () => {
         try {
+          // A stored key is not readable for a moment while its status loads or its test runs: wait, do not fail.
+          await deps.keyReady?.();
           if (deps.canUseKey?.() === false)
             throw new Error("Add or unlock your Mistral key in Settings, then try again.");
           const result = await request(origin, { op: "extract", id });

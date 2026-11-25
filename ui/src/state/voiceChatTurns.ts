@@ -28,6 +28,8 @@ import {
 } from "../features/voice/voiceChatText";
 import { approvalQuestion, approvalSummary } from "../features/ask/model";
 import { type SessionEntry, statusType } from "./sessionSummary";
+import { finalAnswer } from "./speechPlain";
+export { finalAnswer };
 
 /**
  * Turn statuses that mean "finished" (Vibe `PublicTurnStatus`, generated `common_models_4.ts`), with what voice chat
@@ -55,17 +57,7 @@ export function endedTurns(entry: SessionEntry | undefined): EndedTurn[] {
   });
 }
 
-/** The final answer of `turnId`: its last non-empty assistant message (earlier ones are progress notes). */
-export function finalAnswer(entry: SessionEntry | undefined, turnId: string): string {
-  let last = "";
-  for (const raw of arr(entry?.state?.["history"])) {
-    const e = obj(raw);
-    if (e === null || turnIdOf(e) !== turnId || roleOf(e) !== "assistant") continue;
-    const text = messageText(e);
-    if (text.trim() !== "") last = text;
-  }
-  return last;
-}
+/** The final answer of `turnId` (re-exported from `speechPlain`). */
 
 /** Assistant text of the running turn, including its growing text while the model streams. */
 export function runningAnswer(entry: SessionEntry | undefined): string {

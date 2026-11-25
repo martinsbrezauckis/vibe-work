@@ -66,15 +66,16 @@ export function SessionChip({
       presentation="project-session"
       as="button"
       data-state={session.state}
-      title="Open this chat"
+      title={session.title}
+      aria-label={`${session.title}${note}`}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         open(session.id);
       }}
     >
       <span className="d" aria-hidden="true" />
-      {session.title}
-      {note}
+      <span className="pj-session-title">{session.title}</span>
+      {note && <span className="pj-session-status">{note}</span>}
     </Badge>
   );
 }

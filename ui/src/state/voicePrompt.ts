@@ -2,27 +2,16 @@
 import type { SpeechRequest, SpeechResult } from "../protocol/core";
 import type { CoreController } from "./coreStore";
 import type { Accessibility } from "./accessibility";
-import { createStore } from "./createStore";
+import { createStore, type Store } from "./createStore";
 import { toCallError } from "../protocol/client/types";
 import { openPrompts } from "./voiceChatTurns";
 import { callbackEntry } from "./askBell";
 import { approvalQuestion } from "../features/ask/model";
 import { approvalQuestionSaid } from "../features/voice/voiceChatText";
 import { heardSentence, VOICE_ANSWER_ENDED } from "./voiceQuestion";
+import type { VoicePromptState } from "./voiceTypes";
 
-/** The permission prompt answered by voice: its core ticket, answer phrase, spoken text and whether it has played. */
-export interface VoicePromptState {
-  callbackId: string;
-  ticket: string;
-  phrase: string;
-  text: string;
-  /**
-   * The short prompt spoken when Mistral's safety filter refuses `text`: the card's question (from the effect kind and
-   * tool, never the agent's own words) and the answer phrase. `null`: the action cannot be named, so the card stays.
-   */
-  fallback: string | null;
-  ready: boolean;
-}
+export type { VoicePromptState };
 /**
  * Creates the voice answer for permission prompts in voice chat: adds the answer phrase to the spoken prompt, then
  * sends the recorded answer to the core. Works only with voice answers on, prompts read, English or no language set
@@ -36,8 +25,9 @@ export function createVoicePrompt(deps: {
   blocked: () => boolean;
   language: () => string | null;
   interrupted: (message?: string) => void;
+  store?: Store<VoicePromptState | null> | undefined;
 }) {
-  const store = createStore<VoicePromptState | null>(null);
+  const store = deps.store ?? createStore<VoicePromptState | null>(null);
   let session: string | null = null;
   let serial: Promise<unknown> = Promise.resolve();
   let generation = 0;

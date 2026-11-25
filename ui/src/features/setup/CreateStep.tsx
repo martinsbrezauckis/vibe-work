@@ -123,7 +123,7 @@ export function CreateStep() {
         <Button
           data-testid="setup.create-step-dismiss"
           type="button"
-
+          shape="outlined"
           onClick={() => {
             keys?.dismiss();
           }}

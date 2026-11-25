@@ -66,6 +66,24 @@
   align-items: center;
   border-radius: var(--radius-md);
 }
+/* Tool tabs keep their natural width; overflow scrolls instead of squeezing names. */
+.panel-tabs .ptabs:not(:has(.file-panel-tab)) > .ptab-group {
+  flex: 0 0 auto;
+}
+.panel-tabs .ptabs:not(:has(.file-panel-tab)) .ptab {
+  flex: none;
+}
+.panel-tabs .ptabs:not(:has(.file-panel-tab)) .ptab-label {
+  max-width: 160px;
+}
+.panel-tabs .ptab svg {
+  flex: none;
+}
+.panel-tabs .ptab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .panel-tabs > .end {
   flex-shrink: 0;
   margin-left: auto;

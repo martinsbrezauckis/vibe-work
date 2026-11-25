@@ -8,6 +8,7 @@ import { Button } from "../../components/Controls";
 import { Selector } from "../../components/Selector";
 import { TEXT } from "../../vocabulary";
 import { useKeyUi } from "../setup/useKeys";
+import { ACT_ADD_ENTRY, ACT_CHOOSE_FOLDER } from "../settings/actionLabels";
 import { KeyNotice } from "../shell/KeyNotice";
 import { useShellState } from "../shell/hooks";
 import { isMcp } from "./McpLabel";
@@ -140,7 +141,7 @@ export function ProjectSecretsSettings() {
             setAdding(!adding);
           }}
         >
-          + Add entry
+          {ACT_ADD_ENTRY}
         </Button>
         <VaultLockControls mode="agent" display="icon" />
         <VaultLockControls mode="vault" display="icon" />
@@ -176,7 +177,7 @@ export function ProjectSecretsSettings() {
             disabled={busy || blocked}
             onClick={chooseFolder}
           >
-            Choose folder…
+            {ACT_CHOOSE_FOLDER}
           </Button>
         </div>
       </details>

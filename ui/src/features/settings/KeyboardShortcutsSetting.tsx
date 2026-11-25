@@ -9,6 +9,7 @@ import type { ReactElement } from "react";
 import { Button } from "../../components/Controls";
 import { formatKeys } from "../../state/shortcuts";
 import { useApp } from "../shell/AppContext";
+import { ACT_SHOW_COMMANDS } from "./actionLabels";
 
 /** The section. */
 export function KeyboardShortcutsSetting(): ReactElement {
@@ -22,11 +23,12 @@ export function KeyboardShortcutsSetting(): ReactElement {
       </p>
       <Button
         data-testid="settings.keyboard-shortcuts-open"
+        shape="outlined"
         onClick={() => {
           shell.actions.setOverlay("palette");
         }}
       >
-        Show commands
+        {ACT_SHOW_COMMANDS}
       </Button>
     </section>
   );

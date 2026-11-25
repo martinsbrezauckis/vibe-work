@@ -6,13 +6,20 @@
  * Invariants: without a core nothing is registered (the placeholder stays); the returned function undoes every
  * registration and hides the viewer.
  */
+import { createLazyComponent } from "../../components/LazyChunk";
 import { registerEditorKeys } from "./editorKeys";
 import type { App } from "../shell/AppContext";
-import { FileTab } from "./FileTab";
 import { registerFilesRoute } from "./filesRoutes";
 import { registerEditorsRoute } from "./editorsRoute";
 import { saveOpenFiles } from "./saveBeforeSend";
 import { registerPanelRead } from "./panelRead";
+
+/** File tab body loaded on demand when a file opens. */
+export const LazyFileTab = createLazyComponent({
+  label: "the file tab",
+  testIdPrefix: "files.tab",
+  load: async () => ({ default: (await import("./FileTab")).FileTab }),
+});
 
 /** Registers the File tab on `app`; returns the function that removes it. */
 export function registerFilesTab(app: App): () => void {
@@ -56,7 +63,7 @@ export function registerFilesTab(app: App): () => void {
     registerEditorKeys(app),
     registerPanelRead(app),
     files.workspace.store.subscribe(sync),
-    app.panelTabs.register("file", () => <FileTab files={files} />),
+    app.panelTabs.register("file", () => <LazyFileTab files={files} />),
     registerFilesRoute(app, files),
     registerEditorsRoute(app, files),
   ];

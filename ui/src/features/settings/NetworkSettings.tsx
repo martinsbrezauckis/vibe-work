@@ -14,6 +14,13 @@
  */
 import { literalInputProps } from "../../components/inputProps";
 import { useId, useState, type ReactElement, type ReactNode } from "react";
+import {
+  ACT_CHOOSE_FILE,
+  ACT_REMOVE,
+  ACT_SAVE,
+  ACT_TEST_CONNECTION,
+  ACT_TRY_AGAIN,
+} from "./actionLabels";
 
 import { Button } from "../../components/Controls";
 import type { NetworkFieldView } from "../../protocol/core";
@@ -111,7 +118,7 @@ export function NetworkSettings(): ReactElement | null {
               disabled={n.busy !== null}
               onClick={n.read}
             >
-              Try again
+              {ACT_TRY_AGAIN}
             </Button>
           </div>
         </div>
@@ -208,7 +215,7 @@ export function NetworkSettings(): ReactElement | null {
                     disabled={locked}
                     onClick={n.chooseCertificate}
                   >
-                    Choose file…
+                    {ACT_CHOOSE_FILE}
                   </Button>
                   {n.form.certificateFile !== "" && (
                     <Button
@@ -219,7 +226,7 @@ export function NetworkSettings(): ReactElement | null {
                         n.edit("certificateFile", "");
                       }}
                     >
-                      Remove
+                      {ACT_REMOVE}
                     </Button>
                   )}
                 </>
@@ -272,7 +279,7 @@ export function NetworkSettings(): ReactElement | null {
               disabled={locked}
               onClick={n.testConnection}
             >
-              Test connection
+              {ACT_TEST_CONNECTION}
             </Button>
             <Button
               data-testid="settings.network-settings-save"
@@ -281,7 +288,7 @@ export function NetworkSettings(): ReactElement | null {
               disabled={locked || !n.dirty}
               onClick={n.save}
             >
-              Save
+              {ACT_SAVE}
             </Button>
           </div>
         </>

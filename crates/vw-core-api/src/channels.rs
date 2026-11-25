@@ -48,7 +48,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 use vw_platform::sync::LockRecover;
 
@@ -68,8 +68,11 @@ mod quiet;
 mod requests;
 #[path = "channels_resume.rs"]
 mod resume;
+pub(crate) use resume::{RestoreBinding, RestoreChannel};
 #[path = "channels_sweep.rs"]
 mod sweep;
+#[path = "channels_switch.rs"]
+mod switch;
 #[cfg(test)]
 #[path = "channels_test_peer.rs"]
 mod test_peer;
@@ -88,6 +91,8 @@ struct Slot {
     conn: Connection,
     key: ChannelKey,
     last_used: Instant,
+    /// The Developer-switch generation this channel's runtime is known to follow (`channels_switch.rs`).
+    switch_applied: u64,
 }
 
 impl Slot {
@@ -99,6 +104,8 @@ impl Slot {
 #[derive(Default)]
 struct Inner {
     slots: HashMap<String, Slot>,
+    /// A restore owns the exact channel captured by resume, even if another binding replaces it.
+    restores: HashMap<String, Weak<Mutex<Option<RestoreBinding>>>>,
     /// CLI histories import under a new id; requests already in flight follow that conversation.
     imported: HashMap<String, String>,
     /// The session each client's main view shows (`Command::ViewSession`), by origin name.
@@ -141,6 +148,8 @@ pub(crate) struct Channels {
     leases: Arc<crate::session_lease::Leases>,
     plugin_approvals: Arc<crate::plugin_approvals::PluginApprovals>,
     history_loading: Arc<crate::history_loading::HistoryLoading>,
+    /// Bumped by each Developer-switch transition that changed command servers (`channels_switch.rs`).
+    switch_generation: AtomicU64,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -200,6 +209,7 @@ impl Channels {
             leases,
             plugin_approvals,
             history_loading,
+            switch_generation: AtomicU64::new(0),
         }
     }
 
@@ -219,7 +229,13 @@ impl Channels {
         }
     }
 
+    #[cfg(test)]
     fn bind(&self, id: &str, conn: Connection, key: ChannelKey) {
+        self.bind_applied(id, conn, key, self.switch_generation());
+    }
+
+    /// Binds a channel whose open request was sent at Developer-switch generation `applied`.
+    fn bind_applied(&self, id: &str, conn: Connection, key: ChannelKey, applied: u64) {
         let mut inner = locked(&self.inner);
         if let Some(old) = inner.slots.get(id).filter(|old| old.alive()) {
             // Never expected (opens are serialized per session); keep the newer, report it.
@@ -235,6 +251,7 @@ impl Channels {
                 conn,
                 key,
                 last_used: Instant::now(),
+                switch_applied: applied,
             },
         );
     }
@@ -282,8 +299,8 @@ impl Channels {
                 channel_id = slot.key.1,
                 "channel now carries a new session id"
             );
+            self.leases.retain(to, slot.key, lease);
             inner.slots.insert(to.to_owned(), slot);
-            self.leases.retain(to, lease);
             self.leases.release(from);
         }
         Ok(())

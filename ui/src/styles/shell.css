@@ -416,7 +416,8 @@ kbd {
   display: none;
 }
 @media (max-width: 640px) {
-  .statusbar:has(> .toasts[data-docked]) > :first-child {
+  .statusbar:has(> .toasts[data-docked]) > :first-child,
+  .statusbar:has(> .toasts[data-docked]) > .sb-app {
     display: none;
   }
   /* The docked notification needs room for Show all, navigation and Dismiss. The lock keeps its icon,

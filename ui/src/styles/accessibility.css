@@ -13,8 +13,14 @@ select,
 .switch {
   border-color: var(--control-line);
 }
+/* The track's edge is a shadow, and a shadow rule here would replace the keyboard ring (same specificity, loaded
+   later than the global :focus-visible ring). The edge is the ring's underlay instead, so Tab still shows the ring. */
 .switch {
-  box-shadow: 0 0 0 1px var(--control-line);
+  --focus-ring-underlay: 0 0 0 1px var(--control-line);
+  box-shadow: var(--focus-ring-underlay);
+}
+.switch:focus-visible {
+  box-shadow: var(--focus-ring-underlay), var(--focus-ring);
 }
 :root[data-motion="reduce"] *,
 :root[data-motion="reduce"] *::before,

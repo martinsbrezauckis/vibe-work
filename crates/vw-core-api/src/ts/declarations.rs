@@ -36,6 +36,9 @@ pub(super) fn connectors_decls(cfg: &Config) -> Vec<String> {
         ToolView::decl(cfg),
         crate::NewServerSecret::decl(cfg),
         crate::ServerKeyView::decl(cfg),
+        crate::CommandConfigView::decl(cfg),
+        crate::CommandEnvInput::decl(cfg),
+        crate::CommandEnvView::decl(cfg),
     ]
 }
 

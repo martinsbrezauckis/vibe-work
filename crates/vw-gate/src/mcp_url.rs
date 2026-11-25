@@ -85,6 +85,38 @@ fn is_loopback(host: &Host<&str>) -> bool {
     }
 }
 
+/// True when `text` is an address on this computer (host exactly `localhost`, `127.0.0.1` or `::1`, parsed).
+/// The address rule itself is [`check_mcp_server_url`]; this only tells the dialogs which sentence is true.
+#[must_use]
+pub fn is_loopback_mcp_url(text: &str) -> bool {
+    Url::parse(text)
+        .ok()
+        .and_then(|url| url.host().map(|host| is_loopback(&host)))
+        .unwrap_or(false)
+}
+
+/// Said in every dialog that adds an MCP server: the app checks the address, not the server.
+pub const MCP_NOT_VOUCHED: &str = "Vibe Work does not inspect or vouch for servers you add.";
+
+/// What is true about a server at an address on this computer, for the add dialogs; `None` for any other
+/// address. Plain `http` is named only where the address rule allows it.
+#[must_use]
+pub fn local_server_disclosure(text: &str) -> Option<String> {
+    if !is_loopback_mcp_url(text) {
+        return None;
+    }
+    let plain = if text.starts_with("http://") {
+        " Unencrypted HTTP is only allowed to this computer, where the traffic does not leave it."
+    } else {
+        ""
+    };
+    Some(format!(
+        "This server runs at the local address {} on this computer. Its tools can reach the files, programs and \
+         local services your account on this computer can reach.{plain} {MCP_NOT_VOUCHED}",
+        crate::dialog_quote(text)
+    ))
+}
+
 /// The raw address with only the trivial normalisations applied (lower-case scheme and authority, the
 /// default port dropped, `/` for an empty path). Inputs here hold no `?`, `#`, `\\`, `@` or whitespace.
 fn trivially_normalised(text: &str) -> Option<String> {

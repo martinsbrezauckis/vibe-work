@@ -10,21 +10,24 @@
 import { type RefObject, useEffect } from "react";
 
 import { createStore, useStore } from "../../state/createStore";
-import type { VoicePromptState } from "../../state/voicePrompt";
-import type { VoiceQuestionState } from "../../state/voiceQuestion";
-import { type CaretPlacement, DICTATION_IDLE, type DictationState } from "../../state/dictation";
-import { NARRATION_IDLE, type NarrationState } from "../../state/narration";
-import { VOICE_CHAT_OFF, type VoiceChatState } from "../../state/voiceChat";
+import { DICTATE_KEYS, HOLD_MS, registerVoiceKeys } from "../../state/voiceKeys";
+import {
+  type CaretPlacement,
+  DICTATION_IDLE,
+  type DictationState,
+  NARRATION_IDLE,
+  type NarrationState,
+  VOICE_CHAT_OFF,
+  VOICE_CHUNK_IDLE,
+  type VoiceChatState,
+  type VoiceChunkLoadState,
+  type VoicePromptState,
+  type VoiceQuestionState,
+} from "../../state/voiceTypes";
 import { VOICE_DEFAULTS, type VoiceSettings } from "../../state/voiceSettings";
 import { useApp } from "../shell/AppContext";
-import { keyReadiness } from "../../state/keyReadiness";
-import type { App } from "../shell/AppContext";
 
-/** A press shorter than this toggles; a longer one is hold-to-talk. */
-export const HOLD_MS = 400;
-
-/** The voice shortcut. */
-export const DICTATE_KEYS = "Mod+Shift+space";
+export { DICTATE_KEYS, HOLD_MS, registerVoiceKeys };
 
 // Stand-ins when the app has no core (no voice): they never change.
 const NO_DICTATION = createStore<DictationState>(DICTATION_IDLE);
@@ -34,6 +37,7 @@ const NO_PLACED = createStore<CaretPlacement>(null);
 const NO_PROMPT = createStore<VoicePromptState | null>(null);
 const NO_QUESTION = createStore<VoiceQuestionState | null>(null);
 const NO_VOICE_CHAT = createStore<VoiceChatState>(VOICE_CHAT_OFF);
+const NO_CHUNK_LOAD = createStore<VoiceChunkLoadState>(VOICE_CHUNK_IDLE);
 
 /** Selects from the dictation state (idle without voice). */
 export function useDictation<S>(select: (s: DictationState) => S): S {
@@ -65,6 +69,11 @@ export function useVoiceSettings<S>(select: (s: VoiceSettings) => S): S {
   return useStore(useApp().voice?.settings.store ?? NO_SETTINGS, select);
 }
 
+/** Selects the status of loading the on-demand voice runtime chunk. */
+export function useVoiceChunkLoad<S>(select: (s: VoiceChunkLoadState) => S): S {
+  return useStore(useApp().voice?.chunkLoad.store ?? NO_CHUNK_LOAD, select);
+}
+
 /**
  * Wires a text box to dictation: lets dictation read the box's own selection when it inserts text (the
  * events below are only the fallback), reports the selection on every change, and moves the caret after
@@ -92,60 +101,6 @@ export function useDictationCaret(sessionId: string, box: RefObject<HTMLTextArea
   return () => {
     const el = box.current;
     if (el !== null) voice?.dictation.setCaret(sessionId, el.selectionStart, el.selectionEnd);
-  };
-}
-
-/** Registers the dictation shortcut and Escape (cancel). A press while the previous text is still being made is queued
- * (`dictation.queueStart`). Called once by the shell wiring. */
-export function registerVoiceKeys(app: App): () => void {
-  const voice = app.voice;
-  if (voice === null) return () => undefined;
-  const { dictation } = voice;
-  let down: { at: number; started: boolean } | null = null;
-  const removeShortcut = app.shortcuts.register({
-    id: "voice.dictate",
-    keys: DICTATE_KEYS,
-    description: "Dictate into the message box (hold to talk, or press to start and stop)",
-    allowInInput: true,
-    run: () => {
-      if (app.keys && keyReadiness(app.keys.store.get()) !== null) return;
-      if (down !== null) return; // a key repeat while held
-      const phase = dictation.store.get().phase;
-      const session = app.shell.store.get().selected;
-      if ((phase === "idle" || phase === "error") && session !== null) {
-        down = { at: performance.now(), started: true };
-        void dictation.start(session);
-      } else if (phase === "transcribing") {
-        // The previous text is still being made: this press is queued (a second one cancels it),.
-        down = { at: performance.now(), started: false };
-        if (session !== null) dictation.queueStart(session);
-      } else {
-        down = { at: performance.now(), started: false };
-        if (phase === "recording" || phase === "starting") void dictation.stop();
-      }
-    },
-  });
-  const onKeyUp = (e: KeyboardEvent) => {
-    if (e.code !== "Space" || down === null) return;
-    const held = performance.now() - down.at;
-    const started = down.started;
-    down = null;
-    if (started && held >= HOLD_MS) void dictation.stop();
-  };
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    const phase = dictation.store.get().phase;
-    if (phase === "recording" || phase === "starting") {
-      e.preventDefault();
-      dictation.cancel();
-    }
-  };
-  window.addEventListener("keyup", onKeyUp, true);
-  window.addEventListener("keydown", onKeyDown, true);
-  return () => {
-    removeShortcut();
-    window.removeEventListener("keyup", onKeyUp, true);
-    window.removeEventListener("keydown", onKeyDown, true);
   };
 }
 

@@ -74,6 +74,12 @@ impl PreviewService {
     /// records them for a later retry).
     pub async fn session_ended(&self, session_id: &str, deleted: bool) -> Vec<PathBuf> {
         let web_keys = self.web_tabs(session_id);
+        // A native mount may already be in flight after leaving the FIFO. Withdraw it before
+        // waiting for its session lock, so the admission pass closes it before ending the chat.
+        for key in &web_keys {
+            self.cancel_browser_wait(key);
+        }
+        self.cancel_browser_wait(session_id);
         let mut leftovers = Vec::new();
         for key in &web_keys {
             let _page_activity = self.session_lock(key).await;
@@ -214,11 +220,16 @@ impl PreviewService {
     /// Closes every preview (quit). Website data stays.
     pub async fn shutdown(&self) {
         let _layout = self.layout_op.lock().await;
+        // Pages closing here free slots, but nobody may open while the app quits.
+        self.lock_pool().shutting_down = true;
         let sessions: Vec<String> = self.inner.lock().entries.keys().cloned().collect();
         for session in sessions {
             let _activity = self.session_lock(&session).await;
             let _ = self.unmount(&session).await;
             let _ = self.close_page_window(&session).await;
         }
+        let mut pool = self.lock_pool();
+        pool.clear_waiting();
+        pool.shutting_down = false;
     }
 }

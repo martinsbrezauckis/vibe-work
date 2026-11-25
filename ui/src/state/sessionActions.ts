@@ -217,12 +217,19 @@ export function createSessionActions(deps: {
     },
 
     /**
-     * Delete: native confirmation first, then the call with its single-use token. Then the question about
-     * processes the session left running, awaited so a Debug API request that deleted gets its answer.
+     * Delete through the click's boolean contract; failure reporting is shared with the UI route.
      */
     async remove(id: string): Promise<boolean> {
+      return (await actions.removeWithReason(id)).deleted;
+    },
+
+    /**
+     * Delete with its refusal reason for the UI route: native confirmation, then the call with its
+     * single-use token. Awaits the question about processes left running and reports failures once.
+     */
+    async removeWithReason(id: string): Promise<{ deleted: boolean; reason?: string }> {
       const reason = actions.deleteRefusal(id);
-      if (reason !== null) return false;
+      if (reason !== null) return { deleted: false, reason };
       const params = { sessionId: id };
       try {
         const asked = await core.run({
@@ -230,22 +237,28 @@ export function createSessionActions(deps: {
           method: "session/delete",
           params,
         });
-        if (asked.type !== "confirmation") return false;
+        if (asked.type !== "confirmation")
+          return {
+            deleted: false,
+            reason:
+              "The chat could not be deleted because confirmation was not received. Try again.",
+          };
         await call("session/delete", params, asked.token);
       } catch (thrown) {
         // Windows refuses to remove a file another program still has open, and Vibe passes the raw exception on.
         // The person gets one plain sentence; the raw text stays in the app's log (the core logs every failed command).
-        if (/\[WinError 32\]/.test(toCallError(thrown).error.message)) {
+        const message = toCallError(thrown).error.message;
+        if (/\[WinError 32\]/.test(message)) {
           toasts.push({ kind: "error", bellKind: "failure", text: FILE_IN_USE });
-          return false;
+          return { deleted: false, reason: FILE_IN_USE };
         }
         fail(thrown);
-        return false;
+        return { deleted: false, reason: message };
       }
       core.forget(id);
       if (shell.store.get().selected === id) shell.actions.selectSession(null);
       await deps.afterDelete?.(id);
-      return true;
+      return { deleted: true };
     },
 
     async revealFolder(id: string): Promise<void> {

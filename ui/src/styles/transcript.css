@@ -572,7 +572,7 @@ pre.out.plain {
 /* The local-network card: one row per waiting site, its answers beside it; long site names wrap. */
 .local-network-sites {
   margin: 0;
-  padding: 0;
+  padding: 6px 14px 10px;
   list-style: none;
 }
 .local-network-sites li {

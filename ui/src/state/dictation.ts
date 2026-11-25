@@ -19,75 +19,24 @@
  * - Chunks are sent in order (one chain); `stop()` waits for them before asking for the text.
  * - One dictation at a time; every failure releases the microphone and the core stream.
  */
-import type { CoreEvent, DictationMode, SpeechRequest, SpeechResult } from "../protocol/core";
+import type { CoreEvent, SpeechRequest, SpeechResult } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { PrepareCapture } from "../features/voice/pcmCapture";
 import { micErrorText } from "../features/voice/pcmCapture";
 import type { Composer } from "./composer";
 import type { CoreController } from "./coreStore";
-import { createStore } from "./createStore";
+import { createStore, type Store } from "./createStore";
 import type { VoiceSettingsStore } from "./voiceSettings";
 import { toBase64 } from "./pathText";
+import { type CaretPlacement, DICTATION_IDLE, type DictationState } from "./voiceTypes";
+
+export { type CaretPlacement, DICTATION_IDLE, type DictationState };
 
 /** Base64 of `bytes`, re-exported for the voice chat audio chunks. */
 export { toBase64 };
 
 /** How long the microphone may take to open before the strip says it waits for the permission (an OS prompt). */
 const PERMISSION_LINE_AFTER_MS = 500;
-
-/** Where a dictation is. */
-type DictationPhase = "idle" | "starting" | "recording" | "transcribing" | "error";
-
-/** The dictation state the views and the route read. */
-export interface DictationState {
-  phase: DictationPhase;
-  sessionId: string | null;
-  streamId: string | null;
-  mode: DictationMode | null;
-  /** Who started it (`debug-api`: inserted with the external-client mark). */
-  by: "ui" | "debug-api";
-  /** Seconds of audio the core counted. */
-  seconds: number;
-  maxSeconds: number;
-  /** Live text so far (realtime). */
-  partial: string;
-  /** A note to show (live text lost, the length limit, the fallback). */
-  note: string | null;
-  /** Why the last dictation failed (phase `error`). */
-  error: string | null;
-  /** The last text inserted. */
-  lastText: string | null;
-  /** A start is waiting for the text of the previous dictation: it begins once that text is in. */
-  queued: boolean;
-  /**
-   * The microphone is being opened (`getUserMedia` pending). On a first use the OS may be asking the
-   * user (macOS); the core's no-audio timeout does not run before the first audio, so this can last.
-   */
-  micPending: boolean;
-  /** `micPending` for over half a second: the strip says it waits for the microphone permission. */
-  permissionWait: boolean;
-}
-
-/** The state with nothing going on. */
-export const DICTATION_IDLE: DictationState = {
-  phase: "idle",
-  sessionId: null,
-  streamId: null,
-  mode: null,
-  by: "ui",
-  seconds: 0,
-  maxSeconds: 300,
-  partial: "",
-  note: null,
-  error: null,
-  lastText: null,
-  queued: false,
-  micPending: false,
-  permissionWait: false,
-};
-
-/** Where the text box should put its caret after an insertion (`seq` changes each time). */
-export type CaretPlacement = { sessionId: string; caret: number; seq: number } | null;
 
 /**
  * The draft after inserting `text` at `[start, end)` (the selection is replaced), with a space added where
@@ -120,9 +69,11 @@ export function createDictation(deps: {
   onStart: () => void;
   /** Why a dictation cannot start now (voice chat holds the microphone), or `null`. */
   blocked?: () => string | null;
+  store?: Store<DictationState> | undefined;
+  placed?: Store<CaretPlacement> | undefined;
 }) {
   const { core, composer, settings } = deps;
-  const store = createStore<DictationState>(DICTATION_IDLE);
+  const store = deps.store ?? createStore<DictationState>(DICTATION_IDLE);
   /** The caret per session as the text box last reported it by an event: the fallback only. */
   const carets = new Map<string, { start: number; end: number }>();
   /**
@@ -133,7 +84,7 @@ export function createDictation(deps: {
    */
   const caretReaders = new Map<string, (draft: string) => { start: number; end: number } | null>();
   /** Where the view should put the caret after an insertion (`seq` changes each time). */
-  const placed = createStore<CaretPlacement>(null);
+  const placed = deps.placed ?? createStore<CaretPlacement>(null);
   let capture: { stop(): void } | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   /** A stop asked for while the dictation was still starting (a short hold): honoured once recording. */

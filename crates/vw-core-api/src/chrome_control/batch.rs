@@ -212,7 +212,7 @@ pub(crate) async fn prepare(
         .await;
         drop(prepared);
         if super::output_cache::observation(&answer["vwMcpResult"]) {
-            super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"]);
+            super::output_cache::bound(&shared, &chat, &args, &mut answer["vwMcpResult"])?;
         }
         Ok(answer)
     });

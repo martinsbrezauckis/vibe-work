@@ -91,6 +91,8 @@ pub(super) fn replay(answer: Answer) -> Answer {
     if let Some(mcp) = value.get_mut("vwMcpResult") {
         if let Some(body) = mcp["structuredContent"].as_object_mut() {
             body.insert("requestReplay".into(), serde_json::json!(true));
+            // Connected-browser filtering rebuilds the authoritative text from this receipt.
+            body.insert("requestReplayNote".into(), serde_json::json!(NOTE));
         }
         if let Some(content) = mcp["content"].as_array_mut() {
             content.insert(0, serde_json::json!({"type":"text","text":NOTE}));

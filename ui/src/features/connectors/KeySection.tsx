@@ -1,5 +1,5 @@
 /**
- * "This server needs an API key" in the Add MCP server dialog: pick a vault secret (the project secrets
+ * the "API key" choice in the Add MCP server dialog: pick a vault secret (the project secrets
  * of Settings > Project secrets) or add a new one, and the header that carries it. The key stays in the vault:
  * Vibe's config gets only an address on this computer, and Vibe Work adds the key to each request.
  * Depends on: AppContext (core), state/secrets (list), setup/useKeys (vault status), setup/fields (SecretField), model/keyDraft. Called by:

@@ -318,8 +318,16 @@ export function createCore(
       if (running !== undefined) return running;
       const result = (async () => {
         try {
+          const browserBefore = store.get().chromeControl;
           const result = await client.execute(command, options);
-          fold(result);
+          // A profile-card answer or browser open can publish a newer binding while a read is in flight.
+          // Keep that view: a delayed startup/Settings read must not unlock the composer's tab picker.
+          const supersededBrowserRead =
+            command.type === "chromeControl" &&
+            command.request.op === "read" &&
+            result.type === "chromeControl" &&
+            store.get().chromeControl !== browserBefore;
+          if (!supersededBrowserRead) fold(result);
           return result;
         } catch (thrown) {
           throw thrown instanceof CoreCallError ? thrown : toCallError(thrown);

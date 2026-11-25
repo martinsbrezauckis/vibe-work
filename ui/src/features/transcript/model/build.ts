@@ -34,6 +34,7 @@ import {
   str,
   turnIdOf,
 } from "./entries";
+import { collapseModelChanges } from "./modelChange";
 import { isWebSearch } from "./sources";
 import { hookLine, isHookNotice, refusedSteps, transcriptEntries } from "./hookNotices";
 import { declinedEffects, settledEntry, turnEndingNo } from "./settled";
@@ -360,7 +361,7 @@ export function buildRows(history: readonly JsonValue[], turns: readonly JsonVal
   });
   const byId = new Map(settled.map((entry) => [entryId(entry), entry]));
   const steps = refusedSteps(settled);
-  return blocksOf(transcriptEntries(settled, steps), table).flatMap((block) =>
+  return blocksOf(transcriptEntries(collapseModelChanges(settled), steps), table).flatMap((block) =>
     blockRows(
       block,
       block.turnId === null ? undefined : table.get(block.turnId),
