@@ -93,9 +93,46 @@ const ARROWS: [string, ArrowKind][] = [
   ["-->", "dotted"],
   ["->", "solid"],
 ];
-const MESSAGE = new RegExp(
-  `^(.+?)\\s*(${ARROWS.map(([token]) => token.replace(/[()|]/g, "\\$&")).join("|")})\\s*([+-])?\\s*(.+?)\\s*:(.*)$`,
-);
+// Select the first arrow with a nonempty receiver before a colon. Each character is visited
+// once; whitespace belongs to the captured names and is trimmed after splitting.
+function parseMessage(line: string):
+  | {
+      from: string;
+      to: string;
+      arrow: ArrowKind;
+      activation: "+" | "-" | undefined;
+      text: string;
+    }
+  | undefined {
+  const lastColon = line.lastIndexOf(":");
+  for (let i = 1; i < lastColon; i++) {
+    const found = ARROWS.find(
+      ([token]) => line.startsWith(token, i) && i + token.length < lastColon,
+    );
+    if (!found) continue;
+    const [token, arrow] = found;
+    const end = i + token.length;
+    let receiverStart = end;
+    while (/\s/.test(line[receiverStart] ?? "")) receiverStart++;
+    const signAt = receiverStart;
+    const sign = line[signAt];
+    if (sign === "+" || sign === "-") receiverStart++;
+    while (/\s/.test(line[receiverStart] ?? "")) receiverStart++;
+    // Reserve at least one character for the receiver, including whitespace.
+    receiverStart = Math.min(receiverStart, lastColon - 1);
+    const activation = (sign === "+" || sign === "-") && signAt < receiverStart ? sign : undefined;
+    const colon = line.indexOf(":", receiverStart + 1);
+    const receiver = line.slice(receiverStart, colon);
+    return {
+      from: line.slice(0, i).trim(),
+      to: receiver.trim(),
+      arrow,
+      activation,
+      text: line.slice(colon + 1).trim(),
+    };
+  }
+  return undefined;
+}
 const BLOCK_OPEN = /^(loop|alt|opt|par|critical|break|rect)(?:\s+(.*))?$/i;
 const SECTION_WORD: Partial<Record<BlockKind, RegExp>> = {
   alt: /^else(?:\s+(.*))?$/i,
@@ -229,7 +266,7 @@ export function parseSequence(input: string | PreparedSource): SequenceModel {
           ? { kind: "activate", id }
           : { kind: "deactivate", id },
       );
-    } else if ((match = /^note\s+(left of|right of|over)\s+([^:]+?)\s*:(.*)$/i.exec(line))) {
+    } else if ((match = /^note\s+(left of|right of|over)\s([^:]+):(.*)$/i.exec(line))) {
       const where = (match[1] ?? "").toLowerCase();
       const ids = (match[2] ?? "")
         .split(",")
@@ -267,21 +304,19 @@ export function parseSequence(input: string | PreparedSource): SequenceModel {
         frame.sections.push({ label: (section[1] ?? "").trim(), statements: [] });
         continue;
       }
-      match = MESSAGE.exec(line);
-      if (!match) throw new DiagramInputError(`Unreadable sequence line: ${line.slice(0, 40)}`);
-      const arrow = ARROWS.find(([token]) => token === match?.[2])?.[1];
-      if (!arrow) throw new DiagramInputError("Unknown arrow");
-      const from = known((match[1] ?? "").trim());
-      const to = known((match[4] ?? "").trim());
+      const message = parseMessage(line);
+      if (!message) throw new DiagramInputError(`Unreadable sequence line: ${line.slice(0, 40)}`);
+      const from = known(message.from);
+      const to = known(message.to);
       messageCount++;
       checkCount(messageCount, MAX_EDGES, "messages");
       const statement: SequenceStatement = {
         kind: "message",
         from,
         to,
-        text: (match[5] ?? "").trim(),
-        arrow,
-        activation: match[3] === "+" ? "+" : match[3] === "-" ? "-" : undefined,
+        text: message.text,
+        arrow: message.arrow,
+        activation: message.activation,
       };
       if (pendingCreate !== undefined) {
         if (pendingCreate !== to)

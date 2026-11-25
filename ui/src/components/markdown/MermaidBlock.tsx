@@ -9,7 +9,7 @@ const REFUSALS = new Set(["DiagramInputError", "DiagramLimitError", "DiagramUnsu
 /** The drawing code's own refusal sentence (it names the line or the bound); anything else gets no guessed reason. */
 function refusalReason(error: unknown): string | null {
   if (!(error instanceof Error) || !REFUSALS.has(error.name)) return null;
-  const text = error.message.trim().replace(/[.\s]+$/, "");
+  const text = trimRefusal(error.message.trim());
   return text === "" ? null : `${text.length > 140 ? `${text.slice(0, 140)}…` : text}.`;
 }
 
@@ -108,4 +108,11 @@ export function MermaidBlock({
       </div>
     </div>
   );
+}
+
+/** Trim punctuation once, without retrying a suffix regex at every earlier dot. */
+function trimRefusal(message: string): string {
+  let end = message.length;
+  while (end > 0 && /[.\s]/.test(message[end - 1] ?? "")) end--;
+  return message.slice(0, end);
 }

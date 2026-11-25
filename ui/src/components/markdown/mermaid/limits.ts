@@ -3,6 +3,8 @@ import { DiagramLimitError } from "./types";
 
 /** Longest source accepted, in characters. */
 export const MAX_SOURCE_CHARS = 8000;
+/** Longest physical source line, checked before comments, trimming, or engine loading. */
+export const MAX_LINE_CHARS = 1000;
 /** Participants, classes, states, entities, slices, tasks, blocks... */
 export const MAX_NODES = 120;
 /** Messages, relations, transitions, dependencies... */

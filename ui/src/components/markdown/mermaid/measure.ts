@@ -46,8 +46,20 @@ export function clampLabel(text: string, max = MAX_LABEL_CHARS): string {
 export function fitWidth(text: string, width: number, style: TextStyle): string {
   if (textWidth(text, style) <= width) return text;
   const chars = Array.from(text);
-  while (chars.length > 1 && textWidth(`${chars.join("")}…`, style) > width) chars.pop();
-  return `${chars.join("")}…`;
+  const prefixes: number[] = [];
+  let em = 0;
+  for (const character of chars) {
+    em += glyphEm(character, style.mono === true);
+    prefixes.push(em);
+  }
+  const ellipsis = glyphEm("…", style.mono === true);
+  let length = chars.length;
+  while (
+    length > 1 &&
+    ((prefixes[length - 1] ?? 0) + ellipsis) * style.size * (style.bold ? 1.06 : 1) > width
+  )
+    length--;
+  return `${chars.slice(0, length).join("")}…`;
 }
 
 /**

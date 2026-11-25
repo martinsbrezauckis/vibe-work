@@ -61,8 +61,12 @@ export function decodeUsecaseLabel(raw: string): string {
 
 /** Generate Mermaid's deterministic identifier from a quoted title by replacing non-word chars with `_`. */
 export function autoIdFromTitle(decodedTitle: string): string {
-  const id = decodedTitle.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-  return id || "item";
+  const id = decodedTitle.replace(/[^A-Za-z0-9_]+/g, "_");
+  let start = 0;
+  let end = id.length;
+  while (start < end && id[start] === "_") start++;
+  while (end > start && id[end - 1] === "_") end--;
+  return id.slice(start, end) || "item";
 }
 
 /** Parse strict JSON while retaining exact source key insertion order even for numeric keys. */

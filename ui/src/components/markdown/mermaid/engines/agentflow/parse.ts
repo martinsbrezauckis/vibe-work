@@ -190,18 +190,42 @@ function findNextEdgeOp(text: string, fromIdx: number): ParsedOp | undefined {
     else if (ch === "}" && br > 0) br--;
     if (sq > 0 || br > 0) continue;
 
-    const slice = text.slice(i);
-    const labeled = /^(?:--\s+([^->]+?)\s+(-->|--x)|-\.\s+([^.]+?)\s+(\.-))/.exec(slice);
-    if (labeled) {
-      const endTok = labeled[2] ?? labeled[4] ?? "-->";
-      const lbl = clampLabel(unquote((labeled[1] ?? labeled[3] ?? "").trim()));
-      return {
-        index: i,
-        length: labeled[0].length,
-        kind: endTok === "--x" ? "failure" : endTok === ".-" ? "reference" : "sequence",
-        label: lbl,
-      };
+    if (ch !== "-") continue;
+    // The first disallowed character after a label is the start of its closing token.
+    // Scanning once avoids partitioning long whitespace runs between regex quantifiers.
+    const dotted = text.startsWith("-.", i);
+    const plain = !dotted && text.startsWith("--", i);
+    if (dotted || plain) {
+      let cursor = i + 2;
+      if (/\s/.test(text[cursor] ?? "")) {
+        cursor++;
+        const labelStart = cursor;
+        while (
+          cursor < text.length &&
+          (dotted ? text[cursor] !== "." : !/[->]/.test(text[cursor] ?? ""))
+        )
+          cursor++;
+        const label = text.slice(labelStart, cursor);
+        const endTok = dotted
+          ? text.startsWith(".-", cursor)
+            ? ".-"
+            : undefined
+          : text.startsWith("-->", cursor)
+            ? "-->"
+            : text.startsWith("--x", cursor)
+              ? "--x"
+              : undefined;
+        if (endTok && label.length >= 2 && /\s$/.test(label)) {
+          return {
+            index: i,
+            length: cursor + endTok.length - i,
+            kind: endTok === "--x" ? "failure" : endTok === ".-" ? "reference" : "sequence",
+            label: clampLabel(unquote(label.trim())),
+          };
+        }
+      }
     }
+    const slice = text.slice(i);
     const op = /^(-->|-\.-|--x)(?:\|([^|]*)\|)?/.exec(slice);
     if (op?.[1]) {
       return {

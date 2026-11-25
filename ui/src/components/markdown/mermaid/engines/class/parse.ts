@@ -79,11 +79,17 @@ const CLASS_REF = /^(?:`([^`]+)`|([^\s~{}"`:]+))(?:~([^~]+)~)?(?:\["([^"]*)"\])?
 /** A class reference as written after `class`: plain, generic `~T~`, backticked, or with a `["label"]`. */
 const CLASS_WORD = '(?:[^\\s"{]|\\["[^"]*"\\])+?';
 const CLASS_OPEN = new RegExp(`^class\\s+(${CLASS_WORD})\\s*\\{$`);
-const CLASS_DECL = new RegExp(`^class\\s+(${CLASS_WORD})(?:\\s+<<\\s*(.+?)\\s*>>)?$`);
+const CLASS_DECL = new RegExp(`^class\\s+(${CLASS_WORD})(?:\\s+<<(.+)>>)?$`);
 const REFUSED = /^(?:callback|link|click|cssClass|style|classDef)\b/i;
 
 /** Mermaid writes generics as `~T~` in members; show them as `<T>`. */
 const showGenerics = (text: string): string => text.replace(/~([^~]*)~/g, "<$1>");
+
+function stereotypeText(raw: string): string {
+  // The old whitespace-tolerant pattern captured the final whitespace character
+  // for an all-whitespace stereotype. Keep that accepted spelling unchanged.
+  return raw.trim() || raw.slice(-1);
+}
 
 function parseMember(raw: string): ClassMember {
   let text = raw.trim();
@@ -154,8 +160,8 @@ export function parseClass(input: string | PreparedSource): ClassModel {
     if (current) {
       if (line === "}") {
         current = undefined;
-      } else if ((match = /^<<\s*(.+?)\s*>>$/.exec(line))) {
-        current.stereotype = match[1] ?? "";
+      } else if ((match = /^<<(.+)>>$/.exec(line))) {
+        current.stereotype = stereotypeText(match[1] ?? "");
       } else if (line.startsWith("<<")) {
         throw new DiagramInputError("Unterminated stereotype");
       } else addMember(current, line);
@@ -176,9 +182,9 @@ export function parseClass(input: string | PreparedSource): ClassModel {
       current = ref(match[1] ?? "");
     } else if ((match = CLASS_DECL.exec(line))) {
       const node = ref(match[1] ?? "");
-      if (match[2]) node.stereotype = match[2];
-    } else if ((match = /^<<\s*(.+?)\s*>>\s+(\S+)$/.exec(line))) {
-      ref(match[2] ?? "").stereotype = match[1] ?? "";
+      if (match[2]) node.stereotype = stereotypeText(match[2]);
+    } else if ((match = /^<<(.+)>>\s+(\S+)$/.exec(line))) {
+      ref(match[2] ?? "").stereotype = stereotypeText(match[1] ?? "");
     } else if ((match = /^note\s+for\s+(\S+)\s+"([^"]*)"$/i.exec(line))) {
       model.notes.push({ text: match[2] ?? "", target: ref(match[1] ?? "").id });
     } else if ((match = /^note\s+"([^"]*)"$/i.exec(line))) {

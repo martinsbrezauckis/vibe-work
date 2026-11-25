@@ -12,8 +12,21 @@ fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
         .unwrap();
     let alias = root.join("alias.txt");
     std::fs::hard_link(&ordinary, &alias).unwrap();
+    let refusal = policy.check_opened(&File::open(&alias).unwrap(), &alias, deadline);
+    #[cfg(target_os = "macos")]
+    {
+        // F_GETPATH can report another hard link's path. check_opened checks that location before
+        // its expired identity budget, so either exact refusal is safe on macOS.
+        let location_unconfirmed =
+            "The file's location could not be confirmed. Choose the file again.";
+        assert!(
+            matches!(&refusal, Err(reason) if reason == PROTECTED || reason == location_unconfirmed),
+            "an expired budget cleared a multiply linked identity: {refusal:?}"
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
     assert_eq!(
-        policy.check_opened(&File::open(&alias).unwrap(), &alias, deadline),
+        refusal,
         Err(PROTECTED.into()),
         "an expired budget cleared a multiply linked identity"
     );

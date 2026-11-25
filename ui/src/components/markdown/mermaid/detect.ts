@@ -1,5 +1,5 @@
 /** First gate of every diagram: size bound, refused directives, comment stripping and header detection. */
-import { MAX_SOURCE_CHARS } from "./limits";
+import { MAX_LINE_CHARS, MAX_SOURCE_CHARS } from "./limits";
 import {
   DiagramInputError,
   DiagramLimitError,
@@ -88,6 +88,20 @@ export function detectType(header: string): DiagramType | undefined {
   return headers.find(([, pattern]) => pattern.test(text))?.[0];
 }
 
+/** Check logical line starts once; whitespace-only Unicode line spans cannot be retried quadratically. */
+export function hasRefusedDirective(body: string): boolean {
+  const directive = /---|(?:click|style|classDef|linkStyle)\s/iy;
+  let i = 0;
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i] ?? "")) i++;
+    directive.lastIndex = i;
+    if (directive.test(body)) return true;
+    while (i < body.length && !/[\r\n\u2028\u2029]/.test(body[i] ?? "")) i++;
+    i++;
+  }
+  return false;
+}
+
 /**
  * Bound the size, refuse configuration and styling directives (init blocks, YAML front matter,
  * click, style, classDef, linkStyle), strip comments, and find the family. Throws on any refusal.
@@ -98,13 +112,18 @@ export function prepareDiagramSource(source: string): PreparedSource {
       `Diagram too large: more than ${String(MAX_SOURCE_CHARS)} characters`,
     );
   }
-  const lines = source
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
+  const rawLines = source.split(/\r?\n/);
+  if (rawLines.some((line) => line.length > MAX_LINE_CHARS)) {
+    throw new DiagramLimitError(
+      `Diagram line too long: more than ${String(MAX_LINE_CHARS)} characters`,
+    );
+  }
+  const lines = rawLines
+    .map((line, index) => (index === 0 ? line.replace(/^\uFEFF/, "") : line))
     .filter((line) => line.trim() !== "" && !line.trim().startsWith("%%"))
     .map((line) => line.trimEnd());
   const body = lines.join("\n");
-  if (/%%\{/.test(source) || /^\s*---|^\s*(?:click|style|classDef|linkStyle)\s/im.test(body)) {
+  if (/%%\{/.test(source) || hasRefusedDirective(body)) {
     throw new DiagramUnsupportedError("Unsupported diagram: configuration or styling directive");
   }
   const first = lines[0];

@@ -277,20 +277,44 @@ function tryParseEdgeLine(line: string):
   const rest = line.slice(left.next).trim();
   if (rest === "") return undefined;
 
-  let m = /^--\s*(?:"([^"]*)"|([^>-]+?))\s*(---|-->)\s*(.+)$/.exec(rest);
-  if (m) {
-    const label = decodeLabel(m[1] !== undefined ? `"${m[1]}"` : (m[2] ?? ""));
-    const toArrow = m[3] === "-->";
-    const right = parseBlockToken(m[4] ?? "", 0);
-    if ((m[4] ?? "").slice(right.next).trim() !== "") return undefined;
+  const quoted = /^--\s*"([^"]*)"\s*(---|-->)\s*(.+)$/.exec(rest);
+  if (quoted) {
+    const label = decodeLabel(`"${quoted[1] ?? ""}"`);
+    const tail = quoted[3] ?? "";
+    const right = parseBlockToken(tail, 0);
+    if (tail.slice(right.next).trim() !== "") return undefined;
     return {
       leftToken: left,
-      edge: { label, dashed: false, fromArrow: false, toArrow },
+      edge: { label, dashed: false, fromArrow: false, toArrow: quoted[2] === "-->" },
       rightToken: right,
     };
   }
 
-  m = /^(<)?(---|--|-\.-|===|==)(>)?(?:\|([^|]*)\|)?\s*(.+)$/.exec(rest);
+  if (rest.startsWith("--")) {
+    // An unquoted label cannot contain '-' or '>'. The first such character must
+    // start the closing operator, so find it once rather than repartitioning spaces.
+    let end = 2;
+    while (end < rest.length && rest[end] !== "-" && rest[end] !== ">") end++;
+    const token = rest.startsWith("---", end)
+      ? "---"
+      : rest.startsWith("-->", end)
+        ? "-->"
+        : undefined;
+    const rawLabel = rest.slice(2, end);
+    const tail = token ? rest.slice(end + token.length).trimStart() : "";
+    if (token && rawLabel.length > 0 && tail !== "") {
+      const label = decodeLabel(rawLabel);
+      const right = parseBlockToken(tail, 0);
+      if (tail.slice(right.next).trim() !== "") return undefined;
+      return {
+        leftToken: left,
+        edge: { label, dashed: false, fromArrow: false, toArrow: token === "-->" },
+        rightToken: right,
+      };
+    }
+  }
+
+  const m = /^(<)?(---|--|-\.-|===|==)(>)?(?:\|([^|]*)\|)?\s*(.+)$/.exec(rest);
   if (m) {
     const fromArrow = Boolean(m[1]);
     const mid = m[2] ?? "--";

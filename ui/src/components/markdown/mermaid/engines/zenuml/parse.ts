@@ -313,7 +313,13 @@ export function parseZenuml(input: string | PreparedSource): ZenumlModel {
     }
 
     // Control blocks: loop, if, opt, par, try.
-    const loopMatch = /^(while|foreach|for|loop)(?:\s*\(([^)]*)\)|\s+([^{]+?))?\s*\{$/i.exec(line);
+    // Remove the required brace before matching conditions, so whitespace runs cannot trade
+    // characters with a lazy condition while searching for a missing terminator.
+    const blockHeader = line.endsWith("{") ? line.slice(0, -1).trimEnd() : undefined;
+    const loopMatch =
+      blockHeader === undefined
+        ? null
+        : /^(while|foreach|for|loop)(?:\s*\(([^)]*)\)|\s([^{]+))?$/i.exec(blockHeader);
     if (loopMatch) {
       if (pendingReply) throw new DiagramInputError("@return must precede an async message");
       openDepth();
@@ -349,7 +355,8 @@ export function parseZenuml(input: string | PreparedSource): ZenumlModel {
       continue;
     }
 
-    const optMatch = /^opt(?:\s*\(([^)]*)\)|\s+([^{]+?))?\s*\{$/i.exec(line);
+    const optMatch =
+      blockHeader === undefined ? null : /^opt(?:\s*\(([^)]*)\)|\s([^{]+))?$/i.exec(blockHeader);
     if (optMatch) {
       if (pendingReply) throw new DiagramInputError("@return must precede an async message");
       openDepth();
@@ -435,7 +442,7 @@ export function parseZenuml(input: string | PreparedSource): ZenumlModel {
 
     // Creation message: `[var = ]new Target[(args)][ {]`
     const newMatch =
-      /^(?:([A-Za-z_][A-Za-z0-9_<>\s]*?)\s*=\s*)?new\s+([A-Za-z_][A-Za-z0-9_-]*)(?:\(([^)]*)\))?(?:\s*(\{))?$/i.exec(
+      /^(?:([A-Za-z_](?:[A-Za-z0-9_<>\s]*[A-Za-z0-9_<>])?)\s*=\s*)?new\s+([A-Za-z_][A-Za-z0-9_-]*)(?:\(([^)]*)\))?(?:\s*(\{))?$/i.exec(
         line,
       );
     if (newMatch) {
@@ -463,7 +470,7 @@ export function parseZenuml(input: string | PreparedSource): ZenumlModel {
 
     // Sync message: `[assign = ][Sender->]Target.method[(args)][ {]`
     const syncMatch =
-      /^(?:([A-Za-z_][A-Za-z0-9_<>\s]*?)\s*=\s*)?(?:([A-Za-z_][A-Za-z0-9_-]*)\s*->\s*)?([A-Za-z_][A-Za-z0-9_-]*)\.([A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)(?:\s*(\{))?$/.exec(
+      /^(?:([A-Za-z_](?:[A-Za-z0-9_<>\s]*[A-Za-z0-9_<>])?)\s*=\s*)?(?:([A-Za-z_][A-Za-z0-9_-]*)\s*->\s*)?([A-Za-z_][A-Za-z0-9_-]*)\.([A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)(?:\s*(\{))?$/.exec(
         line,
       );
     if (syncMatch) {

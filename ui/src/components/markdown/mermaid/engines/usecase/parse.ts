@@ -14,6 +14,7 @@ import {
   parseStrictJsonTable,
   type JsonTableRow,
 } from "./json";
+import { parseSimpleMeta, readBoundaryHead, readLabelledAssociation } from "./scan";
 
 /** Layout direction of a use case diagram. */
 export type UsecaseDirection = "TB" | "BT" | "LR" | "RL";
@@ -90,23 +91,6 @@ const REFUSED = /^(?:class|classDef|cssClass|click|link|callback|style|linkStyle
 const ACTOR_META_KEYS = new Set(["type", "icon", "business"]);
 const ACTOR_TYPES = new Set(["normal", "hollow", "awesome"]);
 
-function parseSimpleMeta(raw: string): Record<string, string> {
-  const inner = raw.trim();
-  const out: Record<string, string> = {};
-  if (!inner) return out;
-  for (const part of inner.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
-    const chunk = part.trim();
-    if (!chunk) continue;
-    const colon = chunk.indexOf(":");
-    if (colon <= 0) throw new DiagramInputError(`Invalid metadata entry: ${chunk}`);
-    const key = chunk.slice(0, colon).trim();
-    let val = chunk.slice(colon + 1).trim();
-    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) val = val.slice(1, -1);
-    out[key] = val;
-  }
-  return out;
-}
-
 function mergeLogicalStatements(body: readonly string[]): string[] {
   const out: string[] = [];
   let i = 0;
@@ -123,9 +107,15 @@ function mergeLogicalStatements(body: readonly string[]): string[] {
     // Multiline Markdown string (`"...` without closing `` `" ``)
     const countMd = (s: string): number =>
       (s.match(/`"/g) ?? []).length + (s.match(/"`/g) ?? []).length;
-    while (cur.includes('"`') && !cur.includes('`"') && i < body.length) {
-      cur += `\n${(body[i] ?? "").trim()}`;
-      i++;
+    if (cur.includes('"`') && !cur.includes('`"')) {
+      const chunks = [cur];
+      while (i < body.length) {
+        const next = (body[i] ?? "").trim();
+        i++;
+        chunks.push(next);
+        if (next.includes('`"')) break;
+      }
+      cur = chunks.join("\n");
     }
     if (cur.includes('"`') && !cur.includes('`"') && countMd(cur) % 2 === 1) {
       throw new DiagramInputError("Unterminated Markdown string");
@@ -147,12 +137,14 @@ function mergeLogicalStatements(body: readonly string[]): string[] {
         }
       };
       scan(cur.slice(atBrace + 1));
+      const chunks = [cur];
       while (depth > 0 && i < body.length) {
         const next = body[i] ?? "";
         i++;
-        cur += `\n${next}`;
+        chunks.push(next);
         scan(next);
       }
+      cur = chunks.join("\n");
       if (depth > 0) throw new DiagramInputError("Unterminated `@{ ... }` block");
     }
     out.push(cur);
@@ -263,6 +255,32 @@ function readDelimited(
   throw new DiagramInputError(`Unterminated ${open}...${close} label`);
 }
 
+/** Match a quoted label without backtracking; plain labels may contain unpaired backticks. */
+function readQuotedLabel(line: string): { inner: string; rest: string } | undefined {
+  if (!line.startsWith('"')) return undefined;
+  // The suffix must fit on one line, just as the former regex's trailing `(.*)` did.
+  let lastBreak = -1;
+  for (let i = 1; i < line.length; i++) {
+    if (/[\r\n\u2028\u2029]/.test(line[i] ?? "")) lastBreak = i;
+  }
+  let reachable = true;
+  let openBacktick = false;
+  for (let i = 1; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (reachable && i > lastBreak) {
+        return { inner: line.slice(0, i + 1), rest: line.slice(i + 1) };
+      }
+      reachable = false;
+    } else if (ch === "`") {
+      // A reachable backtick can start a segment spanning quotes; any later one can close it.
+      if (reachable) openBacktick = true;
+      if (openBacktick) reachable = true;
+    }
+  }
+  return undefined;
+}
+
 function parseElementDecl(line: string):
   | {
       kind: "actor" | "usecase";
@@ -274,7 +292,7 @@ function parseElementDecl(line: string):
     }
   | undefined {
   // Actor declaration: `actor ID[(label)|("label")][@{...}][<<stereo>>]`
-  const actorMatch = /^actor\s+([A-Za-z0-9_]+)(.*)$/.exec(line);
+  const actorMatch = /^actor\s+([A-Za-z0-9_]+)(?![A-Za-z0-9_])(.*)$/.exec(line);
   if (actorMatch) {
     const id = actorMatch[1] ?? "";
     const afterId = (actorMatch[2] ?? "").trimStart();
@@ -284,10 +302,10 @@ function parseElementDecl(line: string):
     return { kind: "actor", id, label, shape: "ellipse", ...suffix };
   }
   // Quoted standalone use case: `"..."[@{...}][<<stereo>>]`
-  const quotedMatch = /^("(?:[^"]|`[\s\S]*?`)*")(.*)$/.exec(line);
+  const quotedMatch = readQuotedLabel(line);
   if (quotedMatch) {
-    const label = decodeUsecaseLabel(quotedMatch[1] ?? "");
-    const suffix = extractSuffix(quotedMatch[2] ?? "");
+    const label = decodeUsecaseLabel(quotedMatch.inner);
+    const suffix = extractSuffix(quotedMatch.rest);
     return { kind: "usecase", id: autoIdFromTitle(label), label, shape: "ellipse", ...suffix };
   }
   // Ellipse or Rect use case: `ID(label)[@{...}][<<stereo>>]` or `ID[label][@{...}][<<stereo>>]`
@@ -454,28 +472,25 @@ export function parseUsecase(input: string | PreparedSource): UsecaseModel {
     }
 
     // `systemBoundary id[title][@{...}]` or `systemBoundary "Title"[@{...}]`
-    const sbMatch =
-      /^systemBoundary\s+(?:"([^"]+)"|([A-Za-z0-9_]+)(?:\s*(?:\[([\s\S]+?)\]|\(([\s\S]+?)\)))?)(.*)$/.exec(
-        line,
-      );
+    const sbMatch = readBoundaryHead(line);
     if (sbMatch) {
-      const quotedTitle = sbMatch[1];
+      const quotedTitle = sbMatch.quotedTitle;
       const id =
         quotedTitle !== undefined
           ? autoIdFromTitle(decodeUsecaseLabel(`"${quotedTitle}"`))
-          : (sbMatch[2] ?? "");
+          : (sbMatch.id ?? "");
       const title =
         quotedTitle !== undefined
           ? decodeUsecaseLabel(`"${quotedTitle}"`)
-          : sbMatch[3] !== undefined
-            ? decodeUsecaseLabel(sbMatch[3])
-            : sbMatch[4] !== undefined
-              ? decodeUsecaseLabel(sbMatch[4])
+          : sbMatch.squareTitle !== undefined
+            ? decodeUsecaseLabel(sbMatch.squareTitle)
+            : sbMatch.roundTitle !== undefined
+              ? decodeUsecaseLabel(sbMatch.roundTitle)
               : id;
       if (boundaryById.has(id) || elemById.has(id)) {
         throw new DiagramInputError(`Duplicate boundary identifier: ${id}`);
       }
-      const suffix = extractSuffix(sbMatch[5] ?? "");
+      const suffix = extractSuffix(sbMatch.rest);
       let bType: "rect" | "package" = "rect";
       if (suffix.meta !== undefined) {
         const meta = parseSimpleMeta(suffix.meta);
@@ -616,16 +631,10 @@ export function parseUsecase(input: string | PreparedSource): UsecaseModel {
     }
 
     // 3. Labelled solid association: `A [id@]-- label (-+>|o|x|--) B`
-    const lblAssoc =
-      /^([A-Za-z0-9_]+)\s+(?:([A-Za-z0-9_]+)@)?--\s+([\s\S]+?)\s+(-{2,}>|-{2,})\s+([A-Za-z0-9_]+)$/.exec(
-        line,
-      );
+    const lblAssoc = readLabelledAssociation(line);
     if (lblAssoc) {
-      const edgeId = lblAssoc[2];
-      const from = lblAssoc[1] ?? "";
-      const label = decodeUsecaseLabel(lblAssoc[3] ?? "");
-      const rightOp = lblAssoc[4] ?? "--";
-      const to = lblAssoc[5] ?? "";
+      const { edgeId, from, rightOp, to } = lblAssoc;
+      const label = decodeUsecaseLabel(lblAssoc.label);
       const dashes = rightOp.replace(/>$/, "").length;
       if (edgeId) edgeIds.add(edgeId);
       ensureUsecase(from);

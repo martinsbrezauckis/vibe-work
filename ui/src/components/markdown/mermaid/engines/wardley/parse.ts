@@ -115,6 +115,27 @@ function parseName(raw: string): string {
   return clampLabel(trimmed);
 }
 
+/** Find the first position bracket that can satisfy the original coordinate grammar. */
+function positionBracket(raw: string, needsComma: boolean): [string, string, string] | undefined {
+  let open = -1;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "[" && open < 0 && i > 0) open = i;
+    else if (ch === "]" && open >= 0) {
+      const coordinate = raw.slice(open + 1, i);
+      const comma = coordinate.indexOf(",");
+      if (
+        (needsComma && comma > 0 && comma < coordinate.length - 1) ||
+        (!needsComma && coordinate.length > 0)
+      ) {
+        return [raw.slice(0, open), coordinate, raw.slice(i + 1)];
+      }
+      open = -1;
+    }
+  }
+  return undefined;
+}
+
 function parseDecoratorsAndOffset(tail: string): {
   labelOffset?: [number, number];
   inertia: boolean;
@@ -205,7 +226,7 @@ function parseLink(line: string): WardleyLink | undefined {
     annotation = clampLabel(line.slice(semi + 1).trim());
   }
 
-  const labeledFlow = /^(.+?)\s*\+'([^']*)'\s*>\s*(.+)$/.exec(main);
+  const labeledFlow = /^(.+?)\+'([^']*)'\s*>\s*(.+)$/.exec(main);
   if (labeledFlow) {
     return {
       from: parseName(labeledFlow[1] ?? ""),
@@ -287,11 +308,16 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
         openPipeline = undefined;
         continue;
       }
-      const pm = /^component\s+(.+?)\s*\[\s*([^\]]+)\s*\](.*)$/i.exec(line);
-      if (!pm) throw new DiagramInputError(`Unreadable pipeline line: ${line.slice(0, 40)}`);
-      const name = parseName(pm[1] ?? "");
-      const evo = unitCoord((pm[2] ?? "").trim(), "Pipeline evolution");
-      const suffix = parseDecoratorsAndOffset(pm[3] ?? "");
+      const pm = /^component(\s+)(.*)$/i.exec(line);
+      const memberBody = pm?.[2] ?? "";
+      const position = pm
+        ? (positionBracket(memberBody, false) ??
+          positionBracket(`${pm[1]?.slice(-1) ?? ""}${memberBody}`, false))
+        : undefined;
+      if (!position) throw new DiagramInputError(`Unreadable pipeline line: ${line.slice(0, 40)}`);
+      const name = parseName(position[0]);
+      const evo = unitCoord(position[1].trim(), "Pipeline evolution");
+      const suffix = parseDecoratorsAndOffset(position[2]);
       const member: WardleyNode = {
         name,
         kind: "pipeline-member",
@@ -345,15 +371,19 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       model.stages = parseStages(evoStagesMatch[1] ?? "");
       continue;
     }
-    const nodeMatch = /^(anchor|component)\s+(.+?)\s*\[\s*([^,\]]+)\s*,\s*([^\]]+)\s*\](.*)$/i.exec(
-      line,
-    );
-    if (nodeMatch) {
-      const kind = (nodeMatch[1] ?? "").toLowerCase() as "anchor" | "component";
-      const name = parseName(nodeMatch[2] ?? "");
-      const visibility = unitCoord((nodeMatch[3] ?? "").trim(), "Visibility");
-      const evolution = unitCoord((nodeMatch[4] ?? "").trim(), "Evolution");
-      const suffix = parseDecoratorsAndOffset(nodeMatch[5] ?? "");
+    const nodePrefix = /^(anchor|component)(\s+)(.*)$/i.exec(line);
+    const nodeBody = nodePrefix?.[3] ?? "";
+    const nodePosition = nodePrefix
+      ? (positionBracket(nodeBody, true) ??
+        positionBracket(`${nodePrefix[2]?.slice(-1) ?? ""}${nodeBody}`, true))
+      : undefined;
+    if (nodePrefix && nodePosition) {
+      const kind = (nodePrefix[1] ?? "").toLowerCase() as "anchor" | "component";
+      const name = parseName(nodePosition[0]);
+      const comma = nodePosition[1].indexOf(",");
+      const visibility = unitCoord(nodePosition[1].slice(0, comma).trim(), "Visibility");
+      const evolution = unitCoord(nodePosition[1].slice(comma + 1).trim(), "Evolution");
+      const suffix = parseDecoratorsAndOffset(nodePosition[2]);
       const node: WardleyNode = {
         name,
         kind,
@@ -366,7 +396,7 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       registerNode(node);
       continue;
     }
-    const pipeMatch = /^pipeline\s+(.+?)\s*\{$/i.exec(line);
+    const pipeMatch = /^pipeline\s(.+)\{$/i.exec(line);
     if (pipeMatch) {
       const parent = parseName(pipeMatch[1] ?? "");
       const parentNode = nodeByName.get(parent);
@@ -375,16 +405,22 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       model.pipelines.push(openPipeline);
       continue;
     }
-    const evolveMatch = /^evolve\s+(.+?)\s+(\d+(?:\.\d+)?)$/i.exec(line);
-    if (evolveMatch) {
-      const name = parseName(evolveMatch[1] ?? "");
+    const evolvePrefix = /^evolve\s/i.exec(line);
+    const evolveTail = evolvePrefix ? line.slice(evolvePrefix[0].length) : "";
+    let evolveSeparator = evolveTail.length - 1;
+    while (evolveSeparator >= 0 && !/\s/.test(evolveTail[evolveSeparator] ?? "")) {
+      evolveSeparator--;
+    }
+    const evolveValue = evolveTail.slice(evolveSeparator + 1);
+    if (evolvePrefix && evolveSeparator > 0 && /^\d+(?:\.\d+)?$/.test(evolveValue)) {
+      const name = parseName(evolveTail.slice(0, evolveSeparator));
       const target = nodeByName.get(name);
       if (!target) throw new DiagramInputError(`Unknown component in evolve: ${name}`);
-      target.evolveTo = unitCoord(evolveMatch[2] ?? "", "Evolve target");
+      target.evolveTo = unitCoord(evolveValue, "Evolve target");
       countEdge();
       continue;
     }
-    const trendMatch = /^(.+?)\s*-\.-\s*\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)$/.exec(line);
+    const trendMatch = /^(.+?)-\.-\s*\(([^,)]+),([^)]+)\)$/.exec(line);
     if (trendMatch) {
       const name = parseName(trendMatch[1] ?? "");
       const target = nodeByName.get(name);
@@ -396,7 +432,7 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       countEdge();
       continue;
     }
-    const noteMatch = /^note\s+"([^"]*)"\s*\[\s*([^,\]]+)\s*,\s*([^\]]+)\s*\]$/i.exec(line);
+    const noteMatch = /^note\s+"([^"]*)"\s*\[([^,\]]+),([^\]]+)\]$/i.exec(line);
     if (noteMatch) {
       model.notes.push({
         text: clampLabel(noteMatch[1] ?? ""),
@@ -406,7 +442,7 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       countNode();
       continue;
     }
-    const annBoxMatch = /^annotations\s*\[\s*([^,\]]+)\s*,\s*([^\]]+)\s*\]$/i.exec(line);
+    const annBoxMatch = /^annotations\s*\[([^,\]]+),([^\]]+)\]$/i.exec(line);
     if (annBoxMatch) {
       model.annotationsBox = [
         unitCoord((annBoxMatch[1] ?? "").trim(), "Annotations visibility"),
@@ -414,8 +450,7 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       ];
       continue;
     }
-    const annMatch =
-      /^annotation\s+(\d+)\s*,\s*\[\s*([^,\]]+)\s*,\s*([^\]]+)\s*\]\s+"([^"]*)"$/i.exec(line);
+    const annMatch = /^annotation\s+(\d+)\s*,\s*\[([^,\]]+),([^\]]+)\]\s+"([^"]*)"$/i.exec(line);
     if (annMatch) {
       model.annotations.push({
         num: Number(annMatch[1]),
@@ -426,8 +461,9 @@ export function parseWardley(input: string | PreparedSource): WardleyModel {
       countNode();
       continue;
     }
-    const forceMatch =
-      /^(accelerator|deaccelerator)\s+"([^"]*)"\s*\[\s*([^,\]]+)\s*,\s*([^\]]+)\s*\]$/i.exec(line);
+    const forceMatch = /^(accelerator|deaccelerator)\s+"([^"]*)"\s*\[([^,\]]+),([^\]]+)\]$/i.exec(
+      line,
+    );
     if (forceMatch) {
       model.forces.push({
         kind: (forceMatch[1] ?? "").toLowerCase() as "accelerator" | "deaccelerator",

@@ -117,7 +117,8 @@ function parsePointLine(line: string): QuadrantPoint | undefined {
   }
   if (!label) throw new DiagramInputError("Point needs a label");
   const afterColon = rest.slice(1).trim();
-  const coords = /^\[\s*([^\],]+?)\s*,\s*([^\]]+?)\s*\](.*)$/.exec(afterColon);
+  // Delimiters bound each coordinate; trim whitespace after matching, without overlapping runs.
+  const coords = /^\[([^\],]+),([^\]]+)\](.*)$/.exec(afterColon);
   if (!coords) {
     throw new DiagramInputError(`Point coordinates must be [x, y]: ${line.slice(0, 40)}`);
   }

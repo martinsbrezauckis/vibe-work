@@ -100,6 +100,44 @@ interface ParsedOp {
   arrowEnd: boolean;
 }
 
+/** Read a labelled connector up to its first character forbidden in the label. */
+function labelledEdgeAt(text: string, index: number): ParsedOp | undefined {
+  let marker: string;
+  let blocked: string;
+  let endings: readonly string[];
+  if (text.startsWith("--", index)) {
+    marker = "--";
+    blocked = "->";
+    endings = ["-->", "---"];
+  } else if (text.startsWith("-.", index)) {
+    marker = "-.";
+    blocked = ".";
+    endings = [".->", ".-"];
+  } else if (text.startsWith("==", index)) {
+    marker = "==";
+    blocked = "=>";
+    endings = ["==>", "==="];
+  } else return undefined;
+
+  const firstSpace = index + marker.length;
+  if (!/\s/.test(text[firstSpace] ?? "")) return undefined;
+  const labelStart = firstSpace + 1;
+  for (let end = labelStart; end < text.length; end++) {
+    if (!blocked.includes(text[end] ?? "")) continue;
+    const endToken = endings.find((token) => text.startsWith(token, end));
+    if (!endToken || end - labelStart < 2 || !/\s/.test(text[end - 1] ?? "")) return undefined;
+    return {
+      index,
+      length: end + endToken.length - index,
+      label: clampLabel(unquote(text.slice(labelStart, end - 1).trim())),
+      style: endToken.startsWith(".") ? "dotted" : endToken.startsWith("=") ? "thick" : "solid",
+      arrowStart: false,
+      arrowEnd: endToken.endsWith(">"),
+    };
+  }
+  return undefined;
+}
+
 function findNextEdgeOp(text: string, fromIndex: number): ParsedOp | undefined {
   let depthSquare = 0;
   let depthParen = 0;
@@ -130,22 +168,8 @@ function findNextEdgeOp(text: string, fromIndex: number): ParsedOp | undefined {
     if (depthSquare > 0 || depthParen > 0 || depthBrace > 0) continue;
 
     const slice = text.slice(i);
-    const labeledMatch =
-      /^(?:--\s+([^->]+?)\s+(-->|---)|-\.\s+([^.]+?)\s+(\.->|\.-)|==\s+([^=>]+?)\s+(==>|===))/.exec(
-        slice,
-      );
-    if (labeledMatch) {
-      const lbl = (labeledMatch[1] ?? labeledMatch[3] ?? labeledMatch[5] ?? "").trim();
-      const endTok = labeledMatch[2] ?? labeledMatch[4] ?? labeledMatch[6] ?? "-->";
-      return {
-        index: i,
-        length: labeledMatch[0].length,
-        label: clampLabel(unquote(lbl)),
-        style: endTok.startsWith(".") ? "dotted" : endTok.startsWith("=") ? "thick" : "solid",
-        arrowStart: false,
-        arrowEnd: endTok.endsWith(">"),
-      };
-    }
+    const labelled = labelledEdgeAt(text, i);
+    if (labelled) return labelled;
 
     const opMatch = /^(<-->|-\.->|-\.-|==>|===|-->|---)(?:\|([^|]*)\|)?/.exec(slice);
     if (opMatch?.[1]) {

@@ -70,9 +70,11 @@ const WORD_PATTERN = WORDS.map(([word]) => word.replace(/[()+]/g, "\\$&")).join(
 const SYMBOL_SPEC = /^([|}][o|])(--|\.\.)([o|][|{])$/;
 const WORD_SPEC = new RegExp(`^(${WORD_PATTERN})\\s+(to|optionally to)\\s+(${WORD_PATTERN})$`, "i");
 const NAME = '(?:"[^"]+"|[\\p{L}\\p{N}_][\\p{L}\\p{N}_.-]*)';
+const ENTITY = `${NAME}(?:\\[[^\\]]*\\])?`;
+const RELATION_SPEC = `(?:[|}][o|](?:--|\\.\\.)[o|][|{]|(?:${WORD_PATTERN})\\s+(?:to|optionally to)\\s+(?:${WORD_PATTERN}))`;
 const RELATION = new RegExp(
-  `^(${NAME}(?:\\[[^\\]]*\\])?)\\s+(.+?)\\s+(${NAME}(?:\\[[^\\]]*\\])?)\\s*:\\s*(.*)$`,
-  "u",
+  `^(${ENTITY})\\s+(${RELATION_SPEC})\\s+(${ENTITY})\\s*:\\s*(.*)$`,
+  "iu",
 );
 const REFUSED = /^(?:class|classDef|cssClass|click|link|callback)\b|:::/;
 

@@ -93,7 +93,7 @@ const RELATION_KINDS: Record<string, RelationKind> = {
 };
 
 const REFUSED = /^(?:style|classDef|class|click|link|linkStyle|callback)\b|:::/i;
-const NAME_TOKEN = '"(?:[^"\\\\]|\\\\.)*"|(?:[^\\s{}<>:]|-(?![\\s>]))+';
+const NAME_TOKEN = '"(?:[^"\\\\]|\\\\.)*"|[^\\s{}<>:]+';
 const BLOCK_OPEN = new RegExp(`^([A-Za-z]+)\\s+(${NAME_TOKEN})\\s*\\{(\\s*\\})?$`);
 const FWD_REL = new RegExp(`^(${NAME_TOKEN})\\s+-\\s*([A-Za-z]+)\\s*->\\s*(${NAME_TOKEN})$`);
 const REV_REL = new RegExp(`^(${NAME_TOKEN})\\s+<-\\s*([A-Za-z]+)\\s*-\\s*(${NAME_TOKEN})$`);
