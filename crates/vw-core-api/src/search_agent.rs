@@ -128,7 +128,7 @@ pub(crate) fn run(
     Ok(output.join("\n"))
 }
 
-// The same handle supplies the bytes after its final path passes the caller's policy.
+// The same handle supplies the bytes after its selected name and identity pass the caller's policy.
 fn open_allowed(
     folder: &Path,
     relative: &str,
@@ -136,8 +136,62 @@ fn open_allowed(
     check_opened: &dyn Fn(&std::fs::File, &Path) -> bool,
 ) -> Option<std::fs::File> {
     let file = search_walk::open(folder, relative).ok()?.into_std();
+    opened_allowed(file, &folder.join(relative), allowed, check_opened)
+}
+
+fn opened_allowed(
+    file: std::fs::File,
+    named: &Path,
+    allowed: &dyn Fn(&Path) -> bool,
+    check_opened: &dyn Fn(&std::fs::File, &Path) -> bool,
+) -> Option<std::fs::File> {
     let opened = vw_platform::final_path::final_path(&file).ok()?;
-    (allowed(&opened) && check_opened(&file, &folder.join(relative))).then_some(file)
+    // The selected name must still be allowed after opening, including when a concurrent rename
+    // changes the path between enumeration and this check.
+    if !allowed(named) {
+        return None;
+    }
+    if allowed(&opened) {
+        #[cfg(windows)]
+        if opened != named.canonicalize().ok()?
+            && !crate::read_exclusions::windows_other_hard_link_name(&file, &opened, named)
+        {
+            return None;
+        }
+        return check_opened(&file, named).then_some(file);
+    }
+    #[cfg(target_os = "macos")]
+    if other_hard_link_name(&file, &opened, named) && check_opened(&file, named) {
+        return Some(file);
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn other_hard_link_name(file: &std::fs::File, reported: &Path, selected: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(actual) = file.metadata() else {
+        return false;
+    };
+    if !actual.is_file() || actual.nlink() <= 1 {
+        return false;
+    }
+    let Ok(real) = selected.canonicalize() else {
+        return false;
+    };
+    if reported == real {
+        return false;
+    }
+    for path in [&real, reported] {
+        let Ok(at) = std::fs::metadata(path) else {
+            return false;
+        };
+        if at.dev() != actual.dev() || at.ino() != actual.ino() {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]

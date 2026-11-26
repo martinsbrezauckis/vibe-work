@@ -36,6 +36,9 @@ pub struct SupervisorConfig {
     pub cwd: PathBuf,
     /// Explicit variables from our own code (validated against the hijack list).
     pub extra_env: Vec<(String, OsString)>,
+    /// Exact current key-service relay capabilities allowed in proxy variables only.
+    /// Never populate this from inherited or user-configured proxy values; never log it.
+    pub proxy_relays: Vec<OsString>,
     /// Parent environment to filter; `None` reads this process's environment at each start.
     pub parent_env: Option<Vec<(OsString, OsString)>>,
     /// Our `initialize` params.
@@ -84,6 +87,7 @@ impl SupervisorConfig {
             home: None,
             cwd,
             extra_env: Vec::new(),
+            proxy_relays: Vec::new(),
             parent_env: None,
             initialize: default_initialize_params(),
             connection: ConnectionConfig::default(),
@@ -174,6 +178,11 @@ pub enum SupervisorState {
 /// Supervisor failure.
 #[derive(Debug, thiserror::Error)]
 pub enum SupervisorError {
+    /// A named Vibe server has no interpreter that can run the safety adapter.
+    #[error(
+        "This Vibe installation cannot run with Vibe Work's safety guards: choose Install Vibe for Vibe Work, or a Vibe installed in its own Python environment."
+    )]
+    UnprovenInterpreter,
     /// A core-owned prelaunch check refused to start the server.
     #[error("server startup check failed: {0}")]
     BeforeLaunch(String),

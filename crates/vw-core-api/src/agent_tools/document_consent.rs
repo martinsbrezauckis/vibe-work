@@ -275,8 +275,8 @@ mod tests {
 
     #[test]
     fn document_refuses_an_uncleared_hard_link_in_a_large_protected_tree() {
-        let (root, policy, _) = crate::read_exclusions::tests::fixture("document-bounded");
-        crate::read_exclusions::tests::large_protected_tree(&root);
+        let (root, mut policy, _) = crate::read_exclusions::tests::fixture("document-bounded");
+        crate::read_exclusions::tests::large_protected_tree(&root, &mut policy);
         let original = root.join("ordinary.pdf");
         let alias = root.join("alias.pdf");
         std::fs::write(&original, b"%PDF-1.7\n").unwrap();

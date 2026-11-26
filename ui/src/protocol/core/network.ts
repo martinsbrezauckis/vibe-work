@@ -135,7 +135,7 @@ field: string,
  */
 message: string, };
 
-export type NetworkTestKind = "reached" | "proxyUnreachable" | "proxyRefused" | "proxySignInNeeded" | "certificateNotTrusted" | "nameNotFound" | "connectFailed" | "timedOut" | "failed";
+export type NetworkTestKind = "reached" | "proxyUnreachable" | "proxyRefused" | "proxyLookupFailed" | "proxySignInNeeded" | "certificateNotTrusted" | "nameNotFound" | "connectFailed" | "timedOut" | "failed";
 
 export type NetworkTestView = {
 /**

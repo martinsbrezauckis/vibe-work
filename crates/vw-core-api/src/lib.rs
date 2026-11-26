@@ -117,6 +117,7 @@ mod core;
 mod core_config;
 mod core_viewers;
 mod default_model;
+mod default_recovery;
 mod detached_fields;
 mod detached_reads;
 mod detached_runtime;
@@ -271,6 +272,8 @@ mod history_loading_tests;
 #[cfg(test)]
 mod history_test_vibe;
 mod mcp_refresh;
+#[cfg(all(test, unix))]
+mod mcp_unguarded_tests;
 #[cfg(test)]
 mod offline_core;
 mod own_server;

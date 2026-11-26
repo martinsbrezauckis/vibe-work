@@ -4,7 +4,7 @@
  * a project config folder Vibe ignores because it is marked untrusted (`workspace/trust/untrustedConfig`), and a model
  * the organization's admin config enforces (`config/fields/read`: `active_model` whose top layer is `admin`).
  * Depends on: coreStore (the sessions' runtime snapshots and the typed `call` command), toastStore, the vocabulary,
- * thinkingLevels (the retired Large 4 alias rule).
+ * thinkingLevels (the retired Large 4 alias rule), keyStore/keyReadiness (the composer's key guard).
  * Called by: createApp (wiring), useShellWiring (`start`).
  * Invariants:
  * - One plain line per problem, naming the file (or folder, or model) and what is wrong; never explanatory prose.
@@ -15,6 +15,8 @@
  *   leaves the bell (without counting as dismissed) when that alert arrives after it.
  * - Vibe's warning about Vibe Work's retired `large-4` alias is not shown while the list offers the one catalog Large 4
  *   a chat on that alias is put back on (`retiredAliasSettled`); Core alerts itself if that fails.
+ * - Model warnings wait while the Mistral key is unread or unusable; a later usable key reads each attached chat's
+ *   runtime once and waits for Core's checked restore outcome before judging warnings hidden during the lock.
  * - Reads only sessions that already have a runtime (their channel is open); the trust read runs once per folder
  *   and the admin read once per app run. A failed read shows nothing (it is retried on a later run).
  */
@@ -23,6 +25,8 @@ import { TEXT, wording } from "../vocabulary";
 import type { CoreController } from "./coreStore";
 import type { Toasts } from "./toastStore";
 import { retiredAliasSettled } from "./thinkingLevels";
+import type { KeyController } from "./keyStore";
+import { keyReadiness } from "./keyReadiness";
 
 const KEY = "vw.config.problems.dismissed";
 /** Vibe's warnings about an unavailable or excluded model (`vibe_schema.py`), which name its alias. */
@@ -85,7 +89,37 @@ export function isConfigProblem(runtime: JsonValue | undefined, message: string)
 export function settledModelWarning(runtime: JsonValue | undefined, message: string): boolean {
   const alias = MODEL_WARNING.exec(oneLine(message))?.[1];
   const models = list(obj(obj(runtime)?.["config"])?.["models"]).map(obj);
-  return alias !== undefined && retiredAliasSettled(alias, models);
+  return (
+    alias !== undefined &&
+    (retiredAliasSettled(alias, models) || checkedActiveModelWarning(runtime, alias, models))
+  );
+}
+
+/** A completed Core restore and Vibe's effective model/catalog settle an earlier fallback warning. */
+function checkedActiveModelWarning(
+  runtime: JsonValue | undefined,
+  alias: string,
+  models: readonly (Obj | null)[],
+): boolean {
+  const root = obj(runtime);
+  if (root?.["modelChoiceRestore"] !== "checked") return false;
+  const active = obj(obj(root["config"])?.["activeModel"]);
+  const name = active?.["name"];
+  const thinking = active?.["thinking"];
+  if (
+    active?.["alias"] !== alias ||
+    typeof name !== "string" ||
+    name === "" ||
+    typeof thinking !== "string" ||
+    thinking === ""
+  )
+    return false;
+  return models.some(
+    (model) =>
+      model?.["alias"] === alias &&
+      model["name"] === name &&
+      list(model["thinkingLevels"]).includes(thinking),
+  );
 }
 
 function problem(kind: string, file: string, message: string, text: string): ConfigProblem {
@@ -93,7 +127,7 @@ function problem(kind: string, file: string, message: string, text: string): Con
 }
 
 /** The problems in one runtime snapshot: Vibe's config issues, then its config warnings. */
-export function runtimeProblems(runtime: JsonValue | undefined): ConfigProblem[] {
+export function runtimeProblems(runtime: JsonValue | undefined, keyUsable = true): ConfigProblem[] {
   const root = obj(runtime);
   const issues = list(root?.["issues"]).flatMap((value) => {
     const issue = obj(value);
@@ -120,6 +154,7 @@ export function runtimeProblems(runtime: JsonValue | undefined): ConfigProblem[]
     );
     const alias = MODEL_WARNING.exec(warning)?.[1];
     if (alias === undefined) return [shown];
+    if (!keyUsable) return [];
     if (settledModelWarning(runtime, warning)) return [];
     const display = list(config?.["models"])
       .map(obj)
@@ -168,6 +203,7 @@ function loadDismissed(persist: boolean): string[] {
 export function createConfigNotices(deps: {
   core: CoreController;
   toasts: Toasts;
+  keys: KeyController | null;
   persist: boolean;
 }) {
   const dismissed = new Set(loadDismissed(deps.persist));
@@ -181,6 +217,12 @@ export function createConfigNotices(deps: {
   const shownIds = new Set<string>();
   const folders = new Set<string>();
   let adminRead = false;
+  const keyUsable = (): boolean => {
+    const state = deps.keys?.store.get();
+    return (
+      state === undefined || (state.availability !== "loading" && keyReadiness(state) === null)
+    );
+  };
 
   const show = (problems: readonly ConfigProblem[]): void => {
     for (const p of problems) {
@@ -207,23 +249,49 @@ export function createConfigNotices(deps: {
     }
   };
 
-  const call = async (method: string, params: JsonValue): Promise<JsonValue | undefined> => {
+  const call = async (
+    method: string,
+    params: JsonValue,
+    freshRuntimeRead = false,
+  ): Promise<JsonValue | undefined> => {
     try {
-      const reply = await deps.core.run({ type: "call", method, params }, { origin: "window" });
+      const reply = await deps.core.run(
+        { type: "call", method, params },
+        { origin: "window" },
+        freshRuntimeRead,
+      );
       return reply.type === "reply" ? reply.result : undefined;
     } catch {
       return undefined;
     }
   };
 
-  // The store changes on every event; a runtime snapshot already looked at is not read again.
+  // The store changes on every event; a runtime snapshot already looked at is not scanned again.
   const read = new WeakSet<object>();
+  // One original runtime per chat and key transition. Only a later Core-checked runtime settles it.
+  const awaiting = new Map<string, JsonValue>();
   const scan = (): void => {
     for (const entry of Object.values(deps.core.store.get().sessions)) {
       const runtime = entry.runtime;
-      if (typeof runtime !== "object" || runtime === null || read.has(runtime)) continue;
+      if (typeof runtime !== "object" || runtime === null) continue;
+      if (
+        awaiting.has(entry.id) &&
+        awaiting.get(entry.id) !== runtime &&
+        obj(runtime)?.["modelChoiceRestore"] === "checked"
+      ) {
+        awaiting.delete(entry.id);
+        read.delete(runtime); // This object may have been scanned during the lock.
+      }
+      if (read.has(runtime)) continue;
       read.add(runtime);
-      show(runtimeProblems(runtime));
+      show(
+        runtimeProblems(
+          runtime,
+          keyUsable() &&
+            !awaiting.has(entry.id) &&
+            obj(runtime)?.["modelChoiceRestore"] !== "pending",
+        ),
+      );
       const cwd = entry.session["cwd"];
       if (typeof cwd === "string" && cwd !== "" && !folders.has(cwd)) {
         folders.add(cwd);
@@ -241,9 +309,46 @@ export function createConfigNotices(deps: {
     }
   };
 
+  let keyEpoch = 0;
+  const readAfterUnlock = (epoch: number): void => {
+    for (const entry of Object.values(deps.core.store.get().sessions)) {
+      const runtime = entry.runtime;
+      if (typeof runtime !== "object" || runtime === null) continue;
+      awaiting.set(entry.id, runtime);
+      // A single read per attached chat and key transition, including an idle chat with no new runtime event.
+      void call("runtime/read", { sessionId: entry.id }, true).then((reply) => {
+        if (epoch !== keyEpoch || !keyUsable()) return;
+        const current = deps.core.store.get().sessions[entry.id];
+        if (current === undefined) return;
+        if (
+          current.runtime !== runtime &&
+          obj(current.runtime)?.["modelChoiceRestore"] === "checked"
+        )
+          return; // A new Core-checked runtime event already won this race.
+        const response = obj(reply);
+        const outcome = response?.["modelChoiceRestore"];
+        const fresh = obj(response?.["runtime"]);
+        if (
+          fresh === null ||
+          (outcome !== "checked" && outcome !== "pending") ||
+          (fresh["modelChoiceRestore"] !== undefined && fresh["modelChoiceRestore"] !== outcome)
+        )
+          return;
+        const tagged =
+          fresh["modelChoiceRestore"] === outcome
+            ? fresh
+            : { ...fresh, modelChoiceRestore: outcome };
+        if (outcome === "checked") awaiting.delete(entry.id);
+        read.delete(tagged); // A fresh reply counts even when its object identity matches a cached snapshot.
+        deps.core.setRuntime(entry.id, tagged);
+      });
+    }
+  };
+
   return {
     /** Starts watching; returns the function that stops it. */
     start(): () => void {
+      let wasUsable = keyUsable();
       const stopDismissed = deps.toasts.onDismissed(remember);
       const stopAlerts = deps.core.listen((event) => {
         if (event.type !== "alert" || event.kind !== "modelChoiceNotRestored") return;
@@ -257,10 +362,30 @@ export function createConfigNotices(deps: {
       });
       scan();
       const stopScan = deps.core.store.subscribe(scan);
+      const stopKeys = deps.keys?.store.subscribe(() => {
+        const usable = keyUsable();
+        if (usable === wasUsable) return;
+        wasUsable = usable;
+        const epoch = ++keyEpoch;
+        if (usable) {
+          readAfterUnlock(epoch);
+          return;
+        }
+        awaiting.clear();
+        for (const [entry, problem] of shown) {
+          if (problem.models === undefined) continue;
+          // A lock is not dismissal. A fresh runtime can report this problem again after unlock.
+          shown.delete(entry);
+          shownIds.delete(problem.id);
+          deps.toasts.forget(entry);
+        }
+      });
       return () => {
+        keyEpoch += 1;
         stopDismissed();
         stopAlerts();
         stopScan();
+        stopKeys?.();
       };
     },
   };

@@ -522,14 +522,25 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       carrying = false;
       closeCapture();
       busy = null;
-      patch({ note: "Nothing was heard.", partial: "", carryOpen: false });
+      patch({
+        note:
+          store.get().note === "Vibe Work could not reach the proxy."
+            ? store.get().note
+            : "Nothing was heard.",
+        partial: "",
+        carryOpen: false,
+      });
       settle();
       return;
     }
     patch({
       heard: text,
       partial: "",
-      note: store.get().note === CARRY_OVERFLOW ? CARRY_OVERFLOW : null,
+      note:
+        store.get().note === CARRY_OVERFLOW ||
+        store.get().note === "Vibe Work could not reach the proxy."
+          ? store.get().note
+          : null,
       error: null,
       phase: "thinking",
     });
@@ -753,7 +764,12 @@ export function createVoiceChat(deps: VoiceChatDeps) {
       if (u.text !== store.get().partial) detector?.words(heardMs);
       patch({ partial: u.text });
     } else if (u.type === "liveLost") {
-      patch({ note: "Live text stopped; your words are sent when your turn ends." });
+      patch({
+        note:
+          u.message === "Vibe Work could not reach the proxy."
+            ? u.message
+            : "Live text stopped; your words are sent when your turn ends.",
+      });
     } else {
       fail(u.reason);
     }

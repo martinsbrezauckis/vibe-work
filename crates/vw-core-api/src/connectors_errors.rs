@@ -173,7 +173,8 @@ pub(crate) async fn probe_reason(
             ProbeKind::NameNotFound
             | ProbeKind::ConnectFailed
             | ProbeKind::ProxyUnreachable
-            | ProbeKind::ProxyRefused,
+            | ProbeKind::ProxyRefused
+            | ProbeKind::ProxyLookupFailed,
             _,
         ) => Some(unreachable()),
         (ProbeKind::Reached, Some(401)) if sign_in == "none" => Some(needs_credentials()),

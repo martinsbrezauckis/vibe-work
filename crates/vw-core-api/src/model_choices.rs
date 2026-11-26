@@ -17,6 +17,8 @@ mod handoff;
 pub(crate) use handoff::{forked, handed_off};
 mod restore;
 pub(crate) use restore::restore;
+mod settled;
+pub(crate) use settled::{certify, finish_read, pending_runtime};
 
 /// The alias of a Settings default Vibe no longer offers (its own validation warning), else `None`.
 pub(crate) fn unavailable_default_alias(config: &Value) -> Option<String> {
@@ -105,7 +107,7 @@ pub(crate) struct Choices {
     names: Mutex<BTreeMap<String, String>>,
     /// Latest rejected turn admitted for recovery in each chat; repeated notifications do not repeat the alert.
     rejected_turns: Mutex<BTreeMap<String, String>>,
-    /// A bound pick whose cold, incomplete model list required a readiness refresh. Keep this
+    /// A bound pick deferred by a cold or unavailable model list. Keep this
     /// across restore and the first Send so a failed replay cannot erase that pick.
     cold_replay: Mutex<BTreeMap<String, Choice>>,
 }
@@ -175,13 +177,31 @@ impl Choices {
     // Only the unix-only retired tests call it; on Windows a plain cfg(test) leaves it dead and clippy -D warnings fails.
     #[cfg(all(test, unix))]
     pub(crate) fn saved_name(&self, id: &str, alias: &str) -> String {
-        self.saved_identity(id, alias).0
+        Self::saved_identity(&self.records.get(id), alias).0
+    }
+
+    /// Projects the saved choice that reopen will replay for a detached display.
+    /// Legacy remembered choices without a backend still use Vibe's stored pins.
+    pub(crate) fn detached_session(&self, session: &Value) -> (Value, String, String) {
+        let mut projected = session.clone();
+        let record = session["id"]
+            .as_str()
+            .map(|id| self.records.get(id))
+            .unwrap_or_default();
+        if let Some(choice) = restore::saved_replay(&record) {
+            projected["model"] = json!(choice.alias);
+            projected["reasoningEffort"] = json!(choice.effort);
+        }
+        let (name, provider) = projected["model"]
+            .as_str()
+            .map(|alias| Self::saved_identity(&record, alias))
+            .unwrap_or_default();
+        (projected, name, provider)
     }
 
     /// Read both identity fields from one record snapshot; a concurrent choice update cannot mix them.
-    pub(crate) fn saved_identity(&self, id: &str, alias: &str) -> (String, String) {
-        self.records
-            .get(id)
+    fn saved_identity(record: &records::Record, alias: &str) -> (String, String) {
+        record
             .expected()
             .filter(|saved| saved.alias == alias)
             .map(|saved| (saved.name, saved.provider))
@@ -409,7 +429,7 @@ fn accepted(result: &Value) -> Result<(), CoreError> {
     Ok(())
 }
 
-/// Replays only a pending pick, through the same closed gate, after restoring the agent profile.
+/// Replays a saved pick through the same closed gate after restoring the agent profile.
 /// A pin in a newly managed/profile layer must refuse visibly, never run a different choice silently.
 async fn apply(shared: &Shared, id: &str, choice: &Choice) -> Result<Value, CoreError> {
     let read = "runtime/read";
@@ -447,8 +467,29 @@ pub(crate) async fn turn_started(shared: &Arc<Shared>, params: &Value) {
     let Some(id) = params["sessionId"].as_str() else {
         return;
     };
+    if shared
+        .model_choices
+        .records
+        .get(id)
+        .expected()
+        .is_some_and(|choice| shared.model_choices.cold_replay_matches(id, &choice))
+    {
+        // A notification from the locked runtime cannot replace the saved choice.
+        // The pre-turn replay clears this marker once the saved choice is checked.
+        return;
+    }
     // Remember the served identity and retire confirmed pending/fallback pins in one commit.
-    let served = if let Some(runtime) = shared.store.runtime(id) {
+    let runtime = shared.store.runtime(id);
+    if let Some(choice) = shared.model_choices.records.get(id).expected()
+        && restore::waiting_for_account_models(
+            shared,
+            runtime.as_ref().unwrap_or(&Value::Null),
+            &choice,
+        )
+    {
+        return;
+    }
+    let served = if let Some(runtime) = runtime {
         identified_actual(shared, id, &json!({"runtime":runtime})).await
     } else {
         None
@@ -496,10 +537,16 @@ pub(crate) async fn turn_started(shared: &Arc<Shared>, params: &Value) {
 /// Vibe resolves the model again when a turn starts. A model that left Vibe's list after the send check (its runtime
 /// view can trail its own model list by a few seconds) runs the turn on Vibe's own fallback. Then the chat gets the
 /// same notice and Settings default as at reopen, and `true` is returned. `choice` is the model the check let through.
+/// An unavailable account list also returns `true`, deferring record updates without a retirement notice.
 async fn moved_off(shared: &Arc<Shared>, id: &str, choice: &Choice) -> bool {
     let Ok(runtime) = restore::read(shared, id).await else {
         return false;
     };
+    let expected = shared.model_choices.records.get(id).expected();
+    if restore::waiting_for_account_models(shared, &runtime, expected.as_ref().unwrap_or(choice)) {
+        // Stop the turn-start record update too: an incomplete list cannot replace the saved identity.
+        return true;
+    }
     // Without a model list (an older runtime shape) nothing shows that the model left it.
     if !runtime
         .pointer("/config/models")

@@ -199,6 +199,22 @@ fn optional_fields_are_none_and_declared_defaults_match_vibe() {
 }
 
 #[test]
+fn remote_scope_round_trips_but_unknown_scope_is_refused() {
+    let remote = json!({
+        "name":"remote-skill", "description":"Remote skill", "prompt":"Do work",
+        "source":"registry", "scope":"remote"
+    });
+    let skill: SkillSummary = serde_json::from_value(remote).unwrap();
+    assert_eq!(skill.scope, SkillScope::Remote);
+    assert_eq!(serde_json::to_value(skill).unwrap()["scope"], "remote");
+    let unknown = json!({
+        "name":"unknown-skill", "description":"Unknown", "prompt":"Do work",
+        "source":"registry", "scope":"future-scope"
+    });
+    assert!(serde_json::from_value::<SkillSummary>(unknown).is_err());
+}
+
+#[test]
 fn model_thinking_levels_use_vibes_factory_when_missing() {
     let model: ModelConfigView = serde_json::from_value(json!({"name":"m", "alias":"a", "thinking":"off".to_owned(), "supportsImages":false, "displayName":"fixture-model"})).unwrap();
     assert_eq!(

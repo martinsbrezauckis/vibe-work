@@ -153,3 +153,37 @@ fn loader_keeps_stdin_argv_and_isolation_and_refuses_a_post_preparation_swap() {
         "the verifier must remain bounded"
     );
 }
+
+#[test]
+fn pinned_mcp_refresh_never_starts_disabled_stdio() {
+    let python = std::env::var_os("VIBE_PYTHON").map_or_else(
+        || {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../data")
+                .join(format!(
+                    "vibe-{}/venv",
+                    include_str!("../../../tools/public/codegen/vibe.pin").trim()
+                ))
+                .join(if cfg!(windows) {
+                    "Scripts/python.exe"
+                } else {
+                    "bin/python"
+                })
+        },
+        PathBuf::from,
+    );
+    let output = Command::new(python)
+        .args(["-I", "-B"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/public/python/test_mcp_refresh.py"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

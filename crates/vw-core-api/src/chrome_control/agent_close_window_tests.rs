@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use vw_platform::sync::LockRecover;
 
 /// The answer when some own tabs stay open after a window closed: it names the possible causes (a moved tab, a reconnect
-/// or browser restart, a close the browser did not confirm) and asserts none of them (DBK17S-02).
+/// or browser restart, a close the browser did not confirm) and asserts none of them.
 pub(super) const MIXED_FAILURE: &str = "Some of the agent's own tabs could not be closed (a tab the user moved to another window, a window from before the browser reconnected or restarted, or a close the browser did not confirm); tell the user they may still be open.";
 /// Clause kept on later closes in the same chat and profile after a warning that an earlier window may remain.
 pub(super) const REPORTED_EARLIER: &str =
@@ -406,7 +406,7 @@ async fn a_lost_session_keeps_its_window_for_the_next_close() {
     core.shutdown().await;
 }
 
-/// DBK17R-01: the person moved an agent-created tab into their own window 5 and handed it over. The inventory lists that
+/// The person moved an agent-created tab into their own window 5 and handed it over. The inventory lists that
 /// tab as this chat's, but window 5 was never opened by the agent: it is not asked, and the agent is told a tab may stay.
 /// PREDICT (red on 84e4185f9): window 5 was nominated from the inventory and its moved tab closed.
 #[tokio::test]
@@ -439,7 +439,7 @@ async fn a_person_window_holding_a_moved_agent_tab_is_never_closed() {
     core.shutdown().await;
 }
 
-/// DBK17S-02: window 9 closed and window 7 answered "outcome unknown" (no move, no reconnect). The answer must not assert
+/// Window 9 closed and window 7 answered "outcome unknown" (no move, no reconnect). The answer must not assert
 /// a moved tab or a reconnect: it lists the possible causes, among them a close the browser did not confirm.
 /// PREDICT (red before the change): the parenthesis named only a moved tab and a reconnect.
 #[tokio::test]
@@ -498,7 +498,7 @@ fn reopen(core: &crate::Core) {
         .open("new-chrome", "s", "active", "chrome:work", None);
 }
 
-/// DBK17R-02: a window whose `window.close` the helper refused is still the chat's open window. It stays remembered, so a
+/// A window whose `window.close` the helper refused is still the chat's open window. It stays remembered, so a
 /// later `close_browser` (after the agent opens a session again) nominates it again; only a confirmed close forgets it.
 /// PREDICT (red before the change): every tried window was forgotten, confirmed or not: `remembered` was `[]`.
 #[tokio::test]
@@ -558,7 +558,7 @@ async fn an_unconfirmed_window_close_keeps_the_window_for_a_later_retry() {
     core.shutdown().await;
 }
 
-/// DBK17R-03: a deleted chat keeps no remembered windows; an ordinary Stop keeps them for the lost-session recovery.
+/// A deleted chat keeps no remembered windows; an ordinary Stop keeps them for the lost-session recovery.
 /// PREDICT (red before the change): `end_chat(.., true)` left the chat's entry in `agent_windows`.
 #[tokio::test]
 async fn a_deleted_chats_remembered_windows_are_dropped_a_stopped_chats_are_kept() {
@@ -587,7 +587,7 @@ async fn a_deleted_chats_remembered_windows_are_dropped_a_stopped_chats_are_kept
     core.shutdown().await;
 }
 
-/// DBK17R-03: the remembered windows of all chats are bounded; the chat remembered first is dropped when a new chat needs
+/// The remembered windows of all chats are bounded; the chat remembered first is dropped when a new chat needs
 /// room. PREDICT (red before the change): the map grew with every chat and "cap0" stayed.
 #[tokio::test]
 async fn remembered_windows_are_capped_in_chats_and_the_oldest_chat_goes_first() {

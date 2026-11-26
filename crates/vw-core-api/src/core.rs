@@ -77,6 +77,9 @@ pub(crate) struct Shared {
     /// means never (`command_origin::debug_api_acts`).
     pub(crate) window_drive: std::sync::OnceLock<crate::command_origin::WindowDrive>,
     pub(crate) supervisor: Arc<Supervisor>,
+    /// Mock channels explicitly model an adapter-backed server; never present in production builds.
+    #[cfg(test)]
+    pub(crate) mock_mcp_refresh_guard: std::sync::atomic::AtomicBool,
     pub(crate) store: SessionStore,
     pub(crate) history_loading: Arc<crate::history_loading::HistoryLoading>,
     /// Vault project authority captured before session opening, never refreshed from agent-writable metadata.

@@ -34,9 +34,9 @@ category Ideas: the task, how you would use it, and an example. Requests there s
 - TypeScript: strict mode, no `any`; components render, state and logic live in the stores; the UI talks to the core
   only through the typed command client.
 - Files stay small (a size check enforces a ceiling).
-- The protocol types in `crates/vw-protocol/src/generated/` and `ui/src/protocol/generated/` come from pinned Vibe
-  3.1.2; `ui/src/protocol/core/` comes from Rust core API types. Change the generator or source types and regenerate
-  as described in `AGENTS.md`; never edit generated files by hand.
+- The protocol types in `crates/vw-protocol/src/generated/` and `ui/src/protocol/generated/` come from the pinned Vibe
+  version in `tools/public/codegen/vibe.pin` (3.1.5); `ui/src/protocol/core/` comes from Rust core API types. Change the
+  generator or source types and regenerate as described in `AGENTS.md`; never edit generated files by hand.
 
 ## License
 

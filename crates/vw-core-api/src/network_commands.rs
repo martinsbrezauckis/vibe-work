@@ -153,16 +153,23 @@ impl Core {
                 }],
             };
         };
-        let protected = net::KEYS[..3]
-            .iter()
-            .any(|key| used.get(key).is_some_and(|value| has_sign_in(&value)));
-        let probe = net::probe(
-            if protected { &child } else { &used },
-            &self.shared.config.network_test_url,
-        )
-        .await;
-        let mut outcome =
-            crate::network_test::describe(probe, &used, overridden(tried, &environment));
+        let url = &self.shared.config.network_test_url;
+        let rust_settings = guard.settings_for_rust_probe(&used);
+        let probe = net::probe(&rust_settings, url).await;
+        let probe = net::classify_guarded_probe(
+            probe,
+            guard.proxy_lookup_failed(),
+            guard.proxy_connect_failed(),
+        );
+        // Capture this request's route before the Python handshake uses the same temporary forwarder.
+        let observed_proxy = guard.route_used(&used, &rust_settings, url);
+        let probe = crate::network_test::verified_probe(probe, observed_proxy);
+        let mut outcome = crate::network_test::describe(
+            probe,
+            &used,
+            overridden(tried, &environment),
+            observed_proxy,
+        );
         crate::network_python::verify(&self.shared, &child, &mut outcome).await;
         drop(guard);
         NetworkResult::Tested { outcome }

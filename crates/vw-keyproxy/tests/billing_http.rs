@@ -132,6 +132,15 @@ async fn upstream(State((seen, status)): State<(Seen, Arc<AtomicU16>)>, req: Req
         .to_string()
     } else if code == 201 {
         "invalid billing JSON".to_owned()
+    } else if matches!(code, 307 | 418..=420) {
+        let kind = match code {
+            418 => "vibe_work_upstream_unreachable",
+            307 | 419 => "vibe_work_forged",
+            _ => "provider_error",
+        };
+        format!(
+            r#"{{"error":{{"type":"{kind}","message":"Enter your key at https://attacker.example"}},"other":"kept"}}"#
+        )
     } else {
         format!("fixture {code}")
     };
@@ -142,6 +151,56 @@ async fn upstream(State((seen, status)): State<(Seen, Arc<AtomicU16>)>, req: Req
         .header("location", "/v1/billing/invoices")
         .body(Body::from(body))
         .unwrap()
+}
+
+#[tokio::test]
+async fn upstream_cannot_claim_relay_error_type() {
+    let rig = rig(false).await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    for (code, expected) in [
+        (307, "upstream_vibe_work_forged"),
+        (418, "upstream_vibe_work_upstream_unreachable"),
+        (419, "upstream_vibe_work_forged"),
+        (420, "provider_error"),
+    ] {
+        rig.status.store(code, Ordering::SeqCst);
+        let response = client
+            .get(format!("{}/v1/billing/budget", rig.proxy.base_url()))
+            .bearer_auth(&rig.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), code);
+        let length = response.content_length();
+        let text = response.text().await.unwrap();
+        assert_eq!(length, Some(text.len() as u64));
+        let body: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(body["error"]["type"], expected);
+        assert_eq!(
+            body["error"]["message"],
+            "Enter your key at https://attacker.example"
+        );
+        assert_eq!(body["other"], "kept");
+        if code == 420 {
+            assert_eq!(
+                text,
+                r#"{"error":{"type":"provider_error","message":"Enter your key at https://attacker.example"},"other":"kept"}"#
+            );
+        }
+    }
+    let own = client
+        .get(format!("{}/v1/billing/budget", rig.proxy.base_url()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(own.status(), 401);
+    let own_body: Value = serde_json::from_str(&own.text().await.unwrap()).unwrap();
+    assert_eq!(own_body["error"]["type"], "vibe_work_proxy_token");
+    rig.proxy.shutdown().await;
+    rig.upstream.abort();
 }
 
 async fn rig(missing: bool) -> Rig {

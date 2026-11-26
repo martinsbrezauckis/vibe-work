@@ -2,6 +2,17 @@
 
 All notable changes to Vibe Work. Versions follow [Semantic Versioning](https://semver.org/); dates are UTC.
 
+## 0.1.19 (2026-11-26)
+
+Built for Vibe 3.1.5 on Python 3.14.8.
+
+- **Vibe 3.1.5**: the agent engine moves to Mistral Vibe 3.1.5.
+- **Diagrams** are drawn in the background, so a diagram that takes too long is stopped with a reason and never freezes the chat.
+- **Tools refresh** works while a command MCP server is switched off, and that server stays off.
+- **macOS**: ordinary files with more than one hard link can be opened and searched.
+- **Side panel**: when there are more tabs than fit, a fade shows which side has more.
+- **Windows and macOS**: Vibe Work follows your system's automatic proxy setup (PAC), for its own connections and for the agent.
+
 ## 0.1.18 (2026-11-25)
 
 Built for Vibe 3.1.4 on Python 3.14.8.

@@ -340,6 +340,8 @@ fn build_shared(state: Startup) -> Shared {
         agent_access_locked: std::sync::atomic::AtomicBool::new(false),
         window_drive: std::sync::OnceLock::new(),
         supervisor: state.supervisor,
+        #[cfg(test)]
+        mock_mcp_refresh_guard: std::sync::atomic::AtomicBool::new(false),
         store: state.store,
         history_loading: state.history_loading,
         entry_projects: crate::entry_projects::EntryProjects::default(),

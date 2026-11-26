@@ -1,8 +1,8 @@
 //! "Use my existing install": finds `vibe-app-server` executables the user already has (PATH and
 //! the known install locations, through vw-supervisor's discovery: absolute, canonical, `.exe` only on
-//! Windows) and reads each one's version from its `initialize` answer (2.26.0 has no `--version`).
+//! Windows) and reads guardable candidates' versions from `initialize` (2.26.0 has no `--version`).
 //!
-//! The probe runs the user's binary for a few seconds with a throwaway `VIBE_HOME` and home under `probe_dir`
+//! A guardable candidate's probe runs its binary with a throwaway `VIBE_HOME` and home under `probe_dir`
 //! (never `~/.vibe`), no key, the allowlisted environment, and stdin closed after the answer.
 //!
 //! Depends on: vw-supervisor (discovery, `default_initialize_params`), tokio. Called by: [`crate::manager`].
@@ -30,6 +30,13 @@ pub const MAX_PROBES: usize = 4;
 #[must_use]
 pub fn version_warning(found: &str, pinned: &str) -> String {
     format!("This install is Vibe {found}; Vibe Work needs Vibe {pinned}.")
+}
+
+/// The same guard requirement used at launch, for choices shown during setup and later starts.
+pub(crate) fn interpreter_warning(server: &Path) -> Option<String> {
+    vw_supervisor::adapter_python(server)
+        .is_none()
+        .then(|| vw_supervisor::SupervisorError::UnprovenInterpreter.to_string())
 }
 
 /// True when the canonical candidate `path` lies in Vibe Work's own install folder `own`, which is skipped (it is
@@ -70,13 +77,18 @@ pub async fn find(
     let mut out = Vec::new();
     for (index, path) in seen.into_iter().enumerate() {
         let home = probe_dir.join(format!("probe-{index}"));
-        let version = probe(&path, &home, parent_env).await;
-        let supported = version.as_deref() == Some(pinned);
-        let warning = match &version {
+        let guard_warning = interpreter_warning(&path);
+        let version = if guard_warning.is_none() {
+            probe(&path, &home, parent_env).await
+        } else {
+            None
+        };
+        let supported = version.as_deref() == Some(pinned) && guard_warning.is_none();
+        let warning = guard_warning.or_else(|| match &version {
             Some(v) if v != pinned => Some(version_warning(v, pinned)),
             None => Some(NOT_AN_APP_SERVER.to_owned()),
             _ => None,
-        };
+        });
         out.push(ExistingView {
             path: path.display().to_string(),
             version,

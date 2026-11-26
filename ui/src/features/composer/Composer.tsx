@@ -220,6 +220,15 @@ export default function Composer({ sessionId }: { sessionId: string }): ReactEle
     if (!isNew && entry?.localOnly === true && lobbyStarting) return;
     void actions?.prepareSession(sessionId);
   }, [actions, sessionId, isNew, newFolder, lobbyStarting, entry?.localOnly]);
+  // A new Vibe process (Vibe Work's controlled restart after an unlock) can confirm the saved default model: the
+  // new-chat composer reads the lobby again, so its unconfirmed-default guard clears without reopening it.
+  const serverRunning = useCoreState((s) => s.server.phase === "running");
+  const wasRunning = useRef(serverRunning);
+  useEffect(() => {
+    const restarted = serverRunning && !wasRunning.current;
+    wasRunning.current = serverRunning;
+    if (isNew && restarted) void actions?.loadConfig();
+  }, [actions, isNew, serverRunning]);
 
   if (actions === null || core === null) return null;
   const hasContent = draft.trim() !== "" || context.length > 0 || images.length > 0;

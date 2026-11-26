@@ -39,9 +39,10 @@ export function MermaidBlock({
   useEffect(() => {
     if (streaming) return;
     let live = true;
-    void Promise.all([import("./diagramRender"), import("./passiveMarkup")])
+    const controller = new AbortController();
+    void Promise.all([import("./diagramWorkerClient"), import("./passiveMarkup")])
       .then(async ([renderer, markup]) => {
-        const svg = await renderer.drawDiagram(source);
+        const svg = await renderer.drawDiagramInWorker(source, controller.signal);
         return {
           drawing: markup.passiveMarkup(svg, "svg", id, source),
           floor: drawingFloorClasses(svg),
@@ -55,6 +56,7 @@ export function MermaidBlock({
       });
     return () => {
       live = false;
+      controller.abort();
     };
   }, [source, streaming, id]);
   const current = !streaming && result?.source === source ? result : null;

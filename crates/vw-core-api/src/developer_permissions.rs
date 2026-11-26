@@ -76,25 +76,12 @@ impl DeveloperPermissions {
         self.path.as_deref()
     }
 
-    /// Names resumed by ON or queued by config changes, read under the mutation lock at session apply.
+    /// Names resumed by ON, read under the mutation lock at session apply.
     pub(crate) fn resumed_commands(&self) -> Vec<String> {
         self.resumed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-    }
-
-    /// Targets accumulate across config mutations; current config is rechecked at each stale chat apply.
-    pub(crate) fn remember_changed_servers(&self, names: Vec<String>) {
-        let mut pending = self
-            .resumed_commands
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for name in names {
-            if !pending.contains(&name) {
-                pending.push(name);
-            }
-        }
     }
 
     pub(crate) fn enabled(&self) -> bool {

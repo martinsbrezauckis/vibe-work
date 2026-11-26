@@ -7,7 +7,9 @@ description: Vibe Work's built-in browser (browser_*) for pages, forms, screensh
 
 ## Tabs
 
-**App preview** is pinned for `preview_open`. Tools use web tabs: omitted `tab` means current; `"new"` or an id selects another. Results: `tab.id`, `tab.site`; title/URL are under `untrustedPageContent.tab`. User tabs need handoff for page actions. Ask, Accept edits and Full access close this chat's own tabs and tabs the user handed over. Explore cannot close tabs.
+For status `waiting`, `pending: true`: do not open again; use `list_tabs` later, then `browser_read`.
+
+**App preview** is pinned for `preview_open`. Tools use web tabs: omitted `tab` means current; `"new"` or an id selects another. Results: `tab.id`, `tab.site`; title/URL: `untrustedPageContent.tab`. User tabs need handoff for page actions. Ask, Accept edits and Full access close this chat's own tabs and tabs the user handed over. Explore cannot close tabs.
 
 ```ts
 await tools.mcp_vw.browser_act({ action: "navigate", url: "https://example.com/", tab: "new" });
@@ -24,7 +26,7 @@ await tools.mcp_vw.browser_act({ action: "close_tab", tab: "<id>" });
 
 ## Reading and acting
 
-1. `browser_read({ find: "email" })` returns matching refs/text; without `find`, the whole page. `untrustedPageContent` has refs (`e` + 8 hex digits), role, name, value, state and an 800-character preview. Default: 3,000 bytes, capped at 4,000 compact / 4,500 indented bytes and 32 refs; larger `maxBytes`/`maxRefs` clamp. Use `find` with a label/role for omitted controls; `textPage` (0-based, 2,500 UTF-16 units per window) for text. Combine both to narrow an omitted passage. Keep `tab` when continuing. `screenshot: true` adds a picture. Frame refs work normally; `unreadFrames` explains omissions. The user can open pages that render nothing for the agent in the Browser tab.
+1. `browser_read({ find: "email" })` returns matching refs/text; without `find`, the whole page. `untrustedPageContent` has refs (`e` + 8 hex digits), role, name, value, state and an 800-character preview. Default: 3,000 bytes, capped at 4,000 compact / 4,500 indented bytes and 32 refs; larger `maxBytes`/`maxRefs` clamp. Use `find` with a label/role for omitted controls; `textPage` (0-based, 2,500 UTF-16 units per window). Combine both to narrow an omitted passage. Keep `tab` when continuing. `screenshot: true` adds a picture. Frame refs work normally; `unreadFrames` explains omissions. The user can open pages that show nothing to the agent.
 2. `browser_act` uses refs from the latest `browser_read`; stale refs are refused. [Action arguments](actions.md) indexes every action and covers navigation, input, forms, waits, scrolling, dialogs, HTTP sign-in, downloads, windows, screenshots, batches and `browser_read` options (selectors, subtrees, table/list/link export to CSV or xlsx files); [advanced.md](advanced.md) covers cookies, storage, clipboard, media, diagnostics (console, page errors, network), responsive sizes, element inspection and page scripts.
 3. Success has `ok: true`. `close_tab` returns tab id/site and `result: "closed"`, without a card. Other acts return `Outcome` and page words under `untrustedPageContent.outcomeText`. Receipts list changes, errors, dialogs, new refs and current control states within output limits. A result without `ok: true` did not do it; tell the user the reason after `Not run:`. `Not run: the user declined this.` is the user's No on its card. Other steps of the same script do not change that; the answer reports that step as not done.
 
@@ -48,7 +50,7 @@ Page JavaScript or added styles need Full access (page code can expose site secr
 ## More
 
 8. App preview notes give a crop, route and optional source-file hint. `preview_screenshot` and `preview_console` read it; refs need the same server in a web tab. Reads, captures and clicks bring their tab to the front.
-9. `browser_capture` saves page design, structure and media to files (`vw:capture`). The file tools write long scripts/HTML; shell commands have a length limit.
+9. `browser_capture` saves page design, structure and media to files (`vw:capture`). Use file tools for long scripts/HTML; shell commands have length limits.
 10. Consent walls in covering frames have a separate `untrustedPageContent.coveringFrames` inventory: `choices`, `choicesTotal` and `complete`. It lists visible buttons, links, checkboxes, radio buttons and switches with current states; `complete` refers only to that inventory. The page's exact choice names are preserved, including paid subscription choices.
 11. Settings > Browser > Vibe Work browser has Ad blocking: Off, Balanced or Strict.
 12. The user can choose **Share page to chat** in the Browser toolbar (or **Share link to chat** / **Share image to chat** from the page's right-click menu). The attachment carries `browserTab: {target: "builtin", tab}` with the page's address and title; pass that `tab` to `browser_read`.

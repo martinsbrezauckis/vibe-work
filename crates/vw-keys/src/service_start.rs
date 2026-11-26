@@ -61,7 +61,7 @@ impl KeyService {
         })
         .await?;
         let lock_on_quit = at_start.lock_on_quit;
-        let network_forwarder = crate::proxy_forwarder::bind(resolver.clone())?;
+        let network_forwarder = crate::proxy_forwarder::bind_service(resolver.clone())?;
         let vibe_forwarder = crate::proxy_forwarder::bind(resolver)?;
         let forwarder = network_forwarder.clone();
         let vibe_guard = vibe_forwarder.clone();
@@ -76,6 +76,8 @@ impl KeyService {
             )
         })
         .await??;
+        // Only this app-owned listener may supply automatic routes to key-bearing clients.
+        // Vibe's writable file configures its separate forwarder, never this endpoint.
         let (events, _) = broadcast::channel(64);
         let tokens = Arc::new(TokenSlot::default());
         let key = KeyCell::new(KeyState::Missing(KeyNeed::Unlock));
@@ -92,12 +94,16 @@ impl KeyService {
             *limits_cell.lock_or_recover() = Some(snapshot);
             let _ = limits_events.send(KeyEvent::RateLimits(Some(snapshot)));
         });
-        let proxy = ProxyHandle::start(proxy_config, Arc::clone(&tokens), key.clone())
-            .await
-            .map_err(|e| KeyError::Settings(e.to_string()))?;
-        // No redirects: the key goes only to the host we chose (test call and OCR send it directly).
-        let client =
-            vw_mistral::ClientSlot::new().map_err(|e| KeyError::Settings(e.to_string()))?;
+        let (system_proxy, (proxy, client)) = start_clients(network_forwarder.proxy_url(), async {
+            let proxy = ProxyHandle::start(proxy_config, Arc::clone(&tokens), key.clone())
+                .await
+                .map_err(|e| KeyError::Settings(e.to_string()))?;
+            // No redirects: the key goes only to the host we chose.
+            let client =
+                vw_mistral::ClientSlot::new().map_err(|e| KeyError::Settings(e.to_string()))?;
+            Ok((proxy, client))
+        })
+        .await?;
         let service = Arc::new(Self {
             vault,
             proxy_base: proxy.base_url(),
@@ -130,6 +136,7 @@ impl KeyService {
             network_use: Arc::default(),
             network_probes: Arc::default(),
             network_forwarder,
+            system_proxy,
             vibe_forwarder,
             browser_guards: std::sync::Mutex::default(),
         });
@@ -138,4 +145,14 @@ impl KeyService {
         service.refresh_key().await;
         Ok(service)
     }
+}
+
+pub(super) async fn start_clients<T>(
+    endpoint: String,
+    start: impl std::future::Future<Output = Result<T, KeyError>>,
+) -> Result<(vw_mistral::network::SystemProxy, T), KeyError> {
+    // Both clients must see this relay during construction. RAII clears it on either failure,
+    // cancellation, or unwind, and compare-and-clear preserves a newer service's registration.
+    let owner = vw_mistral::network::set_system_proxy(endpoint);
+    Ok((owner, start.await?))
 }

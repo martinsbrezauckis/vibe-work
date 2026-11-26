@@ -223,7 +223,7 @@ export function createApp(options: CreateAppOptions): App {
     configNotices:
       core === null
         ? null
-        : createConfigNotices({ core, toasts, persist: options.persist ?? true }),
+        : createConfigNotices({ core, toasts, keys, persist: options.persist ?? true }),
     sessions,
     keys,
     vibe: core === null ? null : createVibeInstall(core),

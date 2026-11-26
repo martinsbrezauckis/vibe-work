@@ -219,7 +219,7 @@ async fn fetch_to(
 /// [`FetchError::Timeout`].
 pub async fn get_small(url: &str, cap: u64, limit: Duration) -> Result<Vec<u8>, FetchError> {
     let inner = async {
-        let client = vw_mistral::https_client().map_err(|e| FetchError::Network {
+        let client = vw_mistral::update_https_client().map_err(|e| FetchError::Network {
             host: host_of(url),
             detail: e.to_string(),
         })?;
@@ -362,4 +362,63 @@ pub fn unpack_uv(archive: &Path, kind: &str, dir: &Path) -> Result<PathBuf, Fetc
             .map_err(disk(&out))?;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod update_route_tests {
+    use super::*;
+    static ROUTE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn support_manifest_fetch_has_no_socket_before_the_update_route_is_ready() {
+        let _serial = ROUTE_TEST.lock().await;
+        vw_mistral::network::set_current(vw_mistral::network::NetworkSettings::default());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/vibe-support.json",
+            listener.local_addr().unwrap()
+        );
+        let result = get_small(&url, 1024, Duration::from_millis(200)).await;
+        assert!(result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err(),
+            "support manifest fetch opened a direct socket before route authorization"
+        );
+    }
+
+    #[tokio::test]
+    async fn support_manifest_fetch_uses_the_ready_route() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let _serial = ROUTE_TEST.lock().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/vibe-support.json",
+            listener.local_addr().unwrap()
+        );
+        vw_mistral::network::install_for_launch(
+            &vw_mistral::network::NetworkSettings::default(),
+            &vw_mistral::network::NetworkSettings::default(),
+        );
+        vw_mistral::network::authorize_update_route(true);
+        let _owner = vw_mistral::network::set_system_proxy(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        ));
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let count = stream.read(&mut request).await.unwrap();
+            assert!(request[..count].starts_with(b"GET /vibe-support.json "));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+        let body = get_small(&url, 1024, Duration::from_secs(2)).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(body, b"ok");
+    }
 }

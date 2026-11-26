@@ -102,7 +102,7 @@ impl KeyService {
     pub async fn realtime(&self) -> Result<(RealtimeSender, RealtimeReceiver), SpeechFailure> {
         let key = self.key_for_call().map_err(SpeechFailure::KeyNeeded)?;
         let (_, base) = self.api();
-        vw_mistral::realtime::connect(base, key.as_str())
+        vw_mistral::realtime::connect_via(base, key.as_str(), &self.network_forwarder)
             .await
             .map_err(SpeechFailure::Speech)
     }

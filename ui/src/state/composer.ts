@@ -11,7 +11,7 @@
  * so it can never become a command; a deleted session's draft and chips are dropped.
  */
 import type { ContextItem } from "../features/composer/model/message";
-import { selectedModel } from "../features/composer/model/models";
+import { selectedModel, unresolvedDefaultAlias } from "../features/composer/model/models";
 import type { ComposerActions } from "./composerImpl";
 import { runningTurnId } from "../features/composer/model/session";
 import { type SentContent, createComposerStore, takeContent } from "./composerStore";
@@ -256,6 +256,23 @@ export function createComposer(deps: {
       try {
         const impl = await load(bound);
         await impl.loadConfig();
+        if (
+          held.alias === null &&
+          unresolvedDefaultAlias(composer.store.get().config ?? undefined) !== null
+        ) {
+          composer.restore(
+            NEW_CHAT,
+            content.text,
+            content.context,
+            content.images,
+            content.literal,
+            content.by,
+          );
+          return refuse(
+            "model",
+            "Vibe Work could not confirm your saved default model yet. Choose a model for this chat, or restart Vibe Work. Your message is still here.",
+          );
+        }
         newChatHandOver?.expectStart();
         started =
           newChatStarter === null

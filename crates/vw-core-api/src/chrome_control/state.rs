@@ -71,7 +71,7 @@ pub(crate) struct ChromeControl {
     /// Per chat: (profile, browser incarnation, window) of each tab its agent created (memory only,
     /// `agent_close::remember`). After a reconnect the extension hands the agent's windows to the person and the next
     /// session opens a new one; `close_browser` names these windows too, and the helper still closes only this chat's
-    /// own tabs there. A window is nominated only in the browser incarnation it was opened in (DBK17S-01). Bounded in
+    /// own tabs there. A window is nominated only in the browser incarnation it was opened in. Bounded in
     /// chats and per chat; a deleted chat's entry goes with the chat (`end_chat`).
     pub(super) agent_windows: Mutex<agent_windows::AgentWindows>,
 }

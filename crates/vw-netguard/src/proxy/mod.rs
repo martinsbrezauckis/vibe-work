@@ -13,6 +13,7 @@ pub use route::pac_routes;
 pub(crate) use route::{Kind, Route};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -24,6 +25,15 @@ pub trait ProxyResolver: Send + Sync {
     /// # Errors
     /// A fixed failure when discovery cannot produce a trustworthy list.
     fn resolve(&self, url: &str) -> Result<Vec<String>, Error>;
+}
+
+/// The route of a successful connection, without its endpoint or credentials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UsedRoute {
+    /// The checked destination was reached directly.
+    Direct,
+    /// A proxy accepted the checked destination.
+    Proxy,
 }
 static LOOKUPS: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
 struct System;
@@ -42,6 +52,7 @@ pub struct Upstream {
     resolver: Option<Arc<dyn ProxyResolver>>,
     roots: Vec<Vec<u8>>,
     proxy_roots: std::collections::BTreeMap<String, Vec<Vec<u8>>>,
+    last_success: AtomicU8,
 }
 impl std::fmt::Debug for Upstream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,6 +60,49 @@ impl std::fmt::Debug for Upstream {
     }
 }
 impl Upstream {
+    /// The last successful route on this upstream, if any.
+    #[must_use]
+    pub fn last_route(&self) -> Option<UsedRoute> {
+        match self.last_success.load(Ordering::Relaxed) {
+            1 => Some(UsedRoute::Direct),
+            2 => Some(UsedRoute::Proxy),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn uses_system_for(&self, scheme: &str) -> bool {
+        if self.resolver.is_none() || self.all.is_some() {
+            return false;
+        }
+        match scheme {
+            "http" => self.http.is_none(),
+            "https" => self.https.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Whether a valid configured proxy matches this URL after its bypass list.
+    ///
+    /// # Errors
+    /// Invalid configured endpoints cannot silently become DIRECT.
+    pub fn configured_proxy_for(&self, url: &url::Url) -> Result<bool, Error> {
+        let uri = url.as_str().parse().map_err(|_| Error::Configuration)?;
+        if self.bypass.intercept(&uri).is_none() {
+            return Ok(false);
+        }
+        let configured = match url.scheme() {
+            "http" => &self.http,
+            "https" => &self.https,
+            _ => return Ok(false),
+        };
+        if let Some(raw) = configured.as_ref().or(self.all.as_ref()) {
+            Route::parse(raw)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Explicit Settings values. Unset schemes connect directly unless a system resolver is supplied.
     #[must_use]
     pub fn from_values(
@@ -73,6 +127,7 @@ impl Upstream {
             resolver: None,
             roots: Vec::new(),
             proxy_roots: std::collections::BTreeMap::new(),
+            last_success: AtomicU8::new(0),
         }
     }
     /// Process proxy environment first, then native OS configuration/PAC for unconfigured schemes.
@@ -125,7 +180,16 @@ impl Upstream {
         self
     }
 
+    #[cfg(test)]
     async fn routes(&self, url: &url::Url) -> Result<Vec<Option<Route>>, Error> {
+        self.routes_with_system_url(url, url).await
+    }
+
+    async fn routes_with_system_url(
+        &self,
+        url: &url::Url,
+        native_lookup_url: &url::Url,
+    ) -> Result<Vec<Option<Route>>, Error> {
         let uri = url.as_str().parse().map_err(|_| Error::Configuration)?;
         if self.bypass.intercept(&uri).is_none() {
             return Ok(vec![None]);
@@ -163,7 +227,7 @@ impl Upstream {
             .map_err(|_| Error::Timeout)?
             .map_err(|_| Error::Timeout)?;
         let resolver = resolver.clone();
-        let mut target = url.clone();
+        let mut target = native_lookup_url.clone();
         let _ = target.set_username("");
         let _ = target.set_password(None);
         target.set_fragment(None);
@@ -196,13 +260,27 @@ impl Upstream {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) async fn open(
         &self,
         url: &url::Url,
         tunnel: bool,
         checked: &[SocketAddr],
     ) -> Result<(Stream, Option<Route>), Error> {
-        let routes = self.routes(url).await?;
+        self.open_with_system_url(url, url, tunnel, checked).await
+    }
+
+    /// Open using the routing URL for Settings and a possibly distinct URL for native discovery.
+    pub(crate) async fn open_with_system_url(
+        &self,
+        routing_url: &url::Url,
+        native_lookup_url: &url::Url,
+        tunnel: bool,
+        checked: &[SocketAddr],
+    ) -> Result<(Stream, Option<Route>), Error> {
+        let routes = self
+            .routes_with_system_url(routing_url, native_lookup_url)
+            .await?;
         let fallback_list = routes.len() > 1;
         let mut last = Error::Unreachable;
         for route in routes {
@@ -229,7 +307,11 @@ impl Upstream {
                 .await
                 .unwrap_or(Err(Error::Timeout));
                 match result {
-                    Ok(connection) => return Ok(connection),
+                    Ok(connection) => {
+                        self.last_success
+                            .store(if route.is_some() { 2 } else { 1 }, Ordering::Relaxed);
+                        return Ok(connection);
+                    }
                     Err(e) => last = e,
                 }
             }

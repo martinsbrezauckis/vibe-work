@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
 use axum::extract::Path as UrlPath;
@@ -25,6 +25,23 @@ pub const APP: &str = "0.1.0";
 
 type Files = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
+/// The app normally establishes this before checking the signed support manifest. These loopback
+/// fixtures have no key service, so supply an accepted route that explicitly bypasses the relay
+/// for their local channel. Keep its owner alive for the test binary's lifetime.
+pub fn allow_fixture_update_route() {
+    static OWNER: OnceLock<vw_mistral::network::SystemProxy> = OnceLock::new();
+    OWNER.get_or_init(|| {
+        let settings = vw_mistral::network::NetworkSettings::default()
+            .with("NO_PROXY", Some("127.0.0.1,localhost".into()));
+        vw_mistral::network::install_for_launch(
+            &settings,
+            &vw_mistral::network::NetworkSettings::default(),
+        );
+        vw_mistral::network::authorize_update_route(true);
+        vw_mistral::network::set_system_proxy("http://127.0.0.1:9".into())
+    });
+}
+
 /// The fake channel.
 pub struct Channel {
     pub base: String,
@@ -35,6 +52,7 @@ pub struct Channel {
 
 impl Channel {
     pub async fn start() -> Self {
+        allow_fixture_update_route();
         let files: Files = Arc::default();
         let hits: Arc<Mutex<HashMap<String, u32>>> = Arc::default();
         let (served, counted) = (files.clone(), hits.clone());

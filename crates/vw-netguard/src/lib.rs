@@ -1,5 +1,7 @@
 //! The agent browser's network guard (navigation policy): which addresses the built-in browser may reach, and an app-local HTTP
 //! proxy that enforces it at request time for every request a browser webview sends (documents and subresources).
+//! A separate host-owned listener carries core and Vibe native automatic proxy routes through the same checked-address
+//! transport while keeping the browser's address permissions separate.
 //! It is an extra layer on top of the navigation policy (a listener per data folder or store: Linux, macOS 14+, and
 //! Windows next to the per-webview request barrier, [`chromium`]); on Linux it is never a condition for loading a
 //! page, while macOS and Windows previews that cannot have it are refused (vw-webview). [`rules`] gives the same address table as content rules for engines that filter by URL (macOS).
@@ -8,13 +10,18 @@
 //! answers loopback questions, reads refusals), vw-webview (proxy URL and canary check per webview), vw-host
 //! (internal ports), vw-preview (address classes of literal hosts).
 //! Invariants:
-//! - Public = global unicast only ([`ip::classify`]); a host NAME is refused when any of its DNS answers is not
-//!   public, and the proxy connects only to the addresses it checked (no second resolution: DNS rebinding).
-//! - This computer only as `127.0.0.1` / `[::1]` / `localhost`, never Vibe Work's own ports, and only when the
-//!   session's [`PageContext`] allows the port (Private Network Access idea). For a browser page, this computer's own
-//!   interface addresses ([`own`]) are this computer too: asked about like loopback, Vibe Work's own ports refused.
+//! - Browser public targets are global unicast only ([`ip::classify`]); local targets need their browser scope's
+//!   permission. All connections use checked addresses (no second resolution: DNS rebinding).
+//! - Browser access to this computer needs the session's [`PageContext`] permission. Its own interface addresses
+//!   ([`own`]) count as this computer too. Vibe Work's own ports are refused.
+//! - The host-owned native automatic relay can reach checked local addresses for schemes without a manual proxy.
+//!   The ordinary shared listener and manual routes keep their stricter policy.
 //! - Vibe Work's own ports include every guard's listeners in the process ([`listeners`]), not only the asking guard's.
 pub mod chromium;
+#[cfg(feature = "proxy-transports")]
+mod connect_protocol;
+#[cfg(feature = "proxy-transports")]
+mod connect_tunnel;
 mod credential;
 pub mod decide;
 pub mod forward;
@@ -35,6 +42,8 @@ pub mod upstream;
 mod ws_origin;
 
 pub use decide::{LocalRequest, NoLoopback, Scope, ScopeFuture};
+#[cfg(feature = "proxy-transports")]
+pub use guard::ServiceStreamError;
 pub use guard::{
     CANARY_SUFFIX, LOG_CAP, LOOPBACK_CANARY_PATH, MAX_CONNECTIONS, NetGuard, PageContext, Refusal,
     SEEN_CAP,

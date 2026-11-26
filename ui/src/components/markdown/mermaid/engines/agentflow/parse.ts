@@ -9,6 +9,7 @@ import { linesOf } from "../../detect";
 import { MAX_DEPTH, MAX_EDGES, MAX_NODES, checkCount } from "../../limits";
 import { clampLabel } from "../../measure";
 import { DiagramInputError, DiagramLimitError, type PreparedSource } from "../../types";
+import { splitMetadata } from "./metadata";
 
 /** Layout direction of an agentflow diagram. */
 export type AgentflowDirection = "TB" | "BT" | "LR" | "RL";
@@ -106,8 +107,7 @@ function mergeMetadataLines(body: readonly string[]): string[] {
 
 function parseYamlMeta(raw: string): Record<string, string> {
   const safe: Record<string, string> = {};
-  const parts = raw
-    .split(/\n|,(?=(?:[^"']*["'][^"']*["'])*[^"']*$)/)
+  const parts = splitMetadata(raw)
     .map((p) => p.trim())
     .filter(Boolean);
   for (const part of parts) {

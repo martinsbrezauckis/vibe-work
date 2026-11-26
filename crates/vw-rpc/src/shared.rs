@@ -35,6 +35,8 @@ pub(crate) type Reply = Result<Value, RpcError>;
 
 struct Pending {
     method: String,
+    attaches: bool,
+    stops: Option<String>,
     tx: oneshot::Sender<Reply>,
 }
 
@@ -44,6 +46,11 @@ struct State {
     dead: Option<DeathReport>,
     /// stdin was closed on purpose; new requests are refused, EOF is then expected.
     closing: bool,
+    /// The verified attachment whose runtime Vibe stopped before acknowledging session/stop.
+    stopped_session: Option<String>,
+    close_started: bool,
+    attached: Option<String>,
+    uncertain: bool,
 }
 
 pub(crate) struct Subscriber {
@@ -64,6 +71,11 @@ pub(crate) struct Counters {
 }
 
 pub(crate) struct Shared {
+    /// A process shutdown upgrades the channel's actual task owner, retaining its writer even
+    /// when the last app handle disappears while interrupt/close acknowledgements are in flight.
+    owner: Mutex<std::sync::Weak<crate::connection::Tasks>>,
+    pub(crate) process: Option<std::sync::Weak<Shared>>,
+    pub(crate) close_done: watch::Sender<bool>,
     pub(crate) config: ConnectionConfig,
     pub(crate) counters: Counters,
     pub(crate) handlers: Handlers,
@@ -104,8 +116,11 @@ impl Shared {
         outbound: mpsc::Sender<WriterCmd>,
         stderr: Arc<StderrRing>,
         channel_id: u64,
+        process: std::sync::Weak<Shared>,
     ) -> Self {
-        Self::with_parts(config, outbound, stderr, Some(channel_id))
+        let mut shared = Self::with_parts(config, outbound, stderr, Some(channel_id));
+        shared.process = Some(process);
+        shared
     }
 
     fn with_parts(
@@ -116,6 +131,9 @@ impl Shared {
     ) -> Self {
         let in_flight = channel_id.map(|_| Semaphore::new(config.channel_max_in_flight.max(1)));
         Self {
+            owner: Mutex::new(std::sync::Weak::new()),
+            process: None,
+            close_done: watch::Sender::new(false),
             config,
             counters: Counters::default(),
             handlers: Handlers::default(),
@@ -134,21 +152,53 @@ impl Shared {
         &self,
         id: i64,
         method: &str,
+        params: &Value,
+        closing: bool,
     ) -> Result<oneshot::Receiver<Reply>, RpcError> {
+        if !closing
+            && let Some(process) = self.process.as_ref().and_then(std::sync::Weak::upgrade)
+            && (process.is_closing() || process.death().is_some())
+        {
+            return Err(RpcError::ServerDead(Box::new(
+                process
+                    .death()
+                    .unwrap_or_else(|| process.report(DeathCause::ClosedByClient, None)),
+            )));
+        }
         let mut state = locked(&self.state);
         if let Some(report) = &state.dead {
             return Err(RpcError::ServerDead(Box::new(report.clone())));
         }
-        if state.closing {
+        if state.closing && !closing {
             return Err(RpcError::ServerDead(Box::new(
                 self.report(DeathCause::ClosedByClient, None),
             )));
         }
         let (tx, rx) = oneshot::channel();
+        let stops = if self.config.interrupt_before_close
+            && self.channel_id.is_some()
+            && method == "session/stop"
+        {
+            params["sessionId"]
+                .as_str()
+                .filter(|id| !id.is_empty() && state.attached.as_deref() == Some(*id))
+                .map(str::to_owned)
+        } else {
+            None
+        };
         state.pending.insert(
             id,
             Pending {
                 method: method.to_owned(),
+                attaches: matches!(
+                    method,
+                    "session/start"
+                        | "session/continue"
+                        | "session/resume"
+                        | "session/rewind"
+                        | "session/history/clear"
+                ) || (method == "session/fork" && params["attach"] != false),
+                stops,
                 tx,
             },
         );
@@ -158,15 +208,33 @@ impl Shared {
     /// Forgets a pending request (timeout or caller dropped the future). Returns true if it was
     /// still pending.
     pub(crate) fn forget(&self, id: i64) -> bool {
-        locked(&self.state).pending.remove(&id).is_some()
+        let mut state = locked(&self.state);
+        let removed = state.pending.remove(&id);
+        if self.config.interrupt_before_close
+            && removed.as_ref().is_some_and(|pending| {
+                !matches!(pending.method.as_str(), "session/read" | "runtime/read")
+            })
+        {
+            // Vibe can execute an admitted request after its caller abandons the response.
+            // These two state reads cannot attach a session or start work, so a cancelled
+            // view refresh does not make an otherwise known attachment uncertain.
+            state.uncertain = true;
+        }
+        removed.is_some()
     }
 
     /// Routes a response to its waiter; unknown ids are counted and dropped.
-    pub(crate) fn complete(&self, id: &Value, outcome: Result<Value, Value>) {
-        let pending = id
-            .as_i64()
-            .and_then(|id| locked(&self.state).pending.remove(&id));
-        let Some(Pending { method, tx }) = pending else {
+    pub(crate) fn complete(self: &Arc<Self>, id: &Value, outcome: Result<Value, Value>) {
+        let mut state = locked(&self.state);
+        let pending = id.as_i64().and_then(|id| state.pending.remove(&id));
+        let Some(Pending {
+            method,
+            attaches,
+            stops,
+            tx,
+        }) = pending
+        else {
+            drop(state);
             bump(&self.counters.unknown_response_ids);
             // Only the id's kind is logged: a bogus id could be an arbitrary string from the
             // server, and frame contents never go into the log stream.
@@ -177,6 +245,40 @@ impl Shared {
             );
             return;
         };
+        if attaches && let Ok(value) = &outcome {
+            match value
+                .pointer("/state/session/id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            {
+                Some(id) => state.attached = Some(id.to_owned()),
+                None => state.uncertain = true,
+            }
+        }
+        if attaches && outcome.is_err() {
+            // An open/resume may have attached before a later setup step failed. With no verified
+            // session identity there is no safe interrupt target for a graceful channel close.
+            state.uncertain = true;
+        }
+        let stopped = outcome.is_ok()
+            && stops
+                .as_deref()
+                .is_some_and(|id| state.attached.as_deref() == Some(id))
+            && !state.uncertain
+            && state
+                .pending
+                .values()
+                .all(|pending| matches!(pending.method.as_str(), "session/read" | "runtime/read"));
+        if stopped {
+            // session/stop closes its runtime before replying, then closes this channel.
+            // Fence work before waking the caller or reading the following null frame.
+            state.stopped_session = stops;
+            state.closing = true;
+        }
+        drop(state);
+        if stopped {
+            crate::close::acknowledged_stop(self.clone());
+        }
         let reply = outcome.map_err(|raw| RpcError::Remote {
             method,
             error: crate::message::protocol_error(raw),
@@ -192,6 +294,33 @@ impl Shared {
 
     pub(crate) fn is_closing(&self) -> bool {
         locked(&self.state).closing
+    }
+
+    pub(crate) fn stop_acknowledged(&self) -> bool {
+        locked(&self.state).stopped_session.is_some()
+    }
+
+    pub(crate) fn begin_close(&self) -> bool {
+        let mut state = locked(&self.state);
+        if state.close_started {
+            return false;
+        }
+        state.close_started = true;
+        state.closing = true;
+        true
+    }
+
+    pub(crate) fn close_state(&self) -> (usize, bool, Option<String>) {
+        let state = locked(&self.state);
+        (state.pending.len(), state.uncertain, state.attached.clone())
+    }
+
+    pub(crate) fn set_owner(&self, tasks: &Arc<crate::connection::Tasks>) {
+        *locked(&self.owner) = Arc::downgrade(tasks);
+    }
+
+    pub(crate) fn owner(&self) -> Option<Arc<crate::connection::Tasks>> {
+        locked(&self.owner).upgrade()
     }
 
     fn report(&self, cause: DeathCause, exit: Option<ExitInfo>) -> DeathReport {
@@ -230,6 +359,14 @@ impl Shared {
         }
         locked(&self.subscribers).clear();
         self.death_tx.send_replace(Some(report.clone()));
+        // A dead channel cannot acknowledge an interrupt. Propagate uncertainty synchronously,
+        // before its last handle can abort the writer, so the owner kills the shared process.
+        if self.config.interrupt_before_close
+            && report.cause != DeathCause::ClosedByClient
+            && let Some(process) = self.process.as_ref().and_then(std::sync::Weak::upgrade)
+        {
+            process.mark_dead(report.cause.clone(), report.exit);
+        }
         report
     }
 

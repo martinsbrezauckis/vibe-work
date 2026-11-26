@@ -21,6 +21,8 @@ export default defineConfig({
   // rewrite in dev, so dev and production run the same xterm code.
   optimizeDeps: { exclude: ["@xterm/xterm"] },
   clearScreen: false,
+  // Diagram engines use lazy imports inside a module worker; keep its chunks on the app's origin.
+  worker: { format: "es" },
   server: { host: "127.0.0.1", port: 1420, strictPort: true },
   build: {
     target: "es2023",

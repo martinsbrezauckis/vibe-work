@@ -32,7 +32,9 @@ pub mod work;
 mod ws;
 
 pub use auth::bearer;
-pub use client::{ClientError, ClientSlot, https_client, proxy_client, tls_builder};
+pub use client::{
+    ClientError, ClientSlot, https_client, proxy_client, tls_builder, update_https_client,
+};
 pub use ocr::{OCR_MODEL, OCR_TIMEOUT, OcrError, OcrInput, OcrOutput, ocr, request_body};
 pub use test_call::{DEFAULT_API_BASE, TestCallError, TestCallOk, list_models};
 pub use tts::{SpeechError, Voice};

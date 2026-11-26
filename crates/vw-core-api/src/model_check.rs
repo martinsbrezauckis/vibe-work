@@ -65,7 +65,8 @@ fn legacy_catalog_choice(text: &str, config: &Value) -> Option<String> {
     let settings: toml::Table = text.parse().ok()?;
     if settings.get("active_model")?.as_str()? != OWN_ALIAS
         || settings
-            .get("experimental_enable_model_catalog")
+            .get("enable_model_catalog")
+            .or_else(|| settings.get("experimental_enable_model_catalog"))
             .and_then(toml::Value::as_bool)
             != Some(true)
         || crate::model_choices::unavailable_default_alias(config).as_deref() != Some(OWN_ALIAS)
@@ -162,6 +163,42 @@ async fn lobby(shared: &Shared) -> Result<Value, CoreError> {
         .map_err(|error| CoreError::from_gate("config/read", &error))
 }
 
+fn has_account_models(config: &Value) -> bool {
+    config["models"].as_array().is_some_and(|models| {
+        models
+            .iter()
+            .any(|model| matches!(model["source"].as_str(), Some("growthbook" | "catalog")))
+    })
+}
+
+/// Missing managed-account rows cannot establish retirement, even with a usable vault key:
+/// Vibe may have failed to fetch the catalog through the network or proxy. A core without
+/// the managed key service retains its local-only config behavior.
+pub(crate) fn account_models_unavailable(shared: &Shared, config: &Value) -> bool {
+    account_models_unavailable_reason(shared, config).is_some()
+}
+
+pub(crate) enum AccountModelsUnavailableReason {
+    KeyNotUsable,
+    NotFetched,
+}
+
+/// Distinguishes a missing credential from an unfetched list without inspecting error text.
+pub(crate) fn account_models_unavailable_reason(
+    shared: &Shared,
+    config: &Value,
+) -> Option<AccountModelsUnavailableReason> {
+    let keys = shared.config.keys.as_ref()?;
+    if has_account_models(config) {
+        return None;
+    }
+    Some(if keys.speech_available() {
+        AccountModelsUnavailableReason::NotFetched
+    } else {
+        AccountModelsUnavailableReason::KeyNotUsable
+    })
+}
+
 /// Reads the lobby as Mistral sends it: Vibe Work's facts entry is taken out for the read and put back after, so
 /// Mistral's own values can win. Returns the read and the file text without the facts entry. The record of our entry
 /// (`model_facts::record`) is cleared before the entry leaves the file and restored only if the entry is put back.
@@ -169,7 +206,7 @@ async fn bare_lobby(
     shared: &Shared,
     home: &Path,
     path: &Path,
-    account_models_available: bool,
+    allow_missing_account_models: bool,
 ) -> Result<(Value, String), CoreError> {
     let original = crate::default_model::read(path)?;
     let written = crate::model_facts::recorded(home);
@@ -186,18 +223,12 @@ async fn bare_lobby(
         return Ok((lobby(shared).await?, original));
     }
     let read = lobby(shared).await;
-    // Without a usable vault key an empty account list does not establish that a model was retired.
-    // Keep the saved facts through a locked update, including a file Vibe rewrote without our comment.
-    // An authenticated empty list remains authoritative (e.g. experiments disabled).
+    // A managed account's absent list is inconclusive, whether its key is locked or its fetch failed.
+    // Keep saved facts, including a file Vibe rewrote without our comment, until account rows arrive.
     if read.is_err()
         || read.as_ref().is_ok_and(|r| {
             r["config"]["awaitingExperimentModel"] == true
-                || (!account_models_available
-                    && !r["config"]["models"].as_array().is_some_and(|models| {
-                        models.iter().any(|model| {
-                            matches!(model["source"].as_str(), Some("growthbook" | "catalog"))
-                        })
-                    }))
+                || (!allow_missing_account_models && !has_account_models(&r["config"]))
         })
     {
         if replace(path, &bare, &original).await? {
@@ -215,17 +246,9 @@ async fn bare_lobby(
 pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
     let home = &shared.instructions.own_home;
     let path = home.join("config.toml");
-    let (mut reply, mut current) = bare_lobby(
-        shared,
-        home,
-        &path,
-        shared
-            .config
-            .keys
-            .as_ref()
-            .is_none_or(|keys| keys.speech_available()),
-    )
-    .await?;
+    let allow_missing_account_models = shared.config.keys.is_none();
+    let (mut reply, mut current) =
+        bare_lobby(shared, home, &path, allow_missing_account_models).await?;
     if reply["config"]["awaitingExperimentModel"] == true {
         return Ok(json!({"gone": null}));
     }
@@ -252,7 +275,12 @@ pub(crate) async fn check(shared: &Arc<Shared>) -> Result<Value, CoreError> {
         }
         reply = lobby(shared).await?;
     }
-    let gone = crate::model_choices::unavailable_default_alias(&reply["config"]);
+    // Key usability does not prove that Vibe fetched the account's list.
+    let gone = if account_models_unavailable(shared, &reply["config"]) {
+        None
+    } else {
+        crate::model_choices::unavailable_default_alias(&reply["config"])
+    };
     Ok(json!({"gone": gone}))
 }
 

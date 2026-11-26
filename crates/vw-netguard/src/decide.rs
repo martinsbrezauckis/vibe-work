@@ -9,7 +9,7 @@
 //! local network, link-local) is admitted only when [`Scope::local_access`] says so (Local Network Access: a public
 //! page is asked for first, a page opened on this computer or the local network is not). The proxy still resolves and
 //! pins its connection targets.
-//! Default/non-browser scope invariants:
+//! Ordinary shared-listener scope invariants (without browser or host-owned automatic rights):
 //! - This computer is reachable only as exactly `127.0.0.1`, `[::1]` or `localhost`, and only when the request's
 //!   [`Scope`] allows that port (Private Network Access idea: never Vibe Work's own ports, never
 //!   from a page that came from the web, from a session's local page only its own and other sessions' attributed
@@ -19,6 +19,10 @@
 //! - The one exception to "public only": a request from the local-network page the user opened reaches that page's
 //!   own host when it is (or resolves to) a private-network or carrier-grade-NAT address
 //!   ([`Scope::local_network`]); never loopback, never link-local.
+//!
+//! The host-owned automatic relay uses [`Scope::system_client_addresses`] to inspect and pin every DNS answer,
+//! including local ones, then applies its separate local-access policy. It never grants browser or manual routes
+//! those rights.
 
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -41,6 +45,12 @@ pub trait Scope: Send + Sync {
         false
     }
 
+    /// A host-owned native automatic route may use checked local addresses for an unconfigured scheme. Browser
+    /// and manually configured routes do not inherit this scope.
+    fn system_client_addresses(&self) -> bool {
+        false
+    }
+
     /// `Ok` when the request may reach `127.0.0.1:<port>`; else the reason.
     fn loopback(&self, port: u16) -> ScopeFuture<'_>;
 
@@ -51,9 +61,10 @@ pub trait Scope: Send + Sync {
         false
     }
 
-    /// A live browser scope ([`Self::browser_addresses`]): `Ok` when this request may reach a target that is not
-    /// public ([`LocalRequest`]); else the reason. The answer may wait for the person (a public page is asked for
-    /// first); nothing is connected before it. Default: refused.
+    /// For a live browser scope ([`Self::browser_addresses`]) or host-owned automatic scope
+    /// ([`Self::system_client_addresses`]): `Ok` when this request may reach a non-public target
+    /// ([`LocalRequest`]); else the reason. Browser answers may wait for the person; nothing is connected before
+    /// the answer. Default: refused.
     fn local_access<'a>(&'a self, request: &'a LocalRequest<'a>) -> ScopeFuture<'a> {
         let _ = request;
         Box::pin(async {
@@ -62,8 +73,7 @@ pub trait Scope: Send + Sync {
     }
 }
 
-/// A browser request for a target that is not public: this computer, the local network, link-local, or another
-/// non-public class.
+/// A scoped request for a non-public target: this computer, the local network, link-local, or another class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalRequest<'a> {
     /// The most private class among the target's addresses (loopback before everything else).
@@ -155,7 +165,7 @@ pub async fn decide_for(
 ) -> Result<Vec<SocketAddr>, String> {
     let host = bare_host(host);
     let lower = host.trim_end_matches('.').to_ascii_lowercase();
-    if scope.browser_addresses() {
+    if scope.browser_addresses() || scope.system_client_addresses() {
         let addrs = if let Ok(ip) = lower.parse::<IpAddr>() {
             vec![SocketAddr::new(ip, port)]
         } else if lower == "localhost" || lower.ends_with(".localhost") {

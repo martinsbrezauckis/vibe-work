@@ -17,6 +17,11 @@ pub(crate) fn runtime(repo: &Path) -> Result<PathBuf, LaunchError> {
 }
 
 pub(crate) fn check(server: &Path, run: &Path) -> Result<(), LaunchError> {
+    if vw_supervisor::adapter_python(server).is_none() {
+        return Err(LaunchError::Version(
+            vw_supervisor::SupervisorError::UnprovenInterpreter.to_string(),
+        ));
+    }
     let expected = pinned()?;
     let server = server.to_owned();
     let home = run.join("version-probe");
@@ -70,5 +75,34 @@ mod tests {
                 .to_string()
                 .contains("did not report")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn development_version_check_never_executes_an_unguardable_server() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("vw-dev-version-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let server = dir.join("vibe-app-server");
+        let marker = dir.join("executed");
+        std::fs::write(
+            &server,
+            format!("#!/bin/sh\n: > '{}'\nread request\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"serverInfo\":{{\"version\":\"3.1.5\"}}}}}}'\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let error = super::check(&server, &dir.join("run"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !marker.exists(),
+            "development check executed an unguardable server"
+        );
+        assert!(
+            error.contains("cannot run with Vibe Work's safety guards"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

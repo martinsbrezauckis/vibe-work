@@ -25,6 +25,15 @@
 //! # }
 //! ```
 
+mod close;
+#[cfg(test)]
+mod close_failures_tests;
+#[cfg(test)]
+mod close_family_tests;
+#[cfg(test)]
+mod close_runtime_tests;
+#[cfg(test)]
+mod close_tests;
 mod config;
 mod connection;
 mod error;
@@ -33,6 +42,8 @@ mod handler;
 mod message;
 mod mux;
 mod reader;
+#[cfg(test)]
+mod session_stop_tests;
 mod shared;
 mod stderr_ring;
 mod writer;

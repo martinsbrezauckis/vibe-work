@@ -61,3 +61,43 @@ fn skills_authentication_uses_the_apps_key_state_and_keeps_the_catalog() {
         assert_eq!(result.skills[0].name, "release-notes");
     }
 }
+
+#[test]
+fn remote_scope_refuses_each_local_mutation_even_when_called_directly() {
+    let skill: vw_skills::SkillSummary = serde_json::from_value(json!({
+        "name":"remote-skill", "description":"Remote skill", "prompt":"Do work",
+        "source":"registry", "scope":"remote",
+        "registry":{"skillId":"remote-id", "version":1}
+    }))
+    .unwrap();
+    let skills = vec![skill];
+    let view = vw_skills::SkillsView::merge(
+        &vw_skills::SkillsInstalledResponse {
+            skills: skills.clone(),
+            issues: vec![],
+        },
+        &serde_json::from_value(json!({"skills":[]})).unwrap(),
+        &vw_skills::SkillsUpdatesResponse { updates: vec![] },
+        &vw_skills::SkillsListResponse { skills },
+        &[],
+    );
+    for action in [
+        crate::skills_view::SkillsAction::SetEnabled {
+            name: "remote-skill".to_owned(),
+            enabled: false,
+        },
+        crate::skills_view::SkillsAction::SetLatest {
+            name: "remote-skill".to_owned(),
+            offer_id: None,
+        },
+        crate::skills_view::SkillsAction::OfferUpdate {
+            name: "remote-skill".to_owned(),
+        },
+        crate::skills_view::SkillsAction::Remove {
+            name: "remote-skill".to_owned(),
+        },
+    ] {
+        let error = super::mutation_target(&view, &action).expect_err("remote skill is read-only");
+        assert_eq!(error.message, "Managed remotely");
+    }
+}

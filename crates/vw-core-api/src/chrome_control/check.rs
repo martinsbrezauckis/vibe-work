@@ -305,7 +305,7 @@ pub(super) fn annotate_modes(shared: &Shared, session: &str, tool: &str, result:
     }
 }
 /// A subagent never drives an external browser session, also not through a path that asks the person first
-/// (the Ask-mode `close_browser` card, DBK17G-01). One rule for `check` and every early Ask preparation.
+/// (the Ask-mode `close_browser` card). One rule for `check` and every early Ask preparation.
 pub(crate) fn refuse_child_source(
     shared: &Arc<Shared>,
     source: &str,

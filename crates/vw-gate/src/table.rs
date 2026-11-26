@@ -301,6 +301,10 @@ static TABLE: &[Row] = &[
     fwd!("loops/create", LoopsCreate),
     fwd!("loops/delete", LoopsDelete),
     fwd!("loops/list", LoopsList),
+    // Vibe 3.1.5 added direct execution and mutation. The app only exposes its reviewed
+    // create, list, clear and delete flows.
+    deny!("loops/run", NoUserInterface),
+    deny!("loops/update", NoUserInterface),
     p2_add!("mcp/add", McpAdd),
     p2!("mcp/login", McpLogin),
     p1!("mcp/logout", McpNamed),
@@ -334,6 +338,8 @@ static TABLE: &[Row] = &[
     p2!("projectLinks/resolveRoot", ProjectLinksResolveRoot),
     p2!("projectLinks/save", ProjectLinksSave),
     p2!("projectLinks/unlink", ProjectLinksUnlink),
+    // Root mutation has no reviewed Vibe Work flow.
+    deny!("projects/setRoots", NoUserInterface),
     deny!("review/approve", NotOnUnified),
     deny!("review/baseline", NotOnUnified),
     deny!("review/hunks", NotOnUnified),
@@ -360,9 +366,16 @@ static TABLE: &[Row] = &[
     fwd!("session/history/list", SessionHistoryList),
     // Fresh native lease snapshot; never resumes or takes ownership of a session.
     fwd!("session/lease/subscribe", SessionLeaseSubscribe),
+    // Left-turn controls require a separately reviewed resume policy.
+    deny!("session/leftTurns/interrupt", NoUserInterface),
+    deny!("session/leftTurns/read", NoUserInterface),
     fwd!("session/list", SessionList),
     fwd!("session/log/read", SessionLogRead),
     fwd!("session/markAsSeen", SessionMarkAsSeen),
+    deny!("session/markAsUnseen", NoUserInterface),
+    // MCP Apps have no approved app bridge or user interaction here.
+    deny!("session/mcpApp/callTool", NoUserInterface),
+    deny!("session/mcpApp/readResource", NoUserInterface),
     fwd!("session/pin", SessionPin),
     fwd!("session/archive", SessionArchive),
     fwd!("session/read", SessionRead),
@@ -410,8 +423,16 @@ static TABLE: &[Row] = &[
     fwd!("session/turn/queue/steer", SessionTurnQueueSteer),
     fwd!("session/turn/queue/resume", SessionTurnQueueResume),
     fwd!("turn/interrupt", TurnInterrupt),
+    // The app's reviewed retry continues through `turn/start`.
+    deny!("turn/retry", NoUserInterface),
     fwd!("turn/start", TurnStart),
     fwd!("turn/steer", TurnSteer),
+    // Vibe Work's own speech controls do not call the new server voice methods.
+    deny!("voice/narrate", NoUserInterface),
+    deny!("voice/narrateCancel", NoUserInterface),
+    deny!("voice/transcribeCancel", NoUserInterface),
+    deny!("voice/transcribeStart", NoUserInterface),
+    deny!("voice/transcribeStop", NoUserInterface),
     deny!("vibeCode/projects/cancel", NotSupported),
     deny!("vibeCode/projects/create", NotSupported),
     deny!("vibeCode/projects/loadMore", NotSupported),

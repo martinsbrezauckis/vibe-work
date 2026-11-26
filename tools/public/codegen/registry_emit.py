@@ -210,25 +210,53 @@ def emit_reencode_payloads(schema: Schema) -> dict[str, str]:
     return files
 
 
+def _ts_imports(names: set[str], json_value: bool) -> list[str]:
+    """`import type` blocks for the payload types a registry file uses (one name per line, as Prettier writes it).
+
+    `JsonValue` (the type of a payload-less side) is imported only when the file uses it: TypeScript refuses unused imports.
+    """
+    support = ['import type { JsonValue } from "./support";'] if json_value else []
+    return support + ["import type {"] + [f"  {n}," for n in sorted(names)] + ['} from "./index";']
+
+
+def _ts_side(name: str | None) -> str:
+    return name or "JsonValue"
+
+
 def emit_ts(schema: Schema) -> str:
-    """`methods.ts` source: three maps from method name to payload types."""
+    """`methods.ts` source: the client request map, plus a re-export of the two server-side maps.
+
+    The server notification and server request maps live in `methods_server.ts` (`emit_ts_server`) so neither file
+    approaches the 800-line source ceiling as Vibe adds methods; importers keep using `./methods` for all three.
+    """
     from ts_emit import HEADER
 
-    def side(name: str | None) -> str:
-        return name or "JsonValue"
-
-    used = {n for pair in list(schema.requests.values()) + list(schema.server_requests.values()) for n in pair if n}
-    used |= {n for n in schema.notifications.values() if n}
+    used = {n for pair in schema.requests.values() for n in pair if n}
+    bare = any(n is None for pair in schema.requests.values() for n in pair)
     lines = HEADER.format(title="Method registry: method name to params/result types.", version=schema.vibe_version).splitlines()
-    lines += ["", 'import type { JsonValue } from "./support";', 'import type {']
-    lines += [f"  {n}," for n in sorted(used)] + ['} from "./index";', ""]
+    lines += [""] + _ts_imports(used, bare) + [""]
     lines += ["/** Client request methods: name to params and result. */", "export interface RequestMap {"]
-    lines += [f'  "{m}": {{ params: {side(p)}; result: {side(r)} }};' for m, (p, r) in schema.requests.items()] + ["}", ""]
+    lines += [f'  "{m}": {{ params: {_ts_side(p)}; result: {_ts_side(r)} }};' for m, (p, r) in schema.requests.items()] + ["}", ""]
+    lines += ["/** Every client request method name. */", "export type RequestMethod = keyof RequestMap;", ""]
+    lines += ["export type {", "  NotificationMap,", "  NotificationMethod,", "  ServerRequestMap,", "  ServerRequestMethod,",
+              '} from "./methods_server";']
+    return "\n".join(lines) + "\n"
+
+
+def emit_ts_server(schema: Schema) -> str:
+    """`methods_server.ts` source: server notifications and server-to-client requests (re-exported by `methods.ts`)."""
+    from ts_emit import HEADER
+
+    used = {n for pair in schema.server_requests.values() for n in pair if n}
+    used |= {n for n in schema.notifications.values() if n}
+    bare = any(n is None for pair in schema.server_requests.values() for n in pair)
+    bare |= any(n is None for n in schema.notifications.values())
+    lines = HEADER.format(title="Method registry: server notifications and server requests.", version=schema.vibe_version).splitlines()
+    lines += [""] + _ts_imports(used, bare) + [""]
     lines += ["/** Server notifications: name to params. */", "export interface NotificationMap {"]
-    lines += [f'  "{m}": {{ params: {side(p)} }};' for m, p in schema.notifications.items()] + ["}", ""]
+    lines += [f'  "{m}": {{ params: {_ts_side(p)} }};' for m, p in schema.notifications.items()] + ["}", ""]
     lines += ["/** Server-to-client requests: name to params and the result the client returns. */", "export interface ServerRequestMap {"]
-    lines += [f'  "{m}": {{ params: {side(p)}; result: {side(r)} }};' for m, (p, r) in schema.server_requests.items()] + ["}", ""]
-    lines += ["/** Every client request method name. */", "export type RequestMethod = keyof RequestMap;",
-              "/** Every server notification method name. */", "export type NotificationMethod = keyof NotificationMap;",
+    lines += [f'  "{m}": {{ params: {_ts_side(p)}; result: {_ts_side(r)} }};' for m, (p, r) in schema.server_requests.items()] + ["}", ""]
+    lines += ["/** Every server notification method name. */", "export type NotificationMethod = keyof NotificationMap;",
               "/** Every server request method name. */", "export type ServerRequestMethod = keyof ServerRequestMap;"]
     return "\n".join(lines) + "\n"

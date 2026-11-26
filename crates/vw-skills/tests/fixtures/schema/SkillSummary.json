@@ -62,7 +62,8 @@
         "builtin",
         "global",
         "project",
-        "session"
+        "session",
+        "remote"
       ],
       "title": "Scope",
       "type": "string"

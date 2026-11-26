@@ -64,6 +64,10 @@ for line in sys.stdin:
     elif method == 'runtime/read':
         result = {'runtime': runtime(),
                   'ready': not (home / 'wait-to-ready').exists() or (home / 'catalog-ready').exists()}
+    elif method == 'config/reload':
+        # A refresh loads the held account catalog before returning the idle runtime.
+        (home / 'catalog-ready').write_text('ready')
+        result = {'runtime': runtime(), 'failures': []}
     elif method == 'session/ready/wait':
         if (home / 'wait-fails').exists():
             result = {'ready': False}

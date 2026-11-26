@@ -12,7 +12,7 @@
 import type { JsonValue } from "../protocol/core";
 import { toCallError } from "../protocol/client/types";
 import type { CoreController } from "./coreStore";
-import { newChatPick } from "../features/composer/model/models";
+import { newChatPick, unresolvedDefaultAlias } from "../features/composer/model/models";
 import { modelTerm } from "../vocabulary";
 import { alwaysThinks, listedRows, offeredLevels } from "./thinkingLevels";
 
@@ -31,6 +31,8 @@ export interface ModelList {
   models: readonly ModelOption[];
   /** Alias new chats start with (saved pin, else reported fallback), or null. */
   current: string | null;
+  /** Saved model not yet confirmed by Vibe's current default view. */
+  unresolved?: string;
 }
 
 function asObject(value: JsonValue | undefined): { [key in string]?: JsonValue } | null {
@@ -69,7 +71,8 @@ export function parseModels(result: JsonValue): ModelList | null {
       ...(always ? { alwaysThinks: true as const } : {}),
     });
   }
-  return { models, current };
+  const unresolved = unresolvedDefaultAlias(result);
+  return { models, current, ...(unresolved === null ? {} : { unresolved }) };
 }
 
 /** A session for settings RPCs that require one: the open one, else the most recently updated. */

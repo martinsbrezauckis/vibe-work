@@ -26,29 +26,35 @@ impl VibeInstaller {
         let Some(choice) = layout.choice() else {
             return;
         };
-        let home = fresh_saved_home(&layout.probe_dir());
-        let result = crate::existing::probe_checked(
-            crate::existing::SAVED_PROBE_LIMIT,
-            &choice.path,
-            &[],
-            &home,
-            &self.inner.config.parent_env,
-        )
-        .await;
-        // Best effort: a home that cannot be removed now is only a few small files.
-        if let Err(error) = vw_platform::remove_owned_tree(&layout.root, &home) {
-            tracing::debug!(%error, "the start check's probe home stays");
-        }
-        if let Err(failure) = &result {
-            tracing::warn!(server = %choice.path.display(), ?failure, "the remembered Vibe gave no version");
-        }
-        let warning = crate::existing::saved_warning(
-            &result,
-            crate::existing::SAVED_PROBE_LIMIT,
-            &self.inner.pinned,
-        );
-        let version = result.ok();
-        let supported = version.as_deref() == Some(&self.inner.pinned);
+        let (version, warning) = if let Some(warning) =
+            crate::existing::interpreter_warning(&choice.path)
+        {
+            (None, Some(warning))
+        } else {
+            let home = fresh_saved_home(&layout.probe_dir());
+            let result = crate::existing::probe_checked(
+                crate::existing::SAVED_PROBE_LIMIT,
+                &choice.path,
+                &[],
+                &home,
+                &self.inner.config.parent_env,
+            )
+            .await;
+            // Best effort: a home that cannot be removed now is only a few small files.
+            if let Err(error) = vw_platform::remove_owned_tree(&layout.root, &home) {
+                tracing::debug!(%error, "the start check's probe home stays");
+            }
+            if let Err(failure) = &result {
+                tracing::warn!(server = %choice.path.display(), ?failure, "the remembered Vibe gave no version");
+            }
+            let warning = crate::existing::saved_warning(
+                &result,
+                crate::existing::SAVED_PROBE_LIMIT,
+                &self.inner.pinned,
+            );
+            (result.ok(), warning)
+        };
+        let supported = version.as_deref() == Some(&self.inner.pinned) && warning.is_none();
         let mut state = self.inner.lock();
         if supported {
             state.phase = InstallPhase::Installed {

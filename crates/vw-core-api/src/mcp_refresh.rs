@@ -1,9 +1,8 @@
-//! Forced discovery admission and deferred convergence for shared MCP configuration changes.
+//! Forced discovery admission for shared MCP configuration changes.
 //! Called under the Developer-permissions mutation lock by command pause and connector convergence.
-//! A disabled stdio row must never reach forced discovery, even while Developer permissions is on.
+//! Guarded launches exclude disabled stdio from discovery; unguarded launches defer it. OFF blocks enabled commands.
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use crate::core::Shared;
 use crate::mcp_keys_config::ConfigEditError;
@@ -14,64 +13,121 @@ fn config(home: &Path) -> Result<toml::Table, ConfigEditError> {
         .map_err(|_| ConfigEditError::Unsupported)
 }
 
-/// OFF blocks every command row; ON still blocks every disabled command row. Both TOML forms are validated.
-pub(crate) fn blocked_command(home: &Path, enabled: bool) -> Result<bool, ConfigEditError> {
-    let doc = config(home)?;
-    Ok(crate::mcp_rows::read_rows(&doc)?.iter().any(|row| {
-        row.get("transport").and_then(toml::Value::as_str) == Some("stdio")
-            && (!enabled || row.get("disabled").and_then(toml::Value::as_bool) == Some(true))
-    }))
-}
-
-fn deferred_targets(home: &Path) -> Result<Option<Vec<String>>, ConfigEditError> {
+/// Whether forced discovery is unsafe for this launch. Validate both persisted TOML forms.
+pub(crate) fn blocked_command(
+    home: &Path,
+    enabled: bool,
+    guarded: bool,
+) -> Result<bool, ConfigEditError> {
     let doc = config(home)?;
     let rows = crate::mcp_rows::read_rows(&doc)?;
-    if !rows.iter().any(|row| {
+    let disabled_stdio = rows.iter().any(|row| {
         row.get("transport").and_then(toml::Value::as_str) == Some("stdio")
             && row.get("disabled").and_then(toml::Value::as_bool) == Some(true)
-    }) {
-        return Ok(None);
-    }
-    let mut seen = HashSet::new();
-    let mut targets = Vec::new();
-    for row in rows {
-        let name = row
-            .get("name")
-            .and_then(toml::Value::as_str)
-            .ok_or(ConfigEditError::Unsupported)?;
-        let normalized = crate::command_servers_config::vibe_server_name(name);
-        if normalized.is_empty() || !seen.insert(normalized) {
-            return Err(ConfigEditError::Unsupported);
-        }
-        if row.get("disabled").and_then(toml::Value::as_bool) != Some(true) {
-            targets.push(name.to_owned());
+    });
+    if disabled_stdio {
+        // Preserve the former deferred path's strict name checks: a disabled row
+        // must remain distinguishable from every enabled row after Vibe normalizes names.
+        let mut seen = HashSet::new();
+        for row in &rows {
+            let name = row
+                .get("name")
+                .and_then(toml::Value::as_str)
+                .ok_or(ConfigEditError::Unsupported)?;
+            let normalized = crate::command_servers_config::vibe_server_name(name);
+            if normalized.is_empty() || !seen.insert(normalized) {
+                return Err(ConfigEditError::Unsupported);
+            }
         }
     }
-    Ok(Some(targets))
+    Ok((disabled_stdio && !guarded)
+        || rows.iter().any(|row| {
+            row.get("transport").and_then(toml::Value::as_str) == Some("stdio")
+                && !enabled
+                && row.get("disabled").and_then(toml::Value::as_bool) != Some(true)
+        }))
 }
 
-/// Shared changes with disabled command rows use the switch's before-work reload and targeted toggles.
-/// Running turns finish. A later apply checks current rows again, so a subsequent person-disable wins.
+/// Read the capability of the running process, including after a deferred start or restart.
+pub(crate) fn guard_installed(shared: &Shared) -> bool {
+    #[cfg(test)]
+    if shared
+        .mock_mcp_refresh_guard
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return true;
+    }
+    shared.supervisor.mcp_refresh_guard_installed()
+}
+
+/// Shared refreshes include enabled servers without discovering or re-enabling paused command rows.
 pub(crate) fn admit_shared(shared: &Shared) -> bool {
-    if shared.developer_permissions.enabled() {
-        match deferred_targets(&shared.instructions.own_home) {
-            Ok(Some(targets)) => {
-                shared
-                    .developer_permissions
-                    .remember_changed_servers(targets);
-                shared.channels.bump_switch_generation();
-                return false;
-            }
-            Ok(None) => {}
-            Err(_) => {
-                crate::command_pause::notify_internal_refresh_withheld(
-                    shared,
-                    None,
-                    crate::developer_permissions::RefreshWithheldCause::InspectFailed,
-                );
-                return false;
+    crate::command_pause::admit_internal_refresh(shared, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blocked_command;
+
+    #[test]
+    fn disabled_stdio_needs_the_guard_in_both_forms_and_switch_states() {
+        let dir = tempfile::tempdir().unwrap();
+        for text in [
+            "mcp_servers=[{name='paused',transport='stdio',command='echo',disabled=true}]",
+            "[[mcp_servers]]\nname='paused'\ntransport='stdio'\ncommand='echo'\ndisabled=true\n",
+        ] {
+            std::fs::write(dir.path().join("config.toml"), text).unwrap();
+            for enabled in [false, true] {
+                assert!(blocked_command(dir.path(), enabled, false).unwrap());
+                assert!(!blocked_command(dir.path(), enabled, true).unwrap());
             }
         }
     }
-    crate::command_pause::admit_internal_refresh(shared, None)
+
+    #[test]
+    fn enabled_stdio_stays_blocked_while_off_with_either_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "mcp_servers=[{name='active',transport='stdio',command='echo'}]",
+        )
+        .unwrap();
+        for guarded in [false, true] {
+            assert!(blocked_command(dir.path(), false, guarded).unwrap());
+            assert!(!blocked_command(dir.path(), true, guarded).unwrap());
+        }
+    }
+
+    #[test]
+    fn missing_empty_http_and_malformed_inputs_keep_their_admission_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        for guarded in [false, true] {
+            for enabled in [false, true] {
+                assert!(!blocked_command(dir.path(), enabled, guarded).unwrap());
+            }
+        }
+        for text in [
+            "",
+            "mcp_servers=[{name='web',transport='http',disabled=true}]",
+        ] {
+            std::fs::write(&path, text).unwrap();
+            for guarded in [false, true] {
+                for enabled in [false, true] {
+                    assert!(!blocked_command(dir.path(), enabled, guarded).unwrap());
+                }
+            }
+        }
+        for text in [
+            "mcp_servers=[42]",
+            "mcp_servers=[{name='x',transport='stdio',command='echo',disabled='true'}]",
+        ] {
+            std::fs::write(&path, text).unwrap();
+            for guarded in [false, true] {
+                for enabled in [false, true] {
+                    assert!(blocked_command(dir.path(), enabled, guarded).is_err());
+                }
+            }
+        }
+    }
 }

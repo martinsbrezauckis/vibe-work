@@ -299,6 +299,24 @@ async fn settings_win_over_pac_and_errors_never_imply_direct() {
 }
 
 #[tokio::test]
+async fn browser_route_refuses_a_dead_pac_proxy_without_direct_fallback() {
+    let unavailable = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy = unavailable.local_addr().unwrap();
+    drop(unavailable);
+    let resolver = stub(vec![format!("http://{proxy}")]);
+    let (guard, address) = guard(Upstream::none().with_resolver(resolver.clone()));
+    let (_, answer) = connect(address, "allowed.test").await;
+    assert!(answer.starts_with("HTTP/1.1 502"), "{answer}");
+    assert_eq!(*resolver.queries.lock().unwrap(), ["https://allowed.test/"]);
+    assert_eq!(guard.last_route(), None);
+    assert!(
+        guard.refusals_since(0)[0]
+            .reason
+            .contains("selected upstream proxy could not be reached")
+    );
+}
+
+#[tokio::test]
 async fn proxy_failures_have_short_states_and_actionable_recorded_outcomes() {
     for kind in [Kind::Https, Kind::Socks5] {
         let proxy = Proxy::new(kind, true, true).await;
@@ -317,6 +335,7 @@ async fn proxy_failures_have_short_states_and_actionable_recorded_outcomes() {
         // Record inspection below is intentionally through the same public log the core consumes.
         let refusals = guard.refusals_since(0);
         assert_eq!(refusals.len(), 1);
+        assert!(!guard.proxy_lookup_failed_since(0));
         assert!(refusals[0].reason.contains("Ask the user"));
         assert!(!refusals[0].reason.contains("secret"));
     }

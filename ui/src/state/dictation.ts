@@ -321,7 +321,10 @@ export function createDictation(deps: {
       store.set((x) => ({
         ...DICTATION_IDLE,
         lastText: r.text,
-        note: r.note ?? (r.text === "" ? "Nothing was heard." : x.note),
+        note:
+          x.note === "Vibe Work could not reach the proxy."
+            ? x.note
+            : (r.note ?? (r.text === "" ? "Nothing was heard." : x.note)),
         maxSeconds: x.maxSeconds,
       }));
       // The press that came while the text was being made: dictation starts now.
@@ -373,7 +376,13 @@ export function createDictation(deps: {
     const u = event.update;
     if (u.type === "partial") store.set((s) => ({ ...s, partial: u.text }));
     else if (u.type === "liveLost")
-      store.set((s) => ({ ...s, note: "Live text stopped; the text comes when you stop." }));
+      store.set((s) => ({
+        ...s,
+        note:
+          u.message === "Vibe Work could not reach the proxy."
+            ? u.message
+            : "Live text stopped; the text comes when you stop.",
+      }));
     else fail(u.reason);
   });
 

@@ -233,8 +233,8 @@ mod tests {
 
     #[test]
     fn upload_refuses_an_uncleared_hard_link_in_a_large_protected_tree() {
-        let (root, policy, _) = crate::read_exclusions::tests::fixture("upload-bounded");
-        crate::read_exclusions::tests::large_protected_tree(&root);
+        let (root, mut policy, _) = crate::read_exclusions::tests::fixture("upload-bounded");
+        crate::read_exclusions::tests::large_protected_tree(&root, &mut policy);
         let original = root.join("ordinary.txt");
         let alias = root.join("alias.txt");
         std::fs::write(&original, "ordinary").unwrap();

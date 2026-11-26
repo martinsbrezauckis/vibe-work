@@ -2,8 +2,9 @@
 //! decision, connect, relay). A CONNECT tunnel is one checked target by nature; a plain request goes through
 //! `forward` (one checked target per client connection).
 //!
-//! After the decision, a PUBLIC target goes through the user's proxy when one applies (`upstream`); this
-//! computer and the user's local-network page are always connected directly. A WebSocket handshake to this computer
+//! After the decision, a public target goes through the user's proxy when one applies (`upstream`).
+//! Browser local targets use their existing direct policy; the app-owned automatic system relay also routes
+//! checked local targets through PAC. A WebSocket handshake to this computer
 //! must carry an `Origin` on this computer, and one to the user's local-network page that page's own origin
 //! (`ws_origin`), in absolute form and inside a tunnel.
 //!
@@ -17,13 +18,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncWriteExt, copy_bidirectional};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::decide::decide_for;
 use crate::guard::{CANARY_SUFFIX, Inner, LOOPBACK_CANARY_PATH, ListenerScope, Who};
 use crate::head::{self, Target};
+
+#[path = "serve_tunnel.rs"]
+mod tunnel_relay;
+use tunnel_relay::relay_tunnel;
 
 /// Longest wait for a request head.
 const HEAD_LIMIT: Duration = Duration::from_secs(15);
@@ -49,6 +54,11 @@ pub(crate) fn accept_loop(
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
             };
+            #[cfg(feature = "proxy-transports")]
+            if !inner.native_route_ready() {
+                drop(stream);
+                continue;
+            }
             let (inner, who) = (inner.clone(), who.clone());
             let mut enabled = inner.enabled.subscribe();
             let credential = credential.clone();
@@ -238,6 +248,10 @@ async fn serve_one(
             return;
         }
     };
+    serve_target(&inner, stream, &who, &head).await;
+}
+
+async fn serve_target(inner: &Arc<Inner>, mut stream: TcpStream, who: &Who, head: &head::Head) {
     if let Target::Direct { token } = &head.target {
         inner.saw(&format!("direct:{token}"));
         answer(&mut stream, "404 Not Found", "Not a proxy request.").await;
@@ -251,8 +265,8 @@ async fn serve_one(
         }
     };
     let bare = crate::decide::bare_host(&host).to_ascii_lowercase();
-    if let Some(text) = canary(&inner, &head.target, &stream, &bare, port) {
-        answer_canary(&mut stream, &head, &bare, text).await;
+    if let Some(text) = canary(inner, &head.target, &stream, &bare, port) {
+        answer_canary(&mut stream, head, &bare, text).await;
         return;
     }
     // A plain request's body must have a declared length (one checked target per connection, `forward`).
@@ -266,18 +280,39 @@ async fn serve_one(
         },
         Target::Tunnel { .. } | Target::Direct { .. } => 0,
     };
+    #[cfg(feature = "proxy-transports")]
+    let upstream = inner
+        .upstream
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    #[cfg(feature = "proxy-transports")]
+    let system_client = inner.system_client_mode
+        && matches!(who, Who::Nobody)
+        && upstream.uses_system_for(match &head.target {
+            Target::Forward { url, .. } => url.scheme(),
+            Target::Tunnel { .. } => "https",
+            Target::Direct { .. } => "",
+        });
     let scope = ListenerScope {
         inner: inner.clone(),
-        who: who.clone(),
+        who: (*who).clone(),
+        #[cfg(feature = "proxy-transports")]
+        system_client,
     };
     let decided = Decided {
-        connection_key: inner.refusal_key(&who),
+        connection_key: inner.refusal_key(who),
         browser_addresses: crate::decide::Scope::browser_addresses(&scope),
-        inner: &inner,
-        who: &who,
+        inner: inner.as_ref(),
+        who,
+        #[cfg(not(feature = "proxy-transports"))]
         host: &host,
         bare: &bare,
         port,
+        #[cfg(feature = "proxy-transports")]
+        upstream,
+        #[cfg(feature = "proxy-transports")]
+        system_client,
     };
     let (initiator, nested) = match &head.target {
         Target::Forward { headers, .. } => (initiator(headers), nested(headers)),
@@ -301,7 +336,7 @@ async fn serve_one(
             return;
         }
     };
-    relay(&decided, stream, &head, &addrs, body).await;
+    relay(&decided, stream, head, &addrs, body).await;
 }
 
 /// The origin of the document that sent a plain request: its one `Origin` header (not `null`), else the origin of
@@ -363,10 +398,15 @@ struct Decided<'a> {
     inner: &'a Inner,
     who: &'a Who,
     /// The host as the request wrote it (IPv6 in brackets).
+    #[cfg(not(feature = "proxy-transports"))]
     host: &'a str,
     /// Lower case, no brackets.
     bare: &'a str,
     port: u16,
+    #[cfg(feature = "proxy-transports")]
+    upstream: Arc<crate::Upstream>,
+    #[cfg(feature = "proxy-transports")]
+    system_client: bool,
 }
 
 impl Decided<'_> {
@@ -436,33 +476,54 @@ async fn open(
 }
 
 #[cfg(feature = "proxy-transports")]
+fn proxy_routing_url(target: &Target) -> Result<url::Url, String> {
+    match target {
+        Target::Forward { url, .. } => Ok(url.clone()),
+        Target::Tunnel { host, port } => url::Url::parse(&format!("https://{host}:{port}/"))
+            .map_err(|_| "The proxy address is not valid.".to_owned()),
+        Target::Direct { .. } => Err("The proxy address is not valid.".to_owned()),
+    }
+}
+
+#[cfg(feature = "proxy-transports")]
+fn proxy_system_lookup_url(
+    target: &Target,
+    detected: Option<crate::connect_protocol::Protocol>,
+) -> Result<url::Url, String> {
+    if let (Target::Tunnel { host, port }, Some(crate::connect_protocol::Protocol::Http)) =
+        (target, detected)
+    {
+        return url::Url::parse(&format!("http://{host}:{port}/"))
+            .map_err(|_| "The proxy address is not valid.".to_owned());
+    }
+    proxy_routing_url(target)
+}
+
+#[cfg(feature = "proxy-transports")]
 async fn open(
     decided: &Decided<'_>,
     tunnel: bool,
     public: bool,
     addrs: &[SocketAddr],
     target: &Target,
+    detected: Option<crate::connect_protocol::Protocol>,
 ) -> Result<(crate::stream::Stream, Option<crate::upstream::Route>), String> {
-    if !public {
+    if !public && !decided.system_client {
         return connect(addrs)
             .await
             .map(|s| (Box::new(s) as crate::stream::Stream, None))
             .map_err(|e| unreachable(decided.bare, decided.port, &e));
     }
-    let upstream = decided
-        .inner
-        .upstream
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
-    let url = match target {
-        Target::Forward { url, .. } => url.clone(),
-        _ => url::Url::parse(&format!("https://{}:{}/", decided.host, decided.port))
-            .map_err(|_| "The proxy address is not valid.".to_owned())?,
-    };
-    let opened = tokio::time::timeout(Duration::from_secs(45), upstream.open(&url, tunnel, addrs))
-        .await
-        .unwrap_or(Err(crate::upstream::Error::Timeout));
+    let url = proxy_routing_url(target)?;
+    let system_url = proxy_system_lookup_url(target, detected)?;
+    let opened = tokio::time::timeout(
+        Duration::from_secs(45),
+        decided
+            .upstream
+            .open_with_system_url(&url, &system_url, tunnel, addrs),
+    )
+    .await
+    .unwrap_or(Err(crate::upstream::Error::Timeout));
     match opened {
         Ok(connection) => Ok(connection),
         Err(error) => {
@@ -474,6 +535,60 @@ async fn open(
             );
             Err(error.state().to_owned())
         }
+    }
+}
+
+#[cfg(all(test, feature = "proxy-transports"))]
+mod proxy_lookup_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::{Target, proxy_routing_url, proxy_system_lookup_url};
+    use crate::connect_protocol::Protocol;
+
+    #[test]
+    fn mac_lookup_uses_detected_protocol_at_standard_and_nonstandard_ports() {
+        for (port, detected, expected) in [
+            (80, Protocol::Http, "http"),
+            (8080, Protocol::Http, "http"),
+            (80, Protocol::Https, "https"),
+            (443, Protocol::Https, "https"),
+        ] {
+            let target = Target::Tunnel {
+                host: "public.test".into(),
+                port,
+            };
+            assert_eq!(
+                proxy_system_lookup_url(&target, Some(detected))
+                    .unwrap()
+                    .scheme(),
+                expected
+            );
+            assert_eq!(proxy_routing_url(&target).unwrap().scheme(), "https");
+        }
+        let non_mac = Target::Tunnel {
+            host: "public.test".into(),
+            port: 80,
+        };
+        assert_eq!(
+            proxy_system_lookup_url(&non_mac, None).unwrap().scheme(),
+            "https"
+        );
+    }
+
+    #[test]
+    fn explicit_forward_keeps_its_original_url() {
+        let url = url::Url::parse("http://public.test/path?query=1").unwrap();
+        let target = Target::Forward {
+            raw_host: "public.test".into(),
+            url: url.clone(),
+            method: "GET".into(),
+            version: "HTTP/1.1".into(),
+            headers: Vec::new(),
+        };
+        assert_eq!(
+            proxy_system_lookup_url(&target, Some(Protocol::Https)).unwrap(),
+            url
+        );
+        assert_eq!(proxy_routing_url(&target).unwrap(), url);
     }
 }
 
@@ -491,7 +606,11 @@ async fn relay(
         .iter()
         .all(|a| crate::ip::classify(a.ip()).is_public());
     // Who may open a WebSocket here: pages on this computer, or (the user's local-network page) that host only.
-    let rule = if decided.browser_addresses {
+    #[cfg(feature = "proxy-transports")]
+    let system_client = decided.system_client;
+    #[cfg(not(feature = "proxy-transports"))]
+    let system_client = false;
+    let rule = if decided.browser_addresses || system_client {
         None
     } else if local {
         Some(crate::ws_origin::Rule::ThisComputer)
@@ -508,13 +627,41 @@ async fn relay(
         return;
     }
     let tunnel = matches!(head.target, Target::Tunnel { .. });
+    #[cfg(feature = "proxy-transports")]
+    let inspection = if cfg!(target_os = "macos")
+        && public
+        && tunnel
+        && matches!(decided.who, Who::Store(_, _))
+        && decided.upstream.uses_system_for("https")
+    {
+        match crate::connect_tunnel::inspect(&mut stream, &head.rest, HEAD_LIMIT).await {
+            Ok(value) => Some(value),
+            Err(()) => return,
+        }
+    } else {
+        None
+    };
+    #[cfg(feature = "proxy-transports")]
+    let acknowledged = inspection.is_some_and(|value| value.acknowledged);
     #[cfg(not(feature = "proxy-transports"))]
     let opened = open(decided, tunnel, public, addrs).await;
     #[cfg(feature = "proxy-transports")]
-    let opened = open(decided, tunnel, public, addrs, &head.target).await;
-    let (mut upstream, route) = match opened {
+    let opened = open(
+        decided,
+        tunnel,
+        public,
+        addrs,
+        &head.target,
+        inspection.map(|value| value.protocol),
+    )
+    .await;
+    let (upstream, route) = match opened {
         Ok(open) => open,
         Err(text) => {
+            #[cfg(feature = "proxy-transports")]
+            if acknowledged {
+                return;
+            }
             answer(&mut stream, "502 Bad Gateway", &text).await;
             return;
         }
@@ -523,68 +670,66 @@ async fn relay(
     match &head.target {
         Target::Direct { .. } => {}
         Target::Tunnel { .. } => {
-            // One target by nature: the checked addresses (or the proxy's tunnel to a checked address), connected above.
-            if stream
-                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                .await
-                .is_err()
-            {
-                return;
-            }
-            let first = if let Some(rule) = rule {
-                match tokio::time::timeout(
-                    HEAD_LIMIT,
-                    crate::ws_origin::tunnel_start(&mut stream, head.rest.clone(), rule),
-                )
-                .await
-                {
-                    Ok(Ok(first)) => first,
-                    Ok(Err(reason)) => {
-                        answer(&mut stream, "403 Forbidden", &refuse(&reason)).await;
-                        return;
-                    }
-                    Err(_) => return,
-                }
-            } else {
-                head.rest.clone()
-            };
-            if upstream.write_all(&first).await.is_err() {
-                return;
-            }
-            let _ = copy_bidirectional(&mut stream, &mut upstream).await;
-        }
-        Target::Forward { headers, .. } => {
-            let upgrade = headers
-                .iter()
-                .any(|(n, _)| n.eq_ignore_ascii_case("upgrade"));
-            let request = match forward_head(&head.target, route.as_ref(), addrs) {
-                Ok(request) => request,
-                Err(reason) => {
-                    answer(&mut stream, "502 Bad Gateway", &reason).await;
-                    return;
-                }
-            };
-            crate::forward::exchange(
+            relay_tunnel(
+                decided,
                 stream,
                 upstream,
-                &request,
-                &head.rest,
-                body,
-                upgrade,
-                route.is_some(),
+                head,
+                rule,
                 #[cfg(feature = "proxy-transports")]
-                |reason| {
-                    decided.inner.record(
-                        decided.inner.refusal_key(decided.who).as_deref(),
-                        decided.bare,
-                        decided.port,
-                        reason,
-                    );
-                },
+                acknowledged,
             )
             .await;
         }
+        Target::Forward { .. } => {
+            relay_forward(decided, stream, upstream, head, addrs, route, body).await;
+        }
     }
+}
+
+async fn relay_forward(
+    decided: &Decided<'_>,
+    mut stream: TcpStream,
+    upstream: crate::stream::Stream,
+    head: &head::Head,
+    addrs: &[SocketAddr],
+    route: Option<crate::upstream::Route>,
+    body: u64,
+) {
+    #[cfg(not(feature = "proxy-transports"))]
+    let _ = decided;
+    let Target::Forward { headers, .. } = &head.target else {
+        return;
+    };
+    let upgrade = headers
+        .iter()
+        .any(|(n, _)| n.eq_ignore_ascii_case("upgrade"));
+    let request = match forward_head(&head.target, route.as_ref(), addrs) {
+        Ok(request) => request,
+        Err(reason) => {
+            answer(&mut stream, "502 Bad Gateway", &reason).await;
+            return;
+        }
+    };
+    crate::forward::exchange(
+        stream,
+        upstream,
+        &request,
+        &head.rest,
+        body,
+        upgrade,
+        route.is_some(),
+        #[cfg(feature = "proxy-transports")]
+        |reason| {
+            decided.inner.record(
+                decided.inner.refusal_key(decided.who).as_deref(),
+                decided.bare,
+                decided.port,
+                reason,
+            );
+        },
+    )
+    .await;
 }
 
 /// The HTTP head for a direct or proxied request. Host is retained; every proxy target is a checked address.

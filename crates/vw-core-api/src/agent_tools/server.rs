@@ -297,6 +297,10 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
             log(tool, None, &outcome);
             outcome
         }
+        #[cfg(any(unix, windows))]
+        Some(Holder::Hook) if tool == names::NATIVE_FILE_IDENTITY => {
+            Ok(serde_json::json!({"allowed": native_file_identity(&shared, &request.args)}))
+        }
         Some(Holder::Hook) if tool == names::CONNECTOR_CHECK => {
             let name = request
                 .args
@@ -320,6 +324,31 @@ async fn answer(shared: &Weak<Shared>, request: Request) -> Answer {
     match outcome {
         Ok(value) => Answer::Ok(value),
         Err(reason) => Answer::Error(reason),
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn native_file_identity(shared: &Shared, args: &Value) -> bool {
+    let Some((cwd, path)) = args["cwd"]
+        .as_str()
+        .zip(args["path"].as_str())
+        .filter(|(cwd, path)| !cwd.is_empty() && !path.is_empty())
+    else {
+        return false;
+    };
+    let Ok(policy) =
+        crate::read_exclusions::ReadExclusions::for_chat(shared, std::path::Path::new(cwd))
+    else {
+        return false;
+    };
+    if args["search"] == true {
+        policy
+            .check_native_search(std::path::Path::new(path))
+            .is_ok()
+    } else {
+        policy
+            .check_native_alias(std::path::Path::new(path))
+            .is_ok()
     }
 }
 

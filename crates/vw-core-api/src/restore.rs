@@ -162,7 +162,7 @@ impl Core {
         method: &str,
         params: &Value,
     ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-        if method == "runtime/read"
+        if matches!(method, "runtime/read" | "config/reload")
             && let Some(id) = params["sessionId"].as_str()
         {
             Some(self.shared.access.lock_restore(id).await)
@@ -305,13 +305,14 @@ impl Core {
         }
         restore.verified = true;
         sessions::observe(&self.shared, method, &params, &reply.result).await?;
-        let runtime = Box::pin(crate::model_choices::restore(
+        let mut runtime = Box::pin(crate::model_choices::restore(
             &self.shared,
             &id,
             reply.result["runtime"].clone(),
             restore.model.clone(),
         ))
         .await;
+        crate::model_choices::certify(&self.shared, &id, &mut runtime);
         // Publish the verified runtime even when Vibe only returns it in the switch's reply.
         let applied = self.shared.store.apply(vw_session::Notification::new(
             "runtime/updated",

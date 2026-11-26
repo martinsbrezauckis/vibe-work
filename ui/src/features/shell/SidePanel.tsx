@@ -76,6 +76,32 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = tabStrip.current;
+    const edge = element?.parentElement;
+    if (!element || !edge) return;
+    const update = () => {
+      const max = Math.max(0, element.scrollWidth - element.clientWidth);
+      edge.classList.toggle("has-scroll-left", element.scrollLeft > 1);
+      edge.classList.toggle("has-scroll-right", element.scrollLeft < max - 1);
+    };
+    const resize = new ResizeObserver(update);
+    const observeChildren = () => {
+      resize.disconnect();
+      resize.observe(element);
+      for (const child of element.children) resize.observe(child);
+      update();
+    };
+    const mutations = new MutationObserver(observeChildren);
+    mutations.observe(element, { childList: true, subtree: true });
+    element.addEventListener("scroll", update, { passive: true });
+    observeChildren();
+    return () => {
+      element.removeEventListener("scroll", update);
+      mutations.disconnect();
+      resize.disconnect();
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const element = tabStrip.current;
     if (!element || active === null) return;
     // Scroll the whole group so its separate close control stays beside the selected tab.
     const reveal = () => {
@@ -143,56 +169,58 @@ export function SidePanel({ onDragging }: { onDragging: (dragging: boolean) => v
         onKeyDown={onKey}
       />
       <div className="panel-tabs">
-        <Tabs
-          data-testid="shell.side-panel-ptabs"
-          variant="pill"
+        <div className="panel-tab-scroll">
+          <Tabs
+            data-testid="shell.side-panel-ptabs"
+            variant="pill"
 
-          aria-label="Side panel tabs"
-          ref={tabStrip}
-        >
-          {[...panel.tabs]
-            .sort((a, b) => (a === "git" ? -1 : b === "git" ? 1 : 0))
-            .filter((k) => k !== "file" || !separate || files === null || sessionId === null)
-            .map((kind) => (
-              <span
-                data-item-id={kind}
-                key={kind}
-                className="ptab-group"
-                data-selected={kind === active}
-              >
-                <Tab
-                  data-testid="shell.side-panel-open-tab"
-                  type="button"
-
-                  aria-selected={kind === active}
-                  data-tab={kind}
-                  title={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
-                  aria-label={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
-                  onClick={() => {
-                    shell.actions.openTab(kind);
-                  }}
+            aria-label="Side panel tabs"
+            ref={tabStrip}
+          >
+            {[...panel.tabs]
+              .sort((a, b) => (a === "git" ? -1 : b === "git" ? 1 : 0))
+              .filter((k) => k !== "file" || !separate || files === null || sessionId === null)
+              .map((kind) => (
+                <span
+                  data-item-id={kind}
+                  key={kind}
+                  className="ptab-group"
+                  data-selected={kind === active}
                 >
-                  <Icon name={TAB_ICON[kind]} size={14} />
-                  <span className="ptab-label">{TAB_META[kind].label}</span>
-                </Tab>
-                <TabClose
-                  data-testid="shell.side-panel-close-tab"
-                  type="button"
+                  <Tab
+                    data-testid="shell.side-panel-open-tab"
+                    type="button"
 
-                  aria-label={`Close ${TAB_META[kind].label} tab`}
-                  title={`Close ${TAB_META[kind].label} tab`}
-                  onClick={() => {
-                    shell.actions.closeTab(kind);
-                  }}
-                >
-                  <Icon name="x" size={12} />
-                </TabClose>
-              </span>
-            ))}
-          {files !== null && sessionId !== null && panel.tabs.includes("file") && (
-            <FilePanelTabs files={files} sessionId={sessionId} active={active === "file"} />
-          )}
-        </Tabs>
+                    aria-selected={kind === active}
+                    data-tab={kind}
+                    title={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
+                    aria-label={`Show ${TAB_META[kind].label} tab${kind === "terminal" ? ` (${formatKeys("Mod+`")})` : ""}`}
+                    onClick={() => {
+                      shell.actions.openTab(kind);
+                    }}
+                  >
+                    <Icon name={TAB_ICON[kind]} size={14} />
+                    <span className="ptab-label">{TAB_META[kind].label}</span>
+                  </Tab>
+                  <TabClose
+                    data-testid="shell.side-panel-close-tab"
+                    type="button"
+
+                    aria-label={`Close ${TAB_META[kind].label} tab`}
+                    title={`Close ${TAB_META[kind].label} tab`}
+                    onClick={() => {
+                      shell.actions.closeTab(kind);
+                    }}
+                  >
+                    <Icon name="x" size={12} />
+                  </TabClose>
+                </span>
+              ))}
+            {files !== null && sessionId !== null && panel.tabs.includes("file") && (
+              <FilePanelTabs files={files} sessionId={sessionId} active={active === "file"} />
+            )}
+          </Tabs>
+        </div>
         <span className="end">
           {remaining !== undefined && (
             <IconButton

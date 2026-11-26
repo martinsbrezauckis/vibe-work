@@ -28,6 +28,88 @@ pub(crate) fn error(status: StatusCode, kind: &str, message: &str) -> Response {
         .into_response()
 }
 
+/// Upstream JSON may describe its own error, but may not impersonate a relay error.
+fn neutralize_upstream_type(body: &[u8]) -> Option<Vec<u8>> {
+    let mut value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let kind = value.get("error")?.get("type")?.as_str()?;
+    if !kind.starts_with("vibe_work_") {
+        return None;
+    }
+    let renamed = format!("upstream_{kind}");
+    value
+        .get_mut("error")?
+        .as_object_mut()?
+        .insert("type".to_owned(), serde_json::Value::String(renamed));
+    serde_json::to_vec(&value).ok()
+}
+
+/// Error bodies are small JSON answers; cap the read before inspecting them.
+async fn read_upstream_error(
+    response: reqwest::Response,
+    deadline: Option<tokio::time::Instant>,
+    idle_limit: std::time::Duration,
+) -> Option<Vec<u8>> {
+    const MAX_ERROR_BODY: usize = 1 << 20;
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    loop {
+        let next = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(deadline, stream.next())
+                .await
+                .ok()?
+        } else {
+            tokio::time::timeout(idle_limit, stream.next()).await.ok()?
+        };
+        let Some(chunk) = next else {
+            return Some(body);
+        };
+        let chunk = chunk.ok()?;
+        if chunk.len() > MAX_ERROR_BODY.saturating_sub(body.len()) {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+}
+
+async fn relay_upstream_error(
+    mut out: axum::http::response::Builder,
+    response: reqwest::Response,
+    deadline: Option<tokio::time::Instant>,
+    idle_limit: std::time::Duration,
+) -> Response {
+    let Some(bytes) = read_upstream_error(response, deadline, idle_limit).await else {
+        if deadline.is_some() {
+            return compaction_timeout();
+        }
+        return error(
+            StatusCode::BAD_GATEWAY,
+            "vibe_work_upstream_unreachable",
+            "Mistral's answer could not be passed on.",
+        );
+    };
+    let rewritten = neutralize_upstream_type(&bytes);
+    let body = rewritten.as_deref().unwrap_or(&bytes);
+    if rewritten.is_some()
+        && let Some(headers) = out.headers_mut()
+    {
+        headers.insert(CONTENT_LENGTH, HeaderValue::from(body.len()));
+    }
+    out.body(Body::from(body.to_vec()))
+        .unwrap_or_else(|_| unreachable!())
+}
+
+fn output_headers(response: &reqwest::Response) -> axum::http::response::Builder {
+    let mut out = Response::builder().status(response.status());
+    if let Some(out_headers) = out.headers_mut() {
+        for (name, value) in response.headers() {
+            if !dropped(name, false) {
+                out_headers.append(name.clone(), value.clone());
+            }
+        }
+    }
+    out
+}
+
 /// The 422 keeps Vibe's retry policy from repeating a slow compaction for several minutes.
 fn compaction_timeout() -> Response {
     error(
@@ -491,13 +573,15 @@ async fn relay_response(
             ),
         );
     }
-    let mut out = Response::builder().status(response.status());
-    if let Some(out_headers) = out.headers_mut() {
-        for (name, value) in response.headers() {
-            if !dropped(name, false) {
-                out_headers.append(name.clone(), value.clone());
-            }
-        }
+    let out = output_headers(&response);
+    if !upstream_status.is_success() {
+        return relay_upstream_error(
+            out,
+            response,
+            if compaction { deadline } else { None },
+            shared.config.image_deadline,
+        )
+        .await;
     }
     // A nonstreaming compaction can receive headers and then stall in the body. Return only a
     // complete success or an explicit failure, so Vibe can release its session lock.

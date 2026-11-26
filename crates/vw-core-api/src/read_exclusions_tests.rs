@@ -1,6 +1,62 @@
 //! Synthetic vault locations for the shared read policy and both byte loaders. No real profile is inspected.
 use super::*;
 
+#[cfg(unix)]
+#[path = "read_exclusions_realistic_tests.rs"]
+mod realistic;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn another_hard_link_path_is_allowed_only_for_the_opened_identity() {
+    let (root, policy, paths) = fixture("other-link-path");
+    let original = root.join("ordinary.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&original, "ordinary").unwrap();
+    let opened = File::open(&original).unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    assert_ne!(vw_platform::final_path::final_path(&opened).unwrap(), alias);
+    assert_eq!(policy.check_opened(&opened, &alias, None), Ok(()));
+    let mut bytes = String::new();
+    std::io::Read::read_to_string(&mut &opened, &mut bytes).unwrap();
+    assert_eq!(bytes, "ordinary");
+
+    let replacement = root.join("replacement.txt");
+    std::fs::write(&replacement, "replacement").unwrap();
+    assert!(policy.check_opened(&opened, &replacement, None).is_err());
+    assert!(policy.check_opened(&opened, Path::new(""), None).is_err());
+    assert!(
+        policy
+            .check_opened(&opened, &root.join("missing"), None)
+            .is_err()
+    );
+    assert_eq!(
+        policy.check_opened(&File::open(&paths[0]).unwrap(), &alias, None),
+        Err(PROTECTED.into())
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[path = "read_exclusions_windows_tests.rs"]
+mod windows;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_expired_budget_refuses_another_hard_link_path() {
+    let (root, policy, _) = fixture("other-link-expired");
+    let original = root.join("ordinary.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&original, "ordinary").unwrap();
+    let opened = File::open(&original).unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    assert_ne!(vw_platform::final_path::final_path(&opened).unwrap(), alias);
+    assert_eq!(
+        policy.check_opened(&opened, &alias, Some(policy.now())),
+        Err(PROTECTED.into())
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
     let (root, policy, _) = fixture("deadline");
@@ -13,18 +69,6 @@ fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
     let alias = root.join("alias.txt");
     std::fs::hard_link(&ordinary, &alias).unwrap();
     let refusal = policy.check_opened(&File::open(&alias).unwrap(), &alias, deadline);
-    #[cfg(target_os = "macos")]
-    {
-        // F_GETPATH can report another hard link's path. check_opened checks that location before
-        // its expired identity budget, so either exact refusal is safe on macOS.
-        let location_unconfirmed =
-            "The file's location could not be confirmed. Choose the file again.";
-        assert!(
-            matches!(&refusal, Err(reason) if reason == PROTECTED || reason == location_unconfirmed),
-            "an expired budget cleared a multiply linked identity: {refusal:?}"
-        );
-    }
-    #[cfg(not(target_os = "macos"))]
     assert_eq!(
         refusal,
         Err(PROTECTED.into()),
@@ -35,8 +79,8 @@ fn an_expired_identity_deadline_refuses_hard_links_but_allows_single_links() {
 
 #[test]
 fn a_large_protected_tree_refuses_uncleared_hard_links_but_allows_single_links() {
-    let (root, policy, _) = fixture("bounded");
-    large_protected_tree(&root);
+    let (root, mut policy, _) = fixture("bounded");
+    large_protected_tree(&root, &mut policy);
     let ordinary = root.join("ordinary.txt");
     std::fs::write(&ordinary, "ordinary").unwrap();
     policy
@@ -52,7 +96,8 @@ fn a_large_protected_tree_refuses_uncleared_hard_links_but_allows_single_links()
     std::fs::remove_dir_all(root).unwrap();
 }
 
-pub(crate) fn large_protected_tree(root: &Path) {
+pub(crate) fn large_protected_tree(root: &Path, policy: &mut ReadExclusions) {
+    policy.entry_limit = Some(4096);
     let cache = root.join("app-data/cache");
     std::fs::create_dir_all(&cache).unwrap();
     // Empty directories count as work too, even though none supplies a file identity.
@@ -153,25 +198,220 @@ fn hard_links_to_every_protected_location_are_refused_but_ordinary_links_are_all
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn native_alias_uses_the_same_roots_and_allows_safe_and_single_links() {
+    let (root, policy, paths) = fixture("native-alias-roots");
+    for (index, protected) in paths.iter().enumerate() {
+        let alias = root.join(format!("native-alias-{index}.txt"));
+        std::fs::hard_link(protected, &alias).unwrap();
+        assert_eq!(policy.check_native_alias(&alias), Err(PROTECTED.into()));
+    }
+    let safe = root.join("safe.txt");
+    let safe_alias = root.join("safe-alias.txt");
+    std::fs::write(&safe, "ordinary").unwrap();
+    assert_eq!(policy.check_native_alias(&safe), Ok(()));
+    std::fs::hard_link(&safe, &safe_alias).unwrap();
+    assert_eq!(policy.check_native_alias(&safe_alias), Ok(()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn native_alias_budget_exhaustion_refuses_but_single_link_skips_the_walk() {
+    let (root, mut policy, _) = fixture("native-alias-budget");
+    policy.entry_limit = Some(3);
+    let safe = root.join("safe.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&safe, "ordinary").unwrap();
+    assert_eq!(
+        policy.check_native_alias(&root.join("removed-after-hook.txt")),
+        Err(PROTECTED.into())
+    );
+    assert_eq!(policy.check_native_alias(&safe), Ok(()));
+    std::fs::hard_link(&safe, &alias).unwrap();
+    assert_eq!(policy.check_native_alias(&alias), Err(PROTECTED.into()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn native_alias_walk_is_bounded_on_a_large_protected_tree() {
+    let (root, mut policy, _) = fixture("native-alias-performance");
+    policy.clock = None;
+    let cache = root.join("app-data/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    for index in 0..10_000 {
+        std::fs::write(cache.join(index.to_string()), b"x").unwrap();
+    }
+    let safe = root.join("safe.txt");
+    let alias = root.join("alias.txt");
+    std::fs::write(&safe, b"ordinary").unwrap();
+    std::fs::hard_link(&safe, &alias).unwrap();
+    let started = Instant::now();
+    let answer = policy.check_native_alias(&alias);
+    let elapsed = started.elapsed();
+    println!("native alias scan: 10000 single-link entries in {elapsed:?}, decision={answer:?}");
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "walk exceeded the 3 s budget plus scheduler margin"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn native_grep_directory_refuses_protected_alias_but_allows_safe_alias() {
+    let (root, policy, paths) = fixture("native-grep-directory");
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let safe = root.join("safe.txt");
+    std::fs::write(&safe, "ordinary").unwrap();
+    std::fs::hard_link(&safe, project.join("safe-alias.txt")).unwrap();
+    assert_eq!(policy.check_native_search(&project), Ok(()));
+    std::fs::hard_link(&paths[0], project.join("protected-alias.txt")).unwrap();
+    assert_eq!(policy.check_native_search(&project), Err(PROTECTED.into()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn native_grep_directory_budget_exhaustion_refuses() {
+    let (root, mut policy, _) = fixture("native-grep-budget");
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let safe = root.join("safe.txt");
+    std::fs::write(&safe, "ordinary").unwrap();
+    std::fs::hard_link(&safe, project.join("safe-alias.txt")).unwrap();
+    policy.entry_limit = Some(1);
+    assert_eq!(policy.check_native_search(&project), Err(PROTECTED.into()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn native_identity_checks_exclusively_held_files_without_a_false_refusal() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let (root, policy, paths) = fixture("native-exclusive-handles");
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let safe = project.join("safe.txt");
+    let safe_alias = project.join("safe-alias.txt");
+    std::fs::write(&safe, "ordinary").unwrap();
+    std::fs::hard_link(&safe, &safe_alias).unwrap();
+    let held_safe = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&safe)
+        .unwrap();
+    assert_eq!(policy.check_native_alias(&safe), Ok(()));
+    assert_eq!(policy.check_native_alias(&safe_alias), Ok(()));
+    assert_eq!(policy.check_native_search(&project), Ok(()));
+    drop(held_safe);
+
+    let protected_alias = project.join("protected-alias.txt");
+    std::fs::hard_link(&paths[0], &protected_alias).unwrap();
+    let held_protected = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&paths[0])
+        .unwrap();
+    assert_eq!(policy.check_native_alias(&safe_alias), Ok(()));
+    assert_eq!(
+        policy.check_native_alias(&protected_alias),
+        Err(PROTECTED.into())
+    );
+    assert_eq!(policy.check_native_search(&project), Err(PROTECTED.into()));
+    drop(held_protected);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "measured native NTFS directory grep benchmark"]
+fn native_grep_twenty_thousand_hard_links_is_bounded() {
+    let (root, mut policy, _) = fixture("native-grep-realistic");
+    policy.clock = None;
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    for group in 0..20 {
+        let safe = project.join(format!("safe-{group}.txt"));
+        std::fs::write(&safe, "ordinary").unwrap();
+        for index in 0..999 {
+            std::fs::hard_link(&safe, project.join(format!("alias-{group}-{index}.txt"))).unwrap();
+        }
+    }
+    let start = Instant::now();
+    let result = policy.check_native_search(&project);
+    println!(
+        "native grep: 20000 NTFS files with hard links in {:?}, decision={result:?}",
+        start.elapsed()
+    );
+    assert_eq!(result, Ok(()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "measured native NTFS plain directory grep benchmark"]
+fn native_grep_two_thousand_plain_files_timing() {
+    let (root, mut policy, _) = fixture("native-grep-plain-2000");
+    policy.clock = None;
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    for index in 0..2_000 {
+        std::fs::write(project.join(format!("file-{index}.txt")), b"ordinary").unwrap();
+    }
+    let start = Instant::now();
+    let result = policy.check_native_search(&project);
+    println!(
+        "native grep: 2000 plain NTFS files in {:?}, decision={result:?}",
+        start.elapsed()
+    );
+    assert_eq!(result, Ok(()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "measured native NTFS node_modules grep benchmark"]
+fn native_grep_real_node_modules_timing() {
+    let tree = PathBuf::from(
+        std::env::var_os("VW_NATIVE_GREP_TREE").expect("set a real Windows node_modules tree"),
+    );
+    let count = walkdir::WalkDir::new(&tree)
+        .follow_links(false)
+        .follow_root_links(false)
+        .into_iter()
+        .count();
+    let (root, mut policy, _) = fixture("native-grep-node-modules");
+    policy.clock = None;
+    let start = Instant::now();
+    let result = policy.check_native_search(&tree);
+    println!(
+        "native grep: real node_modules entries={count} in {:?}, decision={result:?}",
+        start.elapsed()
+    );
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(result, Ok(()));
+}
+
+// Windows can still identify an exclusively held file through open_metadata; its counterpart is
+// windows::windows_protected_scan_uses_metadata_for_an_exclusively_held_file.
+#[cfg(unix)]
 #[test]
 fn an_unavailable_protected_identity_refuses_hard_links_but_does_not_scan_single_links() {
+    use std::os::unix::fs::PermissionsExt;
+
     let (root, policy, paths) = fixture("unavailable");
     let ordinary = root.join("ordinary.txt");
     std::fs::write(&ordinary, "ordinary").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&paths[0], std::fs::Permissions::from_mode(0o000)).unwrap();
-    }
-    #[cfg(windows)]
-    let locked = {
-        use std::os::windows::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&paths[0])
-            .unwrap()
-    };
+    std::fs::set_permissions(
+        paths[0].parent().unwrap(),
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
     policy
         .check_opened(&File::open(&ordinary).unwrap(), &ordinary, None)
         .unwrap();
@@ -180,32 +420,12 @@ fn an_unavailable_protected_identity_refuses_hard_links_but_does_not_scan_single
     let error = policy
         .check_opened(&File::open(&alias).unwrap(), &alias, None)
         .unwrap_err();
-    // F_GETPATH may name a different hard link on macOS, producing the safe location refusal.
-    // The single-link check above must still succeed; this alias must always be refused.
-    #[cfg(target_os = "macos")]
-    {
-        assert!(
-            error.contains("Choose the file again") || error.contains("vault or app state"),
-            "{error}"
-        );
-        // Also exercise the unavailable-identity walk when the OS path guard refused first.
-        let (identity, links) =
-            vw_platform::final_path::identity(&File::open(&alias).unwrap()).unwrap();
-        assert!(links > 1);
-        assert_eq!(policy.check_hard_links(identity, None), Err(()));
-    }
-    #[cfg(not(target_os = "macos"))]
-    assert!(
-        error.contains("vault or app state") && error.contains("Choose a file"),
-        "{error}"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&paths[0], std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    #[cfg(windows)]
-    drop(locked);
+    assert_eq!(error, PROTECTED);
+    std::fs::set_permissions(
+        paths[0].parent().unwrap(),
+        std::fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -246,7 +466,7 @@ pub(crate) fn fixture(name: &str) -> (PathBuf, ReadExclusions, Vec<PathBuf>) {
 }
 
 /// Count the scan's per-root/entry/identity budget checks with a fixed monotonic clock. Production keeps its
-/// real 100 ms deadline; these policy tests measure traversal work even when the scheduler suspends the process.
+/// real platform deadline; these policy tests measure traversal work even when the scheduler suspends the process.
 fn count_scan_work(policy: &mut ReadExclusions) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
     let work = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = work.clone();

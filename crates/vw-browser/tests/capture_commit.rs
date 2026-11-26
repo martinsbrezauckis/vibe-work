@@ -6,9 +6,58 @@ mod support;
 
 use serde_json::{Value, json};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use support::{NoFetch, Rig, SESSION};
-use vw_browser::capture::{Target, parse};
+use vw_browser::capture::{Fetch, FetchFuture, Target, parse};
 use vw_browser::{ActError, Actor, Outcome};
+
+struct DeadProxy(AtomicBool);
+impl Fetch for DeadProxy {
+    fn fetch<'a>(&'a self, _: &'a str, _: &'a str, _: u64) -> FetchFuture<'a> {
+        Box::pin(async move {
+            self.0.store(true, Ordering::SeqCst);
+            Err("refused: The proxy could not be reached.".to_owned())
+        })
+    }
+
+    fn capture_refusal(&self) -> Option<String> {
+        self.0
+            .load(Ordering::SeqCst)
+            .then(|| "refused: The proxy could not be reached.".to_owned())
+    }
+}
+
+#[tokio::test]
+async fn a_dead_selected_proxy_refuses_the_whole_media_capture() {
+    let rig = Rig::new().await;
+    rig.engine
+        .eval("document.head.innerHTML += '<link rel=icon href=https://public.test/media.png>';")
+        .await;
+    let fetch = DeadProxy(AtomicBool::new(false));
+    let result = rig
+        .browser
+        .capture(
+            SESSION,
+            parse(&json!({"what":"media"})).unwrap(),
+            Actor::User,
+            Target {
+                session_folder: &rig.dir,
+                fetch: &fetch,
+            },
+        )
+        .await;
+    assert!(
+        fetch.0.load(Ordering::SeqCst),
+        "the media fixture must attempt the fetch"
+    );
+    let error =
+        result.expect_err("a dead selected proxy cannot leave a successful empty media capture");
+    assert_eq!(error.outcome, Outcome::Refused);
+    assert!(
+        error.text.contains("proxy could not be reached"),
+        "{error:?}"
+    );
+}
 
 async fn capture(rig: &Rig, what: &str) -> Result<Value, ActError> {
     rig.browser

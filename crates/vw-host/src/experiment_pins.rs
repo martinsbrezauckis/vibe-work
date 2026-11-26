@@ -12,7 +12,8 @@ use toml::{Table, Value};
 use toml_edit::{DocumentMut, value};
 
 /// The keys pinned off (top level of Vibe's config).
-pub const KEYS: [&str; 4] = vw_supervisor::EXPERIMENT_CONFIG_KEYS;
+pub const KEYS: [&str; vw_supervisor::EXPERIMENT_CONFIG_KEYS.len()] =
+    vw_supervisor::EXPERIMENT_CONFIG_KEYS;
 
 /// Stable features disabled until the app offers them through its own controls.
 pub const STABLE_KEYS: [&str; 1] = vw_supervisor::STABLE_CONFIG_KEYS;
@@ -25,7 +26,8 @@ const OLD_NOTE: &str =
 const OLD_COW: &str = "experimental_worktree_copy_on_write";
 const COW: &str = "worktree_copy_on_write";
 const REGISTRY: &str = "experimental_enable_registry_skills";
-const MODEL_CATALOG: &str = "experimental_enable_model_catalog";
+const MODEL_CATALOG: &str = "enable_model_catalog";
+const OLD_MODEL_CATALOG: &str = "experimental_enable_model_catalog";
 // App-owned state in the managed home, outside the config Vibe rewrites; removed with that home.
 const REGISTRY_MIGRATION: &str = ".vw-registry-skills-default-v1";
 const CATALOG_MIGRATION: &str = ".vw-model-catalog-default-v1";
@@ -111,6 +113,21 @@ fn migrate_approval_policy(doc: &mut DocumentMut, expected: &mut Table) {
     }
 }
 
+/// Preserve a saved 3.1.4 catalog choice and its comments; the stable key wins if both exist.
+fn migrate_model_catalog_key(doc: &mut DocumentMut, expected: &mut Table) {
+    if let Some((old_key, old)) = doc.as_table_mut().remove_entry(OLD_MODEL_CATALOG)
+        && !doc.contains_key(MODEL_CATALOG)
+    {
+        let mut key = toml_edit::Key::new(MODEL_CATALOG);
+        *key.leaf_decor_mut() = old_key.leaf_decor().clone();
+        *key.dotted_decor_mut() = old_key.dotted_decor().clone();
+        doc.as_table_mut().insert_formatted(&key, old);
+    }
+    if let Some(old) = expected.remove(OLD_MODEL_CATALOG) {
+        expected.entry(MODEL_CATALOG).or_insert(old);
+    }
+}
+
 fn edited(
     existing: &str,
     migrate_registry: bool,
@@ -159,19 +176,15 @@ fn edited(
     // This key was removed in 3.1.4 and strict config validation rejects it.
     doc.remove("experimental_enable_local_projects");
     expected.remove("experimental_enable_local_projects");
+    migrate_model_catalog_key(&mut doc, &mut expected);
     if !doc.contains_key(REGISTRY)
         || (migrate_registry && expected.get(REGISTRY).and_then(Value::as_bool) == Some(false))
     {
         enable(&mut doc, &mut expected, REGISTRY);
     }
-    // On the first launch with this default, replace a missing or disabled catalog choice.
-    // The marker makes later changes to this key the person's own choice.
-    if migrate_catalog
-        && matches!(
-            expected.get(MODEL_CATALOG),
-            None | Some(Value::Boolean(false))
-        )
-    {
+    // Enable the catalog on a first launch only when no catalog choice was saved.
+    // An explicit 3.1.4 false remains the person's choice even without our marker.
+    if migrate_catalog && !expected.contains_key(MODEL_CATALOG) {
         enable(&mut doc, &mut expected, MODEL_CATALOG);
     }
     for key in KEYS.into_iter().chain(STABLE_KEYS) {
@@ -410,5 +423,31 @@ mod vibe_314_policy_tests {
             parsed["experimental_local_runtime_session_api"].as_bool(),
             Some(false)
         );
+    }
+}
+
+#[cfg(test)]
+mod vibe_315_catalog_tests {
+    use super::edited;
+
+    #[test]
+    fn a_saved_stable_catalog_off_choice_survives_a_missing_default_marker() {
+        let (updated, outcome) = super::with_pins_off("enable_model_catalog = false\n");
+        assert!(outcome.skipped.is_none(), "{outcome:?}");
+        let config: toml::Table = updated.unwrap().parse().unwrap();
+        assert_eq!(config["enable_model_catalog"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn stable_catalog_key_wins_over_a_leftover_314_key() {
+        let input = "experimental_enable_model_catalog = true # old\nenable_model_catalog = false # person\nactive_model = 'my-model'\n";
+        let (updated, outcome) = edited(input, false, false);
+        assert!(outcome.skipped.is_none(), "{outcome:?}");
+        let updated = updated.unwrap();
+        let config: toml::Table = updated.parse().unwrap();
+        assert!(!config.contains_key("experimental_enable_model_catalog"));
+        assert_eq!(config["enable_model_catalog"].as_bool(), Some(false));
+        assert_eq!(config["active_model"].as_str(), Some("my-model"));
+        assert!(updated.contains("# person"));
     }
 }

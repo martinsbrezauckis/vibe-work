@@ -2,7 +2,9 @@
 //! Policy integration is covered separately; this private module cannot provide a production bypass API.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 struct Resolver {
     values: Vec<String>,
@@ -12,6 +14,14 @@ impl ProxyResolver for Resolver {
     fn resolve(&self, _: &str) -> Result<Vec<String>, Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.values.clone())
+    }
+}
+
+struct TrackingResolver(Mutex<Vec<String>>);
+impl ProxyResolver for TrackingResolver {
+    fn resolve(&self, url: &str) -> Result<Vec<String>, Error> {
+        self.0.lock().unwrap().push(url.to_owned());
+        Ok(vec!["direct://".into()])
     }
 }
 #[tokio::test]
@@ -30,11 +40,13 @@ async fn direct_fallback_is_explicit_and_stops_the_list() {
         calls: AtomicUsize::new(0),
     });
     let upstream = Upstream::none().with_resolver(resolver);
+    assert_eq!(upstream.last_route(), None);
     let url = url::Url::parse("https://allowed.test/").unwrap();
     let _opened = upstream
         .open(&url, true, &[direct.local_addr().unwrap()])
         .await
         .unwrap();
+    assert_eq!(upstream.last_route(), Some(UsedRoute::Direct));
     tokio::time::timeout(Duration::from_secs(1), direct.accept())
         .await
         .unwrap()
@@ -44,6 +56,126 @@ async fn direct_fallback_is_explicit_and_stops_the_list() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn successful_native_proxy_is_reported_without_its_address() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let proxy = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        loop {
+            let mut byte = [0];
+            socket.read_exact(&mut byte).await.unwrap();
+            request.push(byte[0]);
+            if request.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+        assert!(request.starts_with(b"CONNECT 127.0.0.1:12345 HTTP/1.1\r\n"));
+        socket
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let upstream = Upstream::none().with_resolver(Arc::new(Resolver {
+        values: vec![format!("http://{address}"), "direct://".into()],
+        calls: AtomicUsize::new(0),
+    }));
+    let url = url::Url::parse("https://allowed.test/").unwrap();
+    let _opened = upstream
+        .open(&url, true, &["127.0.0.1:12345".parse().unwrap()])
+        .await
+        .unwrap();
+    proxy.await.unwrap();
+    assert_eq!(upstream.last_route(), Some(UsedRoute::Proxy));
+}
+
+#[tokio::test]
+async fn failed_native_proxy_lookup_reports_no_successful_route() {
+    let upstream = Upstream::none().with_resolver(Arc::new(Resolver {
+        values: vec!["unsupported://proxy.test".into()],
+        calls: AtomicUsize::new(0),
+    }));
+    let url = url::Url::parse("https://allowed.test/").unwrap();
+    assert!(
+        upstream
+            .open(&url, true, &["127.0.0.1:12345".parse().unwrap()])
+            .await
+            .is_err()
+    );
+    assert_eq!(upstream.last_route(), None);
+}
+
+#[test]
+fn system_route_is_only_selected_for_unconfigured_schemes() {
+    let resolver = Arc::new(Resolver {
+        values: vec!["direct://".into()],
+        calls: AtomicUsize::new(0),
+    });
+    let settings = Upstream::from_values(Some("http://proxy.test:80"), None, None, None)
+        .with_resolver(resolver.clone());
+    assert!(!settings.uses_system_for("http"));
+    assert!(settings.uses_system_for("https"));
+    assert!(!settings.uses_system_for("wss"));
+    assert!(!Upstream::none().uses_system_for("https"));
+    assert!(
+        !Upstream::from_values(None, None, Some("http://proxy.test:80"), None)
+            .with_resolver(resolver)
+            .uses_system_for("https")
+    );
+}
+
+#[test]
+fn configured_proxy_match_respects_scheme_bypass_and_invalid_values() {
+    let external = url::Url::parse("https://allowed.test/").unwrap();
+    let bypassed = url::Url::parse("https://inside.test/").unwrap();
+    let http = url::Url::parse("http://allowed.test/").unwrap();
+    let settings = Upstream::from_values(
+        None,
+        Some("http://proxy.test:8080"),
+        None,
+        Some("inside.test"),
+    );
+    assert_eq!(settings.configured_proxy_for(&external), Ok(true));
+    assert_eq!(settings.configured_proxy_for(&bypassed), Ok(false));
+    assert_eq!(settings.configured_proxy_for(&http), Ok(false));
+    let all = Upstream::from_values(None, None, Some("http://proxy.test:8080"), None);
+    assert_eq!(all.configured_proxy_for(&http), Ok(true));
+    let malformed = Upstream::from_values(None, Some("invalid://proxy.test"), None, None);
+    assert_eq!(
+        malformed.configured_proxy_for(&external),
+        Err(Error::Configuration)
+    );
+}
+
+#[tokio::test]
+async fn native_lookup_uses_its_target_url_without_changing_manual_scheme_matching() {
+    let routing = url::Url::parse("https://allowed.test:80/").unwrap();
+    let native = url::Url::parse("http://allowed.test:80/").unwrap();
+    let direct = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let resolver = Arc::new(TrackingResolver(Mutex::new(Vec::new())));
+    let automatic = Upstream::none().with_resolver(resolver.clone());
+    let _opened = automatic
+        .open_with_system_url(&routing, &native, true, &[direct.local_addr().unwrap()])
+        .await
+        .unwrap();
+    assert_eq!(resolver.0.lock().unwrap().as_slice(), &[native.as_str()]);
+
+    let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead_address = dead.local_addr().unwrap();
+    drop(dead);
+    let resolver = Arc::new(TrackingResolver(Mutex::new(Vec::new())));
+    let manual = Upstream::from_values(None, Some(&format!("http://{dead_address}")), None, None)
+        .with_resolver(resolver.clone());
+    assert!(
+        manual
+            .open_with_system_url(&routing, &native, true, &[direct.local_addr().unwrap()])
+            .await
+            .is_err()
+    );
+    assert!(resolver.0.lock().unwrap().is_empty());
 }
 #[tokio::test]
 async fn saved_bypass_precedes_system_lookup_and_no_proxy_stays_direct() {
@@ -138,6 +270,7 @@ async fn parallel_page_requests_wait_for_a_bounded_native_worker() {
 /// exact text differs until the outcomes say "Ask the user".
 #[test]
 fn every_proxy_outcome_tells_the_agent_to_ask_the_user() {
+    assert_eq!(Error::ProxyUnreachable.state(), Error::Unreachable.state());
     let expected = [
         (
             Error::Configuration,
@@ -150,6 +283,10 @@ fn every_proxy_outcome_tells_the_agent_to_ask_the_user() {
         (
             Error::Unreachable,
             "The configured proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy.",
+        ),
+        (
+            Error::ProxyUnreachable,
+            "The selected upstream proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy.",
         ),
         (
             Error::Timeout,

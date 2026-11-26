@@ -7,8 +7,8 @@
 //! - Every request ends: a result, a remote error, a timeout, or `ServerDead`; never a hang.
 //! - Dropping a request future cancels it (the pending entry is removed; a late answer is counted
 //!   as an unknown id and dropped).
-//! - The connection's tasks (reader, writer, stderr pump, handler tasks) are owned: dropping the
-//!   last `Connection` clone aborts them, which also closes the server's stdin.
+//! - The connection's tasks are owned. An opted-in multiplex channel transfers its writer to
+//!   bounded interrupt cleanup on last-handle Drop; other connections abort their tasks on Drop.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,13 +52,16 @@ pub struct TransportStats {
     pub stderr_lines: u64,
 }
 
-/// Aborts the connection's tasks when the last handle goes away. A channel of a multiplexed process
-/// also keeps the process's tasks (`parent`) alive while any channel handle exists.
+type DropCleanup = Box<dyn FnOnce(Vec<JoinHandle<()>>, Option<Arc<Tasks>>) + Send + Sync>;
+
+/// Owns the connection's tasks and optional close cleanup. Multiplexed channels retain the process
+/// tasks (`parent`) until their last handle and any bounded interrupt cleanup finish.
 pub(crate) struct Tasks {
     own: Vec<JoinHandle<()>>,
     parent: Option<Arc<Tasks>>,
     /// Runs its `Drop` after the tasks are aborted (a channel uses it to close itself on the server).
     guard: Option<Box<dyn Send + Sync>>,
+    cleanup: Option<DropCleanup>,
 }
 
 impl Tasks {
@@ -68,6 +71,7 @@ impl Tasks {
             own,
             parent,
             guard: None,
+            cleanup: None,
         }
     }
 
@@ -76,10 +80,22 @@ impl Tasks {
         self.guard = Some(Box::new(guard));
         self
     }
+
+    pub(crate) fn with_cleanup(
+        mut self,
+        cleanup: impl FnOnce(Vec<JoinHandle<()>>, Option<Arc<Tasks>>) + Send + Sync + 'static,
+    ) -> Self {
+        self.cleanup = Some(Box::new(cleanup));
+        self
+    }
 }
 
 impl Drop for Tasks {
     fn drop(&mut self) {
+        if let Some(cleanup) = self.cleanup.take() {
+            cleanup(std::mem::take(&mut self.own), self.parent.take());
+            return;
+        }
         for task in &self.own {
             task.abort();
         }
@@ -194,7 +210,7 @@ impl ConnectionBuilder {
 /// A JSON-RPC 2.0 connection to one server over NDJSON streams. Cheap to clone.
 #[derive(Clone)]
 pub struct Connection {
-    shared: Arc<Shared>,
+    pub(crate) shared: Arc<Shared>,
     tasks: Arc<Tasks>,
 }
 
@@ -234,6 +250,7 @@ impl Drop for PendingGuard<'_> {
 impl Connection {
     /// A handle over existing state and tasks (one channel of a multiplexed process, `mux.rs`).
     pub(crate) fn from_parts(shared: Arc<Shared>, tasks: Arc<Tasks>) -> Self {
+        shared.set_owner(&tasks);
         Self { shared, tasks }
     }
 
@@ -265,6 +282,25 @@ impl Connection {
         params: Value,
         options: RequestOptions,
     ) -> Result<Value, RpcError> {
+        self.request_inner(method, params, options, false).await
+    }
+
+    pub(crate) async fn close_request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcError> {
+        self.request_inner(method, params, RequestOptions::default(), true)
+            .await
+    }
+
+    async fn request_inner(
+        &self,
+        method: &str,
+        params: Value,
+        options: RequestOptions,
+        closing: bool,
+    ) -> Result<Value, RpcError> {
         let shared = &*self.shared;
         let id = next_request_id();
         let after = options.timeout.unwrap_or_else(|| {
@@ -282,13 +318,26 @@ impl Connection {
                 TimeoutPolicy::Fail
             }
         });
+        // Stop sends these requests before it reaches channel cleanup. An unanswered Stop
+        // must end the server within the same budget, even if its caller supplied a longer
+        // timeout or a nonfatal policy; otherwise that early error would skip close entirely.
+        let (after, policy) = if shared.config.interrupt_before_close
+            && matches!(method, "turn/interrupt" | "session/subagents/interrupt")
+        {
+            (
+                after.min(shared.config.close_timeout),
+                TimeoutPolicy::ServerDead,
+            )
+        } else {
+            (after, policy)
+        };
         let bytes = encode_frame(&request_frame(id, method, &params)).map_err(|source| {
             RpcError::Encode {
                 method: method.to_owned(),
                 source,
             }
         })?;
-        let rx = shared.register(id, method)?;
+        let rx = shared.register(id, method, &params, closing)?;
         let mut guard = PendingGuard {
             shared,
             id,
@@ -330,6 +379,14 @@ impl Connection {
                 after,
             });
         };
+        if method == "session/stop" && reply.is_ok() && shared.stop_acknowledged() {
+            // Its owned receipt watchdog survives cancellation and bounds this wait. Resume
+            // must not reuse the old channel or race the release of its session lease.
+            let report = self.closed().await;
+            if report.cause != DeathCause::ClosedByClient {
+                return Err(RpcError::ServerDead(Box::new(report)));
+            }
+        }
         reply
     }
 
@@ -409,9 +466,15 @@ impl Connection {
         }
     }
 
-    /// Closes the server's stdin (the graceful shutdown signal for `vibe-app-server`). New
-    /// requests fail with `ServerDead(ClosedByClient)`; answers already on their way still arrive.
+    /// Fences new requests and closes input. With `interrupt_before_close`, an owned bounded task
+    /// stops attached work first; an unverified stop instead marks the process dead for its owner.
+    /// Answers already on their way still arrive. Cancelling this caller does not cancel cleanup.
     pub async fn close_input(&self) {
+        if self.shared.config.interrupt_before_close {
+            self.start_close();
+            self.wait_close_sent().await;
+            return;
+        }
         self.shared.set_closing();
         let _ = self.shared.outbound.send(WriterCmd::Close).await;
     }

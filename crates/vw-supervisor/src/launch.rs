@@ -17,7 +17,7 @@ use vw_rpc::{Connection, Multiplexer, MultiplexerBuilder};
 
 use crate::child::{self, Launch, ServerChild};
 use crate::config::{SupervisorConfig, SupervisorError};
-use crate::env::{EnvPlan, SecretProvider, build_env};
+use crate::env::{EnvPlan, SecretProvider, build_env_with_proxy_relays};
 use crate::handshake::handshake;
 
 #[cfg(test)]
@@ -32,6 +32,7 @@ pub(crate) struct Running {
     pub(crate) child: ServerChild,
     pub(crate) started: Instant,
     pub(crate) server: ServerInfo,
+    pub(crate) mcp_refresh_guard: bool,
 }
 
 /// Spawns a server (`program`: the canonical executable; `config.program` is only the configured value),
@@ -53,16 +54,19 @@ pub(crate) async fn launch(
         .parent_env
         .clone()
         .unwrap_or_else(|| std::env::vars_os().collect());
-    let env = build_env(&EnvPlan {
-        parent,
-        extra: &config.extra_env,
-        vibe_home: &config.vibe_home,
-        home: config.home.as_deref(),
-        key: key.as_ref(),
-        mcp_token: mcp_token.as_ref(),
-    })?;
+    let env = build_env_with_proxy_relays(
+        &EnvPlan {
+            parent,
+            extra: &config.extra_env,
+            vibe_home: &config.vibe_home,
+            home: config.home.as_deref(),
+            key: key.as_ref(),
+            mcp_token: mcp_token.as_ref(),
+        },
+        &config.proxy_relays,
+    )?;
     crate::shell_env::prepare(&config.vibe_home)?;
-    let mut argv = server_argv(config, program)?;
+    let (mut argv, mcp_refresh_guard) = server_argv(config, program)?;
     let program = argv.remove(0);
     let launch = Launch {
         program: program.clone(),
@@ -77,6 +81,9 @@ pub(crate) async fn launch(
     })?;
     *pid_slot.lock_or_recover() = child.pid();
     let mut connection = config.connection.clone();
+    // Vibe 3.1.5 may keep a turn running after its channel closes. The app's
+    // server must acknowledge an interrupt before any channel or stdin closes.
+    connection.interrupt_before_close = true;
     if let Some(key) = &key {
         connection.stderr_redactions = connection
             .stderr_redactions
@@ -109,6 +116,7 @@ pub(crate) async fn launch(
                 child,
                 started: Instant::now(),
                 server: response.server_info,
+                mcp_refresh_guard,
             })
         }
         Err(source) => {
@@ -165,6 +173,8 @@ pub const CHILD_STOP_ADAPTER: &str = concat!(
     include_str!("vibe_plugin_enablement.py"),
     "\n",
     include_str!("vibe_mcp_projection.py"),
+    "\n",
+    include_str!("vibe_mcp_refresh.py"),
     "\n",
     include_str!("vibe_skill_cleanup.py"),
     "\n",
@@ -246,7 +256,7 @@ pub fn start_failure_stderr(error: &SupervisorError) -> Vec<String> {
 #[must_use]
 pub fn start_failure_message(error: &SupervisorError) -> String {
     let reason = start_failure(error);
-    if reason.starts_with(GUARD_REFUSAL) {
+    if reason.starts_with(GUARD_REFUSAL) || matches!(error, SupervisorError::UnprovenInterpreter) {
         reason
     } else {
         format!("Vibe did not start: {reason}")
@@ -261,24 +271,38 @@ pub fn start_failure_message(error: &SupervisorError) -> String {
 #[must_use]
 pub fn adapter_python(program: &std::path::Path) -> Option<std::path::PathBuf> {
     // Only Vibe's own server console script runs through the adapter.
-    if !matches!(
-        program.file_name().and_then(|n| n.to_str()),
-        Some("vibe-app-server" | "vibe-app-server.exe")
-    ) {
+    if !is_vibe_server(program) {
         return None;
     }
     crate::python::server_python(program)
+}
+
+fn is_vibe_server(program: &std::path::Path) -> bool {
+    matches!(
+        program.file_name().and_then(|n| n.to_str()),
+        Some("vibe-app-server" | "vibe-app-server.exe")
+    )
 }
 
 /// Build the server command inside any sandbox/recorder launcher.
 fn server_argv(
     config: &SupervisorConfig,
     program: &std::path::Path,
-) -> Result<Vec<OsString>, SupervisorError> {
+) -> Result<(Vec<OsString>, bool), SupervisorError> {
     let mut argv: Vec<OsString> = config.launcher.clone();
     // Run the exact selected environment with our version-pinned adapter; launchers (sandbox/recorder) still wrap
     // the entire server process.
-    if let Some(python) = adapter_python(program) {
+    let selected_vibe_alias = is_vibe_server(&config.program)
+        && std::fs::canonicalize(&config.program).ok().as_deref() == Some(program);
+    let named_vibe_server = is_vibe_server(program) || selected_vibe_alias;
+    let python = named_vibe_server
+        .then(|| crate::python::server_python(program))
+        .flatten();
+    if named_vibe_server && python.is_none() {
+        return Err(SupervisorError::UnprovenInterpreter);
+    }
+    let mcp_refresh_guard = python.is_some();
+    if let Some(python) = python {
         let adapter = crate::adapter_file::prepare(&config.vibe_home)?;
         // -I excludes cwd, script directory, user site and PYTHON* overrides. -u preserves the
         // unbuffered RPC pipes: isolated Python ignores the previous PYTHONUNBUFFERED setting.
@@ -296,7 +320,7 @@ fn server_argv(
     argv.push(program.as_os_str().to_owned());
     argv.push("--multiplex".into());
     argv.extend(config.extra_args.iter().cloned());
-    Ok(argv)
+    Ok((argv, mcp_refresh_guard))
 }
 
 #[cfg(all(test, unix))]
@@ -312,7 +336,8 @@ mod tests {
         std::fs::write(bin.join("python"), "").unwrap();
         let program = bin.join("vibe-app-server");
         let config = SupervisorConfig::new(program.clone(), root.join("home"), root.join("work"));
-        let argv = server_argv(&config, &program).unwrap();
+        let (argv, guarded) = server_argv(&config, &program).unwrap();
+        assert!(guarded);
         let python = std::fs::canonicalize(&bin).unwrap().join("python");
         assert_eq!(argv[0], python.as_os_str());
         assert_eq!(argv[1], "-I");

@@ -10,7 +10,8 @@
  * Grandfather list: scripts/public/size-grandfather.json maps a path to a no-regrowth ceiling
  * (a line count). A listed file may exceed 800 lines but never its ceiling. A listed file that
  * is now within the limit, or no longer exists, is an error: delete the entry so the ratchet only
- * tightens. The list is empty today; nothing in this repo is legacy.
+ * tightens. The list holds two files that grew past the limit in 0.1.19 (the network guard and the
+ * voice chat state); they are to be split and their entries deleted in 0.1.20.
  *
  * Exit code: 0 when clean, 1 on any violation. Always prints the five largest files.
  */

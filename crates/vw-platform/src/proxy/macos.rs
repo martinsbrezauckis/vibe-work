@@ -1,11 +1,14 @@
 //! System Configuration through `CFNetwork`, including native PAC execution. Used only by the optional guard.
 //! CF objects follow Create/Copy/Get ownership; PAC callbacks run on this worker's private run loop, bounded to 12s.
+use super::macos_policy::{self, Kind};
 use core_foundation_sys::{
     array::{CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, CFArrayRef},
     base::{CFEqual, CFGetTypeID, CFIndex, CFRelease, CFRetain, CFTypeRef},
+    data::{CFDataGetBytePtr, CFDataGetLength},
     dictionary::{CFDictionaryGetTypeID, CFDictionaryGetValue, CFDictionaryRef},
     error::CFErrorRef,
     number::{CFNumberGetTypeID, CFNumberGetValue, kCFNumberSInt32Type},
+    propertylist::{CFPropertyListCreateData, kCFPropertyListBinaryFormat_v1_0},
     runloop::{
         CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRemoveSource, CFRunLoopRunInMode,
         CFRunLoopSourceInvalidate, CFRunLoopSourceRef, kCFRunLoopDefaultMode,
@@ -19,6 +22,7 @@ use core_foundation_sys::{
 use std::ffi::{c_char, c_void};
 use std::ptr;
 const FAILED: &str = "macOS proxy resolution failed.";
+const MAX_FINGERPRINT_BYTES: CFIndex = 1024 * 1024;
 
 #[link(name = "CFNetwork", kind = "framework")]
 unsafe extern "C" {
@@ -73,6 +77,41 @@ impl Drop for Owned {
         unsafe {
             CFRelease(self.0);
         }
+    }
+}
+
+pub(super) fn fingerprint() -> Result<super::ProxyFingerprint, &'static str> {
+    // SAFETY: Copy/Create values are released by Owned. The copied dictionary is the same
+    // configuration source as resolve(); binary property-list bytes retain every nested value.
+    unsafe {
+        let settings = Owned::new(CFNetworkCopySystemProxySettings().cast())?;
+        if CFGetTypeID(settings.0) != CFDictionaryGetTypeID() {
+            return Err(FAILED);
+        }
+        let data = Owned::new(
+            CFPropertyListCreateData(
+                ptr::null(),
+                settings.0.cast(),
+                kCFPropertyListBinaryFormat_v1_0,
+                0,
+                ptr::null_mut(),
+            )
+            .cast(),
+        )?;
+        let length = CFDataGetLength(data.0.cast());
+        if !(0..=MAX_FINGERPRINT_BYTES).contains(&length) {
+            return Err(FAILED);
+        }
+        let bytes = if length == 0 {
+            Vec::new()
+        } else {
+            let start = CFDataGetBytePtr(data.0.cast());
+            if start.is_null() {
+                return Err(FAILED);
+            }
+            std::slice::from_raw_parts(start, usize::try_from(length).map_err(|_| FAILED)?).to_vec()
+        };
+        Ok(super::ProxyFingerprint(vec![Some(bytes)]))
     }
 }
 
@@ -152,6 +191,23 @@ fn routes(array: CFArrayRef, target: CFURLRef, depth: usize) -> Result<Vec<Strin
         if !(1..=32).contains(&count) {
             return Err(FAILED);
         }
+        // CFNetworkCopyProxiesForURL appends a kCFProxyTypeNone entry after a PAC setting even
+        // when the PAC script returned only PROXY. That outer DIRECT is not a PAC fallback.
+        // DIRECT inside the evaluated PAC result remains ordered by the recursive call.
+        let has_pac = if depth == 0 {
+            (0..count).any(|i| {
+                let raw = CFArrayGetValueAtIndex(array, i);
+                if raw.is_null() || CFGetTypeID(raw) != CFDictionaryGetTypeID() {
+                    return false;
+                }
+                let kind = value(raw.cast(), kCFProxyTypeKey);
+                !kind.is_null()
+                    && (CFEqual(kind, kCFProxyTypeAutoConfigurationURL.cast()) != 0
+                        || CFEqual(kind, kCFProxyTypeAutoConfigurationJavaScript.cast()) != 0)
+            })
+        } else {
+            false
+        };
         let mut out = Vec::new();
         for i in 0..count {
             let raw = CFArrayGetValueAtIndex(array, i);
@@ -164,11 +220,7 @@ fn routes(array: CFArrayRef, target: CFURLRef, depth: usize) -> Result<Vec<Strin
                 return Err(FAILED);
             }
             let is = |ty: CFStringRef| CFEqual(kind, ty.cast()) != 0;
-            if is(kCFProxyTypeNone) {
-                out.push("direct://".to_owned());
-            } else if is(kCFProxyTypeAutoConfigurationURL)
-                || is(kCFProxyTypeAutoConfigurationJavaScript)
-            {
+            if is(kCFProxyTypeAutoConfigurationURL) || is(kCFProxyTypeAutoConfigurationJavaScript) {
                 let resolved = if is(kCFProxyTypeAutoConfigurationURL) {
                     pac_url(value(dict, kCFProxyAutoConfigurationURLKey), target)?
                 } else {
@@ -193,35 +245,41 @@ fn routes(array: CFArrayRef, target: CFURLRef, depth: usize) -> Result<Vec<Strin
                 };
                 out.extend(routes(resolved.0.cast(), target, depth + 1)?);
             } else {
-                // CFNetwork's HTTPS setting means an HTTP proxy for HTTPS destinations, not TLS to
-                // the proxy (same mapping as Chromium's proxy_chain_util_apple). PAC output cannot
-                // disambiguate a TLS-proxy extension: refuse that case instead of guessing cleartext.
-                if depth > 0 && is(kCFProxyTypeHTTPS) {
-                    return Err(FAILED);
-                }
-                let scheme = if is(kCFProxyTypeHTTP) || is(kCFProxyTypeHTTPS) {
-                    "http"
+                // CFNetwork's HTTPS kind means an HTTP proxy for HTTPS destinations, including
+                // ordinary PAC PROXY results. Use cleartext HTTP CONNECT, as macOS does; TLS to
+                // the proxy requires an explicit https:// address in Settings.
+                let native_kind = if is(kCFProxyTypeNone) {
+                    Kind::Direct
+                } else if is(kCFProxyTypeHTTP) {
+                    Kind::Http
+                } else if is(kCFProxyTypeHTTPS) {
+                    Kind::Https
                 } else if is(kCFProxyTypeSOCKS) {
-                    "socks5"
+                    Kind::Socks
                 } else {
-                    return Err(FAILED);
+                    Kind::Unknown
                 };
-                let host = string(value(dict, kCFProxyHostNameKey))?;
-                let number = value(dict, kCFProxyPortNumberKey);
-                if number.is_null() || CFGetTypeID(number) != CFNumberGetTypeID() {
-                    return Err(FAILED);
+                if let Some(scheme) = macos_policy::scheme(Some(native_kind), depth > 0)? {
+                    let host = string(value(dict, kCFProxyHostNameKey))?;
+                    let number = value(dict, kCFProxyPortNumberKey);
+                    if number.is_null() || CFGetTypeID(number) != CFNumberGetTypeID() {
+                        return Err(FAILED);
+                    }
+                    let mut port: i32 = 0;
+                    if !CFNumberGetValue(number.cast(), kCFNumberSInt32Type, (&raw mut port).cast())
+                    {
+                        return Err(FAILED);
+                    }
+                    out.push(super::manual::endpoint(
+                        scheme,
+                        &host,
+                        u16::try_from(port).map_err(|_| FAILED)?,
+                        optional_string(dict, kCFProxyUsernameKey)?.as_deref(),
+                        optional_string(dict, kCFProxyPasswordKey)?.as_deref(),
+                    )?);
+                } else if !(has_pac && native_kind == Kind::Direct) {
+                    out.push("direct://".to_owned());
                 }
-                let mut port: i32 = 0;
-                if !CFNumberGetValue(number.cast(), kCFNumberSInt32Type, (&raw mut port).cast()) {
-                    return Err(FAILED);
-                }
-                out.push(super::manual::endpoint(
-                    scheme,
-                    &host,
-                    u16::try_from(port).map_err(|_| FAILED)?,
-                    optional_string(dict, kCFProxyUsernameKey)?.as_deref(),
-                    optional_string(dict, kCFProxyPasswordKey)?.as_deref(),
-                )?);
             }
             if out.len() > 32 {
                 return Err(FAILED);
@@ -284,3 +342,7 @@ fn pac_url(pac: CFTypeRef, target: CFURLRef) -> Result<Owned, &'static str> {
         answer.value.ok_or(FAILED)
     }
 }
+
+#[cfg(test)]
+#[path = "macos_tests.rs"]
+mod tests;

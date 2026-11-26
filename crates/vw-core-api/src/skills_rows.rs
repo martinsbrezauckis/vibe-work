@@ -14,8 +14,12 @@ pub(crate) fn representative(row: &vw_skills::SkillView) -> Option<&vw_skills::S
 }
 /// Why a row cannot be changed here: a plugin or Vibe's settings file sets it.
 pub(crate) fn lock_reason(row: &vw_skills::SkillView) -> Option<String> {
-    if representative(row).is_some_and(|skill| skill.scope == vw_skills::SkillScope::Session) {
-        return Some("Managed by this chat".to_owned());
+    if let Some(skill) = representative(row) {
+        match skill.scope {
+            vw_skills::SkillScope::Session => return Some("Managed by this chat".to_owned()),
+            vw_skills::SkillScope::Remote => return Some("Managed remotely".to_owned()),
+            _ => {}
+        }
     }
     row.installations
         .iter()
@@ -44,6 +48,7 @@ pub(crate) fn row_view(row: &vw_skills::SkillView) -> SkillRow {
             vw_skills::SkillScope::Global => "global",
             vw_skills::SkillScope::Project => "project",
             vw_skills::SkillScope::Session => "session",
+            vw_skills::SkillScope::Remote => "remote",
         }
         .to_owned()
     });
@@ -151,5 +156,76 @@ mod tests {
             let unused = std::path::Path::new("unused-session-skill-location");
             assert_eq!(SkillPlaces::new(unused, unused).modified_ms(&skill), None);
         }
+    }
+
+    #[test]
+    fn remote_skills_show_remote_scope_and_refuse_local_changes_or_file_time() {
+        for source in ["local", "registry", "plugin", "builtin"] {
+            let skill: vw_skills::SkillSummary = serde_json::from_value(json!({
+                "name":"remote-skill", "description":"Remote skill", "prompt":"Do work",
+                "source": source, "scope":"remote",
+                "registry": if source == "registry" { json!({"skillId":"remote-id", "version":1}) } else { json!(null) }
+            }))
+            .unwrap();
+            let skills = vec![skill.clone()];
+            let view = vw_skills::SkillsView::merge(
+                &vw_skills::SkillsInstalledResponse {
+                    skills: skills.clone(),
+                    issues: vec![],
+                },
+                &serde_json::from_value(json!({"skills":[]})).unwrap(),
+                &vw_skills::SkillsUpdatesResponse { updates: vec![] },
+                &vw_skills::SkillsListResponse { skills },
+                &[],
+            );
+            let row = row_view(&view.skills[0]);
+            assert_eq!(row.source, None);
+            assert_eq!(row.scope.as_deref(), Some("remote"));
+            assert!(row.locked);
+            assert_eq!(row.lock_reason.as_deref(), Some("Managed remotely"));
+            let home = tempfile::tempdir().unwrap();
+            let local = home.path().join("skills/remote-skill/SKILL.md");
+            let cached = home
+                .path()
+                .join("skills-registry-cache/store/remote-id/1/SKILL.md");
+            for file in [&local, &cached] {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, "---\nname: remote-skill\n---\nRemote skill").unwrap();
+            }
+            assert_eq!(
+                SkillPlaces::new(home.path(), home.path()).modified_ms(&skill),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn active_only_remote_catalog_collision_stays_unavailable_and_locked() {
+        let remote: vw_skills::SkillSummary = serde_json::from_value(json!({
+            "name":"same-name", "description":"Remote skill", "prompt":"Do work",
+            "source":"registry", "scope":"remote"
+        }))
+        .unwrap();
+        let catalog = serde_json::from_value(json!({
+            "skills":[{"name":"same-name", "skillId":"catalog-id", "description":"Catalog skill", "latestVersion":1, "sharingScope":""}]
+        }))
+        .unwrap();
+        let view = vw_skills::SkillsView::merge(
+            &vw_skills::SkillsInstalledResponse {
+                skills: vec![],
+                issues: vec![],
+            },
+            &catalog,
+            &vw_skills::SkillsUpdatesResponse { updates: vec![] },
+            &vw_skills::SkillsListResponse {
+                skills: vec![remote],
+            },
+            &[],
+        );
+        let row = row_view(&view.skills[0]);
+        assert_eq!(row.source, None);
+        assert_eq!(row.scope.as_deref(), Some("remote"));
+        assert!(row.locked);
+        assert_eq!(row.lock_reason.as_deref(), Some("Managed remotely"));
     }
 }

@@ -19,6 +19,8 @@
 mod adapter_file;
 mod backoff;
 mod child;
+#[cfg(test)]
+mod close_tests;
 mod config;
 mod discovery;
 mod env;
@@ -40,7 +42,7 @@ pub use discovery::{
 pub use env::{
     API_KEY_VAR, ApiKey, EXPERIMENT_CONFIG_KEYS, EnvError, EnvPlan, EnvSecretProvider, INHERITED,
     LOOPBACK_NO_PROXY, MCP_TOKEN_VAR, NoSecret, RUNTIME_PINNED_OFF, STABLE_CONFIG_KEYS,
-    SecretError, SecretProvider, build_env, is_hijack_var,
+    SecretError, SecretProvider, build_env, build_env_with_proxy_relays, is_hijack_var,
 };
 pub use handshake::{default_initialize_params, handshake};
 pub use launch::{

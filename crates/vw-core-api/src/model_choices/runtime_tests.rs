@@ -9,6 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
 
+#[cfg(unix)]
+#[path = "unlock_runtime_tests.rs"]
+mod unlock_runtime_tests;
+
 struct NoPrompt;
 impl Confirmer for NoPrompt {
     async fn confirm(&self, _: &ConfirmationRequest) -> Confirmation {

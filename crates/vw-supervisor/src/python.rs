@@ -20,8 +20,50 @@ pub fn server_python(server: &Path) -> Option<PathBuf> {
     #[cfg(not(windows))]
     {
         let python = server.parent()?.join("python");
-        python.is_file().then_some(python)
+        if python.is_file() {
+            return Some(python);
+        }
+        unix_shebang_python(&server)
     }
+}
+
+#[cfg(not(windows))]
+fn unix_shebang_python(server: &Path) -> Option<PathBuf> {
+    use std::io::Read;
+    use std::os::unix::ffi::OsStrExt;
+
+    if !server.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(server)
+        .ok()?
+        .take(4096)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let line = bytes
+        .strip_prefix(b"#!")?
+        .split(|byte| *byte == b'\n')
+        .next()?;
+    if !bytes.contains(&b'\n') || line.is_empty() || line.iter().any(u8::is_ascii_whitespace) {
+        return None;
+    }
+    let shebang = Path::new(std::ffi::OsStr::from_bytes(line));
+    if !shebang.is_absolute() || !shebang.file_name()?.as_bytes().starts_with(b"python") {
+        return None;
+    }
+    // Canonicalize the directory but keep the executable's venv symlink: resolving that final
+    // symlink to the base Python would make Python lose its pyvenv.cfg association.
+    let bin = std::fs::canonicalize(shebang.parent()?).ok()?;
+    let python = bin.join(shebang.file_name()?);
+    let target = std::fs::canonicalize(&python).ok()?;
+    if !target.is_file()
+        || !target.file_name()?.as_bytes().starts_with(b"python")
+        || !bin.parent()?.join("pyvenv.cfg").is_file()
+    {
+        return None;
+    }
+    Some(python)
 }
 
 #[cfg(windows)]

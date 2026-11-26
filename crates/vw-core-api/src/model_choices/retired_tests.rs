@@ -65,6 +65,26 @@ async fn start_with_marker(
     config: Option<&str>,
     kept_marker: bool,
 ) -> Run {
+    Box::pin(start_with_key_state(
+        name,
+        saved,
+        pin,
+        config,
+        kept_marker,
+        None,
+    ))
+    .await
+}
+
+/// A real disposable key service proves the list is unavailable, with or without a vault lock.
+async fn start_with_key_state(
+    name: &str,
+    saved: &Value,
+    pin: &str,
+    config: Option<&str>,
+    kept_marker: bool,
+    locked: Option<bool>,
+) -> Run {
     use std::os::unix::fs::PermissionsExt;
 
     let base = std::env::var_os("VW_TEST_ROOT").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -100,6 +120,21 @@ async fn start_with_marker(
     std::fs::write(&program, VIBE).unwrap();
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
     // Boxed (clippy large_futures): the start future exceeds 16 KiB on aarch64.
+    let keys = if let Some(locked) = locked {
+        let keys = crate::refresh_notice_tests::memory_keys(&root).await;
+        if locked {
+            keys.store_key(vw_vault::SecretString::new(
+                "lockedgone-chat-test-000000000000000",
+            ))
+            .await
+            .unwrap();
+            keys.lock();
+        }
+        assert!(!keys.speech_available());
+        Some(keys)
+    } else {
+        None
+    };
     let core = Box::pin(crate::Core::start(
         vw_supervisor::SupervisorConfig::new(program, home.clone(), root.clone()),
         Arc::new(vw_supervisor::NoSecret),
@@ -109,6 +144,7 @@ async fn start_with_marker(
                 cli_home: Some(root.join("cli")),
             },
             sessions_dir: Some(sessions.clone()),
+            keys,
             ..crate::CoreConfig::default()
         },
     ))
@@ -248,6 +284,8 @@ mod cold_catalog_tests;
 mod cold_configured_tests;
 #[path = "retired_kept_medium_tests.rs"]
 mod kept_medium_tests;
+#[path = "retired_locked_account_tests.rs"]
+mod locked_account_tests;
 
 /// A 0.1.15 record has no provider. If the project's same-name row vanished, its old identity is ambiguous:
 /// reopening must tell the person and keep the Settings fallback instead of silently selecting catalog Mistral.

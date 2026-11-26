@@ -62,6 +62,9 @@ export function DictationStrip({ sessionId }: { sessionId: string }): ReactEleme
                 : partial
               : (error ?? note)}
       </span>
+      {live && note === "Vibe Work could not reach the proxy." ? (
+        <span className="dictation-note">{note}</span>
+      ) : null}
       {phase === "recording" || phase === "starting" ? (
         <Button
           data-testid="voice.dictation-strip-cancel"

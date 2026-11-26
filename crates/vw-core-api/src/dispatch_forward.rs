@@ -118,6 +118,12 @@ impl Core {
         } else {
             None
         };
+        // Match switch apply's chat-then-mutation order. A queued refresh must not hold up OFF publication.
+        let refresh_lock = if server_refresh {
+            self.plugin_refresh_lock(method, &params, stop).await?
+        } else {
+            None
+        };
         let command_mutation = if server_toggle || server_refresh {
             Some(self.shared.developer_permissions.mutation_lock().await)
         } else {
@@ -127,6 +133,7 @@ impl Core {
             match crate::mcp_refresh::blocked_command(
                 &self.shared.instructions.own_home,
                 self.shared.developer_permissions.enabled(),
+                crate::mcp_refresh::guard_installed(&self.shared),
             ) {
                 Ok(false) => {}
                 Ok(true) => {
@@ -170,7 +177,11 @@ impl Core {
             return Ok(reply);
         }
         crate::session_ownership::check_delete(&self.shared, method, &params).await?;
-        let _refresh = self.plugin_refresh_lock(method, &params, stop).await?;
+        let _refresh = if server_refresh {
+            refresh_lock
+        } else {
+            self.plugin_refresh_lock(method, &params, stop).await?
+        };
         // A chat whose channel predates the last Developer permissions switch applies it before new work
         // (`switch_apply.rs`), the way a reopen restores the access mode first.
         crate::switch_apply::before_work(&self.shared, method, &params).await?;
@@ -264,12 +275,23 @@ impl Core {
         if method == "session/fork" {
             crate::model_choices::forked(&self.shared, &params, &reply.result);
         }
+        if method == "config/read" {
+            crate::default_model::mark_saved_default(&self.shared, &mut reply.result);
+        }
         if matches!(method, "runtime/read" | "config/reload")
             && let Some(id) = params["sessionId"].as_str()
-            && self.shared.channels.has_channel(id)
-            && let Some(runtime) = reply.result.get("runtime")
         {
-            crate::model_choices::publish(&self.shared, id, runtime.clone()).await;
+            Box::pin(crate::model_choices::finish_read(
+                &self.shared,
+                id,
+                &mut reply.result,
+            ))
+            .await;
+            if self.shared.channels.has_channel(id)
+                && let Some(runtime) = reply.result.get("runtime")
+            {
+                crate::model_choices::publish(&self.shared, id, runtime.clone()).await;
+            }
         }
         if method == "turn/interrupt"
             && let Some(id) = params["sessionId"].as_str()

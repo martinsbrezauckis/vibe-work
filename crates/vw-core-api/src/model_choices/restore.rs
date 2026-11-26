@@ -1,6 +1,6 @@
 //! Restores chat choices, falling back to Settings with one alert when a model is unavailable (every model alike: no
 //! chat is moved to another entry without that alert).
-//! Called by reopen and model selection; failures leave the chat open and sendable.
+//! Called by reopen and model selection; unavailable account lists preserve choices for a later Send.
 use super::{Choice, actual, apply};
 use crate::core::Shared;
 use crate::error::{CoreError, ErrorCode};
@@ -26,6 +26,29 @@ pub(super) fn offered(runtime: &Value, choice: &Choice) -> bool {
                     && (choice.name.is_empty() || model["name"] == choice.name)
             })
         })
+}
+
+/// An absent alias cannot retire a saved choice while the account's list is unavailable.
+pub(super) fn waiting_for_account_models(
+    shared: &Shared,
+    runtime: &Value,
+    choice: &Choice,
+) -> bool {
+    crate::model_check::account_models_unavailable(shared, &runtime["config"])
+        && !offered(runtime, choice)
+}
+
+fn saved_choice_waits_for_account_models(
+    shared: &Shared,
+    runtime: &Value,
+    prior: &super::records::Record,
+    recorded: Option<&Choice>,
+) -> bool {
+    prior
+        .expected()
+        .iter()
+        .chain(recorded)
+        .any(|choice| waiting_for_account_models(shared, runtime, choice))
 }
 
 /// A catalog row can be absent from the first runtime after resume while Vibe's resolved fields
@@ -69,14 +92,24 @@ pub(super) async fn backend_changed(shared: &Shared, id: &str, choice: &Choice) 
     !resolved.provider_key.is_empty() && resolved.provider_key != choice.provider_key
 }
 
+/// A failed cold write may wait only when the usable catalog still proves the saved backend.
+/// Missing resolved fields are not proof that an older saved digest names the current route.
+async fn backend_matches(shared: &Shared, id: &str, choice: &Choice) -> bool {
+    let mut probe = choice.clone();
+    probe.provider.clear();
+    probe.provider_key.clear();
+    let resolved = super::identified(shared, id, probe).await;
+    !resolved.provider_key.is_empty() && choice.matches(&resolved)
+}
+
 pub(super) fn mark_cold_replay(
     shared: &Shared,
     id: &str,
     runtime: &Value,
-    pending: Option<&Choice>,
+    expected: Option<&Choice>,
 ) {
     if let Some(choice) =
-        pending.filter(|choice| !choice.provider_key.is_empty() && !offered(runtime, choice))
+        expected.filter(|choice| !choice.provider_key.is_empty() && !offered(runtime, choice))
     {
         shared.model_choices.mark_cold_replay(id, choice.clone());
     }
@@ -146,9 +179,9 @@ pub(super) async fn read(shared: &Shared, id: &str) -> Result<Value, CoreError> 
         .map_err(|error| CoreError::from_gate("runtime/read", &error))
 }
 
-/// A cold resumed runtime can expose catalog rows while its configured rows are still loading.
-/// Wait only for a backend-bound saved pick missing from that list; an absent row after readiness
-/// follows the ordinary unavailable-model notice path.
+/// A listed model is not proof that Vibe's first-turn catalog work has finished. Wait before
+/// deciding whether to replay a bound choice; a catalog request refused while locked must also
+/// be refreshed with the now-usable key before an absent account row can retire the choice.
 pub(super) async fn after_ready(
     shared: &Shared,
     id: &str,
@@ -158,10 +191,32 @@ pub(super) async fn after_ready(
     if choice.name.is_empty()
         || choice.provider.is_empty()
         || choice.provider_key.is_empty()
-        || offered(&last, choice)
+        || !super::settled::key_usable(shared)
     {
         return Ok((last, false));
     }
+    let cold_missing = !offered(&last, choice);
+    let mut runtime = ready_runtime(shared, id).await?;
+    if !offered(&runtime, choice)
+        && !runtime["config"]["models"].as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|row| matches!(row["source"].as_str(), Some("catalog" | "growthbook")))
+        })
+    {
+        // Vibe holds a failed first fetch in its process cache. A ready flag after that failure
+        // does not mean that the account's list was fetched with the key unlocked in the app.
+        let method = "config/reload";
+        shared
+            .gate
+            .call(method, json!({"sessionId":id,"reloadRuntime":true}), None)
+            .await
+            .map_err(|error| CoreError::from_gate(method, &error))?;
+        runtime = ready_runtime(shared, id).await?;
+    }
+    Ok((runtime, cold_missing))
+}
+
+async fn ready_runtime(shared: &Shared, id: &str) -> Result<Value, CoreError> {
     let method = "runtime/read";
     let reply = shared
         .gate
@@ -169,7 +224,7 @@ pub(super) async fn after_ready(
         .await
         .map_err(|error| CoreError::from_gate(method, &error))?;
     if reply.result["ready"] != false {
-        return Ok((reply.result["runtime"].clone(), true));
+        return Ok(reply.result["runtime"].clone());
     }
     let method = "session/ready/wait";
     let ready = shared
@@ -183,7 +238,7 @@ pub(super) async fn after_ready(
             "The saved model for this chat is still loading. Try Send again.",
         ));
     }
-    read(shared, id).await.map(|runtime| (runtime, true))
+    read(shared, id).await
 }
 
 pub(super) async fn fallback(shared: &Shared, id: &str, choice: &Choice, last: Value) -> Value {
@@ -316,6 +371,29 @@ fn notice(
     format!("{unavailable} This chat now uses {current_label}.")
 }
 
+/// Pending/fallback picks and proven remembered choices take the same replay path.
+pub(super) fn saved_replay(record: &super::records::Record) -> Option<Choice> {
+    record.replay().or_else(|| {
+        record
+            .remembered
+            .clone()
+            .filter(|choice| !choice.provider_key.is_empty())
+    })
+}
+
+fn already_restored(
+    record: &super::records::Record,
+    runtime: &Value,
+    choice: &Choice,
+    current: Option<&Choice>,
+) -> bool {
+    // A pending pick also needs a current pin and an offered level before a read may skip its write.
+    (record.fallback.is_some()
+        || record.pending.is_none()
+        || (runtime["config"]["activeModelPinned"] == true && offered(runtime, choice)))
+        && current.is_some_and(|current| choice.matches(current))
+}
+
 /// Restoring a model never closes the chat or prevents a later Send.
 pub(crate) async fn restore(
     shared: &Shared,
@@ -326,7 +404,7 @@ pub(crate) async fn restore(
     // Vibe's pin holds only the alias. Preserve the pre-migration identity: migration can
     // rewrite the saved seed's alias before this pin is interpreted.
     let prior = shared.model_choices.records.get(id);
-    mark_cold_replay(shared, id, &last, prior.pending.as_ref());
+    mark_cold_replay(shared, id, &last, prior.expected().as_ref());
     let (last, cold_missing) = if let Some(choice) = prior.expected() {
         match after_ready(shared, id, last.clone(), &choice).await {
             Ok(runtime) => runtime,
@@ -334,23 +412,24 @@ pub(crate) async fn restore(
                 // A failed readiness check is not evidence that the person's model vanished.
                 // Keep the saved choice for the next Send, which checks again before sending.
                 tracing::warn!(%error, "saved chat model is still loading");
+                if let Some(choice) = prior.expected() {
+                    shared.model_choices.mark_cold_replay(id, choice);
+                }
                 return last;
             }
         }
     } else {
         (last, false)
     };
+    if saved_choice_waits_for_account_models(shared, &last, &prior, recorded.as_ref()) {
+        return last;
+    }
     super::retired::migrate(&shared.model_choices.records, id, &last);
     let record = shared.model_choices.records.get(id);
     let current = super::identified_actual(shared, id, &json!({"runtime":last})).await;
-    let replacement = record.fallback;
-    let is_replacement = replacement.is_some();
-    if let Some(choice) = replacement.or(record.pending) {
-        if is_replacement
-            && current
-                .as_ref()
-                .is_some_and(|current| choice.matches(current))
-        {
+    if let Some(choice) = saved_replay(&record) {
+        if already_restored(&record, &last, &choice, current.as_ref()) {
+            shared.model_choices.clear_cold_replay(id);
             return last;
         }
         if replayable(shared, id, &last, &choice).await {
@@ -362,7 +441,7 @@ pub(crate) async fn restore(
                 Err(error)
                     if (cold_missing || shared.model_choices.cold_replay_matches(id, &choice))
                         && !choice.provider_key.is_empty()
-                        && !backend_changed(shared, id, &choice).await =>
+                        && backend_matches(shared, id, &choice).await =>
                 {
                     // A rejected write does not prove the bound model is gone. Keep the pick
                     // until a later Send can replay it or report the failure to the person.
@@ -445,7 +524,7 @@ pub(super) fn differs(runtime: &Value, choice: &Choice, current: Option<&Choice>
         || current
             .cloned()
             .or_else(|| actual(&json!({"runtime":runtime})))
-            .is_some_and(|current| !choice.same_model(&current))
+            .is_some_and(|current| !choice.matches(&current))
 }
 
 #[cfg(test)]

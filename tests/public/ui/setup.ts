@@ -14,6 +14,7 @@
  * The app's announcer (`ui/src/state/announcer.ts`) is emptied after each test, and text queries skip its regions.
  */
 import "@testing-library/jest-dom/vitest";
+import "./support/diagramWorker";
 import { installAppStyles } from "./support/appStyles";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";

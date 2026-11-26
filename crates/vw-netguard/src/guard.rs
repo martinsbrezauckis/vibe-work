@@ -9,9 +9,10 @@
 //! A mount keeps one page class for its life (a page from the web, or a page of the
 //! session's own server: vw-preview remounts when a navigation crosses classes), so the old page can never use the
 //! new page's rights. The core answers per mount whether a loopback port may be reached ([`PageContext`]); Vibe
-//! Work's own ports ([`NetGuard::internal_ports`], every listener of the guard) are refused in strict backend scopes;
-//! browser pages reach them normally; access control belongs to the destination service. The
-//! shared listener ([`NetGuard::proxy_url`]) knows no webview: loopback refused.
+//! Work's own ports ([`NetGuard::internal_ports`], every listener of the guard) are refused by every scope.
+//! A normal shared listener ([`NetGuard::proxy_url`]) knows no webview and refuses loopback.
+//! The host-owned [`NetGuard::bind_system_client`] listener separately allows checked local destinations only on
+//! native automatic routes; browser and manually configured routes keep their existing scope.
 //!
 //! Every engine keeps the proxy setting on something several webviews share, so the guard has a listener per STORE
 //! ([`NetGuard::proxy_url_for_store`]): the website data store on macOS 14+ (`WKWebsiteDataStore`
@@ -46,7 +47,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinHandle;
 
-use crate::decide::{Scope, ScopeFuture};
+use crate::decide::ScopeFuture;
 use crate::resolve::Resolve;
 
 /// The reserved host suffix of canary requests (`.invalid` never resolves: only this proxy can answer it).
@@ -61,6 +62,18 @@ pub const LOG_CAP: usize = 200;
 pub const SEEN_CAP: usize = 256;
 /// Hex digits of tokens.
 const HEX: &[u8; 16] = b"0123456789abcdef";
+
+/// A service stream was refused before opening, or its selected route failed.
+#[cfg(feature = "proxy-transports")]
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceStreamError {
+    /// The guard's checked-address policy refused the target.
+    #[error("{0}")]
+    Refused(String),
+    /// A proxy or direct route failed with the guard's fixed, credential-free reason.
+    #[error("{0}")]
+    Route(crate::upstream::Error),
+}
 
 /// One refused request.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -132,7 +145,7 @@ pub trait PageContext: Send + Sync {
 /// Whose rights a listener applies.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Who {
-    /// No webview: nothing on this computer or the local network.
+    /// No webview. The ordinary shared listener has no local rights; a host-owned automatic relay has its own scope.
     Nobody,
     /// A store and listener generation: an old accepted connection cannot inherit a replacement
     /// listener's members while its accept task is being cancelled.
@@ -171,8 +184,12 @@ pub(crate) struct Inner {
     pub(crate) announced: Mutex<VecDeque<(String, u16)>>,
     seen_changed: Notify,
     pub(crate) slots: Arc<Semaphore>,
-    /// The user's proxy for public requests ([`NetGuard::set_upstream`]; the system's until then).
+    /// The route for public requests and, on the host-owned automatic relay, checked local system routes.
     pub(crate) upstream: std::sync::RwLock<Arc<crate::Upstream>>,
+    #[cfg(feature = "proxy-transports")]
+    pub(crate) system_client_mode: bool,
+    #[cfg(feature = "proxy-transports")]
+    system_proxy_fingerprint: Mutex<Option<vw_platform::proxy::ProxyFingerprint>>,
     /// True once this guard gives its own ports to the browser content rules ([`NetGuard::publish_internal_ports`]).
     publishes: std::sync::atomic::AtomicBool,
     /// Held across reading and publishing the ports, so an older snapshot never replaces a newer one.
@@ -182,6 +199,22 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    /// A fresh native snapshot is required before each host-owned relay connection. A change
+    /// revokes older tunnels via the same watch used for vault shutdown; a failed read closes
+    /// them and refuses this connection without guessing DIRECT.
+    #[cfg(feature = "proxy-transports")]
+    pub(crate) fn native_route_ready(&self) -> bool {
+        if !self.system_client_mode {
+            return true;
+        }
+        let mut previous = lock(&self.system_proxy_fingerprint);
+        observe_system_route(
+            &mut previous,
+            vw_platform::proxy::fingerprint(),
+            &self.enabled,
+        )
+    }
+
     /// Puts this guard's current listeners (shared and per store) in the process-wide set. The store lock is held
     /// across the snapshot and the update, so an older snapshot never replaces a newer one (the set takes no guard
     /// lock: the order is always stores, then the set).
@@ -192,6 +225,26 @@ impl Inner {
         crate::listeners::set(self.id, ports);
         drop(stores);
     }
+}
+
+#[cfg(feature = "proxy-transports")]
+fn observe_system_route<T: Eq>(
+    previous: &mut Option<T>,
+    next: Result<T, &'static str>,
+    enabled: &tokio::sync::watch::Sender<bool>,
+) -> bool {
+    let Ok(next) = next else {
+        let active = *enabled.borrow();
+        enabled.send_replace(active);
+        return false;
+    };
+    let changed = previous.as_ref().is_some_and(|old| old != &next);
+    *previous = Some(next);
+    if changed {
+        let active = *enabled.borrow();
+        enabled.send_replace(active);
+    }
+    true
 }
 
 impl Drop for Inner {
@@ -317,99 +370,12 @@ impl Inner {
     }
 }
 
-/// The scope of one listener (whose rights it applies).
-pub(crate) struct ListenerScope {
-    pub(crate) inner: Arc<Inner>,
-    pub(crate) who: Who,
-}
-
 /// The most members a store listener asks about per request (the core keeps far fewer alive; more grant nothing).
 const MEMBER_LIMIT: usize = 64;
 
-impl Scope for ListenerScope {
-    fn browser_addresses(&self) -> bool {
-        let Some(context) = self.inner.context.get() else {
-            return false;
-        };
-        let Who::Store(store, generation) = &self.who else {
-            return false;
-        };
-        let members = self.inner.store_members(store, *generation);
-        !members.is_empty() && members.iter().all(|key| context.browser_addresses(key))
-    }
-
-    fn loopback(&self, port: u16) -> ScopeFuture<'_> {
-        Box::pin(async move {
-            if self.inner.is_internal(port) {
-                return Err(format!(
-                    "port {port} belongs to Vibe Work itself and is never opened"
-                ));
-            }
-            let nobody = || "servers on this computer are not reachable from this page".to_owned();
-            let Some(context) = self.inner.context.get() else {
-                return Err(nobody());
-            };
-            match &self.who {
-                Who::Nobody => Err(nobody()),
-                Who::Store(store, generation) => {
-                    // Every member must have the right (never one mount's right used by another).
-                    let members = self.inner.store_members(store, *generation);
-                    if members.is_empty() {
-                        return Err(nobody());
-                    }
-                    for key in &members {
-                        context.loopback(key, port).await?;
-                    }
-                    Ok(())
-                }
-            }
-        })
-    }
-
-    fn local_access<'a>(&'a self, request: &'a crate::decide::LocalRequest<'a>) -> ScopeFuture<'a> {
-        Box::pin(async move {
-            // Vibe Work's own ports, for every page whatever the person answered (`0.0.0.0` reaches this computer too).
-            if request.class == crate::ip::IpClass::Loopback && self.inner.is_internal(request.port)
-            {
-                return Err(format!(
-                    "port {} belongs to Vibe Work itself and is never opened",
-                    request.port
-                ));
-            }
-            let nobody = || {
-                "this computer and the local network are not reachable from this page".to_owned()
-            };
-            let Some(context) = self.inner.context.get() else {
-                return Err(nobody());
-            };
-            let Who::Store(store, generation) = &self.who else {
-                return Err(nobody());
-            };
-            let members = self.inner.store_members(store, *generation);
-            if members.is_empty() {
-                return Err(nobody());
-            }
-            context.local_access(&members, request).await
-        })
-    }
-
-    fn local_network(&self, host: &str) -> bool {
-        let Some(context) = self.inner.context.get() else {
-            return false;
-        };
-        let same = |own: String| own.trim_end_matches('.').eq_ignore_ascii_case(host);
-        match &self.who {
-            Who::Nobody => false,
-            Who::Store(store, generation) => {
-                let members = self.inner.store_members(store, *generation);
-                !members.is_empty()
-                    && members
-                        .iter()
-                        .all(|key| context.lan_host(key).is_some_and(same))
-            }
-        }
-    }
-}
+#[path = "guard_scope.rs"]
+mod scope;
+pub(crate) use scope::ListenerScope;
 
 /// The egress guard (cheap to clone).
 #[derive(Clone)]
@@ -426,11 +392,30 @@ impl std::fmt::Debug for NetGuard {
 }
 
 impl NetGuard {
+    /// Binds a host-owned relay for core and Vibe native automatic proxy traffic. Only a scheme without a manual
+    /// proxy uses the system resolver and may reach checked local addresses. Browser and manual scopes are unchanged.
+    ///
+    /// # Errors
+    /// A bind error or unavailable OS randomness.
+    #[cfg(feature = "proxy-transports")]
+    pub fn bind_system_client(resolver: Arc<dyn Resolve>) -> std::io::Result<Self> {
+        Self::bind_with_mode(resolver, true)
+    }
+
     /// Binds the shared listener on `127.0.0.1:0` now (no runtime needed); [`Self::serve`] starts it.
     ///
     /// # Errors
     /// A bind error or unavailable OS randomness.
     pub fn bind(resolver: Arc<dyn Resolve>) -> std::io::Result<Self> {
+        Self::bind_with_mode(resolver, false)
+    }
+
+    fn bind_with_mode(
+        resolver: Arc<dyn Resolve>,
+        system_client_mode: bool,
+    ) -> std::io::Result<Self> {
+        #[cfg(not(feature = "proxy-transports"))]
+        let _ = system_client_mode;
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let shared_addr = listener.local_addr()?;
@@ -454,6 +439,10 @@ impl NetGuard {
                 seen_changed: Notify::new(),
                 slots: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
                 upstream: std::sync::RwLock::new(Arc::new(crate::Upstream::system())),
+                #[cfg(feature = "proxy-transports")]
+                system_client_mode,
+                #[cfg(feature = "proxy-transports")]
+                system_proxy_fingerprint: Mutex::new(None),
                 publishes: std::sync::atomic::AtomicBool::new(false),
                 publish_lock: Mutex::new(()),
                 id: crate::listeners::next_id(),
@@ -464,13 +453,124 @@ impl NetGuard {
     }
 
     /// Sets the user's proxy for public requests (Settings > Network; the system's proxy is used until this is
-    /// called). Takes effect for the next connection.
+    /// called). A host-owned automatic relay also uses it for checked local system routes. Takes effect for the
+    /// next connection.
     pub fn set_upstream(&self, upstream: crate::Upstream) {
         *self
             .inner
             .upstream
             .write()
             .unwrap_or_else(PoisonError::into_inner) = Arc::new(upstream);
+    }
+
+    /// Whether this is a host-owned service listener whose automatic routes may use checked local addresses.
+    #[cfg(feature = "proxy-transports")]
+    #[must_use]
+    pub fn is_system_client(&self) -> bool {
+        self.inner.system_client_mode
+    }
+
+    /// Opens a checked byte stream for a host-owned service request. The caller keeps the original
+    /// host for TLS verification; the proxy receives only a checked IP. Disabling this guard closes
+    /// the stream, as it does for HTTP tunnels.
+    ///
+    /// # Errors
+    /// A policy refusal or the selected route's fixed error, never a direct retry after a proxy failure.
+    #[cfg(feature = "proxy-transports")]
+    pub async fn open_service_stream(
+        &self,
+        request: &url::Url,
+    ) -> Result<
+        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+        ServiceStreamError,
+    > {
+        use crate::decide::decide_for;
+        use crate::guard::ServiceStreamError::{Refused, Route};
+        use tokio::io::copy_bidirectional;
+
+        if !self.inner.native_route_ready() {
+            return Err(Refused("The system proxy route is not ready.".to_owned()));
+        }
+        if !self.inner.system_client_mode || !*self.inner.enabled.borrow() {
+            return Err(Refused("The network connection is unavailable.".to_owned()));
+        }
+        let secure = match request.scheme() {
+            "https" | "wss" => true,
+            "http" | "ws" => false,
+            _ => return Err(Refused("The address is not valid.".to_owned())),
+        };
+        let host = request
+            .host_str()
+            .ok_or_else(|| Refused("The address has no host.".to_owned()))?;
+        let port = request
+            .port_or_known_default()
+            .ok_or_else(|| Refused("The address has no port.".to_owned()))?;
+        let mut enabled = self.inner.enabled.subscribe();
+        enabled.borrow_and_update();
+        let slot = self
+            .inner
+            .slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Refused("Too many network connections.".to_owned()))?;
+        let scope = ListenerScope {
+            inner: self.inner.clone(),
+            who: Who::Nobody,
+            system_client: true,
+        };
+        let addresses = decide_for(
+            self.inner.resolver.as_ref(),
+            &scope,
+            host,
+            port,
+            None,
+            false,
+            secure,
+        )
+        .await
+        .map_err(Refused)?;
+        let mut url = request.clone();
+        url.set_scheme(if secure { "https" } else { "http" })
+            .map_err(|()| Refused("The address is not valid.".to_owned()))?;
+        let upstream = self
+            .inner
+            .upstream
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let (mut target, _) = upstream
+            .open_with_system_url(&url, &url, true, &addresses)
+            .await
+            .map_err(|error| {
+                self.inner.record(None, host, port, error.outcome());
+                Route(error)
+            })?;
+        if enabled.has_changed().unwrap_or(true) || !*enabled.borrow() {
+            return Err(Refused("The network connection is unavailable.".to_owned()));
+        }
+        let (client, mut bridge) = tokio::io::duplex(32 * 1024);
+        let owner = self.inner.clone();
+        tokio::spawn(async move {
+            let _owner = owner;
+            let _slot = slot;
+            tokio::select! {
+                biased;
+                _ = enabled.changed() => {},
+                _ = copy_bidirectional(&mut bridge, &mut target) => {},
+            }
+        });
+        Ok(client)
+    }
+
+    /// The most recently completed system route on this listener, for the connection test.
+    #[cfg(feature = "proxy-transports")]
+    #[must_use]
+    pub fn last_route(&self) -> Option<crate::upstream::UsedRoute> {
+        self.inner
+            .upstream
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .last_route()
     }
 
     /// Enables forwarding. A change also closes existing connections, including authenticated tunnels.
@@ -484,7 +584,8 @@ impl NetGuard {
         self.inner.canaries.store(false, Ordering::SeqCst);
     }
 
-    /// The shared proxy URL with its per-run ingress credential: no session, loopback refused.
+    /// The shared proxy URL with its per-run ingress credential. The ordinary listener has no session or local
+    /// rights; a [`Self::bind_system_client`] listener grants checked local access only on automatic routes.
     /// Keep this capability private; it never contains the upstream sign-in.
     #[must_use]
     pub fn proxy_url(&self) -> String {
@@ -789,5 +890,72 @@ impl NetGuard {
             .filter(|r| r.seq > since)
             .cloned()
             .collect()
+    }
+
+    /// Whether a refused request failed while reading the system proxy configuration.
+    /// The fixed refusal reason is recorded before the guard answers 502; no destination or PAC text is returned.
+    #[cfg(feature = "proxy-transports")]
+    #[must_use]
+    pub fn proxy_lookup_failed_since(&self, since: u64) -> bool {
+        lock(&self.inner.log).iter().any(|refusal| {
+            refusal.seq > since && refusal.reason == crate::upstream::Error::Discovery.outcome()
+        })
+    }
+
+    /// Whether a selected upstream proxy could not be contacted before it answered.
+    /// Only the fixed reason in this guard's refusal log is read; direct route failures are excluded.
+    #[cfg(feature = "proxy-transports")]
+    #[must_use]
+    pub fn proxy_connect_failed_since(&self, since: u64) -> bool {
+        lock(&self.inner.log).iter().any(|refusal| {
+            refusal.seq > since
+                && refusal.reason == crate::upstream::Error::ProxyUnreachable.outcome()
+        })
+    }
+}
+
+#[cfg(all(test, feature = "proxy-transports"))]
+mod native_route_tests {
+    #[test]
+    fn changed_or_unreadable_system_proxy_revokes_old_connections_without_unlocking() {
+        let (enabled, mut existing) = tokio::sync::watch::channel(true);
+        let mut previous = None;
+        existing.borrow_and_update();
+        assert!(super::observe_system_route(
+            &mut previous,
+            Ok(1_u8),
+            &enabled
+        ));
+        assert!(!existing.has_changed().unwrap());
+        assert!(super::observe_system_route(
+            &mut previous,
+            Ok(1_u8),
+            &enabled
+        ));
+        assert!(!existing.has_changed().unwrap());
+        assert!(super::observe_system_route(
+            &mut previous,
+            Ok(2_u8),
+            &enabled
+        ));
+        assert!(existing.has_changed().unwrap());
+        assert!(*existing.borrow_and_update());
+
+        enabled.send_replace(false);
+        existing.borrow_and_update();
+        assert!(super::observe_system_route(
+            &mut previous,
+            Ok(3_u8),
+            &enabled
+        ));
+        assert!(existing.has_changed().unwrap());
+        assert!(!*existing.borrow_and_update());
+        assert!(!super::observe_system_route::<u8>(
+            &mut previous,
+            Err("unavailable"),
+            &enabled
+        ));
+        assert!(existing.has_changed().unwrap());
+        assert!(!*existing.borrow_and_update());
     }
 }

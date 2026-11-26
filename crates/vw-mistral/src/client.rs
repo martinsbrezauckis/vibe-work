@@ -1,7 +1,7 @@
 //! The shared HTTPS client: on Linux rustls with the `ring` provider (installed once per process)
 //! and the OS trust store; on Windows and macOS the OS TLS stack (native-tls). The proxy and certificate settings of
-//! `network` (the ones saved in Settings > Network) are applied to every client built here; with none set, the system
-//! proxy settings are honoured as before. A 10 s connect timeout and no overall timeout (model streams can run for
+//! `network` (the ones saved in Settings > Network) are applied to every client built here; unconfigured Windows/macOS
+//! routes use the app-owned native proxy relay. A 10 s connect timeout and no overall timeout (model streams can run for
 //! minutes; callers add their own). **Neither client follows redirects**: every caller sends
 //! the key, and a 3xx must never carry it, or the request, to another place.
 //!
@@ -22,7 +22,16 @@ pub struct ClientError(pub String);
 /// # Errors
 /// [`ClientError`] when TLS cannot be set up (no usable trust store).
 pub fn https_client() -> Result<reqwest::Client, ClientError> {
-    build(reqwest::redirect::Policy::none())
+    build(reqwest::redirect::Policy::none(), false)
+}
+
+/// HTTPS client for the signed update manifests. Every new socket rechecks the authenticated
+/// launch route, so an update cannot outlive a vault or relay transition.
+///
+/// # Errors
+/// [`ClientError`] when TLS cannot be set up.
+pub fn update_https_client() -> Result<reqwest::Client, ClientError> {
+    build(reqwest::redirect::Policy::none(), true)
 }
 
 /// The model proxy's client: the same settings as [`https_client`] (it never follows a redirect). A 3xx
@@ -32,7 +41,7 @@ pub fn https_client() -> Result<reqwest::Client, ClientError> {
 /// # Errors
 /// [`ClientError`] when TLS cannot be set up.
 pub fn proxy_client() -> Result<reqwest::Client, ClientError> {
-    build(reqwest::redirect::Policy::none())
+    build(reqwest::redirect::Policy::none(), false)
 }
 
 /// A key-bearing client that is built again when the network settings change in a run (they are applied after a
@@ -88,7 +97,10 @@ pub fn tls_builder() -> reqwest::ClientBuilder {
     }
 }
 
-fn build(redirects: reqwest::redirect::Policy) -> Result<reqwest::Client, ClientError> {
+fn build(
+    redirects: reqwest::redirect::Policy,
+    update: bool,
+) -> Result<reqwest::Client, ClientError> {
     #[cfg(target_os = "linux")]
     let builder = {
         // Installing fails only when a provider is already installed (by us earlier or another
@@ -100,8 +112,13 @@ fn build(redirects: reqwest::redirect::Policy) -> Result<reqwest::Client, Client
     let builder = reqwest::Client::builder().tls_backend_native();
     // The saved proxy and certificates (Settings > Network); read when the client is built, so a client keeps the
     // settings of the moment it was made.
-    crate::network::current()
-        .apply(builder)
+    let settings = crate::network::current();
+    let builder = if update {
+        settings.apply_update(builder)
+    } else {
+        settings.apply(builder)
+    };
+    builder
         .redirect(redirects)
         .connect_timeout(Duration::from_secs(10))
         .pool_idle_timeout(Duration::from_secs(90))

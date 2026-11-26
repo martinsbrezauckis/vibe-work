@@ -50,6 +50,37 @@
   padding-right: 8px;
   border-bottom: 1px solid var(--line);
 }
+.panel-tab-scroll {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.panel-tab-scroll::before,
+.panel-tab-scroll::after {
+  content: "";
+  position: absolute;
+  z-index: var(--z-content);
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  pointer-events: none;
+  opacity: 0;
+}
+.panel-tab-scroll::before {
+  left: 0;
+  background: linear-gradient(to right, var(--panel), transparent);
+  border-left: 1px solid var(--text-3);
+}
+.panel-tab-scroll::after {
+  right: 0;
+  background: linear-gradient(to left, var(--panel), transparent);
+  border-right: 1px solid var(--text-3);
+}
+.panel-tab-scroll.has-scroll-left::before,
+.panel-tab-scroll.has-scroll-right::after {
+  opacity: 1;
+}
 .ptabs {
   flex: 1;
   display: flex;
@@ -59,6 +90,9 @@
   min-height: var(--header-height);
   min-width: 0;
   overflow-x: auto;
+}
+.panel-tab-scroll .ptabs {
+  scroll-padding-inline: 16px;
 }
 .ptab-group {
   flex-shrink: 0;

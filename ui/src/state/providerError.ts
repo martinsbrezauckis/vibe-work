@@ -102,8 +102,115 @@ export function parseProviderError(raw: string): ProviderFailure | null {
   };
 }
 
+/** Exact error types emitted by vw-keyproxy. The upstream body never supplies the plain sentence. */
+const RELAY_ERROR_LINES = new Map<string, string>([
+  ["vibe_work_proxy_token", "Vibe Work's model proxy refused this request. Try the turn again."],
+  ["vibe_work_proxy_path", "Vibe Work's model proxy does not forward this Mistral endpoint."],
+  ["vibe_work_proxy_stopping", "Vibe Work is closing. Try again after restart."],
+  [
+    "vibe_work_key_unavailable",
+    "Vibe Work could not use a key. Unlock the vault or check the key in Settings.",
+  ],
+  [
+    "vibe_work_compaction_timeout",
+    "Context compaction took too long. Try your next message or compact again.",
+  ],
+  ["vibe_work_attachment_timeout", "The attachment request took too long. Try your next message."],
+  [
+    "vibe_work_chat_too_large",
+    "The model request is too large; remove some attachments or start a new chat.",
+  ],
+  [
+    "vibe_work_chat_upload_timeout",
+    "The model request upload took too long; try again with fewer attachments.",
+  ],
+  [
+    "vibe_work_attachment_upstream_unreachable",
+    "The attachment or compaction request could not reach Mistral. Try again later.",
+  ],
+  [
+    "vibe_work_upstream_unreachable",
+    "Vibe Work could not reach Mistral. Check the network or proxy settings.",
+  ],
+  [
+    "vibe_work_model_upstream_refused",
+    "Mistral refused the attachment or compaction request. Try again later.",
+  ],
+  [
+    "vibe_work_resume_hold",
+    "Vibe Work is waiting for the earlier turn to finish. Try again in a moment.",
+  ],
+  [
+    "vibe_work_connector_request",
+    "Vibe Work's model proxy refused this connector request. Check its details.",
+  ],
+  [
+    "vibe_work_mcp_unknown",
+    "Vibe Work has no MCP server with a key at this address. Add it again in Tools.",
+  ],
+  [
+    "vibe_work_mcp_not_allowed",
+    "This MCP server's key is not allowed now. Open Tools and choose Allow key.",
+  ],
+  [
+    "vibe_work_mcp_permissions_unreadable",
+    "The secret's permissions could not be read. Check the vault in Vibe Work.",
+  ],
+  [
+    "vibe_work_agent_vault_locked",
+    "Agent access to the vault is paused. Check the vault in Vibe Work.",
+  ],
+  [
+    "vibe_work_mcp_secret_missing",
+    "This MCP server's key is missing or invalid. Add the server again in Tools.",
+  ],
+  [
+    "vibe_work_debug_token_requires_chat",
+    "This request needs an active chat. Start a chat and try again.",
+  ],
+  ["vibe_work_mcp_query", "Vibe Work's MCP forwarder takes no query."],
+  ["vibe_work_mcp_not_ready", "Vibe Work is still starting. Refresh the server in a moment."],
+  [
+    "vibe_work_mcp_redirect",
+    "This MCP server answered with a redirect. Add it again with its final address.",
+  ],
+  [
+    "vibe_work_mcp_encoded",
+    "This MCP server sent a compressed answer. Turn compression off for this server.",
+  ],
+  [
+    "vibe_work_mcp_header_key",
+    "This MCP server sent your key back in an answer header. Vibe Work refused the answer.",
+  ],
+  ["vibe_work_mcp_key_rejected", "This MCP server rejected its key. Check the key in Tools."],
+  [
+    "vibe_work_upstream_certificate",
+    "This MCP server's certificate is not trusted. Check Network settings.",
+  ],
+  [
+    "vibe_work_upstream_timeout",
+    "This MCP server did not answer in time. Check its address and try again.",
+  ],
+]);
+
+/** Relay errors carry a locally owned reason in the SDK body, independent of HTTP status. */
+function relayLine(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null || !("error" in parsed)) return null;
+    const error = parsed.error;
+    if (typeof error !== "object" || error === null || !("type" in error)) return null;
+    if (typeof error.type !== "string") return null;
+    return RELAY_ERROR_LINES.get(error.type) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The plain line for a failure: what happened and what to do, without codes. */
 export function plainLine(failure: ProviderFailure): string {
+  const relay = relayLine(failure.message);
+  if (relay !== null) return relay;
   const status = failure.status;
   if (status === 401 || status === 403)
     return "Mistral did not accept the API key. Check the key in Settings.";

@@ -1,4 +1,4 @@
-/** Lazy, DOM-free Mermaid rendering. Called by MermaidBlock; only passiveMarkup's output reaches the page. */
+/** Lazy, DOM-free Mermaid rendering. Called in diagramWorker; only passiveMarkup's output reaches the page. */
 import { prepareDiagramSource } from "./mermaid/detect";
 import { engineFor } from "./mermaid/registry";
 

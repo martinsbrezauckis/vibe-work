@@ -142,7 +142,49 @@ pub async fn connect(
     key: &str,
 ) -> Result<(RealtimeSender, RealtimeReceiver), SpeechError> {
     let auth = crate::auth::bearer(key).ok_or(SpeechError::MalformedKey)?;
-    let socket = crate::ws::connect(&realtime_url(api_base), auth, CONNECT_TIMEOUT).await?;
+    let url = realtime_url(api_base);
+    #[cfg(feature = "proxy-transports")]
+    let socket = {
+        use std::sync::Arc;
+        use vw_netguard::{NetGuard, SystemResolver, Upstream};
+        let settings = crate::network::current();
+        let guard = NetGuard::bind_system_client(Arc::new(SystemResolver))
+            .map_err(|_| SpeechError::Network("the network guard could not start".to_owned()))?;
+        guard.set_upstream(
+            Upstream::from_values(
+                settings.http_proxy.as_deref(),
+                settings.https_proxy.as_deref(),
+                settings.all_proxy.as_deref(),
+                settings.no_proxy.as_deref(),
+            )
+            .with_system_resolver()
+            .with_certificates(settings.guard_certificates())
+            .with_proxy_certificates(settings.proxy_certificates.clone()),
+        );
+        crate::ws::connect_via(&url, auth, CONNECT_TIMEOUT, &guard).await?
+    };
+    #[cfg(not(feature = "proxy-transports"))]
+    let socket = {
+        let applies = |settings: &crate::network::NetworkSettings| {
+            if url.starts_with("wss://") {
+                settings.https_proxy.is_some() || settings.all_proxy.is_some()
+            } else {
+                settings.http_proxy.is_some() || settings.all_proxy.is_some()
+            }
+        };
+        if applies(&crate::network::current())
+            || applies(&crate::network::NetworkSettings::from_environment())
+        {
+            return Err(SpeechError::Network(
+                "this build cannot route live transcription through the chosen proxy".to_owned(),
+            ));
+        }
+        crate::ws::connect(&url, auth, CONNECT_TIMEOUT).await?
+    };
+    start_session(socket).await
+}
+
+async fn start_session(socket: Socket) -> Result<(RealtimeSender, RealtimeReceiver), SpeechError> {
     let (sink, mut stream) = socket.split();
     let created = tokio::time::timeout(CONNECT_TIMEOUT, async {
         while let Some(message) = stream.next().await {
@@ -169,6 +211,22 @@ pub async fn connect(
     let mut sender = RealtimeSender { sink };
     sender.send(format_message()).await?;
     Ok((sender, RealtimeReceiver { stream }))
+}
+
+/// Opens a realtime session through the key service's checked network guard.
+///
+/// # Errors
+/// [`SpeechError`] on a proxy, TLS, handshake, or protocol failure.
+#[cfg(feature = "proxy-transports")]
+pub async fn connect_via(
+    api_base: &str,
+    key: &str,
+    guard: &vw_netguard::NetGuard,
+) -> Result<(RealtimeSender, RealtimeReceiver), SpeechError> {
+    let auth = crate::auth::bearer(key).ok_or(SpeechError::MalformedKey)?;
+    let socket =
+        crate::ws::connect_via(&realtime_url(api_base), auth, CONNECT_TIMEOUT, guard).await?;
+    start_session(socket).await
 }
 
 impl RealtimeSender {

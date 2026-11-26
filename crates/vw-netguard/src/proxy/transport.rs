@@ -16,7 +16,7 @@ pub(super) async fn open(
 ) -> Result<Stream, Error> {
     let tcp = tokio::net::TcpStream::connect((route.host.as_str(), route.port))
         .await
-        .map_err(|_| Error::Unreachable)?;
+        .map_err(|_| Error::ProxyUnreachable)?;
     let mut stream: Stream = if route.kind == Kind::Https {
         tls(&route.host, tcp, roots).await?
     } else {

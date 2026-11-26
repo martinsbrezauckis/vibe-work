@@ -303,6 +303,7 @@ def install():
     install_builtin_skill_filter()
     install_agent_worktree_policy()
     install_mcp_projection_guard(adapter)  # noqa: F821 - launch.rs prepends vibe_mcp_projection.py
+    install_mcp_refresh_guard()  # noqa: F821 - launch.rs prepends vibe_mcp_refresh.py
     install_skill_cleanup_guard()  # noqa: F821 - launch.rs prepends vibe_skill_cleanup.py
     install_restored_turn_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py
     install_resumed_plugin_guard()  # noqa: F821 - launch.rs prepends vibe_resume_guard.py

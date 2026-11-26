@@ -31,7 +31,7 @@ pub(crate) async fn prepare(
     call_id: &str,
     args: Value,
 ) -> Result<tool_calls::receipts::Execution, String> {
-    // Before any card: a subagent cannot ask the person to close its parent chat's browser (DBK17G-01).
+    // Before any card: a subagent cannot ask the person to close its parent chat's browser.
     super::check::refuse_child_source(shared, source, chat, chat, "chrome_session", &args)?;
     super::gateway::validate_session_args(
         &args,
@@ -319,7 +319,7 @@ struct Closing {
     /// Windows already asked; each at most once per `close_browser`.
     tried: Vec<u64>,
     /// Windows whose close the helper confirmed. A tried window absent here (refused, timed out, outcome unknown)
-    /// stays remembered, so a later `close_browser` can nominate it again (DBK17R-02).
+    /// stays remembered, so a later `close_browser` can nominate it again.
     confirmed: Vec<u64>,
     /// Remembered windows a complete inventory showed without this chat's tabs, or not at all.
     settled: Vec<u64>,
@@ -359,7 +359,7 @@ struct Inventory {
 /// can hold several. Candidates are ONLY windows the agent itself opened: this session's own window (the helper's
 /// session `windowId`) and the windows this chat's agent created tabs in (`remember`; `tabs.create` always opens in the
 /// agent's own window). A window the inventory lists with this chat's tab is never a candidate by that alone: the person
-/// may have moved an agent-created tab into their own window and handed it over (DBK17R-01); such a tab is reported,
+/// may have moved an agent-created tab into their own window and handed it over; such a tab is reported,
 /// never closed (owner: the person's windows and signed-in tabs are not the agent's to close). The helper's
 /// `window.close` closes only this chat's exact original-window tabs in a window and refuses another chat's window.
 /// Same gateway path and mode checks as the agent's own call.
@@ -374,7 +374,7 @@ async fn close_own_windows(
 ) -> String {
     let live = live_status(shared, id, profile, cached_status).await;
     let current = live.window;
-    // DBK17S-01: a remembered window is nominated only while the helper reports the browser incarnation it was opened
+    // A remembered window is nominated only while the helper reports the browser incarnation it was opened
     // in. After a browser restart Chrome can reuse the number for a person's window, and the helper would close a tab
     // the person moved there. Any other window is dropped unasked and reported: its tabs may still be open.
     let (remembered, dropped) = shared

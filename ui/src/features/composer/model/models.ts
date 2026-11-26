@@ -48,6 +48,12 @@ function configView(source: JsonValue | undefined): Obj | null {
   return inner ?? (Array.isArray(o["models"]) ? o : null);
 }
 
+/** Core's saved default when Vibe could not fetch the account model list. */
+export function unresolvedDefaultAlias(source: JsonValue | undefined): string | null {
+  const alias = obj(obj(source)?.["savedDefaultUnresolved"])?.["alias"];
+  return typeof alias === "string" && alias !== "" ? alias : null;
+}
+
 function choiceOf(value: JsonValue): ModelChoice | null {
   const m = obj(value);
   const alias = m?.["alias"];
@@ -140,15 +146,21 @@ export function newChatPick(
   held: CurrentPick = { alias: null, effort: null },
   defaultReasoning: string | null = null,
 ): CurrentPick {
+  const unresolved = unresolvedDefaultAlias(config);
+  if (unresolved !== null && held.alias === null)
+    return { alias: unresolved, effort: held.effort ?? defaultReasoning };
   const view = configView(config);
   const active = currentPick(config, undefined);
   const fallback = view?.["defaultModelAlias"];
+  const saved = obj(config)?.["savedDefaultAlias"];
   const configuredAlias =
     view?.["activeModelPinned"] === true && active.alias !== null
       ? active.alias
-      : typeof fallback === "string" && fallback !== ""
-        ? fallback
-        : active.alias;
+      : typeof saved === "string" && saved !== ""
+        ? saved
+        : typeof fallback === "string" && fallback !== ""
+          ? fallback
+          : active.alias;
   const alias = held.alias ?? configuredAlias;
   const models = view?.["models"];
   const model = Array.isArray(models) ? models.find((m) => obj(m)?.["alias"] === alias) : undefined;

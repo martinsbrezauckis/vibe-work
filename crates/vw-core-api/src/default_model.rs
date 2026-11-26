@@ -60,6 +60,29 @@ fn editable(path: &Path) -> Result<(String, DocumentMut), CoreError> {
     Ok((before, config))
 }
 
+/// The alias saved as `active_model` in Vibe Work's own Vibe home config, when it can be read safely.
+pub(crate) fn saved_alias(shared: &Shared) -> Option<String> {
+    let path = shared.instructions.own_home.join("config.toml");
+    editable(&path)
+        .ok()
+        .and_then(|(_, document)| document.get("active_model")?.as_str().map(str::to_owned))
+        .filter(|alias| !alias.is_empty() && alias.len() <= 128)
+}
+
+/// Keeps the saved new-chat choice visible when Vibe reports a routed or transient unpinned view.
+/// A listed alias is not enough to prove a new session will use it while Vibe reports no pin.
+pub(crate) fn mark_saved_default(shared: &Shared, reply: &mut Value) {
+    let config = &reply["config"];
+    if config["activeModelPinned"] == true {
+        return;
+    }
+    let Some(alias) = saved_alias(shared) else {
+        return;
+    };
+    reply["savedDefaultAlias"] = json!(alias.clone());
+    reply["savedDefaultUnresolved"] = json!({"alias":alias});
+}
+
 fn write(path: &Path, alias: &str) -> Result<(), CoreError> {
     for _ in 0..2 {
         let (before, mut config) = editable(path)?;

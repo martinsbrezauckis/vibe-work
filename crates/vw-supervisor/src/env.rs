@@ -28,12 +28,19 @@ pub const API_KEY_VAR: &str = "MISTRAL_API_KEY";
 /// that a Vibe CLI pointed at Vibe Work's home, whose `MISTRAL_API_KEY` is the user's real key, sends nothing.
 pub const MCP_TOKEN_VAR: &str = "VW_MCP_TOKEN";
 
+/// Vibe 3.1.5 reads this JSON list through its environment config layer. The
+/// disabled list is concatenated with other config layers and removes these
+/// tools before Vibe offers them to the model.
+const DISABLED_TOOLS_VAR: &str = "VIBE_DISABLED_TOOLS";
+const DISABLED_GOAL_TOOLS: &str = "[\"get_goal\",\"create_goal\",\"update_goal\"]";
+
 /// Unsupported experiments pinned off in both the app config and the server environment.
-pub const EXPERIMENT_CONFIG_KEYS: [&str; 4] = [
+pub const EXPERIMENT_CONFIG_KEYS: [&str; 5] = [
     "experimental_enable_mistral_mcp_connector",
     "experimental_local_runtime_session_api",
     "experimental_enable_document_library_connector",
     "experimental_enable_tab_status",
+    "experimental_enable_remote_plugins",
 ];
 
 /// Stable features not offered by the app, pinned off in config and environment.
@@ -298,7 +305,22 @@ pub struct EnvPlan<'a> {
 /// # Errors
 /// [`EnvError`] when an explicit variable is refused.
 pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvError> {
+    build_env_with_proxy_relays(plan, &[])
+}
+
+/// Builds a child environment with exact current app-owned proxy relay URLs.
+/// The caller obtains these from the key service, never from inherited or user settings.
+///
+/// # Errors
+/// [`EnvError`] when an explicit variable is refused.
+pub fn build_env_with_proxy_relays(
+    plan: &EnvPlan<'_>,
+    relay_urls: &[OsString],
+) -> Result<Vec<(OsString, OsString)>, EnvError> {
     for (name, value) in plan.extra {
+        if name.eq_ignore_ascii_case(DISABLED_TOOLS_VAR) {
+            return Err(EnvError::PinnedSetting(name.clone()));
+        }
         if STABLE_CONFIG_KEYS
             .iter()
             .any(|key| name.eq_ignore_ascii_case(&format!("VIBE_{key}")))
@@ -342,6 +364,7 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
     for name in RUNTIME_PINNED_OFF {
         set(name, "false".into());
     }
+    set(DISABLED_TOOLS_VAR, DISABLED_GOAL_TOOLS.into());
     set("VIBE_HOME", plan.vibe_home.as_os_str().to_owned());
     set(
         "BASH_ENV",
@@ -367,7 +390,21 @@ pub fn build_env(plan: &EnvPlan<'_>) -> Result<Vec<(OsString, OsString)>, EnvErr
         set(MCP_TOKEN_VAR, OsString::from(token.expose()));
     }
     keep_loopback_off_the_proxy(&mut env);
+    // Only current key-service capabilities already selected for a proxy slot may survive.
+    // Neither loopback addresses nor an arbitrary credentialed URL establish ownership.
+    let relay_env: Vec<_> = env
+        .iter()
+        .filter(|(name, value)| {
+            matches!(
+                name.to_str().map(str::to_ascii_uppercase).as_deref(),
+                Some("HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY")
+            ) && value.to_string_lossy().contains('@')
+                && relay_urls.contains(value)
+        })
+        .cloned()
+        .collect();
     crate::isolate_credentials(&mut env);
+    env.extend(relay_env);
     Ok(env)
 }
 
@@ -467,6 +504,10 @@ fn same_name(a: &OsStr, b: &OsStr) -> bool {
 }
 
 #[cfg(test)]
+#[path = "env_proxy_relay_tests.rs"]
+mod proxy_relay_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -550,5 +591,81 @@ mod tests {
             build_env(&plan(Vec::new(), &extra)),
             Err(EnvError::Experiment("VIBE_CLI_OIDC_ENABLED".to_owned()))
         );
+    }
+
+    #[test]
+    fn remote_plugins_are_forced_off_in_the_child_environment() {
+        let env = build_env(&plan(Vec::new(), &[])).unwrap();
+        assert_eq!(
+            value(&env, "VIBE_EXPERIMENTAL_ENABLE_REMOTE_PLUGINS"),
+            Some("false".into())
+        );
+    }
+
+    #[test]
+    fn goal_tools_are_disabled_in_every_child_environment() -> Result<(), EnvError> {
+        let parent = vec![(OsString::from("VIBE_DISABLED_TOOLS"), OsString::from("[]"))];
+        let env = build_env(&plan(parent, &[]))?;
+        let expected = OsString::from("[\"get_goal\",\"create_goal\",\"update_goal\"]");
+        assert_eq!(value(&env, "VIBE_DISABLED_TOOLS"), Some(expected.clone()));
+        let env = build_env(&plan(Vec::new(), &[]))?;
+        assert_eq!(value(&env, "VIBE_DISABLED_TOOLS"), Some(expected));
+        let extra = [("VIBE_DISABLED_TOOLS".to_owned(), "[]".into())];
+        assert_eq!(
+            build_env(&plan(Vec::new(), &extra)),
+            Err(EnvError::PinnedSetting("VIBE_DISABLED_TOOLS".to_owned()))
+        );
+        Ok(())
+    }
+
+    /// The real pinned Vibe registry, read through Vibe's own environment config layer with the exact value this
+    /// builder gives every Vibe child: no goal tool reaches the model, ordinary tools stay, and a saved goal
+    /// reopens paused without starting a turn. Inherited `VIBE_*` names are removed so only the pin is read.
+    #[test]
+    fn pinned_vibe_offers_no_goal_tools_with_the_child_environment() -> Result<(), EnvError> {
+        let env = build_env(&plan(Vec::new(), &[]))?;
+        let disabled = value(&env, "VIBE_DISABLED_TOOLS").unwrap();
+        let python = std::env::var_os("VIBE_PYTHON").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../data")
+                    .join(format!(
+                        "vibe-{}/venv",
+                        include_str!("../../../tools/public/codegen/vibe.pin").trim()
+                    ))
+                    .join(if cfg!(windows) {
+                        "Scripts/python.exe"
+                    } else {
+                        "bin/python"
+                    })
+            },
+            std::path::PathBuf::from,
+        );
+        let mut command = std::process::Command::new(python);
+        for (name, _) in std::env::vars_os() {
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("VIBE_")
+            {
+                command.env_remove(name);
+            }
+        }
+        let output = command
+            .args(["-I", "-B"])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/public/python/test_goal_tools_off.py"
+            ))
+            .env("VIBE_DISABLED_TOOLS", disabled)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
     }
 }

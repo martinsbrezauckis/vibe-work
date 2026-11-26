@@ -58,14 +58,25 @@ mod tests {
             for key in vw_agent_tools::folders::PATH_FIELDS {
                 let native = cwd.join("file.txt");
                 let result = hook(&home, &cwd, tool, &json!({(*key):msys(&native)})).unwrap();
-                assert_eq!(
-                    Path::new(
-                        result["hook_specific_output"]["tool_input"][*key]
+                if matches!(*key, "filePath" | "file_path" | "path") {
+                    assert_eq!(
+                        Path::new(
+                            result["hook_specific_output"]["tool_input"][*key]
+                                .as_str()
+                                .unwrap()
+                        ),
+                        native
+                    );
+                } else {
+                    assert_eq!(result["decision"], "deny", "{tool} {key}: {result}");
+                    assert!(
+                        result["reason"]
                             .as_str()
                             .unwrap()
-                    ),
-                    native
-                );
+                            .contains("vault or app state"),
+                        "{tool} {key}: {result}"
+                    );
+                }
                 let result = hook(
                     &home,
                     &cwd,

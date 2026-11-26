@@ -50,6 +50,219 @@ async fn original_read_creates_no_attachment_and_search_lists_it_once() {
     f.finish().await;
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_search_and_document_read_allow_both_ordinary_hard_link_names() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let f = Fixture::new().await;
+    let folder = f.root.join("project");
+    f.load("s", &folder, &[], false);
+    f.load("second", &folder, &[], false);
+    let original = folder.join("a.txt");
+    let alias = folder.join("b.txt");
+    let plain = folder.join("plain.txt");
+    std::fs::write(&original, "WINSEARCH_ADAPTER_MARKER").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    std::fs::write(&plain, "WINSEARCH_PLAIN_MARKER").unwrap();
+    let protected = f.root.join("app-data/venv/protected.txt");
+    std::fs::create_dir_all(protected.parent().unwrap()).unwrap();
+    std::fs::write(&protected, "WINSEARCH_PROTECTED_MARKER").unwrap();
+    let protected_alias = folder.join("protected.txt");
+    std::fs::hard_link(&protected, &protected_alias).unwrap();
+    let held_path = f.root.join("app-data/venv/held.db");
+    std::fs::write(&held_path, "held app state").unwrap();
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&held_path)
+        .unwrap();
+    assert!(std::fs::File::open(&held_path).is_err());
+    assert!(vw_platform::final_path::open_metadata(&held_path).is_ok());
+    for selected in [&original, &alias] {
+        println!(
+            "WINSEARCH_ADAPTER selected={} reported={}",
+            selected.display(),
+            vw_platform::final_path::final_path(&std::fs::File::open(selected).unwrap())
+                .unwrap()
+                .display()
+        );
+    }
+    for name in ["ask", "accept-edits", "auto-approve"] {
+        mode(&f, name);
+        let args = json!({"query":"WINSEARCH_"});
+        let (first, second) = tokio::join!(
+            search_tool::call(&f.core.shared, "s", args.clone()),
+            search_tool::call(&f.core.shared, "second", args),
+        );
+        for answer in [first, second] {
+            let text = answer.unwrap();
+            let text = text.as_str().unwrap();
+            assert!(
+                text.contains("a.txt:1: WINSEARCH_ADAPTER_MARKER"),
+                "{name}: {text}"
+            );
+            assert!(
+                text.contains("b.txt:1: WINSEARCH_ADAPTER_MARKER"),
+                "{name}: {text}"
+            );
+            assert!(
+                text.contains("plain.txt:1: WINSEARCH_PLAIN_MARKER"),
+                "{name}: {text}"
+            );
+            assert!(!text.contains("PROTECTED"), "{name}: {text}");
+        }
+        for selected in [&original, &alias, &plain] {
+            let read = prepared(&f.core.shared, selected).await.await.unwrap();
+            assert!(
+                read["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if selected == &plain {
+                        "WINSEARCH_PLAIN_MARKER"
+                    } else {
+                        "WINSEARCH_ADAPTER_MARKER"
+                    })
+            );
+        }
+        assert!(
+            prepare(
+                &f.core.shared,
+                "s",
+                "s",
+                "protected",
+                "document_read",
+                &mut json!({"path":protected_alias})
+            )
+            .await
+            .is_err()
+        );
+    }
+    windows_invalid_inputs_are_refused(&f).await;
+    drop(held);
+    f.finish().await;
+}
+
+#[cfg(windows)]
+async fn windows_invalid_inputs_are_refused(f: &Fixture) {
+    for path in ["", "missing.txt"] {
+        assert!(
+            prepare(
+                &f.core.shared,
+                "s",
+                "s",
+                "missing",
+                "document_read",
+                &mut json!({"path":path})
+            )
+            .await
+            .is_err()
+        );
+    }
+    assert!(
+        search_tool::call(&f.core.shared, "s", json!({"query":""}))
+            .await
+            .is_err()
+    );
+    assert!(
+        search_tool::call(&f.core.shared, "missing", json!({"query":"WINSEARCH_"}))
+            .await
+            .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn realistic_hard_links_work_in_all_access_modes_and_parallel_chats() {
+    let f = Fixture::new().await;
+    let cache = f.root.join("app-data/venv");
+    std::fs::create_dir_all(&cache).unwrap();
+    for index in 0..15_000 {
+        std::fs::write(cache.join(format!("package-{index}.py")), "single link").unwrap();
+    }
+    let folder = f.root.join("project");
+    f.load("s", &folder, &[], false);
+    f.load("second", &folder, &[], false);
+    let original = folder.join("a.txt");
+    let alias = folder.join("b.txt");
+    std::fs::write(&original, "HARDLINKS3_ADAPTER_MARKER").unwrap();
+    std::fs::hard_link(&original, &alias).unwrap();
+    let protected = cache.join("protected.txt");
+    std::fs::write(&protected, "HARDLINKS3_PROTECTED_MARKER").unwrap();
+    let protected_alias = folder.join("protected.txt");
+    std::fs::hard_link(&protected, &protected_alias).unwrap();
+    for name in ["ask", "accept-edits", "auto-approve"] {
+        mode(&f, name);
+        let args = json!({"query":"HARDLINKS3_"});
+        let (first, second) = tokio::join!(
+            search_tool::call(&f.core.shared, "s", args.clone()),
+            search_tool::call(&f.core.shared, "second", args),
+        );
+        for answer in [first, second] {
+            let answer = answer.unwrap();
+            let text = answer.as_str().unwrap();
+            assert!(
+                text.contains("a.txt:1: HARDLINKS3_ADAPTER_MARKER"),
+                "{name}: {text}"
+            );
+            assert!(
+                text.contains("b.txt:1: HARDLINKS3_ADAPTER_MARKER"),
+                "{name}: {text}"
+            );
+            assert!(!text.contains("PROTECTED"), "{name}: {text}");
+        }
+        let read = prepared(&f.core.shared, &alias).await.await.unwrap();
+        assert!(
+            read["text"]
+                .as_str()
+                .unwrap()
+                .contains("HARDLINKS3_ADAPTER_MARKER")
+        );
+        assert!(
+            prepare(
+                &f.core.shared,
+                "s",
+                "s",
+                "negative",
+                "document_read",
+                &mut json!({"path":protected_alias})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(f.core.asks(), [] as [vw_ask::Ask; 0]);
+        println!(
+            "HARDLINKS3 adapters: {name}: parallel search + document positive/negative passed"
+        );
+    }
+    for path in ["", "missing.txt"] {
+        assert!(
+            prepare(
+                &f.core.shared,
+                "s",
+                "s",
+                "missing",
+                "document_read",
+                &mut json!({"path":path})
+            )
+            .await
+            .is_err()
+        );
+    }
+    assert!(
+        search_tool::call(&f.core.shared, "s", json!({"query":""}))
+            .await
+            .is_err()
+    );
+    assert!(
+        search_tool::call(&f.core.shared, "missing", json!({"query":"HARDLINKS3_"}))
+            .await
+            .is_err()
+    );
+    f.finish().await;
+}
+
 #[tokio::test]
 async fn unchanged_original_reuses_digest_cache() {
     let f = Fixture::new().await;

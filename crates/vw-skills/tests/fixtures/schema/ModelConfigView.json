@@ -69,7 +69,6 @@
         {
           "enum": [
             "admin",
-            "growthbook",
             "catalog",
             "project",
             "local"

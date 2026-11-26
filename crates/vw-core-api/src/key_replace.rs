@@ -1,4 +1,5 @@
-//! Dispatches key commands and confirms replacement or selection before the model key changes.
+//! Dispatches key commands and confirms replacement or selection before the model key changes; after an unlock it
+//! runs the saved-default recovery (`default_recovery`).
 //! Depends on the key service and the core's native confirmer; called by the typed dispatcher.
 //! Only a fixed warning crosses the dialog boundary, never the typed or stored key.
 
@@ -30,7 +31,18 @@ pub(crate) async fn execute(
     } else {
         confirm(shared, &request).await?;
     }
-    crate::keys::execute(keys, request).await
+    // Only an unlock of a locked vault runs the recovery, so each unlock asks at most once.
+    let unlock = matches!(request, KeyRequest::UnlockVault { .. })
+        && keys
+            .status()
+            .await
+            .is_ok_and(|s| matches!(s.vault, vw_vault::VaultStatus::Locked { .. }));
+    let done = crate::keys::execute(keys, request).await?;
+    if unlock {
+        // Before the unlock answers, so the person's next Send meets the confirmed default (`default_recovery`).
+        crate::default_recovery::after_unlock(shared).await;
+    }
+    Ok(done)
 }
 
 /// Ask before replacing a key in use unless its latest test rejected authentication.

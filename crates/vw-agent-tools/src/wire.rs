@@ -85,6 +85,8 @@ pub mod tools {
     /// The folder guard's question (hook credential only): may this session work in that copy now (one
     /// active session per copy)?
     pub const COPY_CHECK: &str = "copy_check";
+    /// Hook-only check of a multiply linked native file against the core's protected roots.
+    pub const NATIVE_FILE_IDENTITY: &str = "native_file_identity";
     /// The connector hook's question: was this MCP server removed while an open chat still lists its tool?
     pub const CONNECTOR_CHECK: &str = "connector_check";
     /// The Chrome Control guard's question (hook credential only): may this Chrome Control call run? The core

@@ -169,6 +169,13 @@ export function notificationFor(event: CoreEvent, core?: CoreState): ToastSpec |
         text: `Debug API request refused: ${event.reason}`,
       };
     case "server":
+      // Core's own controlled restart (after an unlock, to confirm the saved default) is not a failure.
+      if (
+        event.status.state === "restarting" &&
+        event.status.lastDeath.cause === "closed_by_client"
+      ) {
+        return null;
+      }
       if (event.status.state === "restarting") {
         return { kind: "warn", bellKind: "failure", text: "Vibe stopped and is restarting" };
       }

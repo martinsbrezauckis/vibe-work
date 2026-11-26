@@ -39,7 +39,9 @@ pub(super) async fn start_keys(
                     .push(("NO_PROXY".to_owned(), list.into()));
             }
             supervisor.extra_env.extend(service.vibe_env());
-            supervisor.extra_env.extend(service.proxy_env());
+            let proxy_env = service.proxy_env();
+            supervisor.proxy_relays = service.agent_proxy_relays(&proxy_env);
+            supervisor.extra_env.extend(proxy_env);
             let before = supervisor.before_launch.take();
             let network_keys = service.clone();
             supervisor.before_launch = Some(Arc::new(move |program| {

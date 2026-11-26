@@ -1,1 +1,4 @@
-{}
+{
+  "crates/vw-netguard/src/guard.rs": 961,
+  "ui/src/state/voiceChat.ts": 809
+}

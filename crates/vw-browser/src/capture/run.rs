@@ -169,6 +169,12 @@ impl Browser {
         } else {
             work.await
         };
+        // A selected proxy failure may be recorded per asset by media or omitted by single_html.
+        // It must still refuse the capture before the action log claims success.
+        let result = match (result, target.fetch.capture_refusal()) {
+            (Ok(_), Some(reason)) => Err(refused(reason)),
+            (other, _) => other,
+        };
         self.log_capture(session_id, by, what, &result);
         result
     }

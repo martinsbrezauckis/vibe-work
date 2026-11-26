@@ -34,3 +34,6 @@ getrandom = { workspace = true }
 
 # Lowercase owner-scalar encoding; already present in the workspace lock.
 hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -75,6 +75,10 @@ pub enum Access {
 /// permissions and the helper's copy there).
 pub const CHROME_CONTROL_STATE: &str = "chrome-control";
 
+/// Same plain refusal as the core's document/search protected-file identity check.
+pub const PROTECTED_IDENTITY_REASON: &str =
+    "Not run: this file belongs to the vault or app state. Choose a file outside those folders.";
+
 // Reserve spellings Windows can interpret as this file before it exists, including default data streams.
 fn approval_path(path: &Path, data: &Path) -> bool {
     data_entry_named(path, data, "plugin-approvals.json")
@@ -363,7 +367,7 @@ pub fn check_tool_input(
 }
 
 /// `word` with a leading `~`, `$HOME`, `${HOME}`, `$VIBE_HOME` or `${VIBE_HOME}` replaced.
-fn expand(word: &str, home: Option<&Path>, vibe_home: &Path) -> String {
+pub(crate) fn expand(word: &str, home: Option<&Path>, vibe_home: &Path) -> String {
     let vibe = vibe_home.to_string_lossy();
     let mut out = word.to_owned();
     for name in ["${VIBE_HOME}", "$VIBE_HOME"] {

@@ -42,9 +42,15 @@ mod check;
 mod prepare;
 mod probe;
 mod record;
+mod system;
+
+pub use system::{
+    SystemProxy, clear_system_proxy_if, set_system_proxy, system_proxy_settings, update_route_ready,
+};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 
 pub use check::{
@@ -53,7 +59,7 @@ pub use check::{
     has_sign_in, mask_proxy_url, scrub, with_loopback, without_loopback,
 };
 pub use prepare::{PreparedSettings, prepare_settings};
-pub use probe::{Probe, ProbeKind, classify_request_error, probe};
+pub use probe::{Probe, ProbeKind, classify_guarded_probe, classify_request_error, probe};
 pub use record::{LoadedSettings, NetworkMacKey, read_settings, seal_settings};
 
 /// Vibe's six keys, in the order its `/proxy-setup` lists them.
@@ -311,9 +317,29 @@ impl NetworkSettings {
     }
 
     /// `builder` with these settings: the proxies (each with the no-proxy list and the addresses of this computer
-    /// on it) and the extra trusted certificates. With no proxy set the builder keeps reqwest's own proxy
-    /// handling (the environment and the system's settings).
-    pub fn apply(&self, mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    /// on it) and the extra trusted certificates. On Windows/macOS, the app-owned native relay fills
+    /// unconfigured request types when installed by the key service. Linux keeps reqwest's proxy handling.
+    pub fn apply(&self, builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        system::apply(self, builder)
+    }
+
+    /// The update client's route stays authorized for every new connection, including after a
+    /// vault transition or relay shutdown while a check or package download is in progress.
+    pub fn apply_update(&self, builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        let route = self.clone();
+        self.apply(builder)
+            .connector_layer(tower::filter::FilterLayer::new(move |request| {
+                if system::update_route_ready() && *current() == route {
+                    Ok(request)
+                } else {
+                    Err(std::io::Error::other(
+                        "the update network route is not ready",
+                    ))
+                }
+            }))
+    }
+
+    fn apply_values(&self, mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
         if self.has_proxy() {
             let bypass = reqwest::NoProxy::from_string(&with_loopback(
                 self.no_proxy.as_deref().unwrap_or_default(),
@@ -402,10 +428,19 @@ fn certificate_files(dir: &Path) -> Result<Vec<Vec<u8>>, String> {
 }
 
 static CURRENT: RwLock<Option<Arc<NetworkSettings>>> = RwLock::new(None);
+static ROUTE_VERIFIED: AtomicBool = AtomicBool::new(false);
 
-/// Sets the settings every client built from now on uses. Called once at the start of the process.
+/// Sets the settings every client built from now on uses. Update checks wait for the key service
+/// to accept this snapshot as the user's route.
 pub fn set_current(settings: NetworkSettings) {
+    ROUTE_VERIFIED.store(false, Ordering::SeqCst);
     *CURRENT.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(settings));
+}
+
+/// The key service calls this only after it has decided whether the saved Network record is
+/// usable. A locked or rejected record cannot authorize an update through a different route.
+pub fn authorize_update_route(accepted: bool) {
+    ROUTE_VERIFIED.store(accepted, Ordering::SeqCst);
 }
 
 /// The settings clients are built with (empty until [`set_current`] ran).
@@ -435,7 +470,8 @@ pub fn load_for_launch(file: &Path, key: Option<&NetworkMacKey>) -> LoadedSettin
     loaded
 }
 
-/// Installs verified settings after the key service replaced vault references with local forwarder addresses.
+/// Installs the key service's current settings after it replaced vault references with local
+/// forwarder addresses. The key service then authorizes or refuses the update route.
 pub fn install_for_launch(saved: &NetworkSettings, environment: &NetworkSettings) {
     #[cfg(feature = "proxy-transports")]
     guard::set(saved, environment);

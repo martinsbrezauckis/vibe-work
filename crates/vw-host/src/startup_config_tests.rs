@@ -182,49 +182,88 @@ fn a_later_catalog_off_choice_survives_product_and_dev_launches() {
             .unwrap()
             .parse()
             .unwrap();
-        assert_eq!(
-            config["experimental_enable_model_catalog"].as_bool(),
-            Some(false)
-        );
+        assert_eq!(config["enable_model_catalog"].as_bool(), Some(false));
         assert!(config.contains_key("models"), "offline local model remains");
     }
 }
 
-// PREDICT: product startup removes its old model seed with the catalog on, but dev startup
-// skips the model step and keeps that seed as an overriding default.
+#[test]
+fn a_saved_314_catalog_choice_migrates_once_without_changing_the_model() {
+    for product in [true, false] {
+        for catalog_on in [true, false] {
+            for marker in [true, false] {
+                let root = tempfile::tempdir().unwrap();
+                let home = root.path().join("vibe-home");
+                std::fs::create_dir_all(&home).unwrap();
+                if marker {
+                    std::fs::write(home.join(CATALOG_MARKER), b"1\n").unwrap();
+                }
+                // This is a complete 3.1.4-era config, including a saved catalog choice and Large 4.
+                let old = std::fs::read_to_string(fixtures().join("settled.in.toml"))
+                    .unwrap()
+                    .replace(
+                        "experimental_enable_model_catalog = false",
+                        if catalog_on {
+                            "experimental_enable_model_catalog = true"
+                        } else {
+                            "experimental_enable_model_catalog = false"
+                        },
+                    );
+                std::fs::write(home.join("config.toml"), old).unwrap();
+                prepare(&home, product, write_config).unwrap();
+                let first = std::fs::read_to_string(home.join("config.toml")).unwrap();
+                let config: toml::Table = first.parse().unwrap();
+                assert!(!config.contains_key("experimental_enable_model_catalog"));
+                assert_eq!(config["enable_model_catalog"].as_bool(), Some(catalog_on));
+                assert_eq!(config["active_model"].as_str(), Some("large-4"));
+                assert_eq!(config.contains_key("models"), marker || !catalog_on);
+                prepare(&home, product, write_config).unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(home.join("config.toml")).unwrap(),
+                    first
+                );
+            }
+        }
+    }
+}
+
+// A saved catalog-on choice removes an exact app seed on its first startup in either mode.
 #[test]
 fn catalog_upgrade_retires_the_exact_app_model_in_product_and_dev() {
     for product in [true, false] {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("vibe-home");
         std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(
-            home.join("config.toml"),
-            std::fs::read(fixtures().join("settled.in.toml")).unwrap(),
-        )
-        .unwrap();
+        let catalog_on = std::fs::read_to_string(fixtures().join("settled.in.toml"))
+            .unwrap()
+            .replace(
+                "experimental_enable_model_catalog = false",
+                "experimental_enable_model_catalog = true",
+            );
+        std::fs::write(home.join("config.toml"), catalog_on).unwrap();
         prepare(&home, product, write_config).unwrap();
         let config: toml::Table = std::fs::read_to_string(home.join("config.toml"))
             .unwrap()
             .parse()
             .unwrap();
-        assert_eq!(
-            config["experimental_enable_model_catalog"].as_bool(),
-            Some(true)
-        );
+        assert_eq!(config["enable_model_catalog"].as_bool(), Some(true));
         assert!(!config.contains_key("models"), "product={product}");
         assert_eq!(config["active_model"].as_str(), Some("large-4"));
     }
 }
 
-// PREDICT: startup currently removes an exact app row on every catalog-on launch,
-// including after its first migration marker has been recorded.
+// The first catalog migration removes the old app row; later launches respect the marker.
 #[test]
 fn catalog_seed_cleanup_runs_once_after_the_marker() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("vibe-home");
     std::fs::create_dir_all(&home).unwrap();
-    let old = std::fs::read_to_string(fixtures().join("settled.in.toml")).unwrap();
+    let old = std::fs::read_to_string(fixtures().join("settled.in.toml"))
+        .unwrap()
+        .replace(
+            "experimental_enable_model_catalog = false",
+            "experimental_enable_model_catalog = true",
+        );
     std::fs::write(home.join("config.toml"), &old).unwrap();
     prepare(&home, true, write_config).unwrap();
     assert!(home.join(CATALOG_MARKER).is_file());
@@ -234,11 +273,7 @@ fn catalog_seed_cleanup_runs_once_after_the_marker() {
         .unwrap();
     assert!(!first.contains_key("models"));
 
-    let repeated_seed = old.replace(
-        "experimental_enable_model_catalog = false",
-        "experimental_enable_model_catalog = true",
-    );
-    std::fs::write(home.join("config.toml"), repeated_seed).unwrap();
+    std::fs::write(home.join("config.toml"), old).unwrap();
     prepare(&home, true, write_config).unwrap();
     let second: toml::Table = std::fs::read_to_string(home.join("config.toml"))
         .unwrap()

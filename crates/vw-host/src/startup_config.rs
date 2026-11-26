@@ -258,7 +258,7 @@ pub(crate) fn prepare(
         .text
         .parse::<toml::Table>()
         .ok()
-        .and_then(|config| config.get("experimental_enable_model_catalog")?.as_bool())
+        .and_then(|config| config.get("enable_model_catalog")?.as_bool())
         == Some(true);
     let model = (if catalog_on {
         pins.catalog_first_launch()

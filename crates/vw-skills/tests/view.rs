@@ -70,6 +70,63 @@ fn session_scope_keeps_its_source() {
 }
 
 #[test]
+fn remote_scope_is_not_projected_as_a_local_skill() {
+    let (installed, catalog, updates, active) = inputs();
+    for source in ["local", "registry"] {
+        let remote: vw_skills::SkillSummary = serde_json::from_value(serde_json::json!({
+            "name":"remote-skill", "description":"Remote skill", "prompt":"Do work",
+            "source": source, "scope":"remote"
+        }))
+        .unwrap();
+        let mut installed = installed.clone();
+        installed.skills = vec![remote.clone()];
+        let mut active = active.clone();
+        active.skills = vec![remote];
+        let view = SkillsView::merge(&installed, &catalog, &updates, &active, &[]);
+        let row = view
+            .skills
+            .iter()
+            .find(|s| s.name == "remote-skill")
+            .unwrap();
+        assert_eq!(row.source, None);
+        assert_eq!(row.active.as_ref().unwrap().scope, SkillScope::Remote);
+    }
+}
+
+#[test]
+fn active_only_remote_skill_never_falls_back_to_catalog_source() {
+    let (_, mut catalog, _, _) = inputs();
+    catalog.skills.retain(|entry| entry.name == "catalog-only");
+    let remote: vw_skills::SkillSummary = serde_json::from_value(serde_json::json!({
+        "name":"catalog-only", "description":"Remote copy", "prompt":"Do work",
+        "source":"registry", "scope":"remote"
+    }))
+    .unwrap();
+    let view = SkillsView::merge(
+        &SkillsInstalledResponse {
+            skills: vec![],
+            issues: vec![],
+        },
+        &catalog,
+        &SkillsUpdatesResponse { updates: vec![] },
+        &SkillsListResponse {
+            skills: vec![remote],
+        },
+        &[],
+    );
+    let row = view
+        .skills
+        .iter()
+        .find(|row| row.name == "catalog-only")
+        .unwrap();
+    assert_eq!(
+        row.source, None,
+        "an active remote copy is not catalog-only"
+    );
+    assert_eq!(row.active.as_ref().unwrap().scope, SkillScope::Remote);
+}
+
+#[test]
 fn merges_update_disabled_project_shadow_and_reported_sources() {
     let (installed, catalog, updates, active) = inputs();
     let mutation: RuntimeMutationResponse = result(include_str!("fixtures/import.json"));

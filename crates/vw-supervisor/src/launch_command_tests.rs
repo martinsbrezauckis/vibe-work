@@ -39,7 +39,7 @@ impl Fixture {
     }
 
     fn argv(&self) -> Vec<OsString> {
-        server_argv(&self.config, &self.config.program).unwrap()
+        server_argv(&self.config, &self.config.program).unwrap().0
     }
 
     fn record(&mut self) {
@@ -77,6 +77,186 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.root).unwrap();
     }
+}
+
+#[test]
+fn guard_capability_follows_the_actual_command_branch() {
+    let fixture = Fixture::new("guard-capability");
+    let (_, guarded) = server_argv(&fixture.config, &fixture.config.program).unwrap();
+    assert!(guarded);
+    let python = adapter_python(&fixture.config.program).unwrap();
+    std::fs::remove_file(python).unwrap();
+    let error = server_argv(&fixture.config, &fixture.config.program).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot run with Vibe Work's safety guards")
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unproven_vibe_script_is_refused_before_its_process_starts() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new("unproven-script");
+    let python = fixture.config.program.parent().unwrap().join("python");
+    std::fs::remove_file(python).unwrap();
+    let marker = fixture.root.join("started");
+    std::fs::write(
+        &fixture.config.program,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &fixture.config.program,
+        std::fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
+    let config = SupervisorConfig::new(
+        fixture.config.program.clone(),
+        fixture.root.join("home"),
+        fixture.root.clone(),
+    );
+
+    let Err(error) = crate::Supervisor::start(config, std::sync::Arc::new(crate::NoSecret)).await
+    else {
+        panic!("unproven Vibe script started")
+    };
+    assert!(!marker.exists(), "unproven script ran before refusal");
+    assert_eq!(
+        crate::start_failure_message(&error),
+        "This Vibe installation cannot run with Vibe Work's safety guards: choose Install Vibe for Vibe Work, or a Vibe installed in its own Python environment."
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_named_vibe_symlink_cannot_hide_an_unproven_target() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let fixture = Fixture::new("named-symlink");
+    std::fs::remove_file(&fixture.config.program).unwrap();
+    std::fs::remove_file(fixture.config.program.parent().unwrap().join("python")).unwrap();
+    let target = fixture.root.join("wrapper");
+    let marker = fixture.root.join("wrapper-started");
+    std::fs::write(
+        &target,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+    symlink(&target, &fixture.config.program).unwrap();
+    let config = SupervisorConfig::new(
+        fixture.config.program.clone(),
+        fixture.root.join("home"),
+        fixture.root.clone(),
+    );
+
+    let Err(error) = crate::Supervisor::start(config, std::sync::Arc::new(crate::NoSecret)).await
+    else {
+        panic!("symlinked Vibe script started")
+    };
+    assert!(!marker.exists(), "symlink target ran without the adapter");
+    assert!(matches!(error, SupervisorError::UnprovenInterpreter));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_venv_shebang_without_a_sibling_uses_the_adapter() {
+    let fixture = Fixture::new("venv-shebang");
+    std::fs::remove_file(fixture.config.program.parent().unwrap().join("python")).unwrap();
+    let venv = std::env::temp_dir().join(format!("vw-venv-shebang-{}", std::process::id()));
+    let bin = venv.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(venv.join("pyvenv.cfg"), "").unwrap();
+    let python = bin.join("python3");
+    std::fs::write(&python, "").unwrap();
+    std::fs::write(&fixture.config.program, format!("#!{}\n", python.display())).unwrap();
+    let (argv, guarded) = server_argv(&fixture.config, &fixture.config.program).unwrap();
+    assert!(guarded);
+    assert_eq!(argv[0], python.canonicalize().unwrap().as_os_str());
+    assert_eq!(&argv[1..4], &["-I", "-u", "-c"]);
+    assert_eq!(argv[4], crate::ADAPTER_BOOTSTRAP);
+    assert_eq!(argv[7], fixture.config.program.as_os_str());
+    std::fs::remove_dir_all(venv).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_env_shebang_without_a_sibling_is_refused() {
+    let fixture = Fixture::new("env-shebang");
+    std::fs::remove_file(fixture.config.program.parent().unwrap().join("python")).unwrap();
+    std::fs::write(&fixture.config.program, "#!/usr/bin/env python3\n").unwrap();
+    let error = server_argv(&fixture.config, &fixture.config.program).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot run with Vibe Work's safety guards")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn malformed_or_unassociated_shebangs_do_not_prove_an_interpreter() {
+    let fixture = Fixture::new("unassociated-shebangs");
+    std::fs::remove_file(fixture.config.program.parent().unwrap().join("python")).unwrap();
+    let bin = fixture.root.join("other/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let python = bin.join("python3");
+    std::fs::write(&python, "").unwrap();
+    for shebang in [
+        "#!relative/python3\n".to_owned(),
+        format!("#!{} -E\n", python.display()),
+        format!("#!{}\n", python.display()),
+        format!("#!{}", python.display()),
+        "#!/definitely/missing/python3\n".to_owned(),
+    ] {
+        std::fs::write(&fixture.config.program, shebang).unwrap();
+        assert!(
+            server_argv(&fixture.config, &fixture.config.program).is_err(),
+            "unassociated shebang accepted"
+        );
+    }
+}
+
+#[test]
+fn a_test_server_with_another_name_keeps_direct_launch() {
+    let fixture = Fixture::new("fake-server-name");
+    let program = fixture.root.join("fake-server");
+    std::fs::write(&program, "#!/bin/sh\n").unwrap();
+    let (argv, guarded) = server_argv(&fixture.config, &program).unwrap();
+    assert!(!guarded);
+    assert_eq!(argv[0], program.as_os_str());
+}
+
+#[test]
+fn an_unrecognized_windows_server_launcher_is_refused() {
+    let fixture = Fixture::new("unrecognized-exe");
+    let program = fixture.root.join("vibe-app-server.exe");
+    std::fs::write(&program, b"MZ not a recognized Vibe launcher").unwrap();
+    let config = SupervisorConfig::new(
+        program.clone(),
+        fixture.config.vibe_home.clone(),
+        fixture.root.clone(),
+    );
+    let error = server_argv(&config, &program).unwrap_err();
+    assert!(matches!(error, SupervisorError::UnprovenInterpreter));
+}
+
+#[test]
+fn a_pending_supervisor_does_not_advertise_an_installed_guard() {
+    let fixture = Fixture::new("pending-guard");
+    let supervisor = crate::Supervisor::start_pending(
+        SupervisorConfig::new(
+            fixture.config.program.clone(),
+            fixture.config.vibe_home.clone(),
+            fixture.root.clone(),
+        ),
+        std::sync::Arc::new(crate::NoSecret),
+        "not started".into(),
+    );
+    assert!(!supervisor.mcp_refresh_guard_installed());
 }
 
 // std's Windows make_command_line always quotes argv[0]. append_arg quotes empty/space/tab

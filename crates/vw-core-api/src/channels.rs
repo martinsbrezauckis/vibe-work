@@ -381,16 +381,18 @@ impl Channels {
             .map(|slot| slot.conn.subscribe())
     }
 
-    /// The channel `key` ended: when it ended alone (the server closed it, or it wedged) its
-    /// binding is forgotten and the session it carried is returned. When the whole process died the
-    /// binding stays, so the restart (`reset`) reopens the session on the new server.
+    /// The channel `key` ended: when it ended alone (including an acknowledged stop close), its
+    /// binding is forgotten and the session it carried is returned. Core-initiated closes remove
+    /// their binding first. When the whole process died, the binding stays for restart (`reset`).
     pub(crate) fn lost(&self, key: ChannelKey) -> Option<String> {
         let mut inner = locked(&self.inner);
         let (id, slot) = inner.slots.iter().find(|(_, slot)| slot.key == key)?;
         let alone = slot.conn.death().is_some_and(|report| {
             matches!(
                 report.cause,
-                DeathCause::ChannelClosed { .. } | DeathCause::Wedged { .. }
+                DeathCause::ChannelClosed { .. }
+                    | DeathCause::Wedged { .. }
+                    | DeathCause::ClosedByClient
             )
         });
         if !alone {

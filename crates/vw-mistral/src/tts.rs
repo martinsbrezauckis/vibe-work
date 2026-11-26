@@ -92,6 +92,9 @@ pub enum SpeechError {
     /// No answer, or an answer that could not be read.
     #[error("Could not reach Mistral: {0}.")]
     Network(String),
+    /// The user's selected upstream proxy could not be reached. No direct retry is permitted.
+    #[error("Vibe Work could not reach the proxy.")]
+    ProxyUnreachable,
     /// The key cannot be put in a header.
     #[error("{}", crate::status_text::MALFORMED_STORED_KEY)]
     MalformedKey,

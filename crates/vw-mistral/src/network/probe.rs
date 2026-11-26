@@ -21,6 +21,8 @@ pub enum ProbeKind {
     ProxyUnreachable,
     /// The proxy answered but refused to pass the request on.
     ProxyRefused,
+    /// The system proxy/PAC lookup failed before any proxy was contacted.
+    ProxyLookupFailed,
     /// The proxy wants a user name and password (407).
     ProxySignInNeeded,
     /// The connection worked up to the TLS check, which failed: the certificate is not trusted.
@@ -135,5 +137,144 @@ pub fn classify_request_error(error: &reqwest::Error, via_proxy: bool) -> ProbeK
         }
     } else {
         ProbeKind::Failed
+    }
+}
+
+/// A temporary network-test guard can identify a discovery or upstream connection failure that reqwest reports
+/// only as a generic CONNECT failure. The guard's per-test refusal signals are read after the request.
+#[must_use]
+pub fn classify_guarded_probe(
+    probe: Probe,
+    proxy_lookup_failed: bool,
+    proxy_connect_failed: bool,
+) -> Probe {
+    let guard_502 = probe.kind == ProbeKind::ProxyRefused
+        || (probe.kind == ProbeKind::Reached && probe.status == Some(502));
+    if proxy_lookup_failed && guard_502 {
+        Probe {
+            kind: ProbeKind::ProxyLookupFailed,
+            status: None,
+        }
+    } else if proxy_connect_failed && guard_502 {
+        Probe {
+            kind: ProbeKind::ProxyUnreachable,
+            status: None,
+        }
+    } else {
+        probe
+    }
+}
+
+#[cfg(test)]
+mod lookup_failure_tests {
+    use super::{NetworkSettings, Probe, ProbeKind, classify_guarded_probe, probe};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    #[test]
+    fn discovery_and_real_proxy_refusal_have_different_outcomes() {
+        let refused = Probe {
+            kind: ProbeKind::ProxyRefused,
+            status: None,
+        };
+        assert_eq!(classify_guarded_probe(refused, false, false), refused);
+        assert_eq!(
+            classify_guarded_probe(refused, true, false),
+            Probe {
+                kind: ProbeKind::ProxyLookupFailed,
+                status: None,
+            }
+        );
+        let unreachable = Probe {
+            kind: ProbeKind::ProxyUnreachable,
+            status: None,
+        };
+        assert_eq!(
+            classify_guarded_probe(unreachable, true, false),
+            unreachable
+        );
+        let forwarded_http = Probe {
+            kind: ProbeKind::Reached,
+            status: Some(502),
+        };
+        assert_eq!(
+            classify_guarded_probe(forwarded_http, true, false).kind,
+            ProbeKind::ProxyLookupFailed
+        );
+        assert_eq!(
+            classify_guarded_probe(forwarded_http, false, false),
+            forwarded_http
+        );
+    }
+
+    #[test]
+    fn dead_upstream_proxy_and_answered_refusal_have_different_outcomes() {
+        let refused = Probe {
+            kind: ProbeKind::ProxyRefused,
+            status: None,
+        };
+        assert_eq!(
+            classify_guarded_probe(refused, false, true),
+            Probe {
+                kind: ProbeKind::ProxyUnreachable,
+                status: None,
+            }
+        );
+        assert_eq!(classify_guarded_probe(refused, false, false), refused);
+        assert_eq!(
+            classify_guarded_probe(refused, true, false).kind,
+            ProbeKind::ProxyLookupFailed
+        );
+        let forwarded_502 = Probe {
+            kind: ProbeKind::Reached,
+            status: Some(502),
+        };
+        assert_eq!(
+            classify_guarded_probe(forwarded_502, false, true).kind,
+            ProbeKind::ProxyUnreachable
+        );
+        let target_503 = Probe {
+            kind: ProbeKind::Reached,
+            status: Some(503),
+        };
+        assert_eq!(classify_guarded_probe(target_503, false, true), target_503);
+    }
+
+    #[tokio::test]
+    async fn real_502_and_503_connect_refusals_stay_refused_without_a_guard_signal() {
+        for response_status in [502, 503] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut head = Vec::new();
+                while !head.ends_with(b"\r\n\r\n") {
+                    head.push(stream.read_u8().await.unwrap());
+                }
+                assert!(
+                    String::from_utf8_lossy(&head).starts_with("CONNECT allowed.test:443 HTTP/1.1")
+                );
+                let response =
+                    format!("HTTP/1.1 {response_status} Refused\r\nContent-Length: 0\r\n\r\n");
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+            let settings =
+                NetworkSettings::default().with("HTTPS_PROXY", Some(format!("http://{address}")));
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                probe(&settings, "https://allowed.test/"),
+            )
+            .await
+            .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.kind, ProbeKind::ProxyRefused);
+            assert_eq!(classify_guarded_probe(result, false, false), result);
+            assert_eq!(
+                classify_guarded_probe(result, true, false).kind,
+                ProbeKind::ProxyLookupFailed
+            );
+        }
     }
 }

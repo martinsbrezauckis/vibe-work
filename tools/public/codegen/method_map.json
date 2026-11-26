@@ -1,5 +1,5 @@
 {
-  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.4. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side.",
+  "_comment": "Method -> Pydantic model name table for Vibe app-server 3.1.5 trial. Vibe has no central registry (the server dispatches with match statements), so this table is our own data, derived from the dispatch code and live-validated by the protocol bench. generate.py fails on drift: every name in protocol.SERVER_METHODS must be a key of `requests`, every key must be a real method, and every model name must exist. A null model means Vibe declares none for that side. The 14 new 3.1.5 requests are mapped from the PyPI wheel dispatch and remain unavailable to the app until reviewed.",
   "requests": {
     "account/read": {
       "params": "AccountReadParams",
@@ -181,6 +181,14 @@
       "params": "LoopsListParams",
       "result": "LoopsListResponse"
     },
+    "loops/run": {
+      "params": "LoopsRunParams",
+      "result": "LoopsRunResponse"
+    },
+    "loops/update": {
+      "params": "LoopsUpdateParams",
+      "result": "LoopsUpdateResponse"
+    },
     "mcp/add": {
       "params": "MCPAddParams",
       "result": "MCPAddResponse"
@@ -313,6 +321,10 @@
       "params": "ProjectsSetCloudParams",
       "result": "ProjectMutationResponse"
     },
+    "projects/setRoots": {
+      "params": "ProjectsSetRootsParams",
+      "result": "ProjectMutationResponse"
+    },
     "providerAuth/read": {
       "params": "ProviderAuthReadParams",
       "result": "ProviderAuthReadResponse"
@@ -405,6 +417,14 @@
       "params": null,
       "result": "SessionLeaseSubscribeResponse"
     },
+    "session/leftTurns/interrupt": {
+      "params": "LeftTurnsInterruptParams",
+      "result": "LeftTurnsInterruptResponse"
+    },
+    "session/leftTurns/read": {
+      "params": "LeftTurnsReadParams",
+      "result": "LeftTurnsReadResponse"
+    },
     "session/list": {
       "params": "SessionListParams",
       "result": "SessionListResponse"
@@ -416,6 +436,18 @@
     "session/markAsSeen": {
       "params": "SessionMarkAsSeenParams",
       "result": "EmptyResponse"
+    },
+    "session/markAsUnseen": {
+      "params": "SessionMarkAsUnseenParams",
+      "result": "EmptyResponse"
+    },
+    "session/mcpApp/callTool": {
+      "params": "McpAppCallToolParams",
+      "result": "McpAppCallToolResponse"
+    },
+    "session/mcpApp/readResource": {
+      "params": "McpAppReadResourceParams",
+      "result": "McpAppReadResourceResponse"
     },
     "session/move": {
       "params": "SessionMoveParams",
@@ -673,6 +705,10 @@
       "params": "TurnInterruptParams",
       "result": "TurnInterruptResponse"
     },
+    "turn/retry": {
+      "params": "TurnRetryParams",
+      "result": "TurnRetryResponse"
+    },
     "turn/start": {
       "params": "TurnStartParams",
       "result": "TurnStartResponse"
@@ -692,6 +728,26 @@
     "vibebot/localTools": {
       "params": "VibeBotLocalToolsParams",
       "result": "VibeBotLocalToolsResponse"
+    },
+    "voice/narrate": {
+      "params": "VoiceNarrateParams",
+      "result": "VoiceNarrateResponse"
+    },
+    "voice/narrateCancel": {
+      "params": "VoiceNarrateCancelParams",
+      "result": "VoiceNarrateCancelResponse"
+    },
+    "voice/transcribeCancel": {
+      "params": "VoiceTranscribeCancelParams",
+      "result": "VoiceTranscribeCancelResponse"
+    },
+    "voice/transcribeStart": {
+      "params": "VoiceTranscribeStartParams",
+      "result": "VoiceTranscribeStartResponse"
+    },
+    "voice/transcribeStop": {
+      "params": "VoiceTranscribeStopParams",
+      "result": "VoiceTranscribeStopResponse"
     },
     "workspace/git/checkouts": {
       "params": "WorkspaceGitCheckoutsParams",

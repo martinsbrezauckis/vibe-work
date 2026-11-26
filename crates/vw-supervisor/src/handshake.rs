@@ -38,6 +38,8 @@ pub fn default_initialize_params() -> InitializeParams {
             // Cross-chat tools need a separate design for VW's folder and vault boundaries.
             session_peers: None,
             session_peer_restore: Some(false),
+            // The app owns chat titles; no agent tool may rename a peer chat.
+            session_peer_rename: Some(false),
             session_peer_mark_seen: None,
             // The agent may move its chat into a working copy of its own (Vibe's `enter_worktree`). The launcher
             // (`install_agent_worktree_policy`) puts that tool under the chat's access mode and keeps Vibe's
@@ -54,8 +56,12 @@ pub fn default_initialize_params() -> InitializeParams {
             // Vibe Work does not lend its sign-in tokens to Vibe, so Vibe never sends
             // `platformCredentials/resolve` and keeps its own sign-in.
             platform_credentials: Maybe::Absent,
+            // The app's close contract ends work; never opt in to background-turn resumption.
+            resume_left_turns: Some(false),
         }),
         account: Maybe::Absent,
+        // There is no persisted app-instance identity or adopted left-turn recovery flow.
+        client_instance: Maybe::Absent,
     }
 }
 
@@ -87,6 +93,14 @@ pub async fn handshake(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unadopted_background_and_peer_capabilities_are_explicitly_disabled() {
+        let raw = serde_json::to_value(super::default_initialize_params()).unwrap();
+        assert_eq!(raw["capabilities"]["resumeLeftTurns"], false);
+        assert_eq!(raw["capabilities"]["sessionPeerRename"], false);
+        assert!(raw.get("clientInstance").is_none());
+    }
+
     #[test]
     fn host_execution_capabilities_remain_unadvertised() {
         let raw = serde_json::to_value(super::default_initialize_params()).unwrap();

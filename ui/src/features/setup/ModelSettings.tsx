@@ -60,6 +60,7 @@ export function ModelSettings() {
       });
   };
   const model = list?.models.find((m) => m.alias === list.current);
+  const unresolved = list?.unresolved ?? null;
   const savedLabel = list?.models.find((m) => m.alias === saved)?.label ?? saved;
   const levels = model?.thinkingLevels ?? [];
   // A model that always thinks (Large 4) shows a saved level as High, its only one.
@@ -74,7 +75,9 @@ export function ModelSettings() {
       )}
       {list !== null && list.models.length > 0 && (
         <div className="check">
-          <span>New chats start with</span>
+          <span>
+            {unresolved === null ? "New chats start with" : "Saved default for new chats"}
+          </span>
           <Selector
             testId="setup.model-settings-pick"
             label={TEXT.defaultModel}
@@ -84,6 +87,9 @@ export function ModelSettings() {
                 : modelTerm(model.alias, model.label).tooltip
             }
             value={list.current ?? ""}
+            {...(unresolved === null
+              ? {}
+              : { valueLabel: `${modelTerm(unresolved).name} (waiting for confirmation)` })}
             disabled={saving}
             options={[
               ...(list.current === null ? [{ value: "", label: "Choose" }] : []),
@@ -98,9 +104,18 @@ export function ModelSettings() {
           />
         </div>
       )}
-      {saved !== null && error === null && (
+      {saved !== null && unresolved === null && error === null && (
         <p className="key-field-hint" role="status">
           Saved. New chats start with {savedLabel}.
+        </p>
+      )}
+      {unresolved !== null && (
+        <p className="key-field-hint" role="status">
+          Vibe Work could not confirm your saved default model yet. Choose a model in each new chat,
+          or restart Vibe Work.
+          {savedLevel === null
+            ? ""
+            : ` Your ${thinkingTerm(savedLevel).name} thinking choice is kept.`}
         </p>
       )}
       {error !== null && (
@@ -108,7 +123,7 @@ export function ModelSettings() {
           {error}
         </p>
       )}
-      {list !== null && (
+      {list !== null && unresolved === null && (
         <SelectRow
           id="default-thinking"
           label={TEXT.defaultThinkingLevel}

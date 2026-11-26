@@ -473,7 +473,7 @@ Every command is `{"type": "<name>", ...}`. Requests with an `op` take `{"type":
 | `resumeSession` | opens a stored session | `{"type":"resumeSession","sessionId":"<id>"}` |
 | `forkSession` | branches a session | `{"type":"forkSession","sourceSessionId":"<id>"}` |
 | `rewindSession` | rewinds to an entry | `{"type":"rewindSession","sessionId":"<id>","entryId":"<entry>","inplace":true}` |
-| `startTurn` | sends a message | `{"type":"startTurn","sessionId":"<id>","message":[{"type":"text","text":"Hi"}]}` |
+| `startTurn` | sends a message. When the saved-model guard reports an unfetched catalog, the command returns `invalidParams` with a network or proxy message. | `{"type":"startTurn","sessionId":"<id>","message":[{"type":"text","text":"Hi"}]}` |
 | `steerTurn` | adds to the running turn | `{"type":"steerTurn","sessionId":"<id>","expectedTurnId":"<turn>","message":[{"type":"text","text":"Also add tests"}]}` |
 | `interruptTurn` | stops the running turn | `{"type":"interruptTurn","sessionId":"<id>","expectedTurnId":"<turn>"}` |
 | `stopSession` | cancels compaction by closing this session's channel; preserves saved history and the next send reopens it | `{"type":"stopSession","sessionId":"<id>"}` |

@@ -37,6 +37,7 @@ vw-gate = { workspace = true }
 vw-core-api = { workspace = true }
 vw-debug-api = { workspace = true }
 vw-host = { workspace = true }
+vw-mistral = { workspace = true }
 vw-vault = { workspace = true }
 vw-keyproxy = { workspace = true }
 vw-keys = { workspace = true }

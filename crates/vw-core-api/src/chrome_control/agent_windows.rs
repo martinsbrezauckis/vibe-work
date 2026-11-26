@@ -1,13 +1,13 @@
 //! The windows each chat's agent opened in an external Chrome, Edge or Safari profile, for `close_browser`
 //! (`agent_close`). Bounded both ways: per chat and in the number of chats. A deleted chat's entry is removed.
 //! Memory only: after an app restart the helper no longer owns the earlier windows' tabs, so a saved window would gain
-//! nothing, and a saved window number can name a person's window in the next browser (DBK17S-01).
+//! nothing, and a saved window number can name a person's window in the next browser.
 //!
 //! Chrome numbers windows per browser session and reuses a number after the browser restarts, so a window number alone
 //! never identifies a window. Every remembered window therefore carries the browser incarnation (the helper's
 //! `browserSessionId` of the profile) it was opened in, and `close_browser` nominates it only while the helper reports
 //! the same incarnation for that profile. When `observe` drops remembered windows on an incarnation change, it keeps a
-//! bounded per-`(chat, profile)` mark so the next `close_browser` still warns that earlier tabs may remain (DBK17T-01).
+//! bounded per-`(chat, profile)` mark so the next `close_browser` still warns that earlier tabs may remain.
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -123,7 +123,7 @@ impl AgentWindows {
     /// The windows of `chat` in `profile` that may be nominated now, newest first: those opened in the browser
     /// incarnation `live` that the helper reports for the profile. The others (another incarnation, or none reported)
     /// are dropped, their numbers can name a person's window now; the flag says that some were dropped here or already
-    /// dropped by `observe` (`DBK17T-01`).
+    /// dropped by `observe`.
     pub(super) fn nominate(
         &mut self,
         chat: &str,

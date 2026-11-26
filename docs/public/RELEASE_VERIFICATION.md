@@ -47,6 +47,8 @@ The `.AppImage` and `.deb` are not signed with an operating-system mechanism; ch
 
 ## Updates
 
+In version 0.1.19, an update check does not send a request until the network route is ready. If it is not ready, the check reports that instead.
+
 The app updates itself (Windows, macOS, AppImage) only from the release channel's `latest.json`, and installs an
 update only when its signature verifies against the public key built into the app (minisign key `DAE2633070D0BF4A`):
 

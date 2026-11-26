@@ -73,3 +73,32 @@ fn vibe314_approval_policy_has_a_gated_switch_and_full_access_confirmation() {
         &json!({"sessionId":"s", "agentName":"default"})
     ));
 }
+
+#[test]
+fn vibe_315_new_methods_are_explicitly_denied() {
+    use vw_gate::{Class, DenyReason, classify};
+
+    for method in [
+        "loops/run",
+        "loops/update",
+        "projects/setRoots",
+        "session/leftTurns/interrupt",
+        "session/leftTurns/read",
+        "session/markAsUnseen",
+        "session/mcpApp/callTool",
+        "session/mcpApp/readResource",
+        "turn/retry",
+        "voice/narrate",
+        "voice/narrateCancel",
+        "voice/transcribeCancel",
+        "voice/transcribeStart",
+        "voice/transcribeStop",
+    ] {
+        assert_eq!(
+            classify(method),
+            Some(Class::Denied(DenyReason::NoUserInterface)),
+            "{method}"
+        );
+    }
+    assert_eq!(classify("vibe315/unknown"), None);
+}

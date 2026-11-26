@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::json;
+use tauri::Manager;
 use tauri::test::MockRuntime;
 use vw_host::update_flow::{
     BoxFuture, InstallMode, Phase, Stage, UpdateBackend, UpdateConfig, UpdateHooks, UpdateManager,
@@ -30,6 +31,8 @@ use vw_host::update_flow::{
 use vw_host::update_origin::{PackageOrigins, REFUSED};
 
 use super::PluginBackend;
+
+static ROUTE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The plain failure the person sees (the detail line under "The update could not be downloaded.").
 const REFUSED_TEXT: &str =
@@ -131,6 +134,17 @@ fn app_for(channel: &Recorder) -> tauri::App<MockRuntime> {
         .unwrap()
 }
 
+fn app_for_ready(channel: &Recorder) -> tauri::App<MockRuntime> {
+    let app = app_for(channel);
+    vw_mistral::network::install_for_launch(
+        &vw_mistral::network::NetworkSettings::default(),
+        &vw_mistral::network::NetworkSettings::default(),
+    );
+    vw_mistral::network::authorize_update_route(true);
+    assert!(app.manage(vw_mistral::network::set_system_proxy(channel.base())));
+    app
+}
+
 /// The production backend with the official release hosts as its package origins.
 fn release_backend(app: &tauri::App<MockRuntime>) -> PluginBackend<MockRuntime> {
     PluginBackend {
@@ -149,6 +163,72 @@ fn channel_backend(app: &tauri::App<MockRuntime>) -> PluginBackend<MockRuntime> 
             app.config().plugins.0.get("updater"),
         )),
     }
+}
+
+#[tokio::test]
+async fn an_update_check_waits_for_the_key_service_route_before_opening_a_socket() {
+    let _serial = ROUTE_TEST.lock().await;
+    vw_mistral::network::set_current(vw_mistral::network::NetworkSettings::default());
+    let channel = Recorder::start(|_| reply("204 No Content", "", ""));
+    let app = app_for(&channel);
+    let result = channel_backend(&app).check().await;
+    let seen = channel.seen();
+    assert_eq!(
+        result,
+        Err("The update check is waiting for the network route to be ready. Check Settings > Network and try again.".into()),
+        "update check opened a direct socket: {seen:?}"
+    );
+    assert!(
+        seen.is_empty(),
+        "update check opened a direct socket: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn explicit_check_shows_the_plain_waiting_reason_without_a_request() {
+    let _serial = ROUTE_TEST.lock().await;
+    vw_mistral::network::set_current(vw_mistral::network::NetworkSettings::default());
+    let channel = Recorder::start(|_| reply("204 No Content", "", ""));
+    let app = app_for(&channel);
+    let data = tempfile::tempdir().unwrap();
+    let manager = UpdateManager::new(
+        UpdateConfig {
+            current: "0.0.1".to_owned(),
+            pubkey: "dGVzdA==".to_owned(),
+            mode: InstallMode::InApp,
+            data_dir: data.path().to_path_buf(),
+        },
+        Arc::new(channel_backend(&app)),
+        Arc::new(NoHooks),
+    );
+    manager.check().await.unwrap();
+    assert_eq!(channel.seen(), Vec::<String>::new());
+    match manager.view().phase {
+        Phase::Failed {
+            stage: Stage::Check,
+            error,
+            ..
+        } => assert_eq!(error, super::ROUTE_NOT_READY),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_unverified_saved_route_waits_even_when_the_relay_is_registered() {
+    let _serial = ROUTE_TEST.lock().await;
+    let channel = Recorder::start(|_| reply("204 No Content", "", ""));
+    vw_mistral::network::install_for_launch(
+        &vw_mistral::network::NetworkSettings::default(),
+        &vw_mistral::network::NetworkSettings::default(),
+    );
+    vw_mistral::network::authorize_update_route(false);
+    let _owner = vw_mistral::network::set_system_proxy(channel.base());
+    let app = app_for(&channel);
+    assert_eq!(
+        channel_backend(&app).check().await,
+        Err(super::ROUTE_NOT_READY.to_owned())
+    );
+    assert_eq!(channel.seen(), Vec::<String>::new());
 }
 
 /// Checks, then downloads the announced package with every request of the download sent through `proxy`
@@ -172,6 +252,7 @@ async fn check_and_download(
 
 #[tokio::test]
 async fn a_package_outside_the_release_hosts_gets_no_request() {
+    let _serial = ROUTE_TEST.lock().await;
     let sink = Recorder::start(|_| reply("200 OK", "", "not a package"));
     let sink_port = sink.addr.port();
     let refused = [
@@ -191,7 +272,7 @@ async fn a_package_outside_the_release_hosts_gets_no_request() {
     ];
     let package = Arc::new(Mutex::new(String::new()));
     let channel = channel_server(package.clone(), |_| reply("404 Not Found", "", ""));
-    let app = app_for(&channel);
+    let app = app_for_ready(&channel);
     for url in refused {
         package
             .lock()
@@ -210,6 +291,7 @@ async fn a_package_outside_the_release_hosts_gets_no_request() {
 
 #[tokio::test]
 async fn a_redirect_out_of_the_channel_stops_before_the_next_request() {
+    let _serial = ROUTE_TEST.lock().await;
     let sink = Recorder::start(|_| reply("200 OK", "", "not a package"));
     let target = format!("{}/pkg", sink.base());
     let package = Arc::new(Mutex::new(String::new()));
@@ -220,7 +302,7 @@ async fn a_redirect_out_of_the_channel_stops_before_the_next_request() {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone_from(&format!("{}/first", channel.base()));
-    let app = app_for(&channel);
+    let app = app_for_ready(&channel);
     let backend = channel_backend(&app);
     let result = check_and_download(&backend, None).await;
     assert!(sink.seen().is_empty(), "{:?}", sink.seen());
@@ -240,10 +322,11 @@ async fn a_redirect_out_of_the_channel_stops_before_the_next_request() {
 
 #[tokio::test]
 async fn the_flow_shows_the_refusal_as_a_failed_download() {
+    let _serial = ROUTE_TEST.lock().await;
     let sink = Recorder::start(|_| reply("200 OK", "", "not a package"));
     let package = Arc::new(Mutex::new(format!("{}/pkg", sink.base())));
     let channel = channel_server(package, |_| reply("404 Not Found", "", ""));
-    let app = app_for(&channel);
+    let app = app_for_ready(&channel);
     let data = tempfile::tempdir().unwrap();
     let manager = UpdateManager::new(
         UpdateConfig {
@@ -270,6 +353,7 @@ async fn the_flow_shows_the_refusal_as_a_failed_download() {
 
 #[tokio::test]
 async fn the_official_release_address_still_reaches_the_network() {
+    let _serial = ROUTE_TEST.lock().await;
     // The recording proxy stands in for the network: an https request through it starts with CONNECT to the host.
     let proxy = Recorder::start(|_| reply("502 Bad Gateway", "", ""));
     let package = Arc::new(Mutex::new(
@@ -277,7 +361,7 @@ async fn the_official_release_address_still_reaches_the_network() {
             .to_owned(),
     ));
     let channel = channel_server(package, |_| reply("404 Not Found", "", ""));
-    let app = app_for(&channel);
+    let app = app_for_ready(&channel);
     let backend = release_backend(&app);
     let result = check_and_download(&backend, Some(&proxy)).await;
     assert_ne!(
@@ -296,6 +380,7 @@ async fn the_official_release_address_still_reaches_the_network() {
 
 #[tokio::test]
 async fn a_test_channel_downloads_from_its_own_origin_also_through_a_redirect() {
+    let _serial = ROUTE_TEST.lock().await;
     let package = Arc::new(Mutex::new(String::new()));
     let channel = channel_server(package.clone(), |line| {
         if line.starts_with("GET /first ") {
@@ -308,7 +393,7 @@ async fn a_test_channel_downloads_from_its_own_origin_also_through_a_redirect() 
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone_from(&format!("{}/first", channel.base()));
-    let app = app_for(&channel);
+    let app = app_for_ready(&channel);
     let backend = channel_backend(&app);
     let result = check_and_download(&backend, None).await;
     // The bytes arrived and reached the signature check (the fixture is not signed).

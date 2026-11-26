@@ -148,6 +148,8 @@ pub enum NetworkTestKind {
     ProxyUnreachable,
     /// The proxy answered and refused to pass the request on.
     ProxyRefused,
+    /// The system proxy/PAC lookup failed before a proxy connection.
+    ProxyLookupFailed,
     /// The proxy wants a user name and password.
     ProxySignInNeeded,
     /// The certificate was not trusted.

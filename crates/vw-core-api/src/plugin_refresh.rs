@@ -24,9 +24,10 @@ pub(crate) const MCP_DISCOVERY_WITHHELD: &str = "pluginMcpDiscoveryWithheld";
 async fn discovery_guard<'a>(
     permissions: &'a DeveloperPermissions,
     home: &Path,
+    guard_installed: impl FnOnce() -> bool,
 ) -> Result<Option<tokio::sync::MutexGuard<'a, ()>>, ConfigEditError> {
     let held = permissions.mutation_lock().await;
-    if crate::mcp_refresh::blocked_command(home, permissions.enabled())? {
+    if crate::mcp_refresh::blocked_command(home, permissions.enabled(), guard_installed())? {
         return Ok(None);
     }
     Ok(Some(held))
@@ -368,7 +369,7 @@ impl Core {
     /// After the reattach of a chat that has subagents, `mcp_catalog/refresh` makes Vibe discover the MCP servers a
     /// just-turned-on plugin brings, so their tools are there for its later turns (a chat without subagents gets
     /// them from the reattach itself). A failure leaves the chat usable with its other
-    /// tools and is only logged, except a person-disabled command row explicitly refuses this refresh.
+    /// tools and is only logged. Disabled command rows are safe only when the running server has the guard.
     async fn discover_plugin_mcp_with_children(&self, id: &str) -> Result<(), CoreError> {
         let has_children = self.shared.store.view(id).is_some_and(|view| {
             view.state["childSessions"]
@@ -379,10 +380,11 @@ impl Core {
             return Ok(());
         }
         // Keep the OFF transition from landing between the check and Vibe's
-        // forced discovery: Vibe can start even a disabled stdio row here.
+        // forced discovery. Disabled stdio is safe only when this server runs through the adapter.
         let _mutation = match discovery_guard(
             &self.shared.developer_permissions,
             &self.shared.instructions.own_home,
+            || crate::mcp_refresh::guard_installed(&self.shared),
         )
         .await
         {
@@ -501,7 +503,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_discovery_refuses_person_disabled_row_while_on() {
+    async fn internal_discovery_admits_disabled_row_in_both_switch_states() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("config.toml"),
@@ -509,13 +511,15 @@ mod tests {
         )
         .unwrap();
         let permissions = crate::developer_permissions::DeveloperPermissions::new(None);
-        permissions.set_for_test(true);
-        assert!(
-            discovery_guard(&permissions, dir.path())
-                .await
-                .unwrap()
-                .is_none()
-        );
+        for enabled in [false, true] {
+            permissions.set_for_test(enabled);
+            assert!(
+                discovery_guard(&permissions, dir.path(), || true)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+        }
     }
 
     #[tokio::test]
@@ -530,7 +534,7 @@ mod tests {
         ] {
             std::fs::write(dir.path().join("config.toml"), text).unwrap();
             assert!(
-                discovery_guard(&permissions, dir.path())
+                discovery_guard(&permissions, dir.path(), || true)
                     .await
                     .unwrap()
                     .is_some(),
@@ -540,7 +544,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_discovery_refuses_with_visible_reason_and_call_error_while_on() {
+    async fn internal_discovery_refreshes_without_refusal_while_on() {
         use crate::refresh_notice_tests::{
             attach_mock_channel, count_server_refreshes, drain_events, start_with_keys,
             tools_alerts,
@@ -560,31 +564,23 @@ mod tests {
         }), vw_session::LoadKind::New).unwrap();
         let mut sub = core.subscribe(None);
         let _ = drain_events(&mut sub).await;
-        let reply = format!("{:?}", core.discover_plugin_mcp_with_children("s1").await);
-        assert!(
-            reply.contains("turned off") && reply.contains("refresh plugins again"),
-            "caller did not get refusal: {reply}"
-        );
-        assert!(
-            reply.contains("pluginMcpDiscoveryWithheld"),
-            "completed reload needs a distinct partial outcome: {reply}"
-        );
-        assert_eq!(count_server_refreshes(&calls), 0);
-        let alerts = tools_alerts(&drain_events(&mut sub).await);
-        assert_eq!(alerts.len(), 1);
-        assert!(
-            alerts[0].1.contains("turned off") && alerts[0].1.contains("refresh plugins again")
+        core.discover_plugin_mcp_with_children("s1").await.unwrap();
+        assert_eq!(count_server_refreshes(&calls), 1);
+        assert_eq!(
+            tools_alerts(&drain_events(&mut sub).await),
+            Vec::<(Option<String>, String)>::new()
         );
         core.shutdown().await;
     }
 
     #[tokio::test]
-    async fn internal_discovery_rechecks_off_after_waiting_for_the_mutation_lock() {
+    async fn internal_discovery_rechecks_off_with_enabled_row_after_waiting_for_the_mutation_lock()
+    {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_path_buf();
         std::fs::write(
             home.join("config.toml"),
-            "mcp_servers = [{ name = \"local\", transport = \"stdio\", command = \"/bin/echo\", disabled = true }]\n",
+            "mcp_servers = [{ name = \"local\", transport = \"stdio\", command = \"/bin/echo\", disabled = false }]\n",
         )
         .unwrap();
         let permissions = Arc::new(crate::developer_permissions::DeveloperPermissions::new(
@@ -593,14 +589,18 @@ mod tests {
         permissions.set_for_test(true);
         let changing = permissions.mutation_lock().await;
         let waiting = permissions.clone();
-        let task =
-            tokio::spawn(async move { discovery_guard(&waiting, &home).await.unwrap().is_some() });
+        let task = tokio::spawn(async move {
+            discovery_guard(&waiting, &home, || true)
+                .await
+                .unwrap()
+                .is_some()
+        });
         tokio::task::yield_now().await;
         permissions.set_for_test(false);
         drop(changing);
         assert!(
             !task.await.unwrap(),
-            "an internal refresh would have been sent after OFF"
+            "an unsafe command refresh would have been sent after OFF"
         );
     }
 
@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_plugin_discovery_withheld_emits_deduplicated_tools_alert() {
+    async fn unsafe_plugin_discovery_while_off_emits_deduplicated_tools_alert() {
         let core = crate::offline_core::start_with("plugin-refresh-withheld", |config, dir| {
             let app_data = dir.join("app-data");
             let vibe_home = dir.join("vibe-home");
@@ -643,6 +643,10 @@ mod tests {
             config.secret_scan_data = Some(app_data);
         })
         .await;
+        // An enabled row introduced behind the app's back while OFF must still block discovery.
+        let path = core.shared.instructions.own_home.join("config.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, text.replace("disabled = true", "disabled = false")).unwrap();
         let _ = core
             .shared
             .store

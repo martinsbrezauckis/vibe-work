@@ -9,6 +9,8 @@ pub enum Error {
     Discovery,
     /// Proxy could not be reached.
     Unreachable,
+    /// The selected upstream proxy could not be reached before it answered.
+    ProxyUnreachable,
     /// A bounded operation timed out.
     Timeout,
     /// TLS peer or trust configuration failed verification.
@@ -27,7 +29,7 @@ impl Error {
         match self {
             Self::Configuration => "The proxy settings are not valid.",
             Self::Discovery => "The system proxy could not be resolved.",
-            Self::Unreachable => "The proxy could not be reached.",
+            Self::Unreachable | Self::ProxyUnreachable => "The proxy could not be reached.",
             Self::Timeout => "The proxy did not answer in time.",
             Self::Certificate => "The proxy certificate could not be verified.",
             Self::Authentication => "The proxy sign-in was refused.",
@@ -47,6 +49,9 @@ impl Error {
             }
             Self::Unreachable => {
                 "The configured proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy."
+            }
+            Self::ProxyUnreachable => {
+                "The selected upstream proxy could not be reached. Ask the user to check their network and proxy address, then retry. Do not bypass the proxy."
             }
             Self::Timeout => {
                 "The proxy connection or system PAC lookup timed out. Ask the user to check their proxy, then retry. Do not bypass the proxy."

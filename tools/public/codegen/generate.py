@@ -106,6 +106,7 @@ def render(schema: Schema) -> dict[Path, str]:
     out[TS_DIR / "index.ts"] = ts_emit.emit_index(list(files), [])
     out[TS_DIR / "support.ts"] = (HERE / "templates/support.ts").read_text(encoding="utf-8")
     out[TS_DIR / "methods.ts"] = registry_emit.emit_ts(schema)
+    out[TS_DIR / "methods_server.ts"] = registry_emit.emit_ts_server(schema)
     return out
 
 

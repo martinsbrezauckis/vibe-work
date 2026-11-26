@@ -230,3 +230,128 @@ fn a_failed_handoff_survives_the_next_save_without_replacing_a_newer_pick() {
         );
     }
 }
+
+#[test]
+fn detached_picks_overlay_both_fields_without_mutating_pins_or_other_chats() {
+    let dir = scratch();
+    write(
+        dir.path(),
+        "model-choices.json",
+        &json!({"version":1,"chats":{
+            "first":{"pending":{"alias":"chosen","effort":"low","name":"chosen-name","provider":"llamacpp"}},
+            "second":{"pending":{"alias":"other","effort":"max"}}
+        }}),
+    );
+    let file = dir.path().join("model-choices.json");
+    let before = std::fs::read(&file).unwrap();
+    let choices = Choices::load(Some(dir.path()));
+    let original = json!({"id":"first","model":"old","reasoningEffort":"high","title":"kept"});
+    assert_eq!(
+        choices.detached_session(&original),
+        (
+            json!({"id":"first","model":"chosen","reasoningEffort":"low","title":"kept"}),
+            "chosen-name".into(),
+            "llamacpp".into()
+        )
+    );
+    assert_eq!(original["model"], "old");
+    assert_eq!(original["reasoningEffort"], "high");
+    assert_eq!(
+        choices.detached_session(&json!({"id":"second"})).0,
+        json!({"id":"second","model":"other","reasoningEffort":"max"})
+    );
+    assert_eq!(std::fs::read(file).unwrap(), before);
+}
+
+#[test]
+fn detached_missing_invalid_and_remembered_only_picks_keep_existing_fields() {
+    let dir = scratch();
+    write(
+        dir.path(),
+        "model-choices.json",
+        &json!({"version":1,"chats":{
+            "remembered":{"remembered":{"alias":"older","effort":"low"}},
+            "empty_alias":{"pending":{"alias":"","effort":"low"}},
+            "empty_effort":{"pending":{"alias":"chosen","effort":""}},
+            "invalid_effort":{"pending":{"alias":"chosen","effort":"bad level"}},
+            "damaged":{"pending":{"alias":"chosen","effort":null}}
+        }}),
+    );
+    let choices = Choices::load(Some(dir.path()));
+    for id in [
+        "missing",
+        "remembered",
+        "empty_alias",
+        "empty_effort",
+        "invalid_effort",
+        "damaged",
+    ] {
+        let session = json!({"id":id,"model":"pinned","reasoningEffort":"high"});
+        assert_eq!(choices.detached_session(&session).0, session, "{id}");
+    }
+    for session in [Value::Null, json!({}), json!({"id":null}), json!({"id":7})] {
+        assert_eq!(choices.detached_session(&session).0, session);
+    }
+}
+
+#[test]
+fn detached_backend_bound_remembered_choices_show_each_chats_model_and_effort() {
+    let dir = scratch();
+    write(
+        dir.path(),
+        "model-choices.json",
+        &json!({"version":1,"chats":{
+            "first":{"remembered":{"alias":"saved","effort":"low","name":"saved-wire",
+                "provider":"mistral","provider_key":"route-one","display_name":"Saved model"}},
+            "second":{"remembered":{"alias":"other","effort":"off","name":"other-wire",
+                "provider":"mistral","provider_key":"route-two","display_name":"Other model"}}
+        }}),
+    );
+    let file = dir.path().join("model-choices.json");
+    let before = std::fs::read(&file).unwrap();
+    let choices = Choices::load(Some(dir.path()));
+    let first = json!({"id":"first","model":"runtime-fallback","reasoningEffort":"high"});
+    let second = json!({"id":"second","model":"runtime-fallback","reasoningEffort":"high"});
+    assert_eq!(
+        choices.detached_session(&first),
+        (
+            json!({"id":"first","model":"saved","reasoningEffort":"low"}),
+            "saved-wire".into(),
+            "mistral".into()
+        )
+    );
+    assert_eq!(
+        choices.detached_session(&second),
+        (
+            json!({"id":"second","model":"other","reasoningEffort":"off"}),
+            "other-wire".into(),
+            "mistral".into()
+        )
+    );
+    assert_eq!(first["model"], "runtime-fallback");
+    assert_eq!(second["model"], "runtime-fallback");
+    assert_eq!(std::fs::read(file).unwrap(), before);
+}
+
+#[test]
+fn detached_fallback_keeps_the_same_precedence_as_attached_replay() {
+    let dir = scratch();
+    write(
+        dir.path(),
+        "model-choices.json",
+        &json!({"version":1,"chats":{
+            "chat":{
+                "pending":{"alias":"chosen","effort":"low"},
+                "fallback":{"alias":"replacement","effort":"off"},
+                "remembered":{"alias":"older","effort":"high"}
+            }
+        }}),
+    );
+    let choices = Choices::load(Some(dir.path()));
+    assert_eq!(
+        choices
+            .detached_session(&json!({"id":"chat","model":"old","reasoningEffort":"high"}))
+            .0,
+        json!({"id":"chat","model":"replacement","reasoningEffort":"off"})
+    );
+}

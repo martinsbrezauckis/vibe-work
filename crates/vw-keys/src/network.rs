@@ -154,6 +154,7 @@ pub(crate) fn launch(
     } else {
         State::Used
     };
+    network::authorize_update_route(state == State::Used);
     Ok(Network {
         state,
         file,
@@ -289,6 +290,7 @@ impl KeyService {
             network.browser = forwarder::locked(&network.browser);
         }
         if network.requires_vault {
+            network::authorize_update_route(false);
             network.state = State::Waits(NetworkWait::ProxySignIn);
             let _ = self.events.send(KeyEvent::NetworkSettingsChecked(false));
         }

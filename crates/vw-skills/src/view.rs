@@ -159,13 +159,7 @@ impl SkillsView {
                                 None
                             }
                         }),
-                    source: representative.map(display_source).or({
-                        if installations.is_empty() && !entries.is_empty() {
-                            Some(SkillsSource::Catalog)
-                        } else {
-                            None
-                        }
-                    }),
+                    source: row_source(representative, &installations, &entries),
                     enabled: representative.map(|row| row.enabled),
                     installed_version: registry.map(|reference| reference.version),
                     latest_version,
@@ -197,12 +191,27 @@ fn unique<T>(mut items: impl Iterator<Item = T>) -> Option<T> {
     }
 }
 
-fn display_source(skill: &SkillSummary) -> SkillsSource {
+fn row_source(
+    representative: Option<&SkillSummary>,
+    installations: &[SkillSummary],
+    entries: &[SkillCatalogEntry],
+) -> Option<SkillsSource> {
+    representative.and_then(display_source).or({
+        if representative.is_none() && installations.is_empty() && !entries.is_empty() {
+            Some(SkillsSource::Catalog)
+        } else {
+            None
+        }
+    })
+}
+
+fn display_source(skill: &SkillSummary) -> Option<SkillsSource> {
     match (skill.source, skill.scope) {
-        (SkillSource::Plugin, _) => SkillsSource::Plugin,
-        (SkillSource::Builtin, _) | (_, SkillScope::Builtin) => SkillsSource::Builtin,
-        (_, SkillScope::Project) => SkillsSource::Project,
-        (_, SkillScope::Session) => SkillsSource::Session,
-        (_, SkillScope::Global) => SkillsSource::User,
+        (_, SkillScope::Remote) => None,
+        (SkillSource::Plugin, _) => Some(SkillsSource::Plugin),
+        (SkillSource::Builtin, _) | (_, SkillScope::Builtin) => Some(SkillsSource::Builtin),
+        (_, SkillScope::Project) => Some(SkillsSource::Project),
+        (_, SkillScope::Session) => Some(SkillsSource::Session),
+        (_, SkillScope::Global) => Some(SkillsSource::User),
     }
 }

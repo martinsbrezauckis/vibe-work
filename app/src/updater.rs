@@ -45,6 +45,9 @@ mod selection_tests;
 /// How long after start the check runs (the window and Vibe come first).
 const CHECK_DELAY: Duration = Duration::from_secs(15);
 
+/// Shown by the existing failed-check phase when startup has not established the update route.
+const ROUTE_NOT_READY: &str = "The update check is waiting for the network route to be ready. Check Settings > Network and try again.";
+
 /// Most redirect hops an updater request follows (reqwest's own default).
 const MAX_REDIRECTS: usize = 10;
 
@@ -227,6 +230,10 @@ fn attach_vibe_check<R: Runtime>(app: &AppHandle<R>, manager: &UpdateManager) {
         let app = app.clone();
         let support = support.clone();
         Box::pin(async move {
+            if !vw_mistral::network::update_route_ready() {
+                tracing::info!("Vibe update check: waiting for the network route");
+                return;
+            }
             let installer = app.try_state::<VibeSlot>().and_then(|s| s.0.get().cloned());
             if let Some(installer) = installer
                 && let Err(error) = installer.check_support(&support).await
@@ -404,14 +411,15 @@ fn build_updater<R: Runtime>(
     app: &AppHandle<R>,
     origins: &Arc<PackageOrigins>,
 ) -> Result<tauri_plugin_updater::Updater, String> {
+    require_update_route()?;
     let exit_app = app.clone();
     let origins = origins.clone();
     app.updater_builder()
-        // The proxy and certificates saved in Settings > Network (the same reqwest as vw-mistral's, one version in the
-        // lock file); with none saved the plugin keeps the system proxy settings it was built with.
+        // The proxy and certificates saved in Settings > Network. An automatic native route uses the key service's
+        // relay; every update socket rechecks the verified choice before connecting.
         .configure_client(move |builder| {
             vw_mistral::network::current()
-                .apply(builder)
+                .apply_update(builder)
                 .redirect(redirect_policy(origins.clone()))
         })
         .on_before_exit(move || {
@@ -420,6 +428,14 @@ fn build_updater<R: Runtime>(
         })
         .build()
         .map_err(|e| e.to_string())
+}
+
+fn require_update_route() -> Result<(), String> {
+    if vw_mistral::network::update_route_ready() {
+        Ok(())
+    } else {
+        Err(ROUTE_NOT_READY.to_owned())
+    }
 }
 
 fn shut_down_core<R: Runtime>(app: &AppHandle<R>) {
@@ -451,6 +467,7 @@ impl<R: Runtime> UpdateBackend for PluginBackend<R> {
         let cached = self.cached.clone();
         let origins = self.origins.clone();
         Box::pin(async move {
+            require_update_route()?;
             let update = cached
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)

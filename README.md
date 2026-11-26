@@ -14,8 +14,7 @@ An independent open-source project, part of the ShellX family of apps
   <img src="docs/public/images/vibe-work-016-dark.webp" alt="Vibe Work with three projects, a pending one-line edit to approve, and the Changes panel." width="1920">
 </picture>
 
-Version 0.1.18 draws every Mermaid diagram type in the chat, connects any MCP server by its address and, with Developer
-permissions on, one that runs as a program on your computer. It is built for Vibe 3.1.4 on Python 3.14.8.
+Version 0.1.19 is built for Vibe 3.1.5 on Python 3.14.8.
 Something specific you want Vibe Work to do? Post it in
 [Discussions](https://github.com/martinsbrezauckis/vibe-work/discussions). Changes per version: `CHANGELOG.md`.
 Questions and reports: `CONTRIBUTING.md`.

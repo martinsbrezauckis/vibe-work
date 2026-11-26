@@ -89,11 +89,12 @@ pub fn ensure(vibe_home: &Path) -> io::Result<bool> {
 /// This step's edit for [`crate::startup_config`]: the first config when `missing` (no file, no text yet), else
 /// [`with_missing_defaults`].
 pub(crate) fn edit(existing: &str, missing: bool) -> (Option<String>, ModelDefaults) {
-    if existing
-        .parse::<toml::Table>()
-        .ok()
-        .and_then(|config| config.get("experimental_enable_model_catalog")?.as_bool())
-        == Some(true)
+    if existing.parse::<toml::Table>().ok().and_then(|config| {
+        config
+            .get("enable_model_catalog")
+            .or_else(|| config.get("experimental_enable_model_catalog"))?
+            .as_bool()
+    }) == Some(true)
     {
         return match without_app_seed(existing) {
             Some(text) => (Some(text), ModelDefaults::Filled),

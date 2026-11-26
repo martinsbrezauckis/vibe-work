@@ -29,10 +29,10 @@ use crate::developer_permissions::RefreshWithheldCause;
 use crate::event::{AlertKind, CoreEvent};
 use crate::mcp_keys_config::ConfigEditError;
 
-/// A forced MCP refresh can start a disabled stdio row in pinned Vibe 3.1.4. Check both persisted
-/// row forms before forwarding one while Developer permissions is off.
+/// Whether an enabled command row makes refresh unsafe while OFF. Also validates both persisted TOML
+/// forms before resuming commands. The caller only uses this validation's error, not the blocked flag.
 pub(crate) fn refresh_has_command_server(home: &Path) -> Result<bool, ConfigEditError> {
-    crate::mcp_refresh::blocked_command(home, false)
+    crate::mcp_refresh::blocked_command(home, false, false)
 }
 
 /// Emits at most one visible Tools alert per settings revision and cause when forced
@@ -74,7 +74,11 @@ pub(crate) fn notify_internal_refresh_withheld(
 /// `false` (after emitting the deduplicated Tools alert) when the refresh must remain withheld.
 pub(crate) fn admit_internal_refresh(shared: &Shared, session_id: Option<&str>) -> bool {
     let enabled = shared.developer_permissions.enabled();
-    match crate::mcp_refresh::blocked_command(&shared.instructions.own_home, enabled) {
+    match crate::mcp_refresh::blocked_command(
+        &shared.instructions.own_home,
+        enabled,
+        crate::mcp_refresh::guard_installed(shared),
+    ) {
         Ok(false) => true,
         Ok(true) => {
             notify_internal_refresh_withheld(

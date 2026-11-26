@@ -9,20 +9,103 @@ use super::*;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_version_matching_server_without_an_interpreter_is_not_selectable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("vw-existing-unguarded-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("vibe-app-server");
+    let marker = dir.join("executed");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\n: > '{}'\nread request\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"serverInfo\":{{\"name\":\"vibe-app-server\",\"version\":\"3.1.5\"}}}}}}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let found = find(
+        &Discovery {
+            path_var: Some(dir.as_os_str().to_owned()),
+            ..Discovery::default()
+        },
+        &dir.join("probes"),
+        &[],
+        "3.1.5",
+        &dir.join("own"),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].version, None);
+    assert!(!marker.exists(), "discovery executed an unguardable server");
+    assert!(
+        !found[0].supported,
+        "version alone offered an unguarded server"
+    );
+    assert_eq!(
+        found[0].warning.as_deref(),
+        Some(
+            "This Vibe installation cannot run with Vibe Work's safety guards: choose Install Vibe for Vibe Work, or a Vibe installed in its own Python environment."
+        )
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_guardable_candidate_is_still_version_probed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let python = std::env::var("VIBE_PYTHON").expect("the pinned Vibe Python is required");
+    let dir = std::env::temp_dir().join(format!("vw-existing-guarded-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("vibe-app-server");
+    let marker = dir.join("executed");
+    let reply =
+        serde_json::json!({"jsonrpc":"2.0", "id":1, "result":{"serverInfo":{"version":"3.1.5"}}});
+    std::fs::write(
+        &program,
+        format!(
+            "#!{python}\nimport pathlib, sys\nsys.stdin.readline()\npathlib.Path({}).write_text('yes')\nprint({})\n",
+            serde_json::to_string(&marker.display().to_string()).unwrap(),
+            serde_json::to_string(&reply.to_string()).unwrap(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let found = find(
+        &Discovery {
+            path_var: Some(dir.as_os_str().to_owned()),
+            ..Discovery::default()
+        },
+        &dir.join("probes"),
+        &[],
+        "3.1.5",
+        &dir.join("own"),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].version.as_deref(), Some("3.1.5"));
+    assert!(found[0].supported);
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), "yes");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn an_older_initialize_names_the_version_but_never_becomes_supported() {
     use std::os::unix::fs::PermissionsExt;
+    let python = std::env::var("VIBE_PYTHON").expect("the pinned Vibe Python is required");
     let dir = std::env::temp_dir().join(format!("vw-probe-old-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let program = dir.join("vibe-app-server");
     for code in ["\"invalid_params\"", "-32602"] {
-        std::fs::write(&program, r#"#!/bin/sh
-read first
-case "$first" in *agentWorktrees*) ;; *) exit 2;; esac
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"error":{"code":INVALID_PARAMS,"message":"Invalid request parameters"}}'
-read second
-case "$second" in *agentWorktrees*|*sessionPeerRestore*|*entrypoint*|*title*) exit 3;; esac
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"serverInfo":{"version":"2.26.1"}}}'
-"#.replace("INVALID_PARAMS", code)).unwrap();
+        let code = serde_json::from_str::<serde_json::Value>(code).unwrap();
+        let invalid = serde_json::json!({"jsonrpc":"2.0", "id":1, "error":{"code":code,"message":"Invalid request parameters"}}).to_string();
+        let old = serde_json::json!({"jsonrpc":"2.0", "id":2, "result":{"serverInfo":{"version":"2.26.1"}}}).to_string();
+        std::fs::write(&program, format!(
+            "#!{python}\nimport sys\nfirst = sys.stdin.readline()\nif 'agentWorktrees' not in first: sys.exit(2)\nprint({}, flush=True)\nsecond = sys.stdin.readline()\nif any(key in second for key in ('agentWorktrees', 'sessionPeerRestore', 'entrypoint', 'title')): sys.exit(3)\nprint({}, flush=True)\n",
+            serde_json::to_string(&invalid).unwrap(),
+            serde_json::to_string(&old).unwrap(),
+        )).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
         let found = find(
             &Discovery {

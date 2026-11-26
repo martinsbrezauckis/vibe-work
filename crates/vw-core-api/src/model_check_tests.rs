@@ -8,6 +8,12 @@ use serde_json::json;
 use std::sync::Arc;
 use vw_gate::{Confirmation, ConfirmationRequest, Confirmer};
 
+#[path = "model_check_offline_tests.rs"]
+mod offline;
+
+#[path = "model_check_send_tests.rs"]
+mod send;
+
 struct NoPrompt;
 impl Confirmer for NoPrompt {
     async fn confirm(&self, _: &ConfirmationRequest) -> Confirmation {
@@ -49,6 +55,13 @@ for line in sys.stdin:
 
 /// A core over a disposable Vibe home whose `config/read` copies the config it saw to `read-config.toml`.
 async fn start(name: &str) -> (crate::Core, std::path::PathBuf, std::path::PathBuf) {
+    Box::pin(start_with_keys(name, None)).await
+}
+
+async fn start_with_keys(
+    name: &str,
+    keys: Option<Arc<vw_keys::KeyService>>,
+) -> (crate::Core, std::path::PathBuf, std::path::PathBuf) {
     use std::os::unix::fs::PermissionsExt;
 
     let root = std::env::temp_dir().join(format!("vw-model-check-{name}-{}", std::process::id()));
@@ -63,6 +76,7 @@ async fn start(name: &str) -> (crate::Core, std::path::PathBuf, std::path::PathB
         Arc::new(vw_supervisor::NoSecret),
         NoPrompt,
         crate::CoreConfig {
+            keys,
             instructions: crate::InstructionsConfig {
                 cli_home: Some(root.join("cli")),
             },
@@ -83,6 +97,124 @@ async fn check(core: &crate::Core) -> serde_json::Value {
         panic!("launch check must reply")
     };
     result
+}
+
+async fn catalog_default_check(name: &str, locked: bool, has_key: bool, awaiting: bool) {
+    let keys_root = tempfile::tempdir().unwrap();
+    let keys = crate::refresh_notice_tests::memory_keys(keys_root.path()).await;
+    if has_key {
+        keys.store_key(vw_vault::SecretString::new(
+            "lockedgone-test-key-0000000000000000",
+        ))
+        .await
+        .unwrap();
+        assert!(keys.speech_available());
+    }
+    if locked {
+        keys.set_unlock_method(
+            vw_keys::UnlockMethod::Password,
+            vw_vault::SecretString::new("refresh notice test vault"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(keys.unlock_method(), vw_keys::UnlockMethod::Password);
+        keys.lock();
+    }
+    assert_eq!(keys.speech_available(), has_key && !locked);
+    let (core, root, home) = Box::pin(start_with_keys(name, Some(keys))).await;
+    let original = "enable_model_catalog = true\nactive_model = 'mistral-medium-latest'\n";
+    std::fs::write(home.join("config.toml"), original).unwrap();
+    let large = json!({"alias":"mistral-large-4-0","name":"mistral-large-4-0",
+        "source":if has_key && !locked && !awaiting {"catalog"} else {"local"},
+        "displayName":"Mistral Large 4"});
+    let mut config = json!({"models":[large.clone()], "activeModel":large,
+        "awaitingExperimentModel":awaiting,
+        "validationWarnings":["Model 'mistral-medium-latest' is not available"]});
+    std::fs::write(home.join("reply.json"), config.to_string()).unwrap();
+    let result = check(&core).await;
+    let expected = if has_key && !locked && !awaiting {
+        json!("mistral-medium-latest")
+    } else {
+        json!(null)
+    };
+    assert_eq!(result["gone"], expected, "{name}: {result}");
+    // Empty, missing and malformed lists cannot establish account-model retirement:
+    // a usable key does not prove the catalog fetch succeeded.
+    if !awaiting {
+        for rows in [
+            json!([]),
+            json!(null),
+            json!({}),
+            json!([{"source":"project"}]),
+        ] {
+            config["models"] = rows;
+            std::fs::write(home.join("reply.json"), config.to_string()).unwrap();
+            assert_eq!(check(&core).await["gone"], json!(null), "{name}: {config}");
+        }
+        config.as_object_mut().unwrap().remove("models");
+        std::fs::write(home.join("reply.json"), config.to_string()).unwrap();
+        assert_eq!(check(&core).await["gone"], json!(null), "{name}: {config}");
+        // A returned account row makes the list usable even when the vault is now locked.
+        for source in ["catalog", "growthbook"] {
+            config["models"] = json!([{"alias":"other-account-model", "source":source}]);
+            std::fs::write(home.join("reply.json"), config.to_string()).unwrap();
+            assert_eq!(
+                check(&core).await["gone"],
+                "mistral-medium-latest",
+                "{name}: {config}"
+            );
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        original
+    );
+    core.shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn locked_catalog_default_without_catalog_rows_is_not_known_to_be_gone() {
+    Box::pin(catalog_default_check(
+        "locked-catalog-default",
+        true,
+        true,
+        false,
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn no_key_catalog_default_without_catalog_rows_is_not_known_to_be_gone() {
+    Box::pin(catalog_default_check(
+        "no-key-catalog-default",
+        false,
+        false,
+        false,
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn ready_key_catalog_default_absent_from_loaded_catalog_is_gone() {
+    Box::pin(catalog_default_check(
+        "ready-catalog-default",
+        false,
+        true,
+        false,
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn ready_key_catalog_default_awaiting_catalog_is_not_known_to_be_gone() {
+    Box::pin(catalog_default_check(
+        "awaiting-catalog-default",
+        false,
+        true,
+        true,
+    ))
+    .await;
 }
 
 // PREDICT: after startup removes the exact old app row, `active_model=large-4` is still an
@@ -137,6 +269,13 @@ fn legacy_choice_migration_requires_an_unambiguous_large_4_row_and_no_personal_r
         super::legacy_catalog_choice(old, &view).as_deref(),
         Some("mistral-large-4-0")
     );
+    let stable = old.replace("experimental_enable_model_catalog", "enable_model_catalog");
+    assert_eq!(
+        super::legacy_catalog_choice(&stable, &view).as_deref(),
+        Some("mistral-large-4-0")
+    );
+    let stable_off = format!("enable_model_catalog = false\n{old}");
+    assert!(super::legacy_catalog_choice(&stable_off, &view).is_none());
     for text in [
         "experimental_enable_model_catalog = true\n",
         "experimental_enable_model_catalog = true\nactive_model = ''\n",

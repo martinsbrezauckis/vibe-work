@@ -97,12 +97,12 @@ mod tests {
     use std::time::Duration;
 
     use crate::refresh_notice_tests::{
-        assert_paused_notice_text, attach_mock_channel, count_server_refreshes, drain_events,
-        memory_keys, start_with_keys, tools_alerts,
+        attach_mock_channel, count_server_refreshes, drain_events, memory_keys, start_with_keys,
+        tools_alerts,
     };
 
     #[tokio::test]
-    async fn first_use_key_grant_while_off_with_inline_paused_stdio_emits_one_alert() {
+    async fn first_use_key_grant_while_off_with_inline_paused_stdio_refreshes_without_alert() {
         let key_root = std::env::temp_dir().join(format!(
             "vw-refresh-first-use-keys-{}-{}",
             std::process::id(),
@@ -134,13 +134,18 @@ mod tests {
 
         assert!(super::ask(&core.shared, &binding).await);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-        let mut found = Vec::new();
-        while tokio::time::Instant::now() < deadline && found.is_empty() {
-            found.extend(tools_alerts(&drain_events(&mut sub).await));
+        while tokio::time::Instant::now() < deadline && count_server_refreshes(&calls) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(found.len(), 1, "first-use grant should emit one alert");
-        assert_paused_notice_text(&found[0].1);
-        assert_eq!(count_server_refreshes(&calls), 0);
+        assert_eq!(
+            count_server_refreshes(&calls),
+            1,
+            "first-use grant must refresh the open chat"
+        );
+        assert_eq!(
+            tools_alerts(&drain_events(&mut sub).await),
+            Vec::<(Option<String>, String)>::new()
+        );
 
         core.shutdown().await;
         let _ = std::fs::remove_dir_all(&key_root);

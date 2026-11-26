@@ -79,8 +79,13 @@ export interface CoreController {
   /**
    * Sends a command; the result is folded into the model. Rejects with `CoreCallError`. Every command is the
    * window's; `options.origin: "window"` only keeps it out of a served Debug API action's reply wait.
+   * `freshRuntimeRead` starts a separate `runtime/read` when a key transition needs a post-unlock answer.
    */
-  run(command: Command, options?: ExecuteOptions): Promise<CommandResult>;
+  run(
+    command: Command,
+    options?: ExecuteOptions,
+    freshRuntimeRead?: boolean,
+  ): Promise<CommandResult>;
   /** Keeps a UI-control action's request open through preparation and lazy-loading awaits. */
   trackAction<T>(action: Promise<T>): Promise<T>;
   /** Keeps browser setup discovery current while at least one consumer is mounted. */
@@ -307,11 +312,11 @@ export function createCore(
             };
       });
     },
-    run(command, options) {
+    run(command, options, freshRuntimeRead = false) {
       // A chat's runtime read that is already on its way answers every caller that asks meanwhile (the model menu
       // re-reads when it opens; it never doubles a read still running).
       const key =
-        command.type === "call" && command.method === "runtime/read"
+        !freshRuntimeRead && command.type === "call" && command.method === "runtime/read"
           ? JSON.stringify(command.params)
           : null;
       const running = key === null ? undefined : runtimeReads.get(key);

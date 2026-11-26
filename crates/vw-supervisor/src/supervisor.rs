@@ -1,6 +1,6 @@
 //! The supervisor: starts the server, hands out its connection (in multiplex mode: the lobby channel,
-//! plus more channels on request), restarts it with backoff when it dies, tracks which sessions need
-//! `session/resume`, reports resume progress, shuts down cleanly.
+//! plus more channels on request), restarts it with backoff when it dies or once when the core asks,
+//! tracks which sessions need `session/resume`, reports resume progress, shuts down cleanly.
 //!
 //! Depends on: `launch` (spawn + connect + handshake), `child`, `config`, `backoff`; vw-rpc. Called by:
 //! the app's core (vw-core-api: one supervisor per app), tests.
@@ -48,11 +48,13 @@ struct Inner {
     state: watch::Sender<SupervisorState>,
     conn: watch::Sender<Option<Connection>>,
     /// The multiplexer of the running server and its generation (multiplex mode only).
-    mux: watch::Sender<Option<(Multiplexer, u64)>>,
+    mux: watch::Sender<Option<(Multiplexer, u64, bool)>>,
     tracked: Mutex<BTreeSet<String>>,
     pid: Mutex<Option<u32>>,
     /// The current server's unreaped leader and watchdog, for [`Supervisor::kill_now`].
     live: LiveIds,
+    /// A requested controlled restart ([`Supervisor::restart`]), taken by the monitor.
+    restart: tokio::sync::Notify,
 }
 
 /// Supervises one `vibe-app-server` process.
@@ -91,15 +93,14 @@ impl Supervisor {
     /// [`SupervisorError::ProgramNotUsable`] for a relative or non-executable program; secret, env,
     /// spawn and handshake errors.
     pub async fn start(
-        mut config: SupervisorConfig,
+        config: SupervisorConfig,
         secrets: Arc<dyn SecretProvider>,
     ) -> Result<Self, SupervisorError> {
         if !config.program.is_absolute() {
             return Err(SupervisorError::ProgramNotUsable(config.program));
         }
-        config.program = canonical_executable(&config.program)
+        let program = canonical_executable(&config.program)
             .ok_or_else(|| SupervisorError::ProgramNotUsable(config.program.clone()))?;
-        let program = config.program.clone();
         let inner = Inner::new(config, program, secrets, SupervisorState::Starting);
         let running = inner.launch(true).await?;
         inner.publish_ready(&running, 1, Vec::new());
@@ -205,6 +206,17 @@ impl Supervisor {
         self.inner.program.lock_or_recover().clone()
     }
 
+    /// Whether the current server was launched through the adapter that guards disabled stdio discovery.
+    /// False before a successful launch and while no server connection is published.
+    #[must_use]
+    pub fn mcp_refresh_guard_installed(&self) -> bool {
+        self.inner
+            .mux
+            .borrow()
+            .as_ref()
+            .is_some_and(|(_, _, guarded)| *guarded)
+    }
+
     /// The private adapter path this supervisor supplies to Python, for exact process ownership checks.
     #[must_use]
     pub fn adapter_path(&self) -> PathBuf {
@@ -298,8 +310,8 @@ impl Supervisor {
         let mut state = self.inner.state.subscribe();
         let deadline = tokio::time::Instant::now() + wait;
         loop {
-            if let Some(current) = mux.borrow_and_update().clone() {
-                return Ok(current);
+            if let Some((current, generation, _)) = mux.borrow_and_update().clone() {
+                return Ok((current, generation));
             }
             match &*state.borrow_and_update() {
                 SupervisorState::Stopped { .. } => {
@@ -331,6 +343,19 @@ impl Supervisor {
     /// Forgets a session (closed by the user).
     pub fn untrack_session(&self, session_id: &str) {
         self.inner.tracked().remove(session_id);
+    }
+
+    /// Asks the monitor to replace the ready server with a fresh process through the same path a death takes
+    /// (stop it gracefully, launch again, publish a new generation with the tracked sessions in `needs_resume`),
+    /// without counting it as a failed attempt. Returns false, and does nothing, when no server is ready or the
+    /// supervisor is stopping. The caller checks that nothing in the server would be cut.
+    pub fn restart(&self) -> bool {
+        let ready = matches!(&*self.inner.state.borrow(), SupervisorState::Ready { .. });
+        if !ready || *self.shutdown.borrow() || self.monitor.lock_or_recover().is_none() {
+            return false;
+        }
+        self.inner.restart.notify_one();
+        true
     }
 
     /// OS process id of the current server leader (diagnostics and tests).
@@ -473,6 +498,7 @@ impl Inner {
             tracked: Mutex::new(BTreeSet::new()),
             pid: Mutex::new(None),
             live: LiveIds::default(),
+            restart: tokio::sync::Notify::new(),
         })
     }
 
@@ -492,8 +518,11 @@ impl Inner {
 
     fn publish_ready(&self, running: &Running, generation: u64, needs_resume: Vec<String>) {
         self.conn.send_replace(Some(running.conn.clone()));
-        self.mux
-            .send_replace(Some((running.mux.clone(), generation)));
+        self.mux.send_replace(Some((
+            running.mux.clone(),
+            generation,
+            running.mcp_refresh_guard,
+        )));
         self.state.send_replace(SupervisorState::Ready {
             generation,
             server: running.server.clone(),
@@ -539,38 +568,66 @@ impl Inner {
     }
 }
 
-/// Owns the running server: waits for death or shutdown, restarts with backoff.
+/// Why the monitor stopped waiting on the running server.
+enum Ended {
+    Died(DeathReport),
+    Requested,
+    Shutdown,
+}
+
+/// Owns the running server: waits for death, a requested restart or shutdown; restarts with backoff.
 async fn monitor(inner: Arc<Inner>, mut running: Running, mut shutdown: watch::Receiver<bool>) {
     let backoff = inner.config.backoff;
     let mut generation = 1_u64;
     let mut attempt = 0_u32;
     loop {
         let death = tokio::select! {
-            report = process_closed(&running) => Some(report),
-            _ = shutdown.wait_for(|stop| *stop) => None,
+            report = process_closed(&running) => Ended::Died(report),
+            () = inner.restart.notified() => Ended::Requested,
+            _ = shutdown.wait_for(|stop| *stop) => Ended::Shutdown,
         };
-        let Some(mut report) = death else {
+        let died = match death {
+            Ended::Died(report) => Some(report),
+            Ended::Requested => None,
+            Ended::Shutdown => {
+                inner.mux.send_replace(None);
+                let exit = stop_gracefully(&inner, running).await;
+                inner.conn.send_replace(None);
+                inner.state.send_replace(SupervisorState::Stopped { exit });
+                return;
+            }
+        };
+        let report = if let Some(mut report) = died {
+            inner.conn.send_replace(None);
+            inner.mux.send_replace(None);
+            let lived = running.started.elapsed();
+            // Wedged or write-blocked servers are still alive: kill the tree, then reap.
+            let exit = running.child.kill_and_reap(Duration::from_secs(5)).await;
+            report.exit = report.exit.or(exit);
+            warn!(
+                cause = report.cause.kind(),
+                exit_code = report.exit.and_then(|e| e.code),
+                lived_ms = lived.as_millis(),
+                "vibe-app-server died"
+            );
+            if lived >= backoff.stable_after {
+                attempt = 0;
+            }
+            report
+        } else {
+            // Requested restart: the same stop as a shutdown, then the same relaunch as after a death. New
+            // requests wait for the next server instead of reaching the one that is stopping.
+            inner.conn.send_replace(None);
             inner.mux.send_replace(None);
             let exit = stop_gracefully(&inner, running).await;
-            inner.conn.send_replace(None);
-            inner.state.send_replace(SupervisorState::Stopped { exit });
-            return;
-        };
-        inner.conn.send_replace(None);
-        inner.mux.send_replace(None);
-        let lived = running.started.elapsed();
-        // Wedged or write-blocked servers are still alive: kill the tree, then reap.
-        let exit = running.child.kill_and_reap(Duration::from_secs(5)).await;
-        report.exit = report.exit.or(exit);
-        warn!(
-            cause = report.cause.kind(),
-            exit_code = report.exit.and_then(|e| e.code),
-            lived_ms = lived.as_millis(),
-            "vibe-app-server died"
-        );
-        if lived >= backoff.stable_after {
+            info!("vibe-app-server stopped for a requested restart");
             attempt = 0;
-        }
+            DeathReport {
+                cause: vw_rpc::DeathCause::ClosedByClient,
+                exit,
+                stderr_tail: Vec::new(),
+            }
+        };
         let mut last_error = String::from("server died");
         loop {
             attempt += 1;
@@ -626,8 +683,13 @@ async fn process_closed(running: &Running) -> DeathReport {
 
 /// Closes stdin, waits the grace period, kills what is left and reaps it.
 async fn stop_gracefully(inner: &Inner, running: Running) -> Option<ExitInfo> {
-    // Vibe closes every channel, flushes each harness and releases its lease.
+    // The multiplexer's close interrupts each channel first. An interrupt that cannot be
+    // acknowledged marks it dead; kill the process tree before it can keep working detached.
     running.mux.close_input().await;
+    if running.mux.death().is_some() {
+        warn!("server could not stop every channel before stdin close; killing its tree");
+        return running.child.kill_and_reap(Duration::from_secs(5)).await;
+    }
     let graceful = running.child.wait_exit(inner.config.shutdown_grace).await;
     if graceful.is_none() {
         warn!(

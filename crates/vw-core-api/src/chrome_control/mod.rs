@@ -425,11 +425,11 @@ mod page_capture_tests;
 mod data_export_tests;
 
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
-mod agent_close_dbk17u_tests;
-#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
-mod agent_close_dbk17v_tests;
-#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 mod agent_close_incarnation_tests;
+#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
+mod agent_close_profile_memory_tests;
+#[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
+mod agent_close_profile_recovery_tests;
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]
 mod agent_close_restart_tests;
 #[cfg(all(test, feature = "your-firefox", feature = "your-edge"))]

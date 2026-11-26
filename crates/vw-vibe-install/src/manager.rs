@@ -21,7 +21,7 @@
 
 use std::ffi::OsString;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -169,27 +169,27 @@ impl VibeInstaller {
             .as_ref()
             .map_or(InstallPhase::NotInstalled {}, |layout| {
                 if let Some(choice) = layout.choice() {
-                    if choice.version != pinned {
+                    let warning = if choice.version == pinned {
+                        crate::existing::interpreter_warning(&choice.path)
+                    } else {
+                        Some(crate::existing::version_warning(&choice.version, &pinned))
+                    };
+                    if let Some(warning) = warning {
                         existing.push(ExistingView {
                             path: choice.path.display().to_string(),
-                            warning: Some(crate::existing::version_warning(
-                                &choice.version,
-                                &pinned,
-                            )),
+                            warning: Some(warning),
                             version: Some(choice.version),
                             supported: false,
                         });
                         return InstallPhase::NotInstalled {};
                     }
-                    let warning = (choice.version != pinned)
-                        .then(|| crate::existing::version_warning(&choice.version, &pinned));
                     InstallPhase::Installed {
                         version: choice.version,
                         server: choice.path.display().to_string(),
                         source: InstallSource::Existing,
                         disk_bytes: None,
                         install_ms: None,
-                        warning,
+                        warning: None,
                     }
                 } else if let Some(done) = current_private(layout) {
                     InstallPhase::Installed {
@@ -491,19 +491,28 @@ impl VibeInstaller {
             let found = state
                 .existing
                 .iter()
-                .find(|e| e.path == path && e.version.is_some())
+                .find(|e| e.path == path)
                 .ok_or_else(|| InstallError::UnknownExisting(path.to_owned()))?;
             if !found.supported {
                 return Err(InstallError::UnsupportedVersion(
-                    crate::existing::version_warning(
-                        found.version.as_deref().unwrap_or("unknown"),
-                        &self.inner.pinned,
-                    ),
+                    found.warning.clone().unwrap_or_else(|| {
+                        crate::existing::version_warning(
+                            found.version.as_deref().unwrap_or("unknown"),
+                            &self.inner.pinned,
+                        )
+                    }),
                 ));
             }
+            if let Some(warning) = crate::existing::interpreter_warning(Path::new(path)) {
+                return Err(InstallError::UnsupportedVersion(warning));
+            }
+            let version = found
+                .version
+                .clone()
+                .ok_or_else(|| InstallError::UnknownExisting(path.to_owned()))?;
             let choice = Choice {
                 path: PathBuf::from(&found.path),
-                version: found.version.clone().unwrap_or_default(),
+                version,
             };
             (choice, found.warning.clone())
         };

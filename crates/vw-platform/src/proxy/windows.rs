@@ -66,6 +66,73 @@ fn string(value: PWSTR) -> Result<String, &'static str> {
     unsafe { value.to_string().map_err(|_| FAILED) }
 }
 
+fn fingerprint_string(value: PWSTR) -> Result<Option<Vec<u8>>, &'static str> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: WinHTTP returned a NUL-terminated, owned UTF-16 string. Every index before its
+    // terminator is inside that allocation; the cap rejects unusually long configuration values.
+    let mut units = Vec::new();
+    for index in 0..65_536 {
+        let unit = unsafe { *value.0.add(index) };
+        if unit == 0 {
+            return String::from_utf16(&units)
+                .map(|text| Some(text.into_bytes()))
+                .map_err(|_| FAILED);
+        }
+        units.push(unit);
+    }
+    Err(FAILED)
+}
+
+pub(super) fn fingerprint() -> Result<super::ProxyFingerprint, &'static str> {
+    // SAFETY: each WinHTTP call initializes its output; Ie and Info release all returned strings.
+    unsafe {
+        let mut ie = Ie(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG::default());
+        let got_ie = WinHttpGetIEProxyConfigForCurrentUser(&raw mut ie.0).is_ok();
+        let mut info = Info(WINHTTP_PROXY_INFO::default());
+        let got_default = WinHttpGetDefaultProxyConfiguration(&raw mut info.0).is_ok();
+        if !got_ie && !got_default {
+            return Err(FAILED);
+        }
+        let fields = vec![
+            Some(vec![u8::from(got_ie)]),
+            got_ie.then(|| vec![u8::from(ie.0.fAutoDetect.as_bool())]),
+            if got_ie {
+                fingerprint_string(ie.0.lpszAutoConfigUrl)?
+            } else {
+                None
+            },
+            if got_ie {
+                fingerprint_string(ie.0.lpszProxy)?
+            } else {
+                None
+            },
+            if got_ie {
+                fingerprint_string(ie.0.lpszProxyBypass)?
+            } else {
+                None
+            },
+            Some(vec![u8::from(got_default)]),
+            got_default.then(|| info.0.dwAccessType.0.to_le_bytes().to_vec()),
+            if got_default {
+                fingerprint_string(info.0.lpszProxy)?
+            } else {
+                None
+            },
+            if got_default {
+                fingerprint_string(info.0.lpszProxyBypass)?
+            } else {
+                None
+            },
+        ];
+        if fields.iter().flatten().map(Vec::len).sum::<usize>() > 1024 * 1024 {
+            return Err(FAILED);
+        }
+        Ok(super::ProxyFingerprint(fields))
+    }
+}
+
 pub(super) fn resolve(url: &str) -> Result<Vec<String>, &'static str> {
     // SAFETY: all output structs are initialized, allocations are owned by RAII wrappers.
     unsafe {

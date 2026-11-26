@@ -1,8 +1,8 @@
-//! Applies the Settings default when a picked model differs from what Vibe will run.
-//! Called by dispatch on Send and model selection; runtime checks never block chat work.
+//! Restores saved choices before Send, using the Settings default when a choice is unavailable.
+//! Called by dispatch on Send and model selection; an unavailable account list preserves saved picks and refuses Send.
 use super::{Choice, actual};
 use crate::core::Shared;
-use crate::error::CoreError;
+use crate::error::{CoreError, ErrorCode};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use vw_gate::Reply;
@@ -21,7 +21,8 @@ pub(crate) fn admission(method: &str, params: &Value) -> Value {
     checked
 }
 
-pub(crate) async fn publish(shared: &Arc<Shared>, id: &str, runtime: Value) {
+pub(crate) async fn publish(shared: &Arc<Shared>, id: &str, mut runtime: Value) {
+    super::settled::certify(shared, id, &mut runtime);
     let previous_mode = crate::chrome_control::chat_mode(shared, id);
     shared.access.observe_runtime(id, &runtime);
     crate::chrome_control::mode_changed(shared, id, previous_mode.as_deref());
@@ -62,12 +63,30 @@ pub(crate) async fn before(
             return Ok(());
         }
     };
-    super::restore::mark_cold_replay(shared, id, &runtime, prior.pending.as_ref());
+    super::restore::mark_cold_replay(shared, id, &runtime, prior.expected().as_ref());
     let (runtime, cold_missing) = if let Some(choice) = prior.expected() {
         super::restore::after_ready(shared, id, runtime, &choice).await?
     } else {
         (runtime, false)
     };
+    if prior
+        .expected()
+        .or_else(|| super::restore::unavailable_default(&runtime["config"]))
+        .is_some_and(|choice| super::restore::waiting_for_account_models(shared, &runtime, &choice))
+    {
+        return Err(CoreError::new(
+            ErrorCode::InvalidParams,
+            match crate::model_check::account_models_unavailable_reason(shared, &runtime["config"])
+            {
+                Some(crate::model_check::AccountModelsUnavailableReason::NotFetched) => {
+                    "The saved model for this chat cannot be checked because Vibe Work could not reach Mistral. Check the network or proxy settings, then try Send again."
+                }
+                _ => {
+                    "The saved model for this chat cannot be checked until a Mistral key is ready. Unlock the vault or add a Mistral key, then try Send again."
+                }
+            },
+        ));
+    }
     super::retired::migrate(&choices.records, id, &runtime);
     let record = choices.records.get(id);
     let expected = record.expected();
@@ -76,8 +95,8 @@ pub(crate) async fn before(
     let runtime = if let Some(choice) =
         expected.filter(|choice| super::restore::differs(&runtime, choice, current.as_ref()))
     {
-        if record.pending.as_ref() == Some(&choice)
-            && !choice.provider_key.is_empty()
+        if !choice.provider_key.is_empty()
+            && record.expected().as_ref() == Some(&choice)
             && super::restore::replayable(shared, id, &runtime, &choice).await
         {
             match super::apply(shared, id, &choice).await {

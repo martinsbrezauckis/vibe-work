@@ -80,6 +80,21 @@ fn unrelated_binary_strings_are_not_an_interpreter_association() {
     bytes.extend_from_slice(b"noise#!C:\\planted\\python.exe\nPK\x03\x04");
     assert_eq!(interpreter(&bytes), None);
 }
+
+#[test]
+fn an_unrecognized_windows_launcher_cannot_prove_a_python() {
+    // A structurally valid PE with no uv resource or distlib script overlay is not an association.
+    assert_eq!(interpreter(&pe()), None);
+    #[cfg(windows)]
+    {
+        let root = std::env::temp_dir().join(format!("vw-unknown-launcher-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let server = root.join("vibe-app-server.exe");
+        std::fs::write(&server, pe()).unwrap();
+        assert_eq!(super::server_python(&server), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
 #[test]
 fn uv_resource_and_distlib_overlay_resolve_the_named_interpreter() {
     let path = "C:\\Users\\Mārtiņš\\vibe env\\Scripts\\python.exe";

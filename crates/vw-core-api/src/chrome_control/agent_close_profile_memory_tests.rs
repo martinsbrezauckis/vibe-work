@@ -1,5 +1,5 @@
-//! Regression and reviewer-probe tests for DBK17U-01 sequence B (uncertain delete keeps dropped-window warning)
-//! and DBK17U-02 (exact helper profile matching in `AgentWindows` with live-status profile resolution).
+//! Regression tests for uncertain deletion retaining the dropped-window warning and exact helper-profile
+//! matching in `AgentWindows` with live-status profile resolution.
 //! Depends on `agent_close_incarnation_tests`, `agent_close_window_tests`, `agent_firefox_close_tests::fixture`,
 //! `edge_agent_tests::fixture`, `gateway`, `profile_bindings`, and `test_support`.
 use super::{
@@ -18,8 +18,8 @@ use serde_json::json;
 use vw_platform::sync::LockRecover;
 
 #[tokio::test]
-async fn dbk17u_uncertain_delete_must_not_erase_older_window_warning() {
-    let (core, _) = fixture("dbk17u-uncertain-drop").await;
+async fn close_memory_uncertain_delete_must_not_erase_older_window_warning() {
+    let (core, _) = fixture("close-memory-uncertain-drop").await;
     two_chats(&core);
     created_in(&core, 7);
     open_session(&core, "s", "old-chrome", "chrome:work", "disconnected");
@@ -47,7 +47,7 @@ async fn dbk17u_uncertain_delete_must_not_erase_older_window_warning() {
 }
 
 #[test]
-fn dbk17u_distinct_helper_profile_ids_must_not_share_window_candidates() {
+fn close_memory_distinct_helper_profile_ids_must_not_share_window_candidates() {
     let mut aw = super::agent_windows::AgentWindows::default();
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -63,7 +63,7 @@ fn dbk17u_distinct_helper_profile_ids_must_not_share_window_candidates() {
 async fn a_same_profile_window_opened_and_closed_under_one_spelling_still_closes() {
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let core = edge_agent_tests::fixture(
-        "dbk17u-same-spelling",
+        "close-memory-same-spelling",
         json!([{"profileId":upper,"name":"Work","connected":true}]),
     )
     .await;
@@ -122,7 +122,7 @@ async fn canonical_selected_profile_still_closes_uppercase_chrome_profiles_own_w
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let core = edge_agent_tests::fixture(
-        "dbk17u-canonical-selected-close",
+        "close-memory-canonical-selected-close",
         json!([{"profileId":upper,"name":"Work","connected":true}]),
     )
     .await;
@@ -235,7 +235,7 @@ async fn canonical_selected_profile_still_closes_uppercase_chrome_profiles_own_w
 
 #[tokio::test]
 async fn two_distinct_helper_profiles_with_same_canonical_id_stay_isolated_in_close_browser() {
-    let (core, _) = fixture("dbk17u-two-exact-profiles").await;
+    let (core, _) = fixture("close-memory-two-exact-profiles").await;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let both_profiles = json!({"profiles":[
@@ -267,7 +267,7 @@ async fn two_distinct_helper_profiles_with_same_canonical_id_stay_isolated_in_cl
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one scenario read top to bottom")]
 async fn uncertain_delete_preserves_dropped_mark_across_edge_ask_and_second_chat() {
-    let core = super::read_consent_tests::core("dbk17u-uncertain-variants").await;
+    let core = super::read_consent_tests::core("close-memory-uncertain-variants").await;
     let chrome = &core.shared.chrome_control;
     super::profiles::paired(chrome, "edge:work", None);
     super::profiles::paired(chrome, "chrome:work", None);

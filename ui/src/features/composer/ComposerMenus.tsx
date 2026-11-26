@@ -104,6 +104,7 @@ export function ModelMenu({
             : wording(TEXT.modelChoose, { name: label })
         }
         value={alias ?? label}
+        {...(choice === undefined ? { valueLabel: label } : {})}
         {...(onOpen === undefined ? {} : { onOpen })}
         {...(onClose === undefined ? {} : { onClose })}
         onChange={(model) => {

@@ -28,11 +28,15 @@ use vw_keyproxy::{
 };
 use vw_mistral::{TestCallError, TestCallOk};
 use vw_vault::mistral_key;
-use vw_vault::{SecretString, Vault, VaultConfig, VaultKind, VaultStatus};
+use vw_vault::{SecretString, Vault, VaultConfig, VaultError, VaultKind, VaultStatus};
 use zeroize::Zeroizing;
 
 #[path = "service_start.rs"]
 mod service_start;
+
+#[cfg(test)]
+#[path = "service_lifetime_tests.rs"]
+mod lifetime_tests;
 
 #[path = "last_state.rs"]
 mod last_state;
@@ -206,6 +210,7 @@ pub struct KeyService {
     pub(crate) network_probes: Arc<std::sync::Mutex<Vec<vw_netguard::NetGuard>>>,
     pub(crate) network_use: Arc<std::sync::Mutex<()>>,
     pub(crate) network_forwarder: vw_netguard::NetGuard,
+    system_proxy: vw_mistral::network::SystemProxy,
     pub(crate) vibe_forwarder: vw_netguard::NetGuard,
     pub(crate) browser_guards: std::sync::Mutex<Vec<vw_netguard::NetGuard>>,
 }
@@ -379,9 +384,9 @@ impl KeyService {
             )
         })
         .await?;
-        let status = status?;
+        let mut status = status?;
         let item_id = self.settings.key_item_id();
-        let key = match (&status, self.key.current()) {
+        let mut key = match (&status, self.key.current()) {
             (VaultStatus::Unlocked { .. }, KeyState::Ready(_)) => KeyPresence::Ready {
                 own: mistral_key::is_own(&item_id),
                 item_id: item_id.clone(),
@@ -392,29 +397,36 @@ impl KeyService {
         let active_key = if matches!(&key, KeyPresence::Ready { .. }) {
             let vault = Arc::clone(&self.vault);
             let item_id = item_id.clone();
-            blocking(move || vault.read_item(&item_id))
-                .await??
-                .map(|item| {
-                    let imported = item.id == mistral_key::RESOURCE_ID
-                        && vw_vault::items::VaultResource::from_item(&item).is_some_and(
-                            |resource| {
-                                resource
-                                    .public_fields
-                                    .get("importedFrom")
-                                    .and_then(Value::as_str)
-                                    == Some("vibe")
-                            },
-                        );
-                    KeyMetadata {
-                        label: item.title,
-                        source: if imported {
-                            KeySource::Vibe
-                        } else {
-                            KeySource::Vault
-                        },
-                        added_ms: item.created_ms,
-                    }
-                })
+            let (latest_status, item) = blocking(move || match vault.read_item(&item_id) {
+                Ok(item) => Ok((None, item)),
+                // Lock can win after the snapshot. Refresh only the public status; no item is readable now.
+                Err(VaultError::Locked) => Ok((Some(vault.status()?), None)),
+                Err(error) => Err(error),
+            })
+            .await??;
+            if let Some(latest_status) = latest_status {
+                status = latest_status;
+                key = KeyPresence::Unknown;
+            }
+            item.map(|item| {
+                let imported = item.id == mistral_key::RESOURCE_ID
+                    && vw_vault::items::VaultResource::from_item(&item).is_some_and(|resource| {
+                        resource
+                            .public_fields
+                            .get("importedFrom")
+                            .and_then(Value::as_str)
+                            == Some("vibe")
+                    });
+                KeyMetadata {
+                    label: item.title,
+                    source: if imported {
+                        KeySource::Vibe
+                    } else {
+                        KeySource::Vault
+                    },
+                    added_ms: item.created_ms,
+                }
+            })
         } else {
             None
         };
@@ -643,6 +655,7 @@ impl KeyService {
     /// "Lock the vault when Vibe Work quits" on it locks (deleting the kept key), otherwise the
     /// kept key stays for the next start.
     pub async fn shutdown(&self) {
+        self.system_proxy.clear();
         {
             let _transition = self.network_use.lock_or_recover();
             self.stop_authenticated_network();
@@ -666,5 +679,15 @@ impl KeyService {
             self.vault.close();
         }
         self.key.clear(KeyNeed::Unlock);
+    }
+}
+
+impl Drop for KeyService {
+    fn drop(&mut self) {
+        self.system_proxy.clear();
+        self.network_forwarder.set_enabled(false);
+        self.vibe_forwarder.set_enabled(false);
+        self.network_forwarder.shutdown();
+        self.vibe_forwarder.shutdown();
     }
 }

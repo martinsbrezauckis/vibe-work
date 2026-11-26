@@ -1,5 +1,5 @@
-//! Regressions and reviewer-probe tests for DBK17U-01 sequence A (truthful later close answers)
-//! and DBK17V-01 (exact helper profile isolation and ambiguous-profile refusal in `close_browser`).
+//! Regression tests for truthful later close answers, exact helper-profile isolation, and
+//! ambiguous-profile refusal in `close_browser`.
 //! Depends on `agent_close_incarnation_tests`, `agent_close_window_tests`, `agent_firefox_close_tests::fixture`,
 //! `edge_agent_tests::fixture`, `gateway`, `profile_bindings`, and `test_support`.
 use super::{
@@ -18,8 +18,8 @@ use serde_json::json;
 use vw_platform::sync::LockRecover;
 
 #[tokio::test]
-async fn dbk17v_distinct_exact_profile_request_must_not_close_other_bound_profile() {
-    let (core, _) = fixture("dbk17v-wrong-exact-profile").await;
+async fn close_profile_distinct_exact_profile_request_must_not_close_other_bound_profile() {
+    let (core, _) = fixture("close-profile-wrong-exact-profile").await;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let both = json!({"profiles":[
@@ -86,8 +86,8 @@ async fn dbk17v_distinct_exact_profile_request_must_not_close_other_bound_profil
 }
 
 #[tokio::test]
-async fn dbk17v_same_exact_profile_still_closes_when_both_exact_ids_exist() {
-    let (core, _) = fixture("dbk17v-same-exact-profile").await;
+async fn close_profile_same_exact_profile_still_closes_when_both_exact_ids_exist() {
+    let (core, _) = fixture("close-profile-same-exact-profile").await;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let both = json!({"profiles":[
@@ -118,8 +118,8 @@ async fn dbk17v_same_exact_profile_still_closes_when_both_exact_ids_exist() {
 }
 
 #[tokio::test]
-async fn dbk17v_ambiguous_profile_request_refuses_without_closing_or_stopping() {
-    let (core, _) = fixture("dbk17v-ambiguous-profile").await;
+async fn close_profile_ambiguous_profile_request_refuses_without_closing_or_stopping() {
+    let (core, _) = fixture("close-profile-ambiguous-profile").await;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let mixed = "chrome:AAAAaaaa-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -237,8 +237,8 @@ async fn assert_owner_and_edge_ambiguous_refusal(core: &crate::Core, lower: &str
 }
 
 #[tokio::test]
-async fn dbk17v_live_status_ignores_mismatched_session_profile_window() {
-    let (core, _) = fixture("dbk17v-live-status-profile").await;
+async fn close_profile_live_status_ignores_mismatched_session_profile_window() {
+    let (core, _) = fixture("close-profile-live-status-profile").await;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let both = json!({"profiles":[
@@ -263,8 +263,8 @@ async fn dbk17v_live_status_ignores_mismatched_session_profile_window() {
 }
 
 #[tokio::test]
-async fn dbk17v_edge_ask_and_second_chat_isolation() {
-    let core = super::read_consent_tests::core("dbk17v-edge-ask-two-chats").await;
+async fn close_profile_edge_ask_and_second_chat_isolation() {
+    let core = super::read_consent_tests::core("close-profile-edge-ask-two-chats").await;
     let chrome = &core.shared.chrome_control;
     chrome
         .set_browser_enabled(super::agent_browser::Browser::Edge, true)
@@ -361,8 +361,8 @@ async fn dbk17v_edge_ask_and_second_chat_isolation() {
 }
 
 #[tokio::test]
-async fn dbk17v_chrome_ask_and_second_chat_isolation() {
-    let core = super::read_consent_tests::core("dbk17v-chrome-ask-two-chats").await;
+async fn close_profile_chrome_ask_and_second_chat_isolation() {
+    let core = super::read_consent_tests::core("close-profile-chrome-ask-two-chats").await;
     let chrome = &core.shared.chrome_control;
     let upper = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -450,8 +450,8 @@ async fn dbk17v_chrome_ask_and_second_chat_isolation() {
 }
 
 #[tokio::test]
-async fn dbk17u_second_close_must_not_claim_older_tabs_closed() {
-    let (core, _) = fixture("dbk17u-second-close").await;
+async fn close_memory_second_close_must_not_claim_older_tabs_closed() {
+    let (core, _) = fixture("close-memory-second-close").await;
     two_chats(&core);
     created_in(&core, 7);
     observed_by_owner(&core, &profile_row("chrome:work", "browser-b"));
@@ -490,8 +490,8 @@ async fn dbk17u_second_close_must_not_claim_older_tabs_closed() {
     clippy::too_many_lines,
     reason = "sequence of unresolvable vs resolvable warnings"
 )]
-async fn dbk17u_unresolvable_warnings_keep_reported_earlier_clause_across_branches() {
-    let (core, _) = fixture("dbk17u-unresolvable-variants").await;
+async fn close_memory_unresolvable_warnings_keep_reported_earlier_clause_across_branches() {
+    let (core, _) = fixture("close-memory-unresolvable-variants").await;
     two_chats(&core);
     // 1. Reload settled a present window: later live close and disconnected close keep REPORTED_EARLIER.
     created_in(&core, 7);
@@ -715,8 +715,8 @@ fn safari_agent_windows_warned_marks_respect_caps_seed_and_chat_delete() {
 }
 
 #[tokio::test]
-async fn dbk17u_resolvable_disconnected_window_closed_later_omits_reported_earlier() {
-    let (core, _) = fixture("dbk17u-resolvable-lost-retry").await;
+async fn close_memory_resolvable_disconnected_window_closed_later_omits_reported_earlier() {
+    let (core, _) = fixture("close-memory-resolvable-lost-retry").await;
     two_chats(&core);
     open_session(&core, "s", "old-chrome", "chrome:work", "disconnected");
     created_in(&core, 7);

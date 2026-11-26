@@ -6,6 +6,100 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(windows)]
+#[test]
+fn windows_search_requires_both_hard_link_names_to_be_allowed() {
+    let t = Tree::new();
+    t.put("a.txt", "WINSEARCH_SEARCH_MARKER");
+    let original = t.0.join("a.txt");
+    let alias = t.0.join("b.txt");
+    let file = crate::search_walk::open(&t.0, "a.txt").unwrap().into_std();
+    std::fs::hard_link(&original, &alias).unwrap();
+    println!(
+        "WINSEARCH_SEARCH selected={} reported={}",
+        alias.display(),
+        vw_platform::final_path::final_path(&file)
+            .unwrap()
+            .display()
+    );
+    let reported = vw_platform::final_path::final_path(&file).unwrap();
+    let same_identity = |opened: &std::fs::File, named: &Path| {
+        let actual = vw_platform::final_path::identity(opened).unwrap().0;
+        let selected = vw_platform::final_path::open_metadata(named).unwrap();
+        vw_platform::final_path::identity(&selected).unwrap().0 == actual
+    };
+    assert!(opened_allowed(file.try_clone().unwrap(), &alias, &|_| true, &same_identity).is_some());
+    assert!(
+        opened_allowed(
+            file.try_clone().unwrap(),
+            &alias,
+            &|path| path != reported,
+            &same_identity
+        )
+        .is_none()
+    );
+    assert!(opened_allowed(file, &alias, &|path| path != alias, &same_identity).is_none());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_safe_selected_hard_link_is_not_denied_by_another_reported_name() {
+    use std::os::unix::fs::MetadataExt;
+
+    let selected = Tree::new();
+    let outside = Tree::new();
+    outside.put("original.txt", "needle");
+    let original = outside.0.join("original.txt");
+    let alias = selected.0.join("alias.txt");
+    let file = crate::search_walk::open(&outside.0, "original.txt")
+        .unwrap()
+        .into_std();
+    std::fs::hard_link(&original, &alias).unwrap();
+    assert_eq!(
+        vw_platform::final_path::final_path(&file).unwrap(),
+        original
+    );
+    let in_scope = |path: &Path| path.starts_with(&selected.0);
+    let read_rule = |path: &Path| path != original;
+    let check_opened = |opened: &std::fs::File, named: &Path| {
+        let a = opened.metadata().unwrap();
+        let b = std::fs::metadata(named).unwrap();
+        a.dev() == b.dev() && a.ino() == b.ino()
+    };
+    for allowed in [&in_scope as &dyn Fn(&Path) -> bool, &read_rule] {
+        assert!(allowed(&alias));
+        assert!(!allowed(&original));
+        assert!(
+            opened_allowed(file.try_clone().unwrap(), &alias, allowed, &check_opened).is_some()
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_excluded_selected_hard_link_cannot_be_admitted_by_an_allowed_reported_name() {
+    let t = Tree::new();
+    t.put("original.txt", "needle");
+    let original = t.0.join("original.txt");
+    let alias = t.0.join("alias.txt");
+    let file = crate::search_walk::open(&t.0, "original.txt")
+        .unwrap()
+        .into_std();
+    std::fs::hard_link(&original, &alias).unwrap();
+    assert_eq!(
+        vw_platform::final_path::final_path(&file).unwrap(),
+        original
+    );
+    let allowed = |path: &Path| path != t.0.join("alias.txt");
+    assert!(!allowed(&alias));
+    assert!(allowed(&original));
+    assert!(opened_allowed(file, &alias, &allowed, &|_, _| true).is_none());
+    assert_eq!(
+        t.search(json!({"query":"needle", "glob":"alias.txt"}), &allowed),
+        "No hits."
+    );
+}
+
 #[test]
 fn an_opened_check_crossing_the_deadline_cannot_return_a_last_name_hit() {
     let t = Tree::new();

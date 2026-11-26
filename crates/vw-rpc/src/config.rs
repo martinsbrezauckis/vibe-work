@@ -49,6 +49,13 @@ pub const DEFAULT_LONG_METHODS: &[(&str, Duration)] = &[
 /// Tuning for one connection. `Default` gives production values.
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
+    /// Stop an attached Vibe session before channel close or process EOF. Enabled by the supervisor;
+    /// raw transport peers can leave this off. A failed check makes the process dead for its owner to kill.
+    /// Direct turn/subagent interrupts also use the close budget and a fatal timeout, overriding request options.
+    pub interrupt_before_close: bool,
+    /// Total budget for draining admitted requests, interrupt acknowledgement and idle verification.
+    /// Also caps direct interrupt requests when `interrupt_before_close` is enabled. Default 5 s.
+    pub close_timeout: Duration,
     /// Longest accepted frame (content bytes, newline excluded). Longer frames are discarded and
     /// reported as a gap. Default 64 MiB: a long session's `session/read` carries its history.
     pub max_frame_bytes: usize,
@@ -74,7 +81,8 @@ pub struct ConnectionConfig {
     /// Methods whose timeout declares the server dead (see [`DEFAULT_WEDGE_METHODS`]).
     pub wedge_methods: Vec<String>,
     /// Methods with their own default timeout instead of `default_timeout` (see
-    /// [`DEFAULT_LONG_METHODS`]); a request's own `RequestOptions::timeout` still wins.
+    /// [`DEFAULT_LONG_METHODS`]); a request's own `RequestOptions::timeout` normally wins.
+    /// Opted-in interrupt requests remain capped at `close_timeout`.
     pub method_timeouts: Vec<(String, Duration)>,
     /// Unanswered requests allowed at once on one channel of a multiplexed process; more wait for a
     /// free slot (inside their own timeout). Default 64. Why: Vibe's `multiplex.py` gives each channel
@@ -87,6 +95,8 @@ pub struct ConnectionConfig {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
+            interrupt_before_close: false,
+            close_timeout: Duration::from_secs(5),
             max_frame_bytes: 64 * 1024 * 1024,
             default_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(5),
@@ -118,7 +128,8 @@ pub enum TimeoutPolicy {
     ServerDead,
 }
 
-/// Per-request overrides.
+/// Per-request overrides. With `interrupt_before_close`, turn/subagent interrupts always have a
+/// fatal timeout capped at `close_timeout`; options cannot extend that budget or make it nonfatal.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RequestOptions {
     /// Timeout; `None` uses the connection default.

@@ -13,10 +13,11 @@ workspace = true
 
 [features]
 # Proxy transport settings for the optional network guard.
-proxy-transports = ["reqwest/socks", "dep:rustls-pki-types"]
+proxy-transports = ["reqwest/socks", "dep:rustls-pki-types", "dep:vw-netguard"]
 
 [dependencies]
 rustls-pki-types = { version = "1", optional = true, features = ["std"] }
+vw-netguard = { workspace = true, optional = true, features = ["proxy-transports"] }
 # HTTPS client. Linux: rustls with the `ring` provider installed by us (reqwest's own default
 # provider is aws-lc-rs, a heavier C build) and the OS trust store through rustls-platform-verifier.
 # Windows and macOS: the OS TLS stack (SChannel, Security.framework) through native-tls: OS trust
@@ -31,6 +32,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Warnings about a proxy or certificate setting that cannot be applied (never with a sign-in or key in them).
 tracing = { workspace = true }
+# Refuse new connections from a retained client after its runtime relay owner stops.
+tower = { version = "0.5", default-features = false, features = ["filter"] }
 tokio = { workspace = true, features = ["time", "net", "sync", "macros"] }
 # The key-bearing header is built in a zeroized string.
 zeroize = { workspace = true }
@@ -59,3 +62,8 @@ reqwest = { workspace = true, features = ["native-tls"] }
 # TLS for the realtime WebSocket on Windows and macOS: the OS TLS stack, as for reqwest.
 native-tls = { workspace = true }
 tokio-native-tls = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rcgen = { workspace = true, features = ["ring", "pem"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["process"] }

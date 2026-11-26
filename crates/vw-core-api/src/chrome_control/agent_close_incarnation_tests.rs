@@ -1,4 +1,4 @@
-//! Browser-incarnation and memory-only window-tracking tests (`DBK17S-01` and `DBK17T-01`) for `close_browser`.
+//! Browser-incarnation and memory-only window-tracking tests for `close_browser`.
 //! Depends on `agent_close_window_tests` helpers, `agent_firefox_close_tests::fixture`, `gateway`, `profile_bindings`,
 //! and `test_support`.
 use super::{
@@ -54,7 +54,7 @@ pub(super) fn live_status(
 }
 
 /// Older builds saved the remembered windows in chat-profiles.json (a `windows` field). That file must still load with its
-/// choices intact and its windows ignored, and the next save leaves the field out: the windows are memory only (DBK17S-01).
+/// choices intact and its windows ignored, and the next save leaves the field out: the windows are memory only.
 #[tokio::test]
 async fn an_older_bindings_file_with_saved_windows_still_loads_and_no_window_is_saved() {
     let (core, _) = fixture("agent-chrome-close-old-file").await;
@@ -133,7 +133,7 @@ pub(super) async fn close_chat_with(
     (answer, sent)
 }
 
-/// DBK17S-01: window 9 was the agent's in browser incarnation A. The browser restarted (incarnation B reuses the number 9
+/// Window 9 was the agent's in browser incarnation A. The browser restarted (incarnation B reuses the number 9
 /// for a person's window, where the person may have moved an agent tab and handed the window over): the helper's status
 /// now names B. The remembered 9 is not nominated, only the new session's own window 10 is, and the agent is told that
 /// tabs may stay open. PREDICT (red on 5b516c51e): `window.close` was sent for 10 and then for the stale 9.
@@ -191,7 +191,7 @@ async fn a_remembered_window_is_not_nominated_when_the_helper_names_no_incarnati
 }
 
 /// The same browser incarnation keeps its remembered windows: they are nominated as before (C17J J1/J2), also after the
-/// observer read the same incarnation again, and an unconfirmed close stays remembered for a retry (DBK17R-02).
+/// observer read the same incarnation again, and an unconfirmed close stays remembered for a retry.
 #[tokio::test]
 async fn a_remembered_window_of_the_same_browser_incarnation_is_still_nominated() {
     let (core, _) = fixture("agent-chrome-close-same-incarnation").await;
@@ -339,11 +339,11 @@ async fn only_the_chats_own_tab_create_answers_add_a_remembered_window() {
     core.shutdown().await;
 }
 
-/// DBK17T-01: window 7 remembered in incarnation A, observer sees incarnation B (dropping 7), reopened session closes
+/// Window 7 remembered in incarnation A, observer sees incarnation B (dropping 7), reopened session closes
 /// window 9 -> must warn that earlier tabs could not be closed; a second `close_browser` (no new drop) answers normally.
 #[tokio::test]
-async fn dbk17t_observer_drop_must_report_older_tabs_may_remain() {
-    let (core, _) = fixture("dbk17t-observer-drop-text").await;
+async fn close_incarnation_observer_drop_must_report_older_tabs_may_remain() {
+    let (core, _) = fixture("close-incarnation-observer-drop-text").await;
     two_chats(&core);
     created_in(&core, 7);
     observed_by_owner(&core, &profile_row("chrome:work", "browser-b"));
@@ -384,7 +384,7 @@ async fn dbk17t_observer_drop_must_report_older_tabs_may_remain() {
 /// and clears after that answer.
 #[tokio::test]
 async fn observer_drop_with_no_new_window_warns_then_clears() {
-    let (core, _) = fixture("dbk17t-observer-no-new-window").await;
+    let (core, _) = fixture("close-incarnation-observer-no-new-window").await;
     two_chats(&core);
     created_in(&core, 7);
     observed_by_owner(&core, &profile_row("chrome:work", "browser-b"));
@@ -425,7 +425,7 @@ async fn observer_drop_with_no_new_window_warns_then_clears() {
 /// and stays until a reopened session performs `close_browser`.
 #[tokio::test]
 async fn observer_drop_without_live_session_counts_as_earlier_window() {
-    let (core, _) = fixture("dbk17t-observer-no-live").await;
+    let (core, _) = fixture("close-incarnation-observer-no-live").await;
     two_chats(&core);
     created_in(&core, 7);
     open_session(&core, "s", "old-chrome", "chrome:work", "disconnected");
@@ -474,7 +474,7 @@ async fn observer_drop_without_live_session_counts_as_earlier_window() {
 /// a chat on a different profile keep their state.
 #[tokio::test]
 async fn deleted_chat_drops_observer_mark_while_other_chats_keep_theirs() {
-    let (core, _) = fixture("dbk17t-observer-delete").await;
+    let (core, _) = fixture("close-incarnation-observer-delete").await;
     two_chats(&core);
     observed_by_owner(&core, &profile_row("chrome:personal", "personal-a"));
     test_support::chat(&core.shared, "third");
@@ -560,7 +560,7 @@ async fn deleted_chat_drops_observer_mark_while_other_chats_keep_theirs() {
 /// evicting the oldest entry first.
 #[tokio::test]
 async fn observer_drop_marks_respect_chat_and_per_chat_caps() {
-    let (core, _) = fixture("dbk17t-observer-caps").await;
+    let (core, _) = fixture("close-incarnation-observer-caps").await;
     two_chats(&core);
     for i in 0..256u64 {
         created_by(&core, &format!("cap{i}"), "old-chrome", 1000 + i);
@@ -643,7 +643,7 @@ async fn observer_drop_marks_respect_chat_and_per_chat_caps() {
 /// real `close_browser` answer runs.
 #[tokio::test]
 async fn edge_uuid_and_access_modes_preserve_and_clear_observer_mark() {
-    let (core, _) = fixture("dbk17t-observer-variants").await;
+    let (core, _) = fixture("close-incarnation-observer-variants").await;
     let upper_uuid = "chrome:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
     let lower_uuid = "chrome:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     super::profiles::paired(&core.shared.chrome_control, lower_uuid, None);
@@ -751,7 +751,7 @@ fn safari_agent_windows_observer_drop_is_marked_and_cleared() {
 /// Ask approval card flows through `agent_close::prepare` and preserves/clears the observer-drop mark on answer.
 #[tokio::test]
 async fn ask_approval_card_reports_and_clears_observer_mark() {
-    let core = super::read_consent_tests::core("dbk17t-ask-card").await;
+    let core = super::read_consent_tests::core("close-incarnation-ask-card").await;
     let chrome = &core.shared.chrome_control;
     super::profiles::paired(chrome, "chrome:p", None);
     observed_by_owner(&core, &profile_row("chrome:p", "p-a"));

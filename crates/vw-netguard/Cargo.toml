@@ -19,6 +19,7 @@ proxy-transports = ["dep:vw-platform", "dep:native-tls", "dep:tokio-native-tls",
 vw-platform = { workspace = true, optional = true, features = ["proxy-resolver"] }
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "rt", "macros"] }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true }
 # Canary tokens and per-listener credentials (same version as the other crates).
 getrandom = { workspace = true }

@@ -44,9 +44,9 @@ export function LoopsStrip({
   const readAt = useRef(-Infinity);
   const wasRunning = useRef(running);
 
-  // The list is read once when the session's composer opens.
+  // Re-read on opening: the agent may have changed loops while another chat was shown.
   useEffect(() => {
-    void actions?.loadLoops(sessionId);
+    void actions?.loadLoops(sessionId, true);
   }, [actions, sessionId]);
   // A finished turn may have added or cancelled loops (the model can schedule through its `cron` tool) and has
   // moved the next time of a loop that fired.

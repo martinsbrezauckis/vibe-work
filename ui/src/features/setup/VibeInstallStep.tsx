@@ -35,6 +35,9 @@ export function useVibeUi<S>(select: (state: VibeUi) => S): S {
 
 /** The core's name of the last install step, Vibe's first start (`vw-vibe-install` `run::START_STEP`). */
 const START_STEP = "Start Vibe";
+/** The supervisor's complete refusal for a Vibe server without a guardable interpreter. */
+const UNPROVEN_INTERPRETER =
+  "This Vibe installation cannot run with Vibe Work's safety guards: choose Install Vibe for Vibe Work, or a Vibe installed in its own Python environment.";
 
 /** Starts Vibe again; when the core has no failed start to repeat (an older view), the install review is the retry. */
 async function retryStart(vibe: VibeInstall | null): Promise<void> {
@@ -59,6 +62,7 @@ function failText(phase: Extract<InstallPhase, { state: "failed" }>): string {
     case "disk":
       return "Vibe Work could not write its install folder (disk space or permissions).";
     case "start":
+      if (phase.error === UNPROVEN_INTERPRETER) return phase.error;
       return "Vibe was installed but did not start. Try again keeps the install and only starts Vibe again.";
     case "unsupported":
       // The core's sentence names the version and what to do (wait for a Vibe Work update, or use its own Vibe).
@@ -113,7 +117,11 @@ function Existing({ found }: { found: readonly ExistingView[] }) {
         <li data-item-id={item.path} key={item.path}>
           <span>
             <code>{item.path}</code>{" "}
-            {item.version === null ? "(did not answer)" : `version ${item.version}`}
+            {item.version === null
+              ? item.warning === UNPROVEN_INTERPRETER
+                ? "(version unknown)"
+                : "(did not answer)"
+              : `version ${item.version}`}
           </span>
           {item.warning !== null && <p className="key-problem">{item.warning}</p>}
           {item.supported && (

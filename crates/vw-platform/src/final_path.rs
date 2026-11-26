@@ -38,6 +38,22 @@ pub fn identity(file: &File) -> io::Result<(FileIdentity, u64)> {
     ))
 }
 
+/// Open a Windows file for metadata and identity queries without requesting read access. This can inspect an
+/// exclusively held file when the ordinary `File::open` read handle would get a sharing violation.
+///
+/// # Errors
+/// The operating system could not open the named file for metadata access.
+#[cfg(windows)]
+pub fn open_metadata(path: &std::path::Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+    std::fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+        .open(path)
+}
+
 /// Returns the opened file's volume/object identity and hard-link count, without reading its bytes.
 ///
 /// # Errors

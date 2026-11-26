@@ -4,7 +4,7 @@
       "updates": [
         {
           "version": "0.1.8",
-          "update_link": "https://github.com/martinsbrezauckis/vibe-work/releases/download/v0.1.18/vibe-work-firefox-0.1.8.xpi",
+          "update_link": "https://github.com/martinsbrezauckis/vibe-work/releases/download/v0.1.19/vibe-work-firefox-0.1.8.xpi",
           "update_hash": "sha256:089e71f90fd5d573056bfb9fb78787d26e1509e6098f37a74e5e4a9a2e1dde03",
           "applications": {
             "gecko": {

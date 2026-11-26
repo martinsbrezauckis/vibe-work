@@ -18,12 +18,9 @@ pub(crate) async fn config(shared: &Shared, state: &Value) -> Result<Value, Core
         .map_err(|e| CoreError::from_gate("config/read", &e))?
         .result["config"]
         .clone();
-    let session = &state["session"];
-    let (name, provider) = match (session["id"].as_str(), session["model"].as_str()) {
-        (Some(id), Some(alias)) => shared.model_choices.saved_identity(id, alias),
-        _ => (String::new(), String::new()),
-    };
-    saved_model(&mut config, session, &name, &provider);
+    // A pick after the last turn is newer than Vibe's durable model/thinking pins.
+    let (session, name, provider) = shared.model_choices.detached_session(&state["session"]);
+    saved_model(&mut config, &session, &name, &provider);
     Ok(config)
 }
 

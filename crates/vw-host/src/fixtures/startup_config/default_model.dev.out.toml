@@ -13,10 +13,21 @@ experimental_enable_registry_skills = true
 experimental_enable_mistral_mcp_connector = false
 experimental_local_runtime_session_api = false
 experimental_enable_document_library_connector = false
-experimental_enable_model_catalog = true
 experimental_enable_tab_status = false
 enable_pr_monitoring = false
 default_approval_policy = "accept-edits"
+enable_model_catalog = false
+experimental_enable_remote_plugins = false
+
+[[models]]
+name = "mistral-large-4"
+provider = "mistral"
+alias = "large-4"
+display_name = "Large 4"
+supports_images = true
+max_context_length = 1000000  # window
+input_price = 0.68
+output_price = 2.09
 
 # Vibe Work: each chat's own model writes its session title.
 # Name a model alias here to title every chat with that model instead.

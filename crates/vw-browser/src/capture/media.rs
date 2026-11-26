@@ -52,6 +52,12 @@ pub type FetchFuture<'a> = Pin<Box<dyn Future<Output = Result<Fetched, String>> 
 pub trait Fetch: Send + Sync {
     /// Fetches `url` for `session_id`, at most `max_bytes` (more is an error).
     fn fetch<'a>(&'a self, session_id: &'a str, url: &'a str, max_bytes: u64) -> FetchFuture<'a>;
+
+    /// A network policy failure that refuses the entire capture after the media step, even when that step
+    /// normally records individual missing assets. Other fetchers have no such failure.
+    fn capture_refusal(&self) -> Option<String> {
+        None
+    }
 }
 
 /// One item the page listed.

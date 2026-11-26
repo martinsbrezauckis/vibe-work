@@ -23,8 +23,9 @@
 //! - Outbound frames are wrapped by byte splicing around the already encoded inner frame (no second
 //!   serialization of large messages).
 //! - Process death (stdout EOF, read/write failure) kills every channel with the same cause.
-//! - A channel whose last handle is dropped is closed on the server (best effort, non-blocking), so a
-//!   forgotten channel never keeps a session lease.
+//! - With interrupt-before-close enabled, explicit close, process EOF and last-handle Drop stop
+//!   attached work before sending null. Uncertain teardown marks the process dead for its owner to kill.
+//!   Raw transport users retain the best-effort non-blocking Drop behavior.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -231,6 +232,7 @@ impl Multiplexer {
             tx,
             mux.process.stderr.clone(),
             id,
+            Arc::downgrade(&mux.process),
         ));
         for (method, handler) in &mux.handlers {
             channel.handlers.insert(method.clone(), handler.clone());
@@ -244,12 +246,18 @@ impl Multiplexer {
             channel.clone(),
             mux.process.clone(),
         ));
-        let on_drop = CloseOnDrop {
-            id,
-            channel: channel.clone(),
-            process: mux.process.clone(),
+        let tasks = Tasks::new(vec![writer], Some(self.tasks.clone()));
+        let tasks = if mux.config.interrupt_before_close {
+            let shared = channel.clone();
+            tasks
+                .with_cleanup(move |own, parent| crate::close::dropped_channel(shared, own, parent))
+        } else {
+            tasks.with_guard(CloseOnDrop {
+                id,
+                channel: channel.clone(),
+                process: mux.process.clone(),
+            })
         };
-        let tasks = Tasks::new(vec![writer], Some(self.tasks.clone())).with_guard(on_drop);
         Ok(Connection::from_parts(channel, Arc::new(tasks)))
     }
 
@@ -278,11 +286,53 @@ impl Multiplexer {
         }
     }
 
-    /// Closes the process's stdin: Vibe then closes every channel (each flushes its harness) and
-    /// exits. New channels and requests are refused from now on.
+    /// Fences the process, then closes input. With interrupt-before-close enabled, every channel
+    /// completes its interrupt and close acknowledgement first; failure leaves EOF unsent and the
+    /// process marked dead for its owner to kill. Cancellation does not cancel that owned cleanup.
     pub async fn close_input(&self) {
+        if self.mux.config.interrupt_before_close {
+            self.start_close();
+            let mut done = self.mux.process.close_done.subscribe();
+            let _ = done.wait_for(|done| *done).await;
+            return;
+        }
         self.mux.process.set_closing();
         let _ = self.mux.process.outbound.send(WriterCmd::Close).await;
+    }
+
+    fn start_close(&self) {
+        if !self.mux.process.begin_close() {
+            return;
+        }
+        let mux = self.clone();
+        tokio::spawn(async move {
+            let channels: Vec<_> = locked(&mux.mux.channels).values().cloned().collect();
+            let mut closing = JoinSet::new();
+            for shared in channels {
+                let tasks = shared
+                    .owner()
+                    .unwrap_or_else(|| Arc::new(Tasks::new(Vec::new(), Some(mux.tasks.clone()))));
+                let conn = Connection::from_parts(shared, tasks);
+                let process = mux.mux.process.clone();
+                closing.spawn(async move {
+                    conn.close_input().await;
+                    let mut death = process.death_watch();
+                    if death.borrow().is_none() {
+                        tokio::select! {
+                            result = tokio::time::timeout(conn.shared.config.close_timeout, conn.closed()) => {
+                                if result.is_err() { conn.shared.fail_close(); }
+                            }
+                            _ = death.wait_for(Option::is_some) => {}
+                        }
+                    }
+                });
+            }
+            while closing.join_next().await.is_some() {}
+            if mux.mux.process.death().is_none() {
+                let _ = mux.mux.process.outbound.send(WriterCmd::Close).await;
+            }
+            mux.mux.process.close_done.send_replace(true);
+        });
     }
 
     /// The last `n` stderr lines of the process (oldest first).
@@ -394,6 +444,10 @@ async fn run_channel_writer(
                     Some(DeathCause::Wedged { .. })
                 );
                 if wedged {
+                    if channel.config.interrupt_before_close {
+                        channel.fail_close();
+                        return;
+                    }
                     channel.set_closing();
                     let _ = process.outbound.send(WriterCmd::Frame(close_frame(id))).await;
                 }

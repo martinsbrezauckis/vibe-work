@@ -1,9 +1,9 @@
 ---
 name: images
-description: Vibe Work's image_generate tool - make or edit a picture, an illustration, an icon, a mockup image or a diagram-like visual with Mistral's image generation.
+description: Vibe Work's image_generate tool - make or edit a picture, an illustration, an icon or a mockup image with Mistral's image generation; use Mermaid for diagrams.
 ---
 
-`image_generate` makes or edits images. It is on `mcp_vw` inside `run_typescript`; one program has 60 s for all of its tool calls:
+Use Mermaid fences for flowcharts, charts and structured diagrams. `image_generate` makes or edits pictures. It is on `mcp_vw` inside `run_typescript`; one program has 60 s for all of its tool calls:
 
 ```ts
 const made = await tools.mcp_vw.image_generate({ prompt: "A flat icon of an orange paper boat on a plain blue background", name: "boat-icon" });

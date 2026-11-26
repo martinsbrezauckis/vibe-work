@@ -239,6 +239,11 @@ impl Pump {
                         shared.access.observe_runtime(sid, &n.params["runtime"]);
                         crate::chrome_control::mode_changed(&shared, sid, previous_mode.as_deref());
                     }
+                    if let Some(sid) = session.map(str::to_owned)
+                        && let Some(runtime) = n.params.get_mut("runtime")
+                    {
+                        crate::model_choices::pending_runtime(&shared, &sid, runtime);
+                    }
                 }
                 // Before any projection changes the entry: the receipt as Vibe reported it on this channel.
                 crate::ask::tool_calls::receipts::observe(&shared, item.key, &n.method, &n.params);
@@ -296,11 +301,11 @@ impl Pump {
                 self.resync_source(shared, Some(key));
             }
             (Some(key), false) => {
-                // Our own closes unbind first; a binding still here means the channel died on its
-                // own (closed by the server, or wedged). Its callbacks died with it; re-read the
+                // Core-initiated closes unbind first; a remaining binding also covers an
+                // acknowledged session/stop close. Its callbacks died with it; re-read the
                 // session from the lobby to show what Vibe stored.
                 if let Some(id) = shared.channels.lost(key) {
-                    warn!(channel = key.1, "a session channel ended on its own");
+                    warn!(channel = key.1, "a session channel ended");
                     shared.asks.cancel_session(Some(&id), "the chat closed");
                     shared.gate.session_closed(&id);
                     self.open_callbacks.remove(&id);

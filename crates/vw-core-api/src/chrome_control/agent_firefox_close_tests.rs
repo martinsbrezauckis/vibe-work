@@ -588,7 +588,7 @@ async fn ask_card_approves_the_exact_close_before_any_stop_is_sent() {
     core.shutdown().await;
 }
 
-/// DBK17G-01: in Ask mode a subagent (source != owner chat) is refused before any card, like its `stop`.
+/// In Ask mode a subagent (source != owner chat) is refused before any card, like its `stop`.
 #[tokio::test]
 async fn ask_mode_subagent_cannot_request_close_of_its_parents_browser() {
     let core = super::read_consent_tests::core("agent-close-ask-subagent").await;

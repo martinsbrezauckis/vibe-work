@@ -316,6 +316,15 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
     if tool.starts_with(&format!("mcp_{}.", crate::wire::SERVER_NAME)) {
         return None;
     }
+    let leaf = tool.rsplit('.').next().unwrap_or(tool);
+    #[cfg(any(unix, windows))]
+    let native_file_tool = (tool == leaf || tool.starts_with("file_system."))
+        && matches!(
+            leaf,
+            "read_file" | "write_file" | "edit" | "search_replace" | "grep"
+        );
+    #[cfg(not(any(unix, windows)))]
+    let native_file_tool = false;
     // Windows: a file tool's Git Bash paths (`/c/Users/...`) are rewritten as Windows paths (`C:\Users\...`).
     // Return the same input the folder guard checked, using the receipt hook's rewrite protocol.
     #[cfg(windows)]
@@ -330,25 +339,23 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
             &Failure::WindowsContext.report("missing cwd or VIBE_HOME for native Windows path"),
         ));
     }
-    let cwd = payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .filter(|c| !c.is_empty())?;
-    let vibe_home = std::env::var_os("VIBE_HOME").map(std::path::PathBuf::from)?;
-    let layout = match folders::Layout::new(&vibe_home, Path::new(cwd)) {
-        Ok(layout) => layout,
-        Err(error) => {
-            eprintln!("folder check ChatFolders: {error}");
-            return Some(deny(&folders::diagnostics::folder_resolution(&error)));
+    let layout = match folder_layout(&payload, native_file_tool) {
+        Ok(Some(layout)) => layout,
+        Ok(None) => return None,
+        Err(reason) => return Some(deny(&reason)),
+    };
+    let Some(input) = rewritten.as_ref().or_else(|| payload.get("tool_input")) else {
+        #[cfg(any(unix, windows))]
+        if native_file_tool {
+            return Some(deny(folders::PROTECTED_IDENTITY_REASON));
         }
+        return None;
     };
-    let leaf = tool.rsplit('.').next().unwrap_or(tool);
-    let input = rewritten.as_ref().or_else(|| payload.get("tool_input"))?;
-    let access = match leaf {
-        "read_file" => folders::Access::Read,
-        "write_file" | "edit" | "search_replace" => folders::Access::Write,
-        _ => folders::Access::Unknown,
-    };
+    #[cfg(any(unix, windows))]
+    if native_file_tool && leaf != "grep" && native_file_path(input).is_none() {
+        return Some(deny(folders::PROTECTED_IDENTITY_REASON));
+    }
+    let access = tool_access(leaf);
     // Any copy (the own one too): the core decides (one active session per copy). One question per copy and hook run.
     // No answer: every copy is refused because a different active session may have taken even the own copy.
     let asked: std::cell::RefCell<Answers> = std::cell::RefCell::default();
@@ -388,6 +395,10 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
         answer
     };
     let mut refusal = folders::check_tool_input(&layout, input, access, &permits);
+    #[cfg(any(unix, windows))]
+    if refusal.is_none() && native_file_tool {
+        refusal = native_file_identity_refusal(&layout, input, leaf, endpoint_file);
+    }
     if refusal.is_none() && folders::SHELL_TOOLS.contains(&leaf) {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
         refusal = input
@@ -400,6 +411,120 @@ fn decide_folder(payload: &str, endpoint_file: &Path) -> Option<String> {
     refusal.map(|text| deny(&text)).or_else(|| {
         rewritten.map(|input| json!({"hook_specific_output":{"tool_input":input}}).to_string())
     })
+}
+
+fn folder_layout(
+    payload: &Value,
+    native_file_tool: bool,
+) -> Result<Option<folders::Layout>, String> {
+    let cwd = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|cwd| !cwd.is_empty());
+    let Some(cwd) = cwd else {
+        return if native_file_tool {
+            Err(folders::PROTECTED_IDENTITY_REASON.to_owned())
+        } else {
+            Ok(None)
+        };
+    };
+    let Some(vibe_home) = std::env::var_os("VIBE_HOME").map(std::path::PathBuf::from) else {
+        return if native_file_tool {
+            Err(folders::PROTECTED_IDENTITY_REASON.to_owned())
+        } else {
+            Ok(None)
+        };
+    };
+    folders::Layout::new(&vibe_home, Path::new(cwd))
+        .map(Some)
+        .map_err(|error| {
+            eprintln!("folder check ChatFolders: {error}");
+            folders::diagnostics::folder_resolution(&error)
+        })
+}
+
+fn tool_access(leaf: &str) -> folders::Access {
+    match leaf {
+        "read_file" => folders::Access::Read,
+        "write_file" | "edit" | "search_replace" => folders::Access::Write,
+        _ => folders::Access::Unknown,
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn native_file_path(input: &Value) -> Option<&str> {
+    ["filePath", "file_path", "path"]
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str))
+        .filter(|text| !text.trim().is_empty())
+}
+
+/// Native file tools receive the same protected inode decision as `mcp_vw` reads. The core owns the root list and
+/// bounded walk; the hook sends multiply linked file candidates or a grep search root, so ordinary file tools keep
+/// the path rule.
+#[cfg(any(unix, windows))]
+fn native_file_identity_refusal(
+    layout: &folders::Layout,
+    input: &Value,
+    leaf: &str,
+    endpoint_file: &Path,
+) -> Option<String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    if !matches!(
+        leaf,
+        "read_file" | "write_file" | "edit" | "search_replace" | "grep"
+    ) {
+        return None;
+    }
+    let text = native_file_path(input).or_else(|| (leaf == "grep").then_some("."))?;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let expanded = folders::expand(text, home.as_deref(), &layout.vibe_home);
+    let path = Path::new(&expanded);
+    let target = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        layout.cwd.join(path)
+    };
+    let metadata = match std::fs::metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some(folders::PROTECTED_IDENTITY_REASON.to_owned()),
+    };
+    let search = leaf == "grep";
+    #[cfg(unix)]
+    let linked = metadata.is_file() && metadata.nlink() > 1;
+    #[cfg(windows)]
+    let linked = if metadata.is_file() {
+        match vw_platform::final_path::open_metadata(&target)
+            .and_then(|file| vw_platform::final_path::identity(&file))
+        {
+            Ok((_, links)) => links > 1,
+            Err(_) => return Some(folders::PROTECTED_IDENTITY_REASON.to_owned()),
+        }
+    } else {
+        false
+    };
+    if !search && !linked {
+        return None;
+    }
+    if search && metadata.is_file() && !linked {
+        return None;
+    }
+    let allowed = read_endpoint(endpoint_file).and_then(|file| {
+        wire::call(
+            &file.endpoint,
+            &file.credential,
+            tools::NATIVE_FILE_IDENTITY,
+            json!({"cwd": layout.cwd, "path": target, "search": search}),
+            COPY_TIMEOUT,
+        )
+    });
+    if matches!(allowed, Ok(value) if value["allowed"] == true) {
+        None
+    } else {
+        Some(folders::PROTECTED_IDENTITY_REASON.to_owned())
+    }
 }
 
 /// True when Vibe's Mistral provider is our loopback model proxy (`VIBE_PROVIDERS` set by vw-keys `vibe_env`):

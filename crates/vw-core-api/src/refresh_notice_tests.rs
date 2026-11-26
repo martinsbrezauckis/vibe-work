@@ -1,6 +1,5 @@
-//! Core tests: withheld internal MCP refreshes emit a single deduplicated alert
-//! per Developer-permissions switch-off period and cause, without refreshing or starting children,
-//! and agent-requested forwarded refreshes carry user-directed reason and recovery wording.
+//! Core tests: paused command rows allow refresh; unsafe enabled rows while OFF and malformed config refuse.
+//! Refusal alerts stay deduplicated, and forwarded unsafe requests retain their caller-specific wording.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -58,7 +57,7 @@ pub(crate) async fn start_with_keys(
     config_toml: &str,
 ) -> Core {
     let config_body = config_toml.to_owned();
-    crate::offline_core::start_with_confirmer(
+    let core = crate::offline_core::start_with_confirmer(
         name,
         move |config, dir| {
             let app_data = dir.join("app-data");
@@ -79,7 +78,12 @@ pub(crate) async fn start_with_keys(
         },
         AlwaysAllow,
     )
-    .await
+    .await;
+    // These mock channels model the guarded path; real direct-launch regressions do not set this override.
+    core.shared
+        .mock_mcp_refresh_guard
+        .store(true, std::sync::atomic::Ordering::Release);
+    core
 }
 
 pub(crate) fn attach_mock_channel(
@@ -198,9 +202,10 @@ async fn assert_inspect_failure_deduped(
     calls: &Mutex<Vec<(String, String)>>,
     sub: &mut CoreSubscription,
 ) {
+    let before = count_server_refreshes(calls);
     std::fs::write(config_path, "mcp_servers = [42]\n").unwrap();
     crate::connectors::refresh_servers(&core.shared).await;
-    assert_eq!(count_server_refreshes(calls), 0);
+    assert_eq!(count_server_refreshes(calls), before);
     let inspect_alerts = tools_alerts(&drain_events(sub).await);
     assert_eq!(
         inspect_alerts.len(),
@@ -219,7 +224,7 @@ async fn assert_inspect_failure_deduped(
 }
 
 #[tokio::test]
-async fn grant_revoke_and_switch_reset_deduplicate_withheld_internal_refresh_alerts() {
+async fn grants_and_revokes_refresh_paused_rows_and_inspection_errors_still_dedupe() {
     let key_root = std::env::temp_dir().join(format!(
         "vw-refresh-notice-keys-{}-{}",
         std::process::id(),
@@ -251,7 +256,6 @@ async fn grant_revoke_and_switch_reset_deduplicate_withheld_internal_refresh_ale
     let mut sub = core.subscribe(None);
     let _ = drain_events(&mut sub).await;
 
-    // 1. Granting a key while OFF with a paused stdio server withholds refresh and emits ONE visible alert.
     core.execute(
         Origin::Ui,
         Command::Connectors {
@@ -262,17 +266,13 @@ async fn grant_revoke_and_switch_reset_deduplicate_withheld_internal_refresh_ale
     )
     .await
     .unwrap();
-    assert_eq!(
-        count_server_refreshes(&calls),
-        0,
-        "refresh must stay withheld"
-    );
-    let alerts = tools_alerts(&drain_events(&mut sub).await);
-    assert_eq!(alerts.len(), 1, "expected one withheld alert: {alerts:?}");
-    assert_eq!(alerts[0].0, None);
-    assert_paused_notice_text(&alerts[0].1);
+    assert_eq!(count_server_refreshes(&calls), 2);
+    assert_no_tools_alerts(
+        &mut sub,
+        "paused rows must permit a key grant refresh while OFF",
+    )
+    .await;
 
-    // 2. Revoking the grant while still in the same switch-off period emits no second alert and no refresh.
     core.execute(
         Origin::Ui,
         Command::Secrets {
@@ -283,60 +283,62 @@ async fn grant_revoke_and_switch_reset_deduplicate_withheld_internal_refresh_ale
     )
     .await
     .unwrap();
-    assert_eq!(
-        count_server_refreshes(&calls),
-        0,
-        "refresh must stay withheld"
-    );
-    assert_no_tools_alerts(
-        &mut sub,
-        "second trigger in same OFF period must be deduplicated",
-    )
-    .await;
-
-    // 3. A distinct cause (uncheckable config.toml) in the same switch-off period emits once and dedupes on repeat.
+    assert_eq!(count_server_refreshes(&calls), 4);
+    assert_no_tools_alerts(&mut sub, "paused rows must permit revoke convergence").await;
     assert_inspect_failure_deduped(&core, &config_path, &calls, &mut sub).await;
 
-    // 4. ON with a person-disabled row defers each chat; a config with every command enabled can force refresh.
     std::fs::write(&config_path, &toml).unwrap();
     set_developer_permissions(&core, true).await;
     let _ = drain_events(&mut sub).await;
     crate::connectors::refresh_servers(&core.shared).await;
-    assert_eq!(count_server_refreshes(&calls), 0);
-    assert!(core.shared.channels.switch_stale("s1"));
-    assert!(core.shared.channels.switch_stale("s2"));
-    assert_no_tools_alerts(&mut sub, "deferred convergence is not a withheld refresh").await;
+    assert_eq!(count_server_refreshes(&calls), 6);
+    assert!(!core.shared.channels.switch_stale("s1"));
+    assert!(!core.shared.channels.switch_stale("s2"));
+    assert_no_tools_alerts(&mut sub, "ON with a person-disabled row refreshes normally").await;
     std::fs::write(
         &config_path,
         toml.replace("disabled = true", "disabled = false"),
     )
     .unwrap();
     crate::connectors::refresh_servers(&core.shared).await;
-    assert_eq!(
-        count_server_refreshes(&calls),
-        2,
-        "both open chats must refresh when ON"
-    );
-    assert_no_tools_alerts(&mut sub, "ON refresh must not emit withheld alert").await;
+    assert_eq!(count_server_refreshes(&calls), 8);
+    assert_no_tools_alerts(&mut sub, "enabled servers still refresh while ON").await;
 
     set_developer_permissions(&core, false).await;
     let _ = drain_events(&mut sub).await;
     crate::connectors::refresh_servers(&core.shared).await;
-    assert_eq!(count_server_refreshes(&calls), 2);
-    let new_period_alerts = tools_alerts(&drain_events(&mut sub).await);
-    assert_eq!(
-        new_period_alerts.len(),
-        1,
-        "new OFF period should emit one alert: {new_period_alerts:?}"
-    );
-    assert_paused_notice_text(&new_period_alerts[0].1);
+    assert_eq!(count_server_refreshes(&calls), 10);
+    assert_no_tools_alerts(&mut sub, "switch-paused rows also permit refresh").await;
+
+    // An externally enabled row while OFF is still unsafe; preserve deduplicated refusal notices.
+    std::fs::write(
+        &config_path,
+        toml.replace("disabled = true", "disabled = false"),
+    )
+    .unwrap();
+    assert!(!crate::command_pause::admit_internal_refresh(
+        &core.shared,
+        None
+    ));
+    let alerts = tools_alerts(&drain_events(&mut sub).await);
+    assert_eq!(alerts.len(), 1);
+    assert_paused_notice_text(&alerts[0].1);
+    assert!(!crate::command_pause::admit_internal_refresh(
+        &core.shared,
+        None
+    ));
+    assert_no_tools_alerts(
+        &mut sub,
+        "unsafe repeated refresh notice remains deduplicated",
+    )
+    .await;
 
     core.shutdown().await;
     let _ = std::fs::remove_dir_all(&key_root);
 }
 
 #[tokio::test]
-async fn forwarded_refresh_refusal_uses_person_or_user_wording_by_origin() {
+async fn forwarded_unsafe_refresh_refusal_uses_person_or_user_wording_by_origin() {
     let core = start_with_keys(
         "refresh-note-forwarded",
         None,
@@ -344,6 +346,10 @@ async fn forwarded_refresh_refusal_uses_person_or_user_wording_by_origin() {
         "mcp_servers = [{ name = \"local\", transport = \"stdio\", command = \"/bin/echo\", disabled = true }]\n",
     )
     .await;
+    // Simulate an external edit after startup; ordinary OFF startup already pauses this row.
+    let path = core.shared.instructions.own_home.join("config.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("disabled = true", "disabled = false")).unwrap();
     let mut sub = core.subscribe(None);
     let _ = drain_events(&mut sub).await;
 
@@ -417,7 +423,7 @@ async fn forwarded_refresh_refusal_uses_person_or_user_wording_by_origin() {
 }
 
 #[tokio::test]
-async fn empty_config_refreshes_while_off_and_paused_stdio_withholds_across_access_modes() {
+async fn empty_and_paused_command_configs_refresh_while_off_across_access_modes() {
     // 1. Empty config while OFF: internal refresh proceeds with zero alerts across open chats.
     let empty_core = start_with_keys("refresh-note-empty-config", None, false, "").await;
     let empty_calls: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
@@ -436,7 +442,7 @@ async fn empty_config_refreshes_while_off_and_paused_stdio_withholds_across_acce
     empty_core.shutdown().await;
 
     // 2. Paused stdio while OFF with open chats in Ask, Accept edits, and Full access modes:
-    //    withheld across all modes with a single deduplicated alert.
+    //    refreshes in every mode without a withheld alert.
     let paused_core = start_with_keys(
         "refresh-note-access-modes",
         None,
@@ -469,13 +475,10 @@ async fn empty_config_refreshes_while_off_and_paused_stdio_withholds_across_acce
     let _ = drain_events(&mut sub).await;
 
     crate::connectors::refresh_servers(&paused_core.shared).await;
-    assert_eq!(count_server_refreshes(&paused_calls), 0);
-    let alerts = tools_alerts(&drain_events(&mut sub).await);
-    assert_eq!(alerts.len(), 1);
-    assert_paused_notice_text(&alerts[0].1);
-
+    assert_eq!(count_server_refreshes(&paused_calls), 3);
+    assert_no_tools_alerts(&mut sub, "paused rows must refresh in all access modes").await;
     crate::connectors::refresh_servers(&paused_core.shared).await;
-    assert_eq!(count_server_refreshes(&paused_calls), 0);
-    assert_no_tools_alerts(&mut sub, "second trigger across modes must be deduplicated").await;
+    assert_eq!(count_server_refreshes(&paused_calls), 6);
+    assert_no_tools_alerts(&mut sub, "repeated safe refresh must stay available").await;
     paused_core.shutdown().await;
 }
